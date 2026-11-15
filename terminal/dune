@@ -24,6 +24,8 @@
   artifact_view
   artifact_export
   artifact_binary_export
+  streaming_export
+  streaming_export_test
   evidence_time_view
   execution_time_view
   inspection_view
@@ -79,6 +81,13 @@
  (name presentation_preferences_probe)
  (modules presentation_preferences_probe)
  (libraries core terminal_presentation hardcaml_workbench_protocol)
+ (preprocess
+  (pps ppx_jane)))
+
+(executable
+ (name streaming_memory_probe)
+ (modules streaming_memory_probe)
+ (libraries core async core_unix terminal_presentation hardcaml_workbench_protocol cryptokit)
  (preprocess
   (pps ppx_jane)))
 

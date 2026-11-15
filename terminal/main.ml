@@ -1990,7 +1990,8 @@ let export_artifact_binary session tile_id ~viewer (reference : Asic_artifact.Re
       let instance_id = session.hello.instance_id in
       let client = session.client in
       let owner_current () =
-        V1.Daemon_instance_id.equal instance_id session.hello.instance_id
+        phys_equal client session.client
+        && V1.Daemon_instance_id.equal instance_id session.hello.instance_id
         && Option.value_map (current_project session) ~default:false ~f:(fun p ->
           Project_id.equal p.id project.id)
       in
@@ -2071,7 +2072,7 @@ let export_artifact_binary session tile_id ~viewer (reference : Asic_artifact.Re
               ~viewer
               ~reference
               ~fetch
-              ~publish:Artifact_binary_export.publish_private
+              ~current:owner_current
               ~launch:(fun ~prog ~args ->
                 if owner_current ()
                 then Artifact_export.launch_viewer ~prog ~args
@@ -2471,7 +2472,7 @@ let read_waveform_bytes session artifact ~current =
       | Ok _ when not (String.equal (Simulation_export.suffix artifact) ".vcd") ->
         return (Or_error.error_string "Embedded viewer supports VCD only")
       | Ok _ ->
-        Simulation_export.run
+        Simulation_export.run_embedded
           ~artifact
           ~current
           ~viewer:None
@@ -5033,7 +5034,7 @@ let open_waveform session (artifact : Simulation.Artifact.t) =
             (Or_error.error_string
                "Embedded viewer supports VCD only; use export/external viewer")
         | Ok _ ->
-          Simulation_export.run
+          Simulation_export.run_embedded
             ~artifact
             ~current
             ~viewer:None
@@ -5817,7 +5818,6 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                           Or_error.of_option
                             s.byte_page
                             ~error:(Error.of_string "Missing simulation byte page"))
-                      ~publish:Simulation_export.publish_private
                       ~launch:Artifact_export.launch_viewer
                   in
                   notice

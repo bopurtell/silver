@@ -1,4 +1,11 @@
 (test
+ (name test_artifact_file)
+ (modules test_artifact_file)
+ (libraries core core_unix cryptokit hardcaml_workbench_backend)
+ (preprocess (pps ppx_jane))
+ (lint (pps ppx_js_style)))
+
+(test
  (name test_service)
  (modules test_service)
  (libraries

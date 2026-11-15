@@ -14,7 +14,7 @@ let same_json a b = Poly.equal (Public.canonical_json a) (Public.canonical_json 
 
 (* Resolve before opening, then verify the opened descriptor's physical target. This
    closes the symlink/ancestor swap gap between realpath and open on Linux. *)
-let contents path =
+let with_file path f =
   let canonical = Filename_unix.realpath path in
   require (String.equal canonical path) "Artifact canonical path changed";
   let fd = Core_unix.openfile path ~mode:[ O_RDONLY; O_NONBLOCK; O_CLOEXEC ] in
@@ -31,21 +31,26 @@ let contents path =
       require
         Int64.(before.st_size >= 0L && before.st_size <= of_int max_file)
         "Artifact exceeds 16 MiB byte budget";
-      let buf = Bytes.create (Int64.to_int_exn before.st_size + 1) in
-      let rec loop pos =
-        require (pos < Bytes.length buf) "Artifact grew while reading";
-        let n = Core_unix.read fd ~buf ~pos ~len:(Bytes.length buf - pos) in
-        if n = 0 then Bytes.To_string.sub buf ~pos:0 ~len:pos else loop (pos + n)
-      in
-      let bytes = loop 0 in
-      let after = Core_unix.fstat fd in
-      require
-        (Int64.equal before.st_size after.st_size
-         && Int64.equal after.st_size (Int64.of_int (String.length bytes))
-         && Poly.equal before.st_mtime after.st_mtime
-         && Poly.equal before.st_ctime after.st_ctime)
-        "Artifact changed while reading";
-      bytes)
+      f fd before)
+;;
+
+let contents path =
+  with_file path (fun fd before ->
+    let buf = Bytes.create (Int64.to_int_exn before.st_size + 1) in
+    let rec loop pos =
+      require (pos < Bytes.length buf) "Artifact grew while reading";
+      let n = Core_unix.read fd ~buf ~pos ~len:(Bytes.length buf - pos) in
+      if n = 0 then Bytes.To_string.sub buf ~pos:0 ~len:pos else loop (pos + n)
+    in
+    let bytes = loop 0 in
+    let after = Core_unix.fstat fd in
+    require
+      (Int64.equal before.st_size after.st_size
+       && Int64.equal after.st_size (Int64.of_int (String.length bytes))
+       && Poly.equal before.st_mtime after.st_mtime
+       && Poly.equal before.st_ctime after.st_ctime)
+      "Artifact changed while reading";
+    bytes)
 ;;
 
 let resolve ~root ~external_hash path =
@@ -385,18 +390,17 @@ let read_bytes ~(reference : Reference.t) ~offset ~limit : Asic_artifact.Byte_pa
         "Artifact reference was not listed (or expired); relist artifacts";
       require (offset >= 0 && offset <= reference.size) "Artifact offset out of range";
       require (limit > 0 && limit <= max_page) "Artifact limit must be 1..65536 bytes";
-      let bytes = contents reference.path in
-      require
-        (String.length bytes = reference.size
-         && String.equal (digest bytes) reference.sha256)
-        "Artifact changed since listing (SHA-256/size mismatch)";
-      let length = Int.min limit (String.length bytes - offset) in
-      let next_offset = offset + length in
-      let bytes_hex =
-        String.sub bytes ~pos:offset ~len:length
-        |> Cryptokit.transform_string (Cryptokit.Hexa.encode ())
+      let size, sha256, bytes =
+        with_file reference.path (fun fd _ ->
+          Artifact_file.page fd ~max_bytes:max_file ~offset ~limit)
       in
-      page ~next_offset ~eof:(next_offset = String.length bytes) bytes_hex)
+      require
+        (size = reference.size && String.equal sha256 reference.sha256)
+        "Artifact changed since listing (SHA-256/size mismatch)";
+      let length = String.length bytes in
+      let next_offset = offset + length in
+      let bytes_hex = Cryptokit.transform_string (Cryptokit.Hexa.encode ()) bytes in
+      page ~next_offset ~eof:(next_offset = size) bytes_hex)
   with
   | Ok page -> page
   | Error error ->

@@ -45,7 +45,7 @@ let rec remove path =
     else Core_unix.unlink path
 ;;
 
-let atomic path text =
+let atomic_write path f =
   let tmp = path ^ ".tmp-" ^ Int.to_string (Random.int 1_000_000_000) in
   let fd =
     Core_unix.openfile tmp ~mode:[ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] ~perm:0o600
@@ -54,33 +54,42 @@ let atomic path text =
     ~finally:(fun () ->
       ignore (Or_error.try_with (fun () -> Core_unix.unlink tmp) : unit Or_error.t))
     ~f:(fun () ->
-      Exn.protect
-        ~finally:(fun () -> Core_unix.close fd)
-        ~f:(fun () ->
-          let bytes = Bytes.of_string text in
-          let rec write pos =
-            if pos < Bytes.length bytes
-            then (
-              let n =
-                Core_unix.write fd ~buf:bytes ~pos ~len:(Bytes.length bytes - pos)
-              in
-              require (n > 0) "Could not persist simulation record";
-              write (pos + n))
-          in
-          write 0;
-          Core_unix.fsync fd);
+      let result =
+        Exn.protect
+          ~finally:(fun () -> Core_unix.close fd)
+          ~f:(fun () ->
+            let result = f fd in
+            Core_unix.fsync fd;
+            result)
+      in
       Core_unix.rename ~src:tmp ~dst:path;
       let dir =
         Core_unix.openfile (Filename.dirname path) ~mode:[ O_RDONLY; O_CLOEXEC ]
       in
       Exn.protect
         ~finally:(fun () -> Core_unix.close dir)
-        ~f:(fun () -> Core_unix.fsync dir))
+        ~f:(fun () -> Core_unix.fsync dir);
+      result)
+;;
+
+let write fd bytes len =
+  let rec loop pos =
+    if pos < len
+    then (
+      let n = Core_unix.write fd ~buf:bytes ~pos ~len:(len - pos) in
+      require (n > 0) "Could not persist simulation record";
+      loop (pos + n))
+  in
+  loop 0
+;;
+
+let atomic path text =
+  atomic_write path (fun fd -> write fd (Bytes.of_string text) (String.length text))
 ;;
 
 (** No symlink component, bounded allocation, nonblocking open, and descriptor target
     verification to catch ancestor replacement between validation and open. *)
-let read path ~max_bytes =
+let with_file path ~max_bytes f =
   require (Filename.is_absolute path) "Expected absolute simulation path";
   let rec components prefix = function
     | [] -> ()
@@ -108,21 +117,44 @@ let read path ~max_bytes =
           ("/proc/self/fd/" ^ Int.to_string (Core_unix.File_descr.to_int fd))
       in
       require (String.equal target path) "Simulation descriptor path changed";
-      let buffer = Bytes.create (Int64.to_int_exn before.st_size + 1) in
-      let rec loop pos =
-        require (pos < Bytes.length buffer) "Simulation file grew while reading";
-        let n = Core_unix.read fd ~buf:buffer ~pos ~len:(Bytes.length buffer - pos) in
-        if n = 0 then Bytes.To_string.sub buffer ~pos:0 ~len:pos else loop (pos + n)
+      f fd before)
+;;
+
+let read path ~max_bytes =
+  with_file path ~max_bytes (fun fd before ->
+    let buffer = Bytes.create (Int64.to_int_exn before.st_size + 1) in
+    let rec loop pos =
+      require (pos < Bytes.length buffer) "Simulation file grew while reading";
+      let n = Core_unix.read fd ~buf:buffer ~pos ~len:(Bytes.length buffer - pos) in
+      if n = 0 then Bytes.To_string.sub buffer ~pos:0 ~len:pos else loop (pos + n)
+    in
+    let bytes = loop 0 in
+    let after = Core_unix.fstat fd in
+    require
+      (Int64.equal before.st_size after.st_size
+       && Int64.equal after.st_size (Int64.of_int (String.length bytes))
+       && Poly.equal before.st_mtime after.st_mtime
+       && Poly.equal before.st_ctime after.st_ctime)
+      "Simulation file changed while reading";
+    bytes)
+;;
+
+let read_page path ~max_bytes ~offset ~limit =
+  with_file path ~max_bytes (fun fd _ -> Artifact_file.page fd ~max_bytes ~offset ~limit)
+;;
+
+let capture ~src ~dst ~max_bytes ~reserve =
+  with_file src ~max_bytes (fun input before ->
+    reserve (Int64.to_int_exn before.st_size);
+    atomic_write dst (fun output ->
+      let size, sha256, _ =
+        Artifact_file.scan input ~max_bytes ~offset:0 ~limit:0 ~sink:(fun bytes len ->
+          write output bytes len)
       in
-      let bytes = loop 0 in
-      let after = Core_unix.fstat fd in
       require
-        (Int64.equal before.st_size after.st_size
-         && Int64.equal after.st_size (Int64.of_int (String.length bytes))
-         && Poly.equal before.st_mtime after.st_mtime
-         && Poly.equal before.st_ctime after.st_ctime)
-        "Simulation file changed while reading";
-      bytes)
+        (Int64.equal (Int64.of_int size) before.st_size)
+        "Simulation artifact size changed after budget reservation";
+      size, sha256))
 ;;
 
 let hex bytes = Cryptokit.transform_string (Cryptokit.Hexa.encode ()) bytes

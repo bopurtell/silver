@@ -748,7 +748,17 @@ let tests fixture =
       let p = Store.project service.simulation_service root in
       let entry = Store.find p first.id in
       let bytes_path = Files.artifact_path entry.dir artifact.id in
-      Files.atomic bytes_path "changed";
+      (* Same-size tampering outside the requested page must still be rehashed. *)
+      let original = Files.read bytes_path ~max_bytes:Limits.artifact_bytes in
+      let original_stat = Core_unix.stat bytes_path in
+      require (String.length original > 1) "Expected multi-byte artifact fixture";
+      let last = String.length original - 1 in
+      let replacement = if Char.equal original.[last] 'x' then "y" else "x" in
+      Files.atomic bytes_path (String.prefix original last ^ replacement);
+      Core_unix.utimes
+        bytes_path
+        ~access:original_stat.st_atime
+        ~modif:original_stat.st_mtime;
       let%bind changed =
         rpc
           (Read_artifact_bytes
