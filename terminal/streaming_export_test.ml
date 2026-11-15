@@ -233,6 +233,14 @@ let%test_unit "simulation streaming adapter publishes exact raw bytes and reject
       }
     in
     let launched = ref false in
+    let clipboard = Export_clipboard.create () in
+    let copies = ref [] in
+    let complete result =
+      Export_clipboard.completed clipboard result ~notice:ignore;
+      Bonsai_term.Effect.Expert.handle ~on_exn:raise
+        (Export_clipboard.flush clipboard ~enabled:true ~write:(fun sequence ->
+           Bonsai_term.Effect.of_thunk (fun () -> copies := sequence :: !copies)))
+    in
     let%bind r =
       Simulation_export.run
         ~artifact
@@ -248,6 +256,8 @@ let%test_unit "simulation streaming adapter publishes exact raw bytes and reject
           return (Ok ()))
     in
     assert !launched;
+    complete r;
+    assert (List.equal String.equal !copies [ Export_clipboard.osc52 (Or_error.ok_exn r) ]);
     remove (Or_error.ok_exn r);
     Deferred.List.iter
       [ { page with attempt_id = "changed" }
@@ -266,7 +276,9 @@ let%test_unit "simulation streaming adapter publishes exact raw bytes and reject
             ~viewer:(Some "/viewer")
             ~launch:(fun ~prog:_ ~args:_ -> assert false)
         in
-        assert (Or_error.is_error r)))
+        assert (Or_error.is_error r);
+        complete r;
+        assert (List.length !copies = 1)))
 ;;
 
 let%test_unit "ASIC streaming adapter launches only exact verified local publication" =

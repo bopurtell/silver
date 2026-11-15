@@ -57,6 +57,7 @@
   simulation_catalog
   testing_workspace
   simulation_export
+  export_clipboard
   waveform_data
   waveform_preferences
   waveform_time
