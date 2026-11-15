@@ -38,6 +38,8 @@
   workspace_host
   evidence_activity
   palette_search
+  text_edit
+  text_edit_test
   palette_view
   host_view
   evidence_session_test

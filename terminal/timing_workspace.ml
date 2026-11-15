@@ -331,7 +331,9 @@ let rows
         (if t.pasting then "PASTE " else "FILTER ")
         ^ t.filter
         ^ "▏ · "
-        ^ Option.value t.filter_notice ~default:"Enter/Esc finish · Ctrl-U clear"
+        ^ Option.value
+            t.filter_notice
+            ~default:"Enter/Esc finish · Ctrl-BS/Ctrl-W word · Ctrl-U clear"
       else
         sprintf
           "filter=%s · %s · corner=%s group=%s producer=%s near=%b"
