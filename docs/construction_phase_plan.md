@@ -1,6 +1,257 @@
-# Hardcaml Workbench — Demo construction plan
+# Silver — Demo construction plan
 
-## Active PT.6 resource inspector — 2026-10-28
+New-session context: [cross-repository recovery checkpoint](session_checkpoint.md).
+It summarizes the ASIC PT.0–PT.8 track, acceptance and preservation rules
+without replacing this queue or the ASIC queue. Refactor continuation plans are
+grouped under [migration guides](migration_guides/README.md).
+
+## Status terminology for progress reports
+
+Use **complete** for a stated scope whose required implementation and acceptance
+gates passed. Use **implemented; acceptance pending** when required acceptance is
+still open, and **partial**, **blocked**, **pending**, or **deferred** with an explicit
+remaining gate or reason. Report manual/user acceptance separately where recorded.
+Do not use “delivered” as a status in new updates or summaries. Older entries below
+use it for both accepted work and implementation awaiting acceptance: consult their
+checklists and evidence rather than infer completion from that word. For PT.0–PT.8,
+follow the [authoritative ASIC status definitions](../../hardcaml_asic/docs/phase_plan.md#status-terminology)
+and preserve the distinction between completed generic scope and open Protemu work.
+
+## Normal Protemu installed adoption — 2026-11-12
+
+**Complete in bounded tooling scope:** normal local installation/environment,
+public named project flows and resource preparation, seven qualified simulation
+cases with actual VCD/UI evidence, controlled event-workload comparison, live
+serial/nested cancellation and real Protemu timing launch. A streaming collector
+fix plus explicit provenance-checked reinspection exposes retained negative paths
+without rewriting historical unavailable results. Final installed acceptance and
+independent review pass; [scope and evidence](protemu_installed_adoption.md).
+Protemu timing closure/full physical acceptance and whole-package selection remain
+open. No hardware cycle change or timing constraint relaxation was made.
+
+## Stock SRAM segmented tooling — 2026-11-12
+
+**Complete in bounded scope:** provider stock256×16/R0 segmented execution through
+Timing, path-bound schema-3 checkpoints/restarts, and Workbench capability-aware
+fresh launch/observation/reopen. Real independent example restart-chain and named
+prefix qualification pass; real production TUI launch through Timing and same-store
+restart pass. Controlled failed-timing and unsupported-capability handling pass.
+[Scope, evidence, commands and limits](sram_segmented_release.md).
+Macro Signoff/finalization/PT.7 exceptions remain unsupported. This tooling gate
+does not close Protemu's design timing/physical acceptance.
+
+## Real-test discovery and bounded rebuild recovery — 2026-11-11
+
+Real endpoint/pyramid aliases now discover the sibling example's current prepared
+installation, with optional explicit override and no automatic installation. New
+`@test-real-preflight` validates read-only. Sandboxed/external-build discovery and
+44 controls plus15 self-tests pass. ASIC standard checks passed after three test
+corrections; refreshed example main apps/consumers and verified installed API usage.
+[Crash diagnosis, execution evidence and remaining limitations](rebuild_discovery_verification.md).
+Hardware/platform faults remain unresolved; no physical EDA was run in this update.
+
+## WB-049 common project configuration — 2026-11-11
+
+Delivered `.workbench/` lookup for generic, ASIC, simulation and preparation
+configuration, legacy compatibility, explicit conflict diagnostics and dry-run/
+no-clobber copy migration. New initialization uses the common directory. Example
+main/development launchers and FIFO setup support both locations and recovery.
+[Migration policy, commands and verification](migration_guides/project-configuration.md).
+Focused loader/backend/setup and script tests pass; no live configurations were
+migrated and no real EDA was run. PT.3 consumer acceptance remains separate.
+
+## Real fresh-prefix pyramid tests — 2026-11-11
+
+Owner activated this bounded coverage item from the broader deferred test backlog.
+[Runner/selection guide](real_prefix_pyramid.md) records eight explicit real endpoint
+aliases and one serial pyramid. Default runtest/local/all excludes every real action;
+only controlled harness tests are registered there. Persistent private evidence and
+independent source state preserve the owner's main session.
+
+- [x] Implement fresh independent rungs, exact-prefix/result checks and cleanup.
+- [x] Register per-endpoint aliases and an explicit serial full-pyramid action.
+- [x] Verify controls/default exclusion and actual real Elaboration/Synthesis.
+- [ ] Execute the remaining physical endpoint rungs when explicitly selected.
+- [ ] Execute the complete pyramid for a scheduled large-change qualification.
+
+28 controls plus15 self-tests pass. Independent review substantiates the final real
+Synthesis PASS. Floorplan through Signoff/full-pyramid execution is not claimed.
+
+## Interactive endpoint rejection recovery — 2026-11-10
+
+Owner's placement request in the synthesis-only accepted session exposed late
+admission and a secondary observation error. [Fix and adoption handoff](developer_workflow_endpoint_rejection.md)
+records early capability admission, definitive pre-execution rejection recovery,
+retained checklist context and readable diagnostics. Independent backend/terminal
+tests and actual retained-journal rendering pass. The live session remains on its
+old captured apps until explicit stopped-daemon adoption; no physical run was made.
+
+## Tool-test refactor continuation — 2026-11-10
+
+**Owner priority update:** further general test refactoring and expanded flow
+coverage are deferred to the [backlog](backlog/tool-test-flow-coverage.md).
+Prioritize PT.0–PT.8 completion and its required acceptance; the unchecked follow-ups
+below are deferred, not the active next implementation slice.
+
+Owner authorized implementation with up to three implementation agents, a shared
+20-job ceiling and disposable scripted Git fixtures permitted; owner-checkout Git
+publication/authorship mutations remain prohibited.
+
+- [x] Make nested RPC build budgets explicit and verify actual child argv.
+- [x] Extract shared PTY/screen support with compatibility exports and helper tests.
+- [x] Register an opt-in controlled native smoke with explicit sandbox dependencies.
+- [x] Independently review and verify local groups under inspected execution budgets.
+- [ ] Continue shared HTTP/process support and app-wide driver migrations.
+- [ ] Reconcile external integration with the refactored example's current interfaces.
+
+[Verification and execution limits](test_refactor_verification.md): backend/setup
+passed separately at `-j1`; contracts/presentation/API passed at `-j2`; ten shared
+support tests and seven native smoke assertions passed. The smoke stays terminal-
+owned. `test/integration/` migration and combined local-aggregate execution remain
+pending. No sibling changes or real EDA execution in this slice.
+
+## Test organization alongside example-verification refactor — 2026-11-10
+
+Owner requests clearer subsystem, shared-support and application-integration test
+ownership, independently of the example's ongoing verification refactor.
+[Bounded first restructuring plan](test_organization_plan.md) adds a test inventory,
+root `test/` index and named selectors over current registrations, preserving all
+fixture/evidence bytes and existing subsystem tests.
+
+- [x] Document actual ownership/registration and example-sensitive boundaries.
+- [x] Add explicit local suite selectors with fixture projects still data-only.
+- [x] Verify selected Workbench-only suites and document remaining migration gaps.
+
+No example changes, hardware verification or EDA; the developer synthesis acceptance
+remains paused. Nested job-budget/Git-fixture constraints are documented rather
+than hidden by an outer Dune limit.
+
+Delivered first slice: [test ownership guide](testing.md), [root index](../test/README.md)
+and [verification receipt](test_suite_selection_verification.md). Six named selectors
+reuse current registrations; contracts/presentation forced reruns pass. Existing
+fixture projects remain data-only and default runtest registration is unchanged.
+Backend/API/local and setup execution are not claimed; nested-budget/Git-fixture
+hardening, shared-support extraction and app-integration script migration remain
+separate follow-ups. No example or hardware/EDA execution occurred.
+
+## Completed ordinary developer workflow acceptance — 2026-11-10
+
+**Refactored-example closeout:** [accepted capture, receipts and limits](developer_workflow_refactored_closeout.md).
+Fresh simulation/readiness, real TUI synthesis and collection, report/check inspection
+and same-store restart pass with independent evidence/resource review. Original
+failed harness receipts remain failed; read-only continuations provide the remaining
+inspection/restart evidence without rerunning producers. No P&R or Protemu work.
+
+Owner authorized section-1 closeout: production client startup, FIFO pass/failure
+investigation, PT.8 comparison, fresh synthesis, report/check inspection and
+same-session restart/reopen. [Bounded acceptance and execution allocation](developer_workflow_acceptance_plan.md)
+requires durable automated TUI tests with separately identified supporting RPCs,
+one actual synthesis under the supported six-worker ceiling and no P&R.
+
+- [x] Production startup/FIFO/PT.8 workflows and exact evidence associations.
+- [x] Fresh synthesis through the TUI and actual report/check inspection.
+- [x] Same-store restart/reopen, independent evidence/resource review and closeout.
+
+Use only test-owned private state; existing live owner sessions/evidence remain
+unchanged. Passing metadata/preparation is not synthesis completion.
+
+The [phase-1 handoff](developer_workflow_acceptance_handoff.md) is historical.
+Its lost pre-crash temporary store was replaced with new ownership-v1 captures,
+explicit capability support and a kernel-enforced six-total-task synthesis envelope.
+The [closeout](developer_workflow_refactored_closeout.md) is current authority for
+executed acceptance. No acceptance jobs remain running.
+
+## Development synthesis Git-context correction — 2026-11-05
+
+Owner's synthesis attempt completed elaboration but failed collateral revision
+admission. The development launcher's global source Git selectors contaminated
+`git -C` support-tools/PDK probes. Corrected source-scoped real-Git dispatch keeps
+revision checks strict and source context local. Independent installed preparation
+and public metadata preflight pass on the retained user's bundle, with a genuine
+wrong-revision negative still rejecting. No synthesis or physical flow was run.
+The active user capture/history remains unchanged; adoption uses an explicit
+stopped-daemon same-store refresh. [Recovery and evidence](development_git_context_recovery.md).
+
+## Unified development session and waveform time navigation — 2026-11-05
+
+Owner requests a coherent everyday example session, not another PT.8-only demo.
+[Bounded implementation plan](development_session_plan.md) defines exclusive slices,
+combined FIFO/PT.8 catalog, stable editable source/state and explicit refresh, and
+bounded event-aware waveform Default/Fit over exact retained physical time.
+
+- [x] Stable source-complete setup with pinned app/provider/library environment.
+- [x] Combined real FIFO and PT.8 Testing suites, assertions/results/VCD handoffs.
+- [x] Useful time-aware default, full-trace Fit, truthful compressed graph cells.
+- [x] Real same-session UI/restart/refresh acceptance and independent review.
+
+Existing root configuration/live pairs/evidence remain unchanged. No new EDA.
+
+Delivered: [stable development launch/workflow guide](development_session.md).
+Fixed editable project `.dev/workbench-development/project`, generation
+`26f0d5e474bc4d45b5fc5859325c162d`, with captured matching apps and explicit refresh.
+Native same-session FIFO normal/mismatch and PT.8 execution, useful waveform
+Default/Fit and exact cursor, Workloads comparison, normal ASIC preparation and
+history/restart/refresh gates pass. Independent waveform86 controls, lifecycle38
+plus migration24 checks and final installed-capture audit pass after documented
+corrections. Ordinary private test/asic_test/timing targets and coordinator
+Workbench `@all @runtest` pass. Stable user daemon remains for manual launch;
+earlier sessions/captures/evidence are preserved.
+
+## PT.8 fresh simulation → Waveforms recovery — 2026-11-05
+
+Owner found result-reference JSON opened as a waveform, with no VCD in the
+attempt. [Bounded plan](pt8_waveform_recovery_plan.md) is delivered: explicit
+six-interface-signal capture/publication, exact case/attempt VCD handoff, truthful
+no-VCD availability and preserved JSON Workloads inspection. Mixed known/X/Z
+windows retain known graphs and mark unknown lanes without inventing values.
+Independent review corrected producer admission/publication and restored artifact/
+palette membership gaps. Final real Flops/Exact direct cases and production
+Testing→fresh Exact→quick/dedicated Waveforms pass in `session-waveforms-final-01`;
+same-execution raw signal samples, original counters and standard public Plan pass.
+See [final evidence](pt8_waveform_final_acceptance.md) and
+[updated launch guide](pt8_workloads.md). Existing sessions/results remain unchanged;
+no EDA or user-pair restart occurred. User visual acceptance remains manual.
+
+## Standard Plan / private-session recovery — 2026-11-05
+
+Owner reported blank endpoint input and failed staging in the provided PT.8
+session. Corrected catalog-derived initial endpoint selection, retained failure
+diagnostics and exact quoted-assignment roundtrips. The example recovery setup
+now supplies independent source inputs and matching provider build environment.
+Actual production-client Plan/Preparation staging and enabled Launch-and-view
+controls pass against `session-standard-recovery-02`, without physical submission.
+Both profiles × seven endpoints plan successfully; private source build/emission
+and a fresh Exact workload pass. Original user session remains unchanged.
+See [review and recovery commands](standard_plan_recovery.md) and
+[independent endpoint review](pt8_endpoint_independent_review.md).
+
+## Completed PT.8 workload inspection and execution scope — 2026-11-05
+
+User authorized the Workbench integration of the accepted PT.8 library/example
+workflow. [Bounded plan](pt8_workloads_plan.md) owns shared APIs, exclusive slices,
+isolated provider/session setup and acceptance. Existing configured sessions and
+live daemons remain unchanged.
+
+- [x] Public workload reader bridge and bounded async result/comparison cache.
+- [x] Workloads workspace: explicit result imports, A/B captures, axis and reasons.
+- [x] Example FS2 positive workload catalog, fresh execution and exact result handoff.
+- [x] Independent review, real retained/fresh HTTP/PTY acceptance and launch guide.
+
+No new synthesis/P&R/STA or Protemu scope. Provider-owned verification/deltas and
+existing FS2 supervision are reused; root configuration adoption is separate.
+
+Implementation and native HTTP/PTY acceptance complete, 2026-11-05;
+user visual acceptance remains pending: [launch/acceptance guide](pt8_workloads.md). Corrected private
+session `session-final-review-01` runs immutable provider generation
+`ee3af8de9f83418b9afed9c67e473e3c`. Actual retained comparison and production-form
+fresh Exact launch, digest-pinned artifact handoff and fresh-versus-retained
+comparison pass; all seven workload metrics have zero deltas. Independent frontend
+review78 controls and backend correction61 observations pass after six findings
+were corrected. Full terminal and coordinator `@all @runtest` pass. Source/model/
+trace audit and root-provider/config preservation are recorded in the guide.
+Existing live sessions remain untouched; user visual acceptance is pending.
+
+## Completed PT.6 resource inspector scope — 2026-10-28
 
 Owner authorized presentation of ASIC-owned requested/selected/realized resources,
 physical measurements and sampled timing/electrical links. The
@@ -12,7 +263,7 @@ exact evidence targets, bounded queries and native retained-SRAM acceptance.
 - [x] Native synthetic and actual retained-example acceptance, independent review.
 - [x] Broader checks, matching binaries and explicit provider/restart handoff.
 
-Delivered 2026-10-28: final native bridge533, synthetic HTTP/PTY70, retained SRAM
+Complete in bounded inspector scope, 2026-10-28: final native bridge533, synthetic HTTP/PTY70, retained SRAM
 HTTP/PTY52, unified-flow99 and saved-layout17 assertions passed, along with both
 full suites. Independent peer recheck passed66 assertions after corrections.
 Importing coarse historical evidence does not create a new physical run. Owner

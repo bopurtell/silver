@@ -46,6 +46,10 @@ type t =
   ; session : string
   ; active : string option
   ; workspaces : workspace list
+  ; workloads : (string * Workloads_view.saved) list
+       [@sexp.default []] [@sexp_drop_default.equal]
+  ; testing_artifacts : (string * Hardcaml_workbench_protocol.Simulation.Artifact.t) list
+       [@sexp.default []] [@sexp_drop_default.equal]
   }
 [@@deriving sexp]
 
@@ -71,12 +75,30 @@ let validate (t : t) =
   if List.length t.workspaces > 256 then fail "workspace count limit exceeded";
   let workspace_ids = List.map t.workspaces ~f:(fun w -> w.id) in
   unique workspace_ids;
+  if List.length t.testing_artifacts > 256 then fail "testing artifact count exceeded";
+  unique (List.map t.testing_artifacts ~f:fst);
+  List.iter t.testing_artifacts ~f:(fun (workspace, artifact) ->
+    if not (List.mem workspace_ids workspace ~equal:String.equal)
+    then fail "testing artifact workspace missing";
+    List.iter
+      [ artifact.id; artifact.attempt_id; artifact.media_type; artifact.kind ]
+      ~f:check_string;
+    check_optional artifact.case_id);
   if Option.exists t.active ~f:(fun id ->
        not (List.mem workspace_ids id ~equal:String.equal))
   then fail "active workspace is not saved";
   let members = List.concat_map t.workspaces ~f:(fun w -> w.members) in
   if List.length members > 1024 then fail "member count limit exceeded";
   unique (List.map members ~f:(fun m -> m.tile));
+  if List.length t.workloads > 128 then fail "workload selection count exceeded";
+  unique (List.map t.workloads ~f:fst);
+  List.iter t.workloads ~f:(fun (tile, saved) ->
+    check_string tile;
+    if not
+         (List.exists members ~f:(fun m ->
+            String.equal m.tile tile && String.equal m.kind "workloads"))
+    then fail "workload tile not saved";
+    ignore (Workloads_view.restore saved : Workloads_view.t));
   List.iter t.workspaces ~f:(fun w ->
     check_string w.id;
     List.iter w.members ~f:(fun m ->
@@ -131,7 +153,28 @@ let decode ~project_key text =
 ;;
 
 let create ~project_key ~session ~active ~workspaces =
-  let t = { schema_version = 1; project_key; session; active; workspaces } in
+  let t =
+    { schema_version = 1
+    ; project_key
+    ; session
+    ; active
+    ; workspaces
+    ; workloads = []
+    ; testing_artifacts = []
+    }
+  in
+  ignore (encode t : string);
+  t
+;;
+
+let with_workloads t workloads =
+  let t = { t with workloads } in
+  ignore (encode t : string);
+  t
+;;
+
+let with_testing_artifacts t testing_artifacts =
+  let t = { t with testing_artifacts } in
   ignore (encode t : string);
   t
 ;;
