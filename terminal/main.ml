@@ -28,6 +28,7 @@ module Simulation_view = Terminal_presentation.Simulation_view
 module Testing_workspace = Terminal_presentation.Testing_workspace
 module Simulation_catalog = Terminal_presentation.Simulation_catalog
 module Simulation_export = Terminal_presentation.Simulation_export
+module Export_clipboard = Terminal_presentation.Export_clipboard
 module Waveform_data = Terminal_presentation.Waveform_data
 module Waveform_view = Terminal_presentation.Waveform_view
 module Waveform_preferences = Terminal_presentation.Waveform_preferences
@@ -157,6 +158,7 @@ type session =
   ; mutable artifact_viewer : string option
   ; mutable artifact_binary_viewer : string option
   ; mutable artifact_export_busy : bool
+  ; export_clipboard : Export_clipboard.t
   ; mutable waveform : Waveform_view.t option
   ; mutable waveform_visible : bool
   ; mutable waveform_generation : int
@@ -358,6 +360,7 @@ let create_session
       ; artifact_viewer = None
       ; artifact_binary_viewer = None
       ; artifact_export_busy = false
+      ; export_clipboard = Export_clipboard.create ()
       ; waveform = None
       ; waveform_visible = false
       ; waveform_generation = 0
@@ -2001,7 +2004,8 @@ let export_artifact_binary session tile_id ~viewer (reference : Asic_artifact.Re
       let instance_id = session.hello.instance_id in
       let client = session.client in
       let owner_current () =
-        V1.Daemon_instance_id.equal instance_id session.hello.instance_id
+        phys_equal client session.client
+        && V1.Daemon_instance_id.equal instance_id session.hello.instance_id
         && Option.value_map (current_project session) ~default:false ~f:(fun p ->
           Project_id.equal p.id project.id)
       in
@@ -2082,7 +2086,7 @@ let export_artifact_binary session tile_id ~viewer (reference : Asic_artifact.Re
               ~viewer
               ~reference
               ~fetch
-              ~publish:Artifact_binary_export.publish_private
+              ~current:owner_current
               ~launch:(fun ~prog ~args ->
                 if owner_current ()
                 then Artifact_export.launch_viewer ~prog ~args
@@ -2482,7 +2486,7 @@ let read_waveform_bytes session artifact ~current =
       | Ok _ when not (String.equal (Simulation_export.suffix artifact) ".vcd") ->
         return (Or_error.error_string "Embedded viewer supports VCD only")
       | Ok _ ->
-        Simulation_export.run
+        Simulation_export.run_embedded
           ~artifact
           ~current
           ~viewer:None
@@ -3771,7 +3775,17 @@ let artifact_lines session =
 let connection_detail_lines session ~width =
   let field label value = label :: Presentation.wrap_value ~width ~indent:"  " value in
   let root value = "Root:" :: Presentation.wrap_path ~width ~indent:"  " value in
-  field "Endpoint:" (Http.Client.endpoint session.client)
+  Option.value_map
+    (Export_clipboard.details session.export_clipboard)
+    ~default:[]
+    ~f:(fun path ->
+      [ "Last simulation export:" ]
+      @ field "Exact path (OCaml string):" path
+      @ field
+          "Clipboard:"
+          "F9 retries OSC 52; terminal acceptance cannot be detected. F8 returns; [/] \
+           scroll.")
+  @ field "Endpoint:" (Http.Client.endpoint session.client)
   @ field "Daemon instance:" (V1.Daemon_instance_id.to_string session.hello.instance_id)
   @ field "Protocol:" (sprintf "v%d" V1.version)
   @ field "Connection:" session.status
@@ -4296,6 +4310,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
       dimensions
   in
   match session.waveform_visible, session.waveform with
+  | _ when session.show_connection_details -> render_legacy session dimensions
   | true, Some view ->
     session.last_dimensions <- Some dimensions;
     let appearance = session.host.appearance in
@@ -4403,6 +4418,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; artifact_viewer = None
     ; artifact_binary_viewer = None
     ; artifact_export_busy = false
+    ; export_clipboard = Export_clipboard.create ()
     ; waveform = None
     ; waveform_visible = false
     ; waveform_generation = 0
@@ -5140,7 +5156,7 @@ let open_waveform session (artifact : Simulation.Artifact.t) =
             (Or_error.error_string
                "Embedded viewer supports VCD only; use export/external viewer")
         | Ok _ ->
-          Simulation_export.run
+          Simulation_export.run_embedded
             ~artifact
             ~current
             ~viewer:None
@@ -5914,10 +5930,12 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                (Host.simulation session.host id).attempt
                (Some artifact.attempt_id))
       in
-      let notice message =
+      let notice ?(context = true) message =
         let message =
           Artifact_view.safe
-            (sprintf "Simulation %s / %s: %s" artifact.attempt_id artifact.id message)
+            (if context
+             then sprintf "Simulation %s / %s: %s" artifact.attempt_id artifact.id message
+             else message)
         in
         if owner_current ()
         then (
@@ -5992,13 +6010,18 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                           Or_error.of_option
                             s.byte_page
                             ~error:(Error.of_string "Missing simulation byte page"))
-                      ~publish:Simulation_export.publish_private
                       ~launch:Artifact_export.launch_viewer
                   in
-                  notice
-                    (match result with
-                     | Ok path -> "Verified simulation bytes retained: " ^ path
-                     | Error e -> "Simulation export: " ^ Error.to_string_hum e)))))
+                  match result with
+                  | Ok path ->
+                    append_diagnostic
+                      session.diagnostics_file
+                      (sprintf "Verified simulation export: %S" path);
+                    Export_clipboard.completed
+                      session.export_clipboard
+                      result
+                      ~notice:(notice ~context:false)
+                  | Error e -> notice ("Simulation export: " ^ Error.to_string_hum e)))))
     | Host.Registry mutation -> async (fun () -> mutate_workspace session mutation)
     | Restore_default_layout (workspace, definition) ->
       let host, ticket = Host.begin_restore session.host captured in
@@ -8115,6 +8138,7 @@ let tui session ~exit ~dimensions graph =
      edge instead of waiting for the display clock to repaint. The clock below remains for
      time-dependent displays, not input acknowledgement. *)
   let revision, update_revision = Bonsai.state' 0 graph in
+  let write_to_tty = Expert.Write_to_tty.write_string_to_tty graph in
   let invalidate update = update (fun revision -> revision + 1) in
   let poll =
     Bonsai.map update_revision ~f:(fun update ->
@@ -8167,6 +8191,20 @@ let tui session ~exit ~dimensions graph =
   let handle (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if match event with
+            | Key_press { key = Function 8; mods = [] } -> true
+            | _ -> false
+    then (
+      session.show_connection_details <- not session.show_connection_details;
+      session.connection_details_scroll <- 0;
+      Effect.Ignore)
+    else if match event with
+            | Key_press { key = Function 9; mods = [] } -> true
+            | _ -> false
+    then (
+      Export_clipboard.retry session.export_clipboard ~notice:(fun notice ->
+        session.host <- { session.host with notice });
+      Effect.Ignore)
     else if Option.is_some session.artifact_view
             && Option.exists (Host.decode_event event) ~f:(function
               | Host.Escape -> true
@@ -8176,11 +8214,11 @@ let tui session ~exit ~dimensions graph =
       Effect.Ignore)
     else (
       let hosted =
-        if session.waveform_visible
-           || (Option.is_some session.host.registry
-               && Option.is_none session.hierarchy_view
-               && Option.is_none session.artifact_view
-               && not session.show_connection_details)
+        if (not session.show_connection_details)
+           && (session.waveform_visible
+               || (Option.is_some session.host.registry
+                   && Option.is_none session.hierarchy_view
+                   && Option.is_none session.artifact_view))
         then host_handler session event ~exit
         else None
       in
@@ -8255,7 +8293,7 @@ let tui session ~exit ~dimensions graph =
          | _ -> Effect.Ignore))
   in
   let handler =
-    Bonsai.map update_revision ~f:(fun update event ->
+    Bonsai.map2 update_revision write_to_tty ~f:(fun update write event ->
       let previous = session.host in
       let effect = handle event in
       let active, focus, selections =
@@ -8278,8 +8316,16 @@ let tui session ~exit ~dimensions graph =
         [ invalidate update
         ; Effect.bind effect ~f:(fun () ->
             Effect.bind
-              (Effect.of_deferred_thunk (fun () -> save_navigation_preferences session))
-              ~f:(fun () -> invalidate update))
+              (Export_clipboard.flush
+                 session.export_clipboard
+                 ~enabled:
+                   (not (Option.exists (Sys.getenv "TERM") ~f:(String.equal "dumb")))
+                 ~write)
+              ~f:(fun () ->
+                Effect.bind
+                  (Effect.of_deferred_thunk (fun () ->
+                     save_navigation_preferences session))
+                  ~f:(fun () -> invalidate update)))
         ])
   in
   ~view, ~handler

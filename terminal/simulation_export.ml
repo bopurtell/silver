@@ -70,7 +70,9 @@ let digest_chunks chunks =
   Cryptokit.transform_string (Cryptokit.Hexa.encode ()) hash#result
 ;;
 
-let run ~artifact ~fetch ~current ~publish ~viewer ~launch =
+(* The existing bounded embedded parser consumes chunks. External exports use [run] below
+   and never enter this accumulation path. *)
+let run_embedded ~artifact ~fetch ~current ~publish ~viewer ~launch =
   let abandoned = ref false in
   let check () =
     if !abandoned || not (current ())
@@ -123,7 +125,7 @@ let run ~artifact ~fetch ~current ~publish ~viewer ~launch =
     Or_error.error_string "Simulation export timed out"
 ;;
 
-let publish_private artifact chunks =
+let publish_embedded_fixture artifact chunks =
   In_thread.run (fun () ->
     Or_error.try_with (fun () ->
       let dir = Filename_unix.temp_dir ~perm:0o700 "hardcaml-simulation-" "" in
@@ -141,6 +143,34 @@ let publish_private artifact chunks =
         (write "metadata.sexp" [ Sexp.to_string_hum (S.Artifact.sexp_of_t artifact) ]
          : string);
       write ("artifact" ^ suffix artifact) chunks))
+;;
+
+let run ~artifact ~fetch ~current ~viewer ~launch =
+  match identity artifact with
+  | Error e -> return (Error e)
+  | Ok (size, sha256) ->
+    (match
+       Option.map viewer ~f:Artifact_binary_export.executable
+       |> Option.value ~default:(Ok "")
+     with
+     | Error e -> return (Error e)
+     | Ok _ ->
+       Streaming_export.run
+         ~size
+         ~sha256
+         ~metadata:(Sexp.to_string_hum (S.Artifact.sexp_of_t artifact))
+         ~suffix:(suffix artifact)
+         ~current
+         ~viewer
+         ~launch
+         ~fetch:(fun ~offset ~limit ~check ->
+           let%map page = fetch ~offset ~limit in
+           check ();
+           let open Or_error.Let_syntax in
+           let%bind page in
+           let%map bytes = validate artifact ~offset page in
+           bytes, page.eof)
+         ())
 ;;
 
 let%test_unit "raw bytes and ownership are validated independently of display" =
@@ -259,11 +289,11 @@ let%test_unit "multi-page export publishes exact host bytes and launches only af
     in
     let launched = ref false in
     let%bind result =
-      run
+      run_embedded
         ~artifact
         ~fetch
         ~current:(fun () -> true)
-        ~publish:publish_private
+        ~publish:publish_embedded_fixture
         ~viewer:(Some "/fixture/viewer with spaces")
         ~launch:(fun ~prog ~args ->
           assert (String.equal prog "/fixture/viewer with spaces");
@@ -279,7 +309,7 @@ let%test_unit "multi-page export publishes exact host bytes and launches only af
     Core_unix.unlink (Filename.concat (Filename.dirname path) "metadata.sexp");
     Core_unix.rmdir (Filename.dirname path);
     let%bind result =
-      run
+      run_embedded
         ~artifact:{ artifact with sha256 = Some (String.make 64 '0') }
         ~fetch
         ~current:(fun () -> true)
@@ -289,7 +319,7 @@ let%test_unit "multi-page export publishes exact host bytes and launches only af
     in
     assert (Or_error.is_error result);
     let%bind result =
-      run
+      run_embedded
         ~artifact
         ~fetch:(fun ~offset ~limit ->
           let%map page = fetch ~offset ~limit in
@@ -302,7 +332,7 @@ let%test_unit "multi-page export publishes exact host bytes and launches only af
     in
     assert (Or_error.is_error result);
     let%map result =
-      run
+      run_embedded
         ~artifact
         ~fetch
         ~current:(fun () -> false)
