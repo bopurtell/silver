@@ -7231,6 +7231,7 @@ let host_handler_overlays session event ~exit =
         | Some Host.Enter -> Some Inspection_view.Open
         | Some Escape -> Some Back
         | Some Backspace -> Some Backspace
+        | Some Delete_word -> Some Delete_word
         | Some (Character c) -> Some (Character c)
         | Some (Text text) -> Some (Text text)
         | _ -> None)

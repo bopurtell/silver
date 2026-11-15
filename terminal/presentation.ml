@@ -332,6 +332,145 @@ let wrap_value ~width ~indent value =
     |> List.map ~f:(fun chars -> indent ^ String.of_char_list chars)
 ;;
 
+(** Presentation only: protocol kinds remain exact, open-ended identifiers. Context
+    is joined by job identity, never by the currently selected simulation attempt. *)
+let execution_job_label ?simulation (job : Job.t) =
+  match job.kind.namespace, job.kind.name with
+  | "simulation", "discover" -> "sim discover"
+  | "simulation", "run" ->
+    let context =
+      Option.bind simulation ~f:(fun (snapshot : Simulation.Snapshot.t) ->
+        match snapshot.detail with
+        | Some detail when Job_id.equal detail.job job.id ->
+          let selection = detail.captured.selection in
+          Some
+            (match selection.cases with
+             | [ case ] -> selection.suite ^ "/" ^ case
+             | _ -> selection.suite)
+        | _ ->
+          List.find_map snapshot.attempts ~f:(fun summary ->
+            if Job_id.equal summary.job job.id then Some summary.suite else None))
+    in
+    "sim run" ^ Option.value_map context ~default:"" ~f:(fun context -> " " ^ context)
+  | "dune", "build" -> "dune build"
+  | "dune", "test" -> "dune test"
+  | "project-driver", "generate-rtl" -> "RTL generate"
+  | "project-driver", "describe" -> "project describe"
+  | _ -> Job.Kind.to_string job.kind
+;;
+
+let%test_unit "execution labels map exact known kinds and preserve extensions" =
+  List.iter
+    [ "simulation", "discover", "sim discover"
+    ; "simulation", "run", "sim run"
+    ; "dune", "build", "dune build"
+    ; "dune", "test", "dune test"
+    ; "project-driver", "generate-rtl", "RTL generate"
+    ; "project-driver", "describe", "project describe"
+    ; "simulation", "provider-run", "simulation.provider-run"
+    ; "provider", "run", "provider.run"
+    ; "asic", "synthesis", "asic.synthesis"
+    ; "dune", "Test", "dune.Test"
+    ]
+    ~f:(fun (namespace, name, expect) ->
+      let job =
+        Job.create
+          ~id:(Job_id.of_string "job")
+          ~kind:{ namespace; name }
+          ~project:(Project_id.of_string "project")
+          ~created_at:(Timestamp.of_time_ns Time_ns.epoch)
+      in
+      [%test_result: string] (execution_job_label job) ~expect;
+      [%test_result: string] (Job.Kind.to_string job.kind) ~expect:(namespace ^ "." ^ name))
+;;
+
+let%test_unit "simulation execution context belongs to each job, not the selection" =
+  let job =
+    Job.create
+      ~id:(Job_id.of_string "job")
+      ~kind:{ namespace = "simulation"; name = "run" }
+      ~project:(Project_id.of_string "project")
+      ~created_at:(Timestamp.of_time_ns Time_ns.epoch)
+  in
+  let selection : Simulation.Selection.t =
+    { suite = "fifo"; cases = [ "wrap" ]; seed = "1"; parameters = []; asic_inputs = [] }
+  in
+  let detail : Simulation.Attempt.t =
+    { id = "attempt"
+    ; job = job.id
+    ; project_root = "/project"
+    ; created_at = "now"
+    ; parent = None
+    ; captured =
+        { selection
+        ; discovery_digest = "digest"
+        ; provider_executable = "/provider"
+        ; provider_args = []
+        ; environment = V1.Environment_selection.Inherit_daemon
+        }
+    ; lifecycle = Queued
+    ; outcome = Unknown
+    ; exit_code = None
+    ; diagnostic = None
+    ; progress = None
+    ; cases = []
+    ; artifacts = []
+    ; next_sequence = 0
+    ; recent_events = []
+    ; execution_timing = None
+    }
+  in
+  let summary : Simulation.Summary.t =
+    { id = "history"
+    ; job = job.id
+    ; suite = "retained-suite"
+    ; seed = "2"
+    ; execution_timing = None
+    ; created_at = "earlier"
+    ; parent = None
+    ; lifecycle = Finished
+    ; outcome = Passed
+    }
+  in
+  let snapshot : Simulation.Snapshot.t =
+    { configured = true
+    ; discovery = None
+    ; discovery_digest = None
+    ; discovery_job = None
+    ; discovery_error = None
+    ; attempts = [ summary ]
+    ; next_before = None
+    ; detail = Some detail
+    ; byte_page = None
+    ; history_error = None
+    }
+  in
+  let label simulation = execution_job_label ~simulation job in
+  [%test_result: string] (label snapshot) ~expect:"sim run fifo/wrap";
+  List.iter [ []; [ "wrap"; "reset" ] ] ~f:(fun cases ->
+    let detail =
+      { detail with captured = { detail.captured with selection = { selection with cases } } }
+    in
+    [%test_result: string]
+      (label { snapshot with detail = Some detail })
+      ~expect:"sim run fifo");
+  [%test_result: string]
+    (label { snapshot with detail = None })
+    ~expect:"sim run retained-suite";
+  let other = { detail with job = Job_id.of_string "other-job" } in
+  [%test_result: string]
+    (label { snapshot with detail = Some other })
+    ~expect:"sim run retained-suite";
+  [%test_result: string]
+    (label { snapshot with detail = Some other; attempts = [] })
+    ~expect:"sim run";
+  [%test_result: string]
+    (execution_job_label
+       ~simulation:snapshot
+       { job with kind = { namespace = "provider"; name = "run" } })
+    ~expect:"provider.run"
+;;
+
 let job_outcome_lines (job : Job.t) =
   let process =
     match job.exit_status with

@@ -655,6 +655,7 @@ type input =
   | Character of char
   | Text of string
   | Backspace
+  | Delete_word
 
 let input ~width ~height t action =
   let t = clamp t ~width ~height in
@@ -671,18 +672,8 @@ let input ~width ~height t action =
     | Text text -> local (append_filter_text t text)
     | _ when t.pasting -> local (reject_filter_text t)
     | Back | Open -> local { t with editing = false }
-    | Backspace ->
-      let rec previous offset last =
-        if offset >= String.length t.filter
-        then last
-        else
-          previous
-            (offset
-             + Stdlib.Uchar.utf_decode_length
-                 (Stdlib.String.get_utf_8_uchar t.filter offset))
-            offset
-      in
-      local { t with filter = String.prefix t.filter (previous 0 0) }
+    | Backspace -> local { t with filter = Text_edit.drop_character t.filter }
+    | Delete_word -> local { t with filter = Text_edit.delete_word t.filter }
     | _ -> local t)
   else (
     match action with
@@ -799,7 +790,7 @@ let input ~width ~height t action =
           ; operation_key = Some (index_key t)
           }
       , Some (operation ~refresh:true t) )
-    | Character _ | Text _ | Backspace -> local t)
+    | Character _ | Text _ | Backspace | Delete_word -> local t)
 ;;
 
 let rows ?(now = Time_ns.now ()) ~width ~height t =
@@ -819,8 +810,8 @@ let rows ?(now = Time_ns.now ()) ~width ~height t =
          | None ->
            if t.editing
            then
-             "FILTER INPUT — Enter/Esc finish · Backspace deletes codepoint · Ctrl-U \
-              clears · Ctrl-C exits"
+             "FILTER INPUT — Enter/Esc finish · Ctrl-BS/Ctrl-W word · Ctrl-U clears · \
+              Ctrl-C exits"
            else
              "Enter detail · Esc back · Space c x close · j/k scroll · n/N page · / \
               filter · s sort · c/g/p axes · v ≤1ns · t stage · r refresh · d \

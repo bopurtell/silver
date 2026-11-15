@@ -4261,6 +4261,7 @@ type input =
   | Enter
   | Escape
   | Backspace
+  | Delete_word
   | Clear_filter
   | Next
   | Previous
@@ -4301,32 +4302,36 @@ let%test_unit "interrupt is independent of filter/palette/paste state and key en
 ;;
 
 let decode_event (event : Bonsai_term.Event.t) : input option =
-  match event with
-  | Paste `Start -> Some Paste_start
-  | Paste `End -> Some Paste_end
-  | Key_press { key = Tab; mods = [ Shift ] } -> Some Focus_previous
-  | Key_press { key = ASCII ('r' | 'R'); mods = [ Shift ] } -> Some (Character 'R')
-  | Key_press { key = Uchar value; mods = [ Shift ] }
-    when Uchar.equal value (Uchar.of_char 'r') || Uchar.equal value (Uchar.of_char 'R') ->
-    Some (Character 'R')
-  | Key_press { key = ASCII ('u' | 'U'); mods = [ Ctrl ] } -> Some Clear_filter
-  | Key_press { key = Uchar value; mods = [ Ctrl ] }
-    when Uchar.equal value (Uchar.of_char 'u') || Uchar.equal value (Uchar.of_char 'U') ->
-    Some Clear_filter
-  | Key_press { key; mods = [] } ->
-    (match key with
-     | ASCII ch -> Some (Character ch)
-     | Uchar u when Uchar.to_scalar u < 128 ->
-       Some (Character (Char.of_int_exn (Uchar.to_scalar u)))
-     | Uchar u -> Some (Text (Uchar.Utf8.to_string u))
-     | Enter -> Some Enter
-     | Escape -> Some Escape
-     | Backspace -> Some Backspace
-     | Tab -> Some Focus
-     | Arrow `Down -> Some Next
-     | Arrow `Up -> Some Previous
+  match Text_edit.edit_key event with
+  | Some Backspace -> Some Backspace
+  | Some Delete_word -> Some Delete_word
+  | None ->
+    (match event with
+     | Paste `Start -> Some Paste_start
+     | Paste `End -> Some Paste_end
+     | Key_press { key = Tab; mods = [ Shift ] } -> Some Focus_previous
+     | Key_press { key = ASCII ('r' | 'R'); mods = [ Shift ] } -> Some (Character 'R')
+     | Key_press { key = Uchar value; mods = [ Shift ] }
+       when Uchar.equal value (Uchar.of_char 'r') || Uchar.equal value (Uchar.of_char 'R')
+       -> Some (Character 'R')
+     | Key_press { key = ASCII ('u' | 'U'); mods = [ Ctrl ] } -> Some Clear_filter
+     | Key_press { key = Uchar value; mods = [ Ctrl ] }
+       when Uchar.equal value (Uchar.of_char 'u') || Uchar.equal value (Uchar.of_char 'U')
+       -> Some Clear_filter
+     | Key_press { key; mods = [] } ->
+       (match key with
+        | ASCII ch -> Some (Character ch)
+        | Uchar u when Uchar.to_scalar u < 128 ->
+          Some (Character (Char.of_int_exn (Uchar.to_scalar u)))
+        | Uchar u -> Some (Text (Uchar.Utf8.to_string u))
+        | Enter -> Some Enter
+        | Escape -> Some Escape
+        | Backspace -> Some Backspace
+        | Tab -> Some Focus
+        | Arrow `Down -> Some Next
+        | Arrow `Up -> Some Previous
+        | _ -> None)
      | _ -> None)
-  | _ -> None
 ;;
 
 let%test_unit "Shift-R decodes to quick-launch character" =
@@ -4423,18 +4428,7 @@ let append_reference t text =
       , No_effect ))
 ;;
 
-let drop_last_codepoint text =
-  let rec loop offset previous =
-    if offset >= String.length text
-    then String.prefix text previous
-    else (
-      let length =
-        Stdlib.Uchar.utf_decode_length (Stdlib.String.get_utf_8_uchar text offset)
-      in
-      loop (offset + length) offset)
-  in
-  loop 0 0
-;;
+let drop_last_codepoint = Text_edit.drop_character
 
 type inspection_filter_result =
   | Filter_interrupt
@@ -4491,6 +4485,8 @@ let route_inspection_filter_event t (event : Bonsai_term.Event.t) =
           t, Some { view with filter = ""; filter_notice = None }
         | Some Backspace, Some view ->
           t, Some { view with filter = drop_last_codepoint view.filter }
+        | Some Delete_word, Some view ->
+          t, Some { view with filter = Text_edit.delete_word view.filter }
         | _, Some view ->
           (match event with
            | Key_press _ -> t, Some (Inspection_view.reject_filter_text view)
@@ -4713,11 +4709,17 @@ let input t event ~commands : t * effect =
       | _ -> reject_reference_text t)
   | Character ch when finalization_form t -> append_reference t (String.of_char ch)
   | Text text when finalization_form t -> append_reference t text
-  | Backspace when finalization_form t ->
+  | (Backspace | Delete_word) when finalization_form t ->
     ( { t with
         palette =
           Option.map t.palette ~f:(fun p ->
-            { p with query = drop_last_codepoint p.query; index = 0 })
+            { p with
+              query =
+                Text_edit.apply
+                  (if Poly.equal event Backspace then Backspace else Delete_word)
+                  p.query
+            ; index = 0
+            })
       }
     , No_effect )
   | _ when t.editing_filter ->
@@ -4727,9 +4729,15 @@ let input t event ~commands : t * effect =
      | Character ch, Some id ->
        let l = local t id in
        set_filter t id (l.filter ^ String.of_char ch), No_effect
+     | Text text, Some id when printable_utf8 text ->
+       let l = local t id in
+       set_filter t id (l.filter ^ text), No_effect
      | Backspace, Some id ->
        let l = local t id in
-       set_filter t id (String.drop_suffix l.filter 1), No_effect
+       set_filter t id (drop_last_codepoint l.filter), No_effect
+     | Delete_word, Some id ->
+       let l = local t id in
+       set_filter t id (Text_edit.delete_word l.filter), No_effect
      | _ -> t, No_effect)
   | _ ->
     (match t.palette with
@@ -4755,6 +4763,9 @@ let input t event ~commands : t * effect =
           else t, No_effect
         | Backspace ->
           ( { t with palette = Some (palette_query p (drop_last_codepoint p.query)) }
+          , No_effect )
+        | Delete_word ->
+          ( { t with palette = Some (palette_query p (Text_edit.delete_word p.query)) }
           , No_effect )
         | Next | Focus ->
           ( { t with
