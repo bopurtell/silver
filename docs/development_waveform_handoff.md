@@ -1,5 +1,29 @@
 # Development waveform API handoff (A)
 
+## Connected waveform rendering — 2026-11-15
+
+The projected full-range graph now draws connected Unicode scalar rails with
+rise/fall corners and outlined bus segments with hexadecimal labels. This restores
+the Waveterm-style appearance while retaining original-event projection rather
+than expanding every original tick into a renderer sample.
+
+Projected lanes additionally expose exact cell-end `end_samples` and `binary_edges`.
+Directed scalar corners require a single known binary-to-binary edge; X/Z recovery
+at the window boundary uses a neutral vertical marker. Multiple transitions in one
+cell remain `#`, and unknown-containing lanes retain explicit no-graph handling.
+Padding and cursor placement use terminal-cell geometry, not UTF-8 byte length.
+
+Full-trace Fit (`f`), default extent (`d`), column navigation (`h/l`, arrows), and
+exact tick navigation (`H/L`) remain available. The owner confirmed cursor stepping
+works before this appearance follow-up; appearance acceptance remains pending.
+
+Verification: 32 focused waveform tests and four test modules, the terminal test
+suite, client/daemon/probe builds, independent development-waveform controls, and
+formatting checks passed. Dune builds/tests used at most `-j10`. Local independent
+evidence: `/tmp/opencode/connected-waveform-recovery-controls/receipt.json`.
+
+The implementation record below describes the earlier projection handoff.
+
 2026-11-05 — initial implementation complete and focused verification PASS.
 Ready for C's independent integration checks/review.
 

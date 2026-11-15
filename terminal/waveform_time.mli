@@ -32,6 +32,14 @@ val columns : t -> int
 val start : t -> int64
 val stop : t -> int64
 val scale : t -> scale
+
+(** Move to the adjacent distinct column's first tick in the rendered mapping. Expanded
+    cells sharing a tick are skipped. Off-screen steps use the window's average tick
+    stride (at least one tick), then the view follows the cursor. Saturates at inclusive
+    nonnegative trace bounds [first] and [last], without overflowing at Int64.max_value.
+    [time] must already be within those bounds. *)
+val step_column : t -> first:int64 -> last:int64 -> forward:bool -> int64 -> int64
+
 val cursor : t -> int64 -> cursor
 
 (** Inclusive real tick interval represented by a cell. None past the retained end.

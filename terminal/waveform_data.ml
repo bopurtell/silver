@@ -410,7 +410,9 @@ let values_at t ~time =
 type projected_lane =
   { signal : signal
   ; samples : string option array
+  ; end_samples : string option array
   ; transitions : int array
+  ; binary_edges : bool array
   ; reason : string option
   }
 
@@ -453,18 +455,19 @@ let project_window t ~signals ~cells =
     let cache = String.Table.create () in
     List.map signals ~f:(fun signal ->
       let history = history t signal in
-      let samples, transitions, reason =
+      let samples, end_samples, transitions, binary_edges, reason =
         Hashtbl.find_or_add cache signal.identifier ~default:(fun () ->
           let reason = ref None in
+          let binary value =
+            String.for_all value ~f:(function
+              | '0' | '1' -> true
+              | _ -> false)
+          in
           let inspect ?(unknown = true) value =
             incr events;
             if !events > 100_000 then fail "100000 event budget exceeded";
             charge value;
-            if unknown
-               && not
-                    (String.for_all value ~f:(function
-                      | '0' | '1' -> true
-                      | _ -> false))
+            if unknown && not (binary value)
             then reason := Some "X/Z in window"
           in
           let initial = value_in_history history first in
@@ -472,6 +475,7 @@ let project_window t ~signals ~cells =
            | None -> reason := Some "Uninitialized in window"
            | Some v -> inspect v);
           let transitions = Array.create ~len:count 0 in
+          let binary_edges = Array.create ~len:count false in
           let low = ref 0
           and high = ref (Array.length history) in
           while !low < !high do
@@ -495,7 +499,12 @@ let project_window t ~signals ~cells =
             if Int64.(fst cells.(!cell) <= change.time)
                && Option.value_map !previous ~default:false ~f:(fun v ->
                  not (String.equal v change.value))
-            then transitions.(!cell) <- Int.min 2 (transitions.(!cell) + 1);
+            then (
+              binary_edges.(!cell)
+              <- transitions.(!cell) = 0
+                 && Option.value_map !previous ~default:false ~f:binary
+                 && binary change.value;
+              transitions.(!cell) <- Int.min 2 (transitions.(!cell) + 1));
             previous := Some change.value;
             incr index
           done;
@@ -505,9 +514,18 @@ let project_window t ~signals ~cells =
               Option.iter value ~f:charge;
               value)
           in
-          samples, transitions, !reason)
+          let end_samples =
+            Array.mapi cells ~f:(fun i (first, last) ->
+              if Int64.equal first last
+              then samples.(i)
+              else (
+                let value = value_in_history history last in
+                Option.iter value ~f:charge;
+                value))
+          in
+          samples, end_samples, transitions, binary_edges, !reason)
       in
-      { signal; samples; transitions; reason }))
+      { signal; samples; end_samples; transitions; binary_edges; reason }))
 ;;
 
 let infer_clock t =
@@ -566,8 +584,22 @@ let%test_unit "projection preserves original glitches, unknown excursions and al
   and alias = List.nth_exn lanes 1 in
   assert (Array.equal Int.equal clk.transitions [| 2; 2 |]);
   assert (Array.equal (Option.equal String.equal) clk.samples [| Some "0"; Some "0" |]);
+  assert (Array.equal (Option.equal String.equal) clk.end_samples [| Some "0"; Some "0" |]);
+  assert (Array.equal Bool.equal clk.binary_edges [| false; false |]);
   assert (
-    phys_equal clk.samples alias.samples && phys_equal clk.transitions alias.transitions);
+    phys_equal clk.samples alias.samples
+    && phys_equal clk.end_samples alias.end_samples
+    && phys_equal clk.binary_edges alias.binary_edges
+    && phys_equal clk.transitions alias.transitions);
+  let edges =
+    project_window t ~signals:[ List.hd_exn signals ] ~cells:[| 0L, 2L; 3L, 7L |]
+    |> Or_error.ok_exn
+    |> List.hd_exn
+  in
+  assert (Array.equal Int.equal edges.transitions [| 1; 1 |]);
+  assert (Array.equal Bool.equal edges.binary_edges [| true; true |]);
+  assert (Array.equal (Option.equal String.equal) edges.samples [| Some "0"; Some "0" |]);
+  assert (Array.equal (Option.equal String.equal) edges.end_samples [| Some "1"; Some "0" |]);
   assert (Option.equal String.equal (List.nth_exn lanes 2).reason (Some "X/Z in window"));
   assert (
     Option.equal

@@ -131,6 +131,58 @@ let cell_bounds t ~column =
         Some (first, Int64.(first + min (t.stop - first) (of_int count - 1L)))))
 ;;
 
+let step_column t ~first ~last ~forward time =
+  if Int64.(first < 0L || last < first || time < first || time > last)
+  then invalid_arg "Invalid waveform cursor bounds";
+  let stride = Int64.(max 1L ((t.stop - t.start) / of_int t.columns)) in
+  let fallback () =
+    if forward
+    then Int64.(time + min (last - time) stride)
+    else Int64.(time - min (time - first) stride)
+  in
+  let rec adjacent column =
+    match cell_bounds t ~column with
+    | None ->
+      if forward
+      then Int64.(t.stop + min (last - t.stop) stride)
+      else Int64.(t.start - min (t.start - first) stride)
+    | Some (tick, _) ->
+      if if forward then Int64.(tick > time) else Int64.(tick < time)
+      then Int64.max first (Int64.min last tick)
+      else adjacent (column + if forward then 1 else -1)
+  in
+  match cursor t time with
+  | Left | Right -> fallback ()
+  | Column column -> adjacent (column + if forward then 1 else -1)
+;;
+
+let%test_unit "column steps follow full-range cells and saturate without overflow" =
+  List.iter [ 1; 17; 230 ] ~f:(fun columns ->
+    List.iter
+      [ 0L; 8L; 4096L; Int64.(max_value - 101L) ]
+      ~f:(fun span ->
+        let mapping = create_window ~columns ~start:101L ~stop:Int64.(101L + span) in
+        let step = step_column mapping ~first:0L ~last:Int64.max_value in
+        assert (Int64.equal (step ~forward:false 0L) 0L);
+        assert (Int64.equal (step ~forward:true Int64.max_value) Int64.max_value);
+        for column = 0 to columns - 1 do
+          let time, _ = Option.value_exn (cell_bounds mapping ~column) in
+          List.iter [ false; true ] ~f:(fun forward ->
+            let moved = step ~forward time in
+            match cursor mapping time, cursor mapping moved with
+            | Column a, Column b
+              when not
+                     (Int64.equal time moved
+                      || Int64.equal moved Int64.max_value
+                      || Int64.equal moved 0L) ->
+              assert (if forward then b > a else b < a)
+            | _ -> ())
+        done));
+  let mapping = create_window ~columns:4 ~start:101L ~stop:168L in
+  assert (Int64.equal (step_column mapping ~first:0L ~last:1000L ~forward:true 106L) 117L);
+  assert (Int64.equal (step_column mapping ~first:0L ~last:1000L ~forward:false 135L) 117L)
+;;
+
 let format_time (timescale : Waveform_data.timescale) time =
   if Int64.(time < 0L) then invalid_arg "Negative VCD physical time";
   let zeroes =

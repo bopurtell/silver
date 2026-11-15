@@ -69,7 +69,11 @@ val values_at : t -> time:int64 -> (signal * string option) array
 type projected_lane =
   { signal : signal
   ; samples : string option array
+  ; end_samples : string option array (** Exact values at inclusive cell ends. *)
   ; transitions : int array (** Saturated at two: two means dense/hidden ordering. *)
+  ; binary_edges : bool array
+    (** True only for exactly one transition with binary incoming and outgoing values.
+        Recovery from X/Z at the inclusive start does not establish edge direction. *)
   ; reason : string option
   }
 
