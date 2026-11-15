@@ -7471,6 +7471,8 @@ let host_handler session event ~exit =
                         | 'k'
                         | 'h'
                         | 'l'
+                        | 'H'
+                        | 'L'
                         | '['
                         | ']'
                         | '+'

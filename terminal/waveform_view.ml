@@ -37,6 +37,9 @@ type t =
   ; value_page_size : int
   ; identity_scroll : int option
   ; viewport_ticks : int64 option
+  (* Prepared alongside the visible capacity, so input uses the rendered integer
+     raster rather than estimating a step from the requested span. *)
+  ; viewport_code : int
   ; mutable cache : (int * int * int * int64 * int64 * int list * string) option
   }
 
@@ -58,6 +61,7 @@ let create ~project artifact =
   ; value_page_size = 32
   ; identity_scroll = None
   ; viewport_ticks = None
+  ; viewport_code = -1
   }
 ;;
 
@@ -242,8 +246,23 @@ let input t key =
                  Int.max 0 (s.D.width - 1))
              in
              { t with value_offset = Int.min limit (t.value_offset + t.value_page_size) }
-           | Left | Char 'h' -> cursor Int64.(max 0L (t.cursor - 1L))
-           | Right | Char 'l' ->
+           | Left | Right | Char ('h' | 'l') ->
+             let first, last = D.time_bounds data in
+             let forward =
+               match key with
+               | Right | Char 'l' -> true
+               | _ -> false
+             in
+             cursor
+               (Time.step_column
+                  ~code:t.viewport_code
+                  ~start:t.start
+                  ~first
+                  ~last
+                  ~forward
+                  t.cursor)
+           | Char 'H' -> cursor Int64.(max 0L (t.cursor - 1L))
+           | Char 'L' ->
              let _, last = D.time_bounds data in
              cursor (if Int64.(t.cursor < last) then Int64.succ t.cursor else last)
            | Char 'g' -> cursor (fst (D.time_bounds data))
@@ -414,9 +433,9 @@ let prepare ?(appearance = Appearance.default) t dimensions =
   let g = waves_geometry ~width:graph_width ~height:10 in
   let r = raster ~columns:g.columns ~target:(Int64.to_int_exn t.span) in
   let ticks = Int64.of_int r.ticks in
-  if Option.equal Int64.equal t.viewport_ticks (Some ticks)
+  if Option.equal Int64.equal t.viewport_ticks (Some ticks) && t.viewport_code = r.code
   then t
-  else { t with viewport_ticks = Some ticks }
+  else { t with viewport_ticks = Some ticks; viewport_code = r.code }
 ;;
 
 let graph t data ~width ~height signals =
@@ -890,6 +909,9 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
         then description ^ " · end of trace"
         else description
       in
+      let description =
+        if hints then "h/l column · H/L tick · " ^ description else description
+      in
       View.vcat
         [ text
             (if Option.is_some status then R.Warning else R.Muted)
@@ -931,9 +953,9 @@ let prepare_waves t ~width =
   let geometry = waves_geometry ~width ~height:10 in
   let r = raster ~columns:geometry.columns ~target:(Int64.to_int_exn t.span) in
   let ticks = Some (Int64.of_int r.ticks) in
-  if Option.equal Int64.equal t.viewport_ticks ticks
+  if Option.equal Int64.equal t.viewport_ticks ticks && t.viewport_code = r.code
   then t
-  else { t with viewport_ticks = ticks }
+  else { t with viewport_ticks = ticks; viewport_code = r.code }
 ;;
 
 let render_session
@@ -1128,8 +1150,8 @@ let render_waveform
     | Some Filter -> "Filter (Enter apply / Esc cancel): " ^ t.query
     | Some Time -> "Absolute VCD tick (Enter / Esc): " ^ t.query
     | None ->
-      "Space c c commands · j/k signal · Enter toggle · / filter · h/l tick · : time · \
-       [/] pan · +/- zoom · g/G ends · { } value"
+      "h/l column · H/L tick · Space c c commands · j/k signal · Enter toggle · / filter · \
+       : time · [/] pan · +/- zoom · g/G ends · { } value"
   in
   let value =
     match t.loaded with
@@ -1249,6 +1271,114 @@ let render
          ~width:(Int.max 1 dimensions.width)
          ~height:(Int.max 1 dimensions.height)
     |> Host_view.colored appearance R.Foreground
+;;
+
+let%test_unit "column and tick keys follow prepared geometry, bounds and off-screen state" =
+  let data =
+    D.parse
+      "$timescale 1 ns $end\n$var wire 1 ! a $end\n$enddefinitions $end\n\
+       #5\n0!\n#9223372036854775807\n1!\n"
+    |> Or_error.ok_exn
+  in
+  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    { id = "steps"
+    ; attempt_id = "attempt"
+    ; case_id = None
+    ; label = "Cursor steps"
+    ; kind = "waveform"
+    ; media_type = "text/vcd"
+    ; size = Some 100
+    ; sha256 = Some (String.make 64 'a')
+    ; availability = Available
+    }
+  in
+  let base = receive (create ~project:"project" artifact) (Ok data) in
+  List.iter [ 32; 80; 120; 230 ] ~f:(fun width ->
+    List.iter [ 1L; 128L; 4096L ] ~f:(fun span ->
+      let t = prepare_waves { base with start = 101L; cursor = 106L; span } ~width in
+      let mapping = waves_mapping t data ~width in
+      let stride =
+        match Time.scale mapping with
+        | Cells_per_tick _ -> 1L
+        | Ticks_per_cell n -> Int64.of_int n
+      in
+      let next = input t (Char 'l') in
+      assert (Int64.(next.cursor > t.cursor));
+      assert (Int64.equal next.cursor (input t Right).cursor);
+      assert (Int64.equal (input t (Char 'h')).cursor (input t Left).cursor);
+      assert (Int64.equal (input t (Char 'H')).cursor 105L);
+      assert (Int64.equal (input t (Char 'L')).cursor 107L);
+      let anchor = { t with cursor = 101L } in
+      assert (Int64.equal (input anchor (Char 'l')).cursor Int64.(101L + stride));
+      assert (Int64.equal (input anchor (Char 'h')).cursor Int64.(max 0L (101L - stride)));
+      List.iter [ 5L, 'l'; 10000L, 'h' ] ~f:(fun (cursor, key) ->
+        let offscreen = { t with cursor } in
+        assert (Option.is_some (offscreen_status Appearance.default mapping cursor));
+        let moved = input offscreen (Char key) in
+        let moved_mapping = waves_mapping moved data ~width in
+        assert (
+          Option.is_none (offscreen_status Appearance.default moved_mapping moved.cursor)));
+      let at_end = { t with cursor = Int64.max_value; start = Int64.max_value } in
+      List.iter [ 'l'; 'L' ] ~f:(fun key ->
+        assert (Int64.equal (input at_end (Char key)).cursor Int64.max_value));
+      List.iter [ 'h'; 'H' ] ~f:(fun key ->
+        assert (Int64.equal (input { t with cursor = 0L } (Char key)).cursor 0L));
+      let tick = input at_end (Char 'H') in
+      assert (Int64.equal tick.cursor Int64.(max_value - 1L));
+      assert (Int64.equal (input tick (Char 'L')).cursor Int64.max_value)));
+  let compressed =
+    prepare_waves { base with start = 101L; cursor = 106L; span = 4096L } ~width:230
+  in
+  assert (compressed.viewport_code = -16);
+  assert (Int64.equal (input compressed (Char 'h')).cursor 85L);
+  assert (Int64.equal (input compressed (Char 'l')).cursor 117L);
+  let repeated =
+    List.fold (List.init 16 ~f:Fn.id) ~init:compressed ~f:(fun t _ ->
+      let moved = input t (Char 'l') in
+      let mapping = waves_mapping t data ~width:230 in
+      let column time =
+        match Time.cursor mapping time with
+        | Column c -> c
+        | Left | Right -> assert false
+      in
+      assert (column moved.cursor = column t.cursor + 1);
+      moved)
+  in
+  assert (Int64.equal repeated.cursor 357L);
+  let expanded = prepare_waves { compressed with span = 16L } ~width:230 in
+  assert (expanded.viewport_code >= 0);
+  assert (Int64.equal (input expanded (Char 'l')).cursor 107L);
+  List.iter [ 80; 120; 230 ] ~f:(fun width ->
+    let dimensions = { Bonsai_term.Dimensions.width; height = 24 } in
+    let t = prepare_quick compressed dimensions in
+    let frame = frame_geometry Appearance.default dimensions in
+    let graph_width =
+      Int.min
+        1024
+        (Int.max 7 (frame.content_width - sidebar_width t ~width:frame.content_width - 1))
+    in
+    let mapping = waves_mapping t data ~width:graph_width in
+    let next = input { t with cursor = 101L } (Char 'l') in
+    let stride =
+      match Time.scale mapping with
+      | Cells_per_tick _ -> 1L
+      | Ticks_per_cell n -> Int64.of_int n
+    in
+    assert (Int64.equal next.cursor Int64.(101L + stride)));
+  (* A stationary-window move retains the expensive native graph cache. *)
+  let t = { compressed with cursor = 117L } in
+  ignore (graph t data ~width:100 ~height:10 (Array.to_list (D.signals data)) : string);
+  let moved = input t (Char 'l') in
+  assert (phys_equal t.cache moved.cache);
+  let buffer = Buffer.create 4096 in
+  let view = render_waves compressed ~width:230 ~height:24 in
+  Notty.Render.to_buffer
+    buffer
+    Notty.Cap.dumb
+    (0, 0)
+    (230, 24)
+    (Bonsai_term.View.Private.notty_image view);
+  assert (String.is_substring (Buffer.contents buffer) ~substring:"h/l column · H/L tick")
 ;;
 
 let%test_unit "exact cursor, clamped pan, selection and explicit X rendering failure" =

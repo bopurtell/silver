@@ -26,6 +26,21 @@ val columns : t -> int
 val start : t -> int64
 val stop : t -> int64
 val scale : t -> scale
+
+(** Move to the adjacent column's first tick on the raster anchored at [start].
+    Expanded ticks move by one tick (to the next distinct cursor cell). Compressed
+    ticks snap to the adjacent cell even from within a cell or off-screen.
+    Saturates at inclusive nonnegative trace bounds [first] and [last], without
+    overflowing at Int64.max_value. [time] must already be within those bounds. *)
+val step_column
+  :  code:int
+  -> start:int64
+  -> first:int64
+  -> last:int64
+  -> forward:bool
+  -> int64
+  -> int64
+
 val cursor : t -> int64 -> cursor
 
 (** Inclusive real tick interval represented by a cell. None past the retained end.

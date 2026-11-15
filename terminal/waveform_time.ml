@@ -48,6 +48,24 @@ let start t = t.start
 let stop t = t.stop
 let scale t = t.scale
 
+let step_column ~code ~start ~first ~last ~forward time =
+  if Int64.(first < 0L || last < first || start < 0L || time < first || time > last)
+  then invalid_arg "Invalid waveform cursor bounds";
+  let stride =
+    match scale_of_code code with
+    | Cells_per_tick _ -> 1L
+    | Ticks_per_cell n -> Int64.of_int n
+  in
+  (* The grid is relative to the window, not absolute tick zero. Normalize the
+     remainder also for a cursor left off-screen. Expanded ticks share cells,
+     so their next distinct cursor position is the next tick's first cell. *)
+  let remainder = Int64.rem Int64.(time - start) stride in
+  let remainder = if Int64.(remainder < 0L) then Int64.(remainder + stride) else remainder in
+  if forward
+  then Int64.(time + min (last - time) (stride - remainder))
+  else Int64.(time - min (time - first) (stride + remainder))
+;;
+
 let cursor t time =
   if Int64.(time < t.start)
   then Left
@@ -215,6 +233,41 @@ let ruler t ~timescale =
     |> List.sort ~compare:(fun a b -> Int.compare a.text_column b.text_column)
   in
   { labels; major_columns; minor_columns }
+;;
+
+let%test_unit "column steps use window-relative cells, expanded ticks and saturated bounds" =
+  List.iter [ -16; -3; -1; 0; 3 ] ~f:(fun code ->
+    List.iter [ 5L; 101L; Int64.(max_value - 1000L) ] ~f:(fun start ->
+      let first = Int64.(start - 5L) in
+      let last = Int64.(start + 99L) in
+      let mapping = create ~code ~columns:80 ~start ~stop:last in
+      let step = step_column ~code ~start ~first ~last in
+      assert (Int64.equal (step ~forward:false first) first);
+      assert (Int64.equal (step ~forward:true last) last);
+      List.iter [ false; true ] ~f:(fun forward ->
+        for offset = 0 to 99 do
+          let time = Int64.(start + of_int offset) in
+          let moved = step ~forward time in
+          assert (Int64.(first <= moved && moved <= last));
+          match cursor mapping time, cursor mapping moved with
+          | Column a, Column b when not (Int64.equal moved first || Int64.equal moved last) ->
+            let distance =
+              match scale mapping with
+              | Ticks_per_cell _ -> 1
+              | Cells_per_tick n -> n
+            in
+            assert (b - a = if forward then distance else -distance);
+            assert (Int64.equal moved (fst (Option.value_exn (cell_bounds mapping ~column:b))))
+          | _ -> ()
+        done)));
+  let step = step_column ~code:(-16) ~start:101L ~first:0L ~last:Int64.max_value in
+  assert (Int64.equal (step ~forward:true 106L) 117L);
+  assert (Int64.equal (step ~forward:false 106L) 85L);
+  assert (Int64.equal (step ~forward:true 100L) 101L);
+  assert (Int64.equal (step ~forward:false 100L) 69L);
+  assert (Int64.equal (step ~forward:false 0L) 0L);
+  assert (Int64.equal (step ~forward:true Int64.(max_value - 1L)) Int64.max_value);
+  assert (Int64.equal (step ~forward:true Int64.max_value) Int64.max_value)
 ;;
 
 let%test_unit "exact mapping, compressed/expanded partial end and huge physical units" =
