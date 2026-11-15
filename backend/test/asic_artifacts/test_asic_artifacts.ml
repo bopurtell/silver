@@ -505,10 +505,32 @@ let test_explicit_checkpoint_image () =
   byte_error reference ~offset:0 ~limit:1
 ;;
 
+let test_bounded_byte_memory () =
+  let raw = String.make (16 * 1024 * 1024) 'x' in
+  let root, summary = fixture ~extra:[ "max.gds", raw ] () in
+  Exn.protect
+    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
+    ~f:(fun () ->
+      let reference = find (Artifacts.list ~summary) "max.gds" in
+      let before = Stdlib.Gc.allocated_bytes () in
+      let page = Artifacts.read_bytes ~reference ~offset:65530 ~limit:65536 in
+      let allocated = Stdlib.Gc.allocated_bytes () -. before in
+      require
+        Float.(allocated < 2. *. 1024. *. 1024.)
+        "ASIC byte page allocated whole artifact";
+      require
+        (Option.is_none page.error
+         && String.equal
+              page.bytes_hex
+              (String.concat (List.init 65536 ~f:(fun _ -> "78"))))
+        "Maximum-size ASIC byte page failed")
+;;
+
 let () =
   test_catalog ();
   test_pages ();
   test_byte_pages ();
+  test_bounded_byte_memory ();
   test_containment_and_replacement ();
   test_selected_checkpoint_sources ();
   test_explicit_checkpoint_image ()

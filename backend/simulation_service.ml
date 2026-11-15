@@ -460,22 +460,22 @@ let capture_artifact p entry (declaration : Provider.Artifact.t) =
              (Limits.attempt_artifact_bytes - artifact_bytes entry)
              (Int.max 0 (Limits.history_artifact_bytes - used + reclaimable)))
       in
-      let bytes =
-        Files.read
-          (Filename.concat (Filename.concat entry.dir "work/artifacts") declaration.path)
-          ~max_bytes
-      in
-      require
-        (artifact_bytes entry + String.length bytes <= Limits.attempt_artifact_bytes)
-        "Attempt artifact budget exceeded";
-      prune p ~reserve:0 ~artifact_reserve:(String.length bytes);
       let path = Files.artifact_path entry.dir id in
-      Files.atomic path bytes;
-      { artifact with
-        size = Some (String.length bytes)
-      ; sha256 = Some (Files.digest bytes)
-      ; availability = Available
-      })
+      let size, sha256 =
+        Files.capture
+          ~src:
+            (Filename.concat
+               (Filename.concat entry.dir "work/artifacts")
+               declaration.path)
+          ~dst:path
+          ~max_bytes
+          ~reserve:(fun size ->
+            require
+              (artifact_bytes entry + size <= Limits.attempt_artifact_bytes)
+              "Attempt artifact budget exceeded";
+            prune p ~reserve:0 ~artifact_reserve:size)
+      in
+      { artifact with size = Some size; sha256 = Some sha256; availability = Available })
   with
   | Ok artifact -> artifact
   | Error error ->
@@ -777,7 +777,8 @@ let read_artifact p entry ~artifact_id ~sha256 ~offset ~limit =
   let%bind availability, bytes =
     In_thread.run (fun () ->
       let result =
-        Or_error.try_with (fun () -> Files.read path ~max_bytes:Limits.artifact_bytes)
+        Or_error.try_with (fun () ->
+          Files.read_page path ~max_bytes:Limits.artifact_bytes ~offset ~limit)
       in
       match result with
       | Error _ ->
@@ -785,10 +786,10 @@ let read_artifact p entry ~artifact_id ~sha256 ~offset ~limit =
            | `Yes -> Artifact.Availability.Changed
            | `No | `Unknown -> Missing)
         , None )
-      | Ok bytes
-        when (not (Option.equal Int.equal artifact.size (Some (String.length bytes))))
-             || not (String.equal (Files.digest bytes) sha256) -> Changed, None
-      | Ok bytes -> Available, Some bytes)
+      | Ok (size, digest, _)
+        when (not (Option.equal Int.equal artifact.size (Some size)))
+             || not (String.equal digest sha256) -> Changed, None
+      | Ok (size, _, bytes) -> Available, Some (size, bytes))
   in
   if not
        (Option.exists
@@ -815,8 +816,7 @@ let read_artifact p entry ~artifact_id ~sha256 ~offset ~limit =
        | Changed -> Conflict
        | _ -> Not_found)
       "Simulation artifact missing, changed or unreadable"
-  | Some bytes ->
-    let total_size = String.length bytes in
+  | Some (total_size, bytes) ->
     if offset > total_size then rpc_error Invalid_request "Artifact offset past EOF";
     let length = Int.min limit (total_size - offset) in
     return
@@ -827,7 +827,7 @@ let read_artifact p entry ~artifact_id ~sha256 ~offset ~limit =
       ; next_offset = offset + length
       ; total_size
       ; eof = offset + length = total_size
-      ; bytes_hex = Files.hex (String.sub bytes ~pos:offset ~len:length)
+      ; bytes_hex = Files.hex bytes
       }
 ;;
 

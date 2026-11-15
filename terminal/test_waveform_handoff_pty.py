@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Private production daemon/PTY handoff checks; no build or simulator invocation."""
 import argparse
+import base64
 from contextlib import ExitStack
 import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import sys
@@ -137,7 +139,24 @@ def run(args, evidence):
         terminal.capture('mixed-flops-quick', ['flops256.clk', 'Cursor'], absent=['exact256.clk'])
         check(all('flops256-waveform' in r['request']['artifact_id'] for r in proxy.records),
             'mixed w fetches only exact selected flops waveform')
+        check(b'\x1b]52;' not in terminal.data,
+            'embedded waveform loading never requests clipboard writes')
         terminal.key(b'\x1b')
+        terminal.key(b'e')
+        terminal.capture('export-clipboard', ['Export ready; path sent to clipboard'],
+            absent=['Verified simulation bytes retained:'])
+        copies = re.findall(rb'\x1b\]52;c;([A-Za-z0-9+/=]+)\x07', bytes(terminal.data))
+        check(len(copies) == 1, 'successful verified external export emits one OSC52 request')
+        exported = Path(os.fsdecode(base64.b64decode(copies[0], validate=True)))
+        check(exported.is_file() and '$scope module flops256 ' in exported.read_text(),
+            'clipboard decodes to the actual completed terminal-host trace file')
+        terminal.key(b'\x1b[19~')  # F8
+        terminal.capture('export-path-fallback', ['Last simulation export:',
+            'Exact path (OCaml string):', 'F9 retries OSC 52'])
+        terminal.key(b'\x1b[20~')  # F9
+        copies = re.findall(rb'\x1b\]52;c;([A-Za-z0-9+/=]+)\x07', bytes(terminal.data))
+        check(copies == [copies[0], copies[0]], 'F9 resends the exact retained path')
+        terminal.key(b'\x1b[19~')  # F8 returns to Testing
         terminal.palette('Simulation: Select case exact256')
         gate = proxy.arm('late-exact-quick')
         terminal.key(b'w')

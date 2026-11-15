@@ -92,13 +92,24 @@ selecting an artifact exposes its exact ID, bytes, digest and media type in Deta
 | Attempts | `j` / `k`, arrows | Select an exact retained attempt and observe its detail |
 | Cases | `j` / `k`, arrows | Select a case for shared investigation |
 | Artifacts | `j` / `k`, arrows | Select an exact artifact; list explicitly includes all cases |
-| Artifacts | `e` / `v` | Export verified bytes / open configured external viewer |
+| Artifacts | `e` / `v` | Export verified bytes / open configured external viewer; successful exports send the path to the terminal clipboard |
 | Artifacts | `w` | Open selected VCD in the full-area embedded waveform viewer |
 | Artifacts | `W` | Open selected VCD in the dedicated Waveforms workspace |
 | Investigation panes | `r` / `f` | Rerun selected case / all failed cases using original inputs on current project |
 | Any simulation pane | `h` | Newest history page; palette also provides older pages |
 | All panes | `[` / `]`, Tab/Shift-Tab | Independent scroll; move focus |
 | Palette | Zoom focused tile / Unzoom workspace | More room for full inputs, failures, metadata or logs |
+
+### Export path clipboard
+
+Successful external simulation exports show a compact confirmation instead of the
+long file path: **Export ready; path sent to clipboard (F8: path, F9: copy)**.
+Clipboard transfer uses OSC 52, so it can reach your local clipboard over SSH when
+your terminal (and any tmux/screen layer) permits clipboard writes. Terminal
+acceptance cannot be detected; the message confirms that the request was sent.
+**F8** toggles details with the complete quoted path (`[` / `]` scroll), and **F9**
+resends the last successful export path. These also provide recovery when clipboard
+transfer is unavailable. The exported file itself remains on the client host.
 
 ### Embedded waveform viewer
 

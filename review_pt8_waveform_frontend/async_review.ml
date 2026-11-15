@@ -18,13 +18,18 @@ let page bytes_hex : S.Byte_page.t =
 
 let main () =
   let published = ref 0 in
-  let run ~current ~fetch = E.run ~artifact ~fetch ~current ~viewer:None
-    ~publish:(fun _ _ -> incr published; return (Ok "verified"))
+  (* Exercise verified delivery to the embedded consumer, before VCD parsing. *)
+  let run ~current ~fetch = E.run_embedded ~artifact ~fetch ~current ~viewer:None
+    ~publish:(fun actual chunks ->
+      assert (S.Artifact.equal actual artifact);
+      assert (String.equal (String.concat chunks) "abc");
+      incr published;
+      return (Ok "verified"))
     ~launch:(fun ~prog:_ ~args:_ -> assert false) in
   let%bind good = run ~current:(fun () -> true)
     ~fetch:(fun ~offset:_ ~limit:_ -> return (Ok (page "616263"))) in
   assert (Or_error.is_ok good && !published = 1);
-  printf "PASS actual export digest verifies before publication\n";
+  printf "PASS embedded digest verifies exact bytes before publication\n";
   let%bind bad = run ~current:(fun () -> true)
     ~fetch:(fun ~offset:_ ~limit:_ -> return (Ok (page "616264"))) in
   assert (Or_error.is_error bad && !published = 1);
