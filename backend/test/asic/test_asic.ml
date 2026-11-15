@@ -55,7 +55,7 @@ let launches root profile =
 
 (* These tests isolate provider observation/lifecycle. The full source supervisor, receipt
    validation and exact bundle contract are exercised by test_preparation. *)
-let attach_preparation service =
+let attach_preparation ?(on_prepare = fun () -> ()) service =
   let latest = ref None in
   Service.set_preparation_runner
     service
@@ -63,15 +63,26 @@ let attach_preparation service =
        (match operation with
         | Preparation.Operation.Prepare
             { submission_key; selection; expected_plan_identity } ->
-          let plan =
-            `Assoc
-              [ "contract", `String "hardcaml-asic.methodology-plan"
+          on_prepare ();
+           let plan =
+             `Assoc
+               ([ "contract", `String "hardcaml-asic.methodology-plan"
               ; "schema_version", `Int 1
               ; "plan_identity", `String (String.make 64 'a')
               ; "bundle_identity", `String (String.make 64 'b')
               ; "fixture_profile", `String selection.profile
               ; "fixture_endpoint", `String selection.endpoint
-              ]
+               ]
+                @ if String.is_prefix selection.profile ~prefix:"sram-"
+                  then
+                    [ "bundle_manifest", `String (Yojson.Safe.to_string
+                        (`Assoc [ "operation", `String "Hardening"
+                        ; "macro_contract", `Assoc
+                            [ "schema_version", `Int 2; "execution", `String "fresh_full"
+                            ; "macros", `List [ `Assoc
+                                [ "module", `String "RM_IHPSG13_1P_256x16_c2_bm_bist"
+                                ; "physical_intent", `Assoc [ "orientation", `String "R0" ] ] ] ] ])) ]
+                  else [])
           in
           let created_at = Timestamp.of_time_ns (Time_ns.now ()) in
           latest
@@ -1202,6 +1213,464 @@ let finalization_lifecycle ~root ~state_dir ~reference =
       Deferred.unit)
 ;;
 
+(* WB-065 uses FIFO rendezvous, not elapsed-time guesses, to place cancellation at
+   provider boundaries. Snapshot polling yields to Async and is only a publication
+   barrier; the provider cannot advance past a gate without an explicit release. *)
+let finalization_cancellation_matrix ~root ~state_dir ~reference =
+  let services = ref [] in
+  let unrelated = ref None in
+  let directory = state_dir ^ "-wb065" in
+  let create () =
+    let service = Service.create ~state_dir:directory in
+    services := service :: !services;
+    service
+  in
+  let value (snapshot : Asic.Snapshot.t) key =
+    List.find_exn snapshot.finalizations ~f:(fun f ->
+      String.equal f.Asic.Finalization.key key)
+  in
+  let pending (snapshot : Asic.Snapshot.t) key =
+    List.find_exn snapshot.operations ~f:(fun p -> String.equal p.Asic.Pending.key key)
+  in
+  let write_json path json =
+    In_thread.run (fun () ->
+      Out_channel.write_all path ~data:(Yojson.Safe.to_string json))
+  in
+  let control fields =
+    write_json (Filename.concat root "wb065-finalize.json") (`Assoc fields)
+  in
+  let gate name =
+    let prefix = Filename.concat root ("wb065-" ^ name) in
+    let%map () =
+      In_thread.run (fun () ->
+        Core_unix.mkfifo (prefix ^ ".ready") ~perm:0o600;
+        Core_unix.mkfifo (prefix ^ ".release") ~perm:0o600)
+    in
+    prefix
+  in
+  let arrived prefix =
+    In_thread.run (fun () ->
+      Core_unix.with_file
+        (prefix ^ ".ready")
+        ~mode:[ O_RDWR; O_NONBLOCK; O_CLOEXEC ]
+        ~f:(fun fd ->
+          let ready =
+            Core_unix.select
+              ~restart:true
+              ~read:[ fd ]
+              ~write:[]
+              ~except:[]
+              ~timeout:(`After (Time_ns.Span.of_sec 10.))
+              ()
+          in
+          require (not (List.is_empty ready.read)) ("FIFO arrival timed out: " ^ prefix);
+          let bytes = Bytes.create 4096 in
+          let n = Core_unix.read fd ~buf:bytes in
+          require (n > 0 && n < 4096) "Invalid FIFO arrival payload";
+          Bytes.sub bytes ~pos:0 ~len:n |> Bytes.to_string))
+  in
+  let release prefix =
+    In_thread.run (fun () -> Out_channel.write_all (prefix ^ ".release") ~data:"go")
+  in
+  let wait service predicate =
+    let rec loop () =
+      let%bind snapshot = handle service root Get in
+      if predicate snapshot
+      then return snapshot
+      else (
+        let%bind () = Scheduler.yield () in
+        loop ())
+    in
+    match%map Clock.with_timeout (Time_float.Span.of_sec 10.) (loop ()) with
+    | `Result snapshot -> snapshot
+    | `Timeout -> failwith "WB-065 snapshot publication barrier timed out"
+  in
+  let count_launches () =
+    In_thread.run (fun () ->
+      In_channel.read_lines (Filename.concat root "calls")
+      |> List.count ~f:(fun line -> String.is_prefix line ~prefix:"[\"finalize\""))
+  in
+  let exists path =
+    In_thread.run (fun () -> Poly.equal (Sys_unix.file_exists path) `Yes)
+  in
+  let replace json key replacement =
+    match json with
+    | `Assoc fields ->
+      `Assoc ((key, replacement) :: List.Assoc.remove fields key ~equal:String.equal)
+    | _ -> failwith "Expected WB-065 receipt object"
+  in
+  Monitor.protect
+    ~finally:(fun () ->
+      let%bind () = Deferred.List.iter !services ~how:`Sequential ~f:Service.shutdown in
+      let%bind () =
+        match !unrelated with
+        | None -> Deferred.unit
+        | Some process ->
+          let%bind () = Owned_process.stop process in
+          let%bind () = Writer.close (Process.stdin process) in
+          let%bind () = Reader.close (Process.stdout process) in
+          Reader.close (Process.stderr process)
+      in
+      In_thread.run (fun () ->
+        let path = Filename.concat root "wb065-finalize.json" in
+        if Poly.equal (Sys_unix.file_exists path) `Yes then Core_unix.unlink path))
+    (fun () ->
+      let service = create () in
+      let%bind registered = handle service root (Register reference) in
+      let run = (List.hd_exn registered.runs).run in
+      let%bind loaded = settled service root (Load_summary run) in
+      let execution_file = (summary loaded run.id).execution_file in
+      let%bind sentinel =
+        Process.create_exn
+          ~working_dir:root
+          ~prog:(Filename.concat root "fixture.py")
+          ~args:[ "wb065-unrelated" ]
+          ()
+      in
+      unrelated := Some sentinel;
+      let%bind ready = Reader.read_line (Process.stdout sentinel) in
+      require
+        (match ready with
+         | `Ok line -> Poly.equal (Public.field "ready" (Public.decode line)) (`Bool true)
+         | `Eof -> false)
+        "Unrelated-process sentinel was not ready";
+      let acceptance : Asic.Acceptance.t =
+        { support_tools = root
+        ; precheck_python = Filename.concat root "python"
+        ; testbench = Filename.concat root "postcheck with spaces.sv"
+        ; testbench_top = "exact_postcheck"
+        ; replay_trace = Filename.concat root "trace"
+        }
+      in
+      let finalize key acceptance =
+        Asic.Operation.Finalize { key; run; execution_file; acceptance }
+      in
+      let assert_interrupted snapshot key attempt =
+        let f = value snapshot key in
+        let task = pending snapshot ("finalize:" ^ key) in
+        require
+          (String.equal f.state "interrupted"
+           && (not f.owned)
+           && Option.equal String.equal f.attempt attempt
+           && (Option.is_some attempt || Option.is_none f.acceptance)
+           && Run_ref.equal f.run run
+           && String.equal f.execution_file execution_file
+           && String.equal task.state "failed"
+           && Option.equal Run_ref.equal task.run (Some run)
+           && Option.is_some task.error)
+          ("Cancellation lost exact reservation/task identity: " ^ key)
+      in
+      (* A held producer makes the second task deterministically queued. Cancelling it
+         must retain its target even though launch_finalization never runs. *)
+      let%bind blocker_gate = gate "queue-blocker" in
+      let%bind () = control [ "after_allocation", `String "queue-blocker" ] in
+      let%bind before = count_launches () in
+      let%bind (_ : Asic.Snapshot.t) = handle service root (finalize "blocker" None) in
+      let%bind blocker_attempt = arrived blocker_gate in
+      let%bind queued = handle service root (finalize "queued" (Some acceptance)) in
+      require
+        (String.equal (pending queued "finalize:queued").state "pending"
+         && Option.equal Run_ref.equal (pending queued "finalize:queued").run (Some run)
+         && Option.is_none (value queued "queued").attempt)
+        "Queued finalization omitted its captured run before allocation";
+      let%bind (_ : Asic.Snapshot.t) = handle service root (Cancel "finalize:queued") in
+      let%bind () = release blocker_gate in
+      let%bind queued_cancelled = settled service root Get in
+      assert_interrupted queued_cancelled "queued" None;
+      require
+        (String.equal (value queued_cancelled "blocker").state "completed"
+         && Option.equal
+              String.equal
+              (value queued_cancelled "blocker").attempt
+              (Some blocker_attempt))
+        "Cancelling queued work targeted the active producer";
+      let%bind after = count_launches () in
+      require (after = before + 1) "Cancelled queued finalization launched a producer";
+      let adopted_attempt = ref blocker_attempt in
+      (* The producer is running but has not delivered allocation. Its signal handler
+         optionally emits allocation while stopping, exercising late stdout drainage. *)
+      let%bind () =
+        Deferred.List.iter [ false; true ] ~how:`Sequential ~f:(fun late ->
+          let key = if late then "late-allocation" else "before-allocation" in
+          let%bind prefix = gate key in
+          let%bind late_prefix =
+            if late then gate "late-allocation-drained" >>| Option.some else return None
+          in
+          let%bind () =
+            control
+              [ "before_allocation", `String key
+              ; "late_allocation", `Bool late
+              ; "late_allocation_gate", `String "late-allocation-drained"
+              ]
+          in
+          let%bind (_ : Asic.Snapshot.t) = handle service root (finalize key None) in
+          let%bind attempt = arrived prefix in
+          let%bind unallocated = handle service root Get in
+          require
+            (Option.is_none (value unallocated key).attempt
+             && (value unallocated key).owned)
+            "Before-allocation gate did not precede allocation publication";
+          let%bind (_ : Asic.Snapshot.t) =
+            handle service root (Cancel ("finalize:" ^ key))
+          in
+          let%bind () =
+            match late_prefix with
+            | None -> Deferred.unit
+            | Some prefix ->
+              let%bind delivered_attempt = arrived prefix in
+              require
+                (String.equal delivered_attempt attempt)
+                "Late allocation changed attempt";
+              let%bind (_ : Asic.Snapshot.t) =
+                wait service (fun snapshot ->
+                  Option.equal String.equal (value snapshot key).attempt (Some attempt))
+              in
+              let%bind () = control [] in
+              let%bind replacement =
+                handle service root (finalize "replacement-after-cancel" None)
+              in
+              require
+                (Option.is_none (value replacement "replacement-after-cancel").attempt)
+                "Late allocation retargeted the queued replacement";
+              let%bind (_ : Asic.Snapshot.t) =
+                handle service root (Cancel ("finalize:" ^ key))
+              in
+              release prefix
+          in
+          let%bind cancelled = settled service root Get in
+          assert_interrupted cancelled key (if late then Some attempt else None);
+          if late
+          then (
+            let replacement = value cancelled "replacement-after-cancel" in
+            require
+              (String.equal replacement.state "completed"
+               && (not replacement.owned)
+               && Option.value_map
+                    replacement.attempt
+                    ~default:false
+                    ~f:(fun replacement -> not (String.equal replacement attempt)))
+              "Old cancellation/late allocation resurrected or cancelled the replacement";
+            adopted_attempt := Option.value_exn replacement.attempt);
+          let%bind terminated = exists (Filename.concat attempt "terminated") in
+          require terminated "Unallocated owned producer was not stopped/reaped";
+          let%bind count = count_launches () in
+          let%bind retried = settled service root (finalize key None) in
+          assert_interrupted retried key (if late then Some attempt else None);
+          let%map unchanged = count_launches () in
+          require (count = unchanged) "Cancelled submission retry resurrected execution")
+      in
+      (* Cancellation of a restarted read-only observer must signal that reader only. Its
+         SIGTERM handler deliberately publishes a successful late JSON response. *)
+      let%bind postcheck_gate = gate "postcheck" in
+      let%bind owner_inspect_gate = gate "owner-inspect" in
+      let%bind () =
+        control
+          [ "after_allocation", `String "postcheck"
+          ; "initial_inspect_gate", `String "owner-inspect"
+          ]
+      in
+      let%bind (_ : Asic.Snapshot.t) =
+        handle service root (finalize "postcheck" (Some acceptance))
+      in
+      let%bind attempt = arrived postcheck_gate in
+      (* Keep the automatic owner's reader in flight, so it cannot race the detached
+         observer for either of the following one-shot reader gates. *)
+      let%bind owner_attempt = arrived owner_inspect_gate in
+      require
+        (String.equal owner_attempt attempt)
+        "Automatic reader lost allocation identity";
+      let%bind active =
+        wait service (fun snapshot ->
+          let f = value snapshot "postcheck" in
+          f.owned && Option.equal String.equal f.attempt (Some attempt))
+      in
+      let receipt_path = Filename.concat attempt "operation.json" in
+      let%bind receipt =
+        In_thread.run (fun () -> Public.decode (In_channel.read_all receipt_path))
+      in
+      let%bind count = count_launches () in
+      let detached = create () in
+      let%bind detached_state = handle detached root Get in
+      let retained = value detached_state "postcheck" in
+      require
+        (String.equal retained.state "unknown"
+         && (not retained.owned)
+         && Option.equal String.equal retained.attempt (Some attempt)
+         && retained.acceptance_requested)
+        "Restart did not preserve postcheck identity independently of ownership";
+      let%bind rejected =
+        Service.handle detached ~root ~environment (Cancel "finalize:postcheck")
+      in
+      require (Result.is_error rejected) "Restart acquired cancellation ownership";
+      let%bind (_ : Asic.Snapshot.t) =
+        settled detached root (finalize "postcheck" (Some acceptance))
+      in
+      let inspect_gate_file = Filename.concat attempt "wb065-inspect.json" in
+      let%bind reader_gate = gate "observer-cancel" in
+      let%bind () =
+        write_json inspect_gate_file (`Assoc [ "gate", `String "observer-cancel" ])
+      in
+      let%bind observing = handle detached root (Observe_finalization "postcheck") in
+      require
+        (Option.equal
+           Run_ref.equal
+           (pending observing "finalize-observe:postcheck").run
+           (Some run))
+        "Read-only finalization observer omitted its exact run target";
+      let%bind reader_attempt = arrived reader_gate in
+      require
+        (String.equal reader_attempt attempt)
+        "Observer inspected another allocation";
+      let%bind (_ : Asic.Snapshot.t) =
+        handle detached root (Cancel "finalize-observe:postcheck")
+      in
+      let%bind reader_cancelled = settled detached root Get in
+      require
+        (String.equal
+           (pending reader_cancelled "finalize-observe:postcheck").state
+           "failed"
+         && Option.equal
+              Run_ref.equal
+              (pending reader_cancelled "finalize-observe:postcheck").run
+              (Some run)
+         && String.equal (value reader_cancelled "postcheck").state "unknown"
+         && Option.equal
+              String.equal
+              (value reader_cancelled "postcheck").phase
+              retained.phase
+         && not (value reader_cancelled "postcheck").owned)
+        "Late successful reader response published after cancellation";
+      let%bind terminated = exists (Filename.concat attempt "reader-terminated") in
+      require terminated "Cancelled observer was not stopped/reaped";
+      let%bind shutdown_gate = gate "observer-shutdown" in
+      let%bind () =
+        write_json inspect_gate_file (`Assoc [ "gate", `String "observer-shutdown" ])
+      in
+      let%bind (_ : Asic.Snapshot.t) =
+        handle detached root (Observe_finalization "postcheck")
+      in
+      let%bind (_ : string) = arrived shutdown_gate in
+      let%bind () = Service.shutdown detached in
+      let%bind stopped_reader =
+        In_thread.run (fun () ->
+          In_channel.read_all (Filename.concat attempt "reader-terminated"))
+      in
+      require
+        (String.equal stopped_reader "observer-shutdown")
+        "Observer shutdown did not stop/join its exact in-flight reader";
+      let%bind producer_stopped = exists (Filename.concat attempt "terminated") in
+      require
+        (not producer_stopped)
+        "Read-only observer shutdown signalled historical producer";
+      let%bind still_active = handle service root Get in
+      require
+        ((value still_active "postcheck").owned
+         && String.equal (value still_active "postcheck").state "executing"
+         && Option.equal
+              String.equal
+              (value still_active "postcheck").attempt
+              (Some attempt)
+         && Option.is_none (value active "postcheck").acceptance)
+        "Observer cancellation/shutdown changed the owning producer's lifecycle";
+      let%bind (_ : Asic.Snapshot.t) =
+        handle service root (Cancel "finalize:postcheck")
+      in
+      let%bind cancelled = settled service root Get in
+      assert_interrupted cancelled "postcheck" (Some attempt);
+      let postcheck = value cancelled "postcheck" in
+      require
+        (Option.equal String.equal postcheck.phase (Some "external_postcheck")
+         && Option.equal String.equal postcheck.operation_status (Some "interrupted")
+         && Option.equal String.equal postcheck.acceptance (Some "not_evaluated")
+         && String.equal
+              (Option.value_exn (summary cancelled run.id).terminal).attempt
+              !adopted_attempt)
+        "Postcheck cancellation became acceptance/completion or adopted another attempt";
+      let%bind terminated = exists (Filename.concat attempt "terminated") in
+      require terminated "Exact postcheck producer did not receive cancellation";
+      let%bind () = Service.shutdown service in
+      let reopened = create () in
+      (* Corrupt one identity component at a time on an otherwise valid interrupted
+         receipt. No producer is alive while these read-only specimens are installed. *)
+      let terminal_receipt =
+        receipt
+        |> fun j ->
+        replace j "status" (`String "interrupted")
+        |> fun j ->
+        replace j "ended_at" (`String "recorded")
+        |> fun j -> replace j "exit_code" (`Int 143)
+      in
+      let request = Public.field "request" terminal_receipt in
+      let execution = Public.field "execution" terminal_receipt in
+      let mismatches =
+        [ "operation", replace terminal_receipt "attempt_id" (`String "another-operation")
+        ; ( "execution-request"
+          , replace
+              terminal_receipt
+              "request"
+              (replace request "execution" (`String (execution_file ^ ".other"))) )
+        ; ( "accept-request"
+          , replace terminal_receipt "request" (replace request "accept" (`Bool false)) )
+        ; ( "execution-hash"
+          , replace
+              terminal_receipt
+              "execution"
+              (replace execution "sha256" (`String (String.make 64 '0'))) )
+        ; ( "execution-attempt"
+          , replace
+              terminal_receipt
+              "execution"
+              (replace execution "attempt_id" (`String "another-run")) )
+        ]
+        @ List.map
+            [ "support_tools"
+            ; "precheck_python"
+            ; "testbench"
+            ; "testbench_top"
+            ; "replay_trace"
+            ]
+            ~f:(fun name ->
+              ( name
+              , replace
+                  terminal_receipt
+                  "request"
+                  (replace request name (`String "/wrong-input")) ))
+      in
+      let%bind () =
+        Deferred.List.iter mismatches ~how:`Sequential ~f:(fun (name, invalid) ->
+          let%bind () = write_json receipt_path invalid in
+          let%bind rejected = settled reopened root (Observe_finalization "postcheck") in
+          let f = value rejected "postcheck" in
+          require
+            (String.equal (pending rejected "finalize-observe:postcheck").state "failed"
+             && String.equal f.state "interrupted"
+             && Option.equal String.equal f.attempt (Some attempt)
+             && Option.equal String.equal f.phase postcheck.phase
+             && Option.equal String.equal f.acceptance postcheck.acceptance
+             && Option.is_some f.error
+             && not f.owned)
+            ("Mismatched postcheck receipt mutated exact retained facts: " ^ name);
+          Deferred.unit)
+      in
+      let%bind () = write_json receipt_path terminal_receipt in
+      let%bind recovered = settled reopened root (Observe_finalization "postcheck") in
+      require
+        (String.equal (pending recovered "finalize-observe:postcheck").state "completed"
+         && String.equal (value recovered "postcheck").state "interrupted"
+         && Option.equal String.equal (value recovered "postcheck").attempt (Some attempt)
+         && Option.equal String.equal (value recovered "postcheck").error postcheck.error
+        )
+        "Exact reconnect did not clear observation errors while retaining producer \
+         cancellation";
+      require
+        (not (Deferred.is_determined (Process.wait sentinel)))
+        "ASIC cancellation/shutdown signalled an unrelated live process";
+      let%map unchanged = count_launches () in
+      require
+        (unchanged = count)
+        "Reconnect/retry/cancellation duplicated postcheck producer")
+;;
+
 let stage_entry ?(status = "pending") ?(action = `Null) id =
   `Assoc
     [ "id", `String id
@@ -1582,6 +2051,232 @@ let stage_service_fixtures root state_dir =
           "Stage observation or planning launched execution"))
 ;;
 
+let execution_envelope_fixtures root state_dir =
+  let service = Service.create ~state_dir:(state_dir ^ "-envelope") in
+  let preparations = ref 0 in
+  let on_prepare = ref (fun () -> ()) in
+  attach_preparation
+    ~on_prepare:(fun () -> incr preparations; !on_prepare ())
+    service;
+  let marker name = Filename.concat root name in
+  let enable name = Out_channel.write_all (marker name) ~data:"" in
+  let disable name =
+    if Poly.equal (Sys_unix.file_exists (marker name)) `Yes
+    then Core_unix.unlink (marker name)
+  in
+  let calls () = In_channel.read_lines (marker "calls") in
+  let provider_launches () =
+    List.count (calls ()) ~f:(fun line -> String.is_prefix line ~prefix:"[\"stages\"")
+  in
+  let launch ~key ~elaboration_only selection =
+    let%bind staged =
+      handle service root
+        (Stage_fresh { selection; elaboration_only; expected_plan_identity = None })
+    in
+    let intent_id = (Option.value_exn staged.fresh_intent).id in
+    let%map snapshot = settled service root (Launch_fresh { key; intent_id }) in
+    List.find_exn snapshot.workflows ~f:(fun w -> String.equal w.key key)
+  in
+  Monitor.protect
+    ~finally:(fun () ->
+      List.iter [ "active-synthesis-envelope"; "inactive-synthesis-capability" ] ~f:disable;
+      Service.shutdown service)
+    (fun () ->
+      (* A default provider may advertise collection support without opting in. *)
+      enable "inactive-synthesis-capability";
+      let physical = { (selection "envelope-default") with endpoint = "placement" } in
+      let%bind planned = settled service root (Plan physical) in
+      require (Option.is_some planned.preview) "Inactive capability restricted default planning";
+      let%bind default = launch ~key:"envelope-default" ~elaboration_only:false physical in
+      require
+        (Asic.Fresh.Phase.equal default.phase Completed && !preparations = 1)
+        "Default provider physical admission changed";
+      (* The same service has already cached a default probe. Activation must be fresh. *)
+      enable "active-synthesis-envelope";
+      let%bind () =
+        Deferred.List.iter
+          [ "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
+          ~how:`Sequential
+          ~f:(fun endpoint ->
+            let selected = { physical with endpoint } in
+            let before = calls () in
+            let%bind planned = settled service root (Plan selected) in
+            require
+              (Option.is_none planned.preview
+               && List.exists planned.operations ~f:(fun op ->
+                 String.equal op.kind "plan"
+                 && Option.value_map op.error ~default:false ~f:(fun error ->
+                   String.is_substring error ~substring:("Endpoint '" ^ endpoint ^ "'")
+                   && String.is_substring error ~substring:"synthesis-total-tasks-v1")))
+              "Active envelope did not reject physical planning with actionable diagnostic";
+            require
+              (not (List.exists (List.drop (calls ()) (List.length before)) ~f:(fun line ->
+                 String.is_prefix line ~prefix:"[\"flow\", \"plan\"")))
+              "Incompatible plan reached provider planning";
+            let before = provider_launches () in
+            let%map rejected =
+              launch ~key:("envelope-denied-" ^ endpoint) ~elaboration_only:false selected
+            in
+            require
+              (Asic.Fresh.Phase.equal rejected.phase Failed
+               && Option.is_none rejected.preparation_id
+               && Option.is_none rejected.prepared
+               && Option.is_none rejected.run
+               && Option.is_none rejected.reference
+               && !preparations = 1
+               && provider_launches () = before
+               && Option.value_map rejected.error ~default:false ~f:(fun error ->
+                 String.is_substring error ~substring:"synthesis-total-tasks-v1"))
+              "Incompatible fresh workflow prepared or allocated before rejection")
+      in
+      let before = calls () in
+      let%bind elab = launch ~key:"envelope-elab" ~elaboration_only:true physical in
+      require
+        (Asic.Fresh.Phase.equal elab.phase Completed
+         && Option.is_some elab.prepared
+         && Option.is_none elab.run
+         && !preparations = 2
+         && List.equal String.equal before (calls ()))
+        "Elaboration-only consulted or launched provider under active envelope";
+      let%bind planned = settled service root (Plan (selection "envelope-synth")) in
+      require (Option.is_some planned.preview) "Active envelope rejected synthesis planning";
+      let before = provider_launches () in
+      let%bind synth =
+        launch ~key:"envelope-synth" ~elaboration_only:false (selection "envelope-synth")
+      in
+      require
+        (Asic.Fresh.Phase.equal synth.phase Completed
+         && Option.is_some synth.run
+         && !preparations = 3
+         && provider_launches () = before + 1)
+        "Supported synthesis failed under active envelope";
+      (* Activation during preparation must also be caught before the stage process. *)
+      disable "active-synthesis-envelope";
+      on_prepare := (fun () -> enable "active-synthesis-envelope");
+      let before = provider_launches () in
+      let%bind changed = launch ~key:"envelope-handoff" ~elaboration_only:false physical in
+      require
+        (Asic.Fresh.Phase.equal changed.phase Failed
+         && Option.is_some changed.prepared
+         && Option.is_none changed.run
+         && !preparations = 4
+         && provider_launches () = before
+         && Option.value_map changed.error ~default:false ~f:(fun error ->
+           String.is_substring error ~substring:"synthesis-total-tasks-v1"))
+        "Changed execution envelope allocated an incompatible physical attempt";
+      Deferred.unit)
+;;
+
+let sram_workflow_fixtures root state_dir =
+  let create () =
+    let service = Service.create ~state_dir:(state_dir ^ "-sram") in
+    attach_preparation service;
+    service
+  in
+  let service = create () in
+  let marker name = Filename.concat root name in
+  let enable name = Out_channel.write_all (marker name) ~data:"" in
+  let disable name =
+    if Poly.equal (Sys_unix.file_exists (marker name)) `Yes then Core_unix.unlink (marker name)
+  in
+  let selection profile endpoint = { (selection profile) with endpoint } in
+  let launch service key endpoint =
+    let%bind staged = handle service root
+      (Stage_fresh { selection = selection key endpoint; elaboration_only = false; expected_plan_identity = None }) in
+    settled service root (Launch_fresh { key; intent_id = (Option.value_exn staged.fresh_intent).id })
+  in
+  let workflow snapshot key = List.find_exn snapshot.Asic.Snapshot.workflows ~f:(fun w -> String.equal w.key key) in
+  Monitor.protect
+    ~finally:(fun () ->
+      List.iter [ "sram-capability"; "timing-capability"; "sram-bad-scope"; "sram-revoke-count" ] ~f:disable;
+      Service.shutdown service)
+    (fun () ->
+      enable "timing-capability";
+      let%bind unsupported = launch service "sram-old-provider" "timing" in
+      let denied = workflow unsupported "sram-old-provider" in
+      require (Asic.Fresh.Phase.equal denied.phase Failed && Option.is_none denied.run
+               && Option.value_map denied.error ~default:false ~f:(fun e -> String.is_substring e ~substring:"sram_segmented1"))
+        "Old provider allocated a macro execution";
+      let%bind count = launches root "sram-old-provider" in
+      require (count = 0) "Unsupported macro plan reached stages";
+      let%bind planned = settled service root (Plan (selection "sram-preview" "synthesis")) in
+      require (Option.is_none planned.preview
+               && List.exists planned.operations ~f:(fun op ->
+                 String.equal op.kind "plan"
+                 && Option.value_map op.error ~default:false ~f:(fun e ->
+                   String.is_substring e ~substring:"sram_segmented1")))
+        "Unsupported emitted macro plan published a usable preview";
+      enable "sram-capability";
+      enable "sram-bad-scope";
+      let%bind bad_scope = launch service "sram-bad-scope" "timing" in
+      require (Asic.Fresh.Phase.equal (workflow bad_scope "sram-bad-scope").phase Failed
+               && Option.is_none (workflow bad_scope "sram-bad-scope").run
+               && Option.value_map (workflow bad_scope "sram-bad-scope").error ~default:false
+                    ~f:(fun e -> String.is_substring e ~substring:"sram_segmented1_scope.checkpoint_schema"))
+        "Incompatible provider scope admitted";
+      let%bind count = launches root "sram-bad-scope" in
+      require (count = 0) "Incompatible provider scope reached stages";
+      disable "sram-bad-scope";
+      Out_channel.write_all (marker "sram-revoke-count") ~data:"0";
+      let%bind revoked = launch service "sram-revoked" "timing" in
+      require (Asic.Fresh.Phase.equal (workflow revoked "sram-revoked").phase Failed
+               && Option.is_none (workflow revoked "sram-revoked").run
+               && Option.is_some (workflow revoked "sram-revoked").prepared
+               && Option.value_map (workflow revoked "sram-revoked").error ~default:false
+                    ~f:(fun e -> String.is_substring e ~substring:"sram_segmented1=true"))
+        "Capability withdrawal before launch admitted";
+      let%bind count = launches root "sram-revoked" in
+      require (count = 0) "Revoked capability reached stages";
+      require (Int.of_string (In_channel.read_all (marker "sram-revoke-count")) = 3)
+        "Expected independent emission and pre-launch admission probes";
+      disable "sram-revoke-count";
+      let%bind signoff = launch service "sram-signoff" "signoff" in
+      require (Asic.Fresh.Phase.equal (workflow signoff "sram-signoff").phase Failed
+               && Option.is_none (workflow signoff "sram-signoff").run)
+        "Macro Signoff was admitted";
+      let%bind count = launches root "sram-signoff" in
+      require (count = 0) "Macro Signoff reached provider execution";
+      let%bind supported = launch service "sram-supported" "timing" in
+      let completed = workflow supported "sram-supported" in
+      require (Asic.Fresh.Phase.equal completed.phase Completed && Option.is_some completed.run)
+        "Supported SRAM Timing workflow did not complete";
+      let intent_id = completed.intent.id in
+      let%bind (_ : Asic.Snapshot.t) = settled service root (Launch_fresh { key = completed.key; intent_id }) in
+      let%bind count = launches root "sram-supported" in
+      require (count = 1) "Completed macro workflow automatically resubmitted";
+      let%bind failed = launch service "sram-failed" "timing" in
+      let failed_workflow = workflow failed "sram-failed" in
+      let failed_run = Option.value_exn failed_workflow.run in
+      let run = List.find_exn failed.runs ~f:(fun r -> String.equal r.Asic.Run.run.id failed_run.id) in
+      let timing = List.find_exn run.stages ~f:(fun s -> String.equal s.id "timing") in
+      let signoff = List.find_exn run.stages ~f:(fun s -> String.equal s.id "signoff") in
+      require (Asic.Fresh.Phase.equal failed_workflow.phase Failed
+               && Asic.Stage.Status.equal timing.status Failed
+               && not signoff.requested
+               && Asic.Stage.Status.equal signoff.status Not_requested)
+        "Failed macro Timing lost stage outcome or inferred Signoff";
+      require (String.equal (summary failed failed_run.id).completion "failed"
+               && Asic.Summary.Freshness.equal (summary failed failed_run.id).freshness Validated)
+        "Failed macro Timing did not retain a report";
+      let%bind (_ : Asic.Snapshot.t) = settled service root
+        (Launch_fresh { key = failed_workflow.key; intent_id = failed_workflow.intent.id }) in
+      let%bind count = launches root "sram-failed" in
+      require (count = 1) "Failed macro workflow resubmitted";
+      let%bind () = Service.shutdown service in
+      let reopened = create () in
+      Monitor.protect ~finally:(fun () -> Service.shutdown reopened) (fun () ->
+        let%bind (_ : Asic.Snapshot.t) = settled reopened root (Launch_fresh { key = completed.key; intent_id }) in
+        let%bind (_ : Asic.Snapshot.t) = settled reopened root (Launch_fresh { key = denied.key; intent_id = denied.intent.id }) in
+        let%bind (_ : Asic.Snapshot.t) = settled reopened root
+          (Launch_fresh { key = failed_workflow.key; intent_id = failed_workflow.intent.id }) in
+        let%bind count = launches root "sram-failed" in
+        require (count = 1) "Restart resubmitted failed macro workflow";
+        let%bind count = launches root "sram-supported" in
+        require (count = 1) "Restart resubmitted macro workflow";
+        let%map count = launches root "sram-old-provider" in
+        require (count = 0) "Restart retried rejected macro workflow"))
+;;
+
 let main () =
   let%bind () = evidence_file_fixtures () in
   declared_clock_fixtures ();
@@ -1604,6 +2299,9 @@ let main () =
       let state_dir = Filename.concat root "cache" in
       let fixture = Filename.concat root "fixture.py" in
       Out_channel.write_all fixture ~data:(In_channel.read_all "fake_provider.py");
+      Out_channel.write_all
+        (Filename.concat root "sram_scope.json")
+        ~data:(In_channel.read_all "sram_scope.json");
       Out_channel.write_all
         (Filename.concat root "production_flow_list.json")
         ~data:(In_channel.read_all "production_flow_list.json");
@@ -1633,6 +2331,8 @@ let main () =
       root, state_dir)
   in
   let%bind () = stage_service_fixtures root state_dir in
+  let%bind () = execution_envelope_fixtures root state_dir in
+  let%bind () = sram_workflow_fixtures root state_dir in
   (* Reaping and repeated cleanup use the same Async Process ownership record. No raw PID
      signalling or independent waitpid is involved. *)
   let%bind exited =
@@ -1898,6 +2598,29 @@ let main () =
       let%bind warm_reports = reports root in
       require (warm_reports = initial_reports) "Warm switch queried provider report";
       let%bind () = Service.shutdown service in
+      let common_dir = Filename.concat root ".workbench" in
+      Core_unix.mkdir common_dir;
+      let legacy_config = Filename.concat root Config.filename in
+      let common_config = Filename.concat common_dir Config.filename in
+      let config_bytes = In_channel.read_all legacy_config in
+      Out_channel.write_all common_config ~data:config_bytes;
+      let dual = create () in
+      let%bind dual_snapshot = handle dual root Get in
+      require
+        (List.equal Asic.Launch.equal second.launches dual_snapshot.launches)
+        "Identical dual ASIC configs changed persisted provider scope";
+      let%bind () = Service.shutdown dual in
+      Out_channel.write_all common_config ~data:"invalid common ASIC configuration";
+      let invalid = create () in
+      let%bind invalid_result = Service.handle invalid ~root ~environment Get in
+      require (Result.is_error invalid_result) "Invalid common ASIC config fell back";
+      let%bind () = Service.shutdown invalid in
+      Out_channel.write_all common_config ~data:config_bytes;
+      Core_unix.unlink legacy_config;
+      let preparation_name = "hardcaml-workbench-preparation.sexp" in
+      Core_unix.rename
+        ~src:(Filename.concat root preparation_name)
+        ~dst:(Filename.concat common_dir preparation_name);
       let restarted = create () in
       let%bind restored = settled restarted root (Load_summary r1) in
       require
@@ -2001,6 +2724,13 @@ let main () =
       let physical = summary physical physical_run.id in
       let%bind () =
         finalization_lifecycle
+          ~root
+          ~state_dir
+          ~reference:
+            { Asic.Reference.attempt = physical_attempt; stream_id = "stream-terminal" }
+      in
+      let%bind () =
+        finalization_cancellation_matrix
           ~root
           ~state_dir
           ~reference:
@@ -2265,6 +2995,81 @@ let main () =
               "Natural completion was signalled"))
       in
       let%bind () = Service.shutdown recovered in
+      let rejection_dir = state_dir ^ "-admission-rejection" in
+      let rejection_service = create ~directory:rejection_dir () in
+      let%bind planned = settled rejection_service root (Plan (selection "admission-rejected")) in
+      let rejected_request = Asic.Operation.Run { key = "admission-rejected"; preview = Option.value_exn planned.preview } in
+      let%bind rejected = settled rejection_service root rejected_request in
+      let rejected_run =
+        List.find_exn rejected.runs ~f:(fun r ->
+          String.equal r.Asic.Run.run.id "stream-admission-rejected")
+      in
+      let check_rejection (r : Asic.Run.t) =
+        require
+          (String.equal r.status "failed" && r.cursor = 3
+           && Option.is_none r.execution_file
+           && Option.value_map r.error ~default:false ~f:(fun error ->
+             String.is_substring error ~substring:"strict synthesis envelope"
+             && not (String.is_substring error ~substring:"monitor.ml"))
+           && List.equal String.equal
+                (List.filter_map r.stages ~f:(fun stage ->
+                   if stage.requested then Some stage.id else None))
+                [ "synthesis"; "floorplan"; "placement" ]
+           && List.for_all r.stages ~f:(fun stage ->
+             Asic.Stage.Status.equal stage.status
+               (if stage.requested then Skipped else Not_requested)))
+          "Pre-execution rejection lost its intended recipe or original failure"
+      in
+      check_rejection rejected_run;
+      let%bind refreshed = settled rejection_service root (Refresh rejected_run.run) in
+      check_rejection (List.find_exn refreshed.runs ~f:(fun r -> Run_ref.equal r.run rejected_run.run));
+      let%bind (_ : Asic.Snapshot.t) = settled rejection_service root rejected_request in
+      let%bind count = launches root "admission-rejected" in
+      require (count = 1) "Rejected admission was relaunched";
+      require
+        (Poly.equal (Sys_unix.file_exists (Filename.concat root "attempt-admission-rejected/inspect-called")) `No)
+        "Definitive admission rejection required named preflight inspection";
+      let%bind () = Service.shutdown rejection_service in
+      (* Reopen the old daemon's durable failure shape, not just the corrected
+         in-memory state. Only this fixture-owned cache is rewritten. *)
+      let%bind () = In_thread.run (fun () ->
+        let registry =
+          Sys_unix.ls_dir rejection_dir
+          |> List.find_exn ~f:(fun name ->
+            String.is_suffix name ~suffix:".sexp"
+            && not (String.is_substring name ~substring:"resources")
+            && not (String.is_substring name ~substring:"workloads"))
+          |> Filename.concat rejection_dir
+        in
+        let stored = Sexp.of_string (In_channel.read_all registry) in
+        let rewrite_run = function
+          | Sexp.List fields ->
+            Sexp.List (List.map fields ~f:(function
+              | Sexp.List [ Sexp.Atom "cursor"; _ ] -> Sexp.List [ Sexp.Atom "cursor"; Sexp.Atom "0" ]
+              | Sexp.List [ Sexp.Atom "status"; _ ] -> Sexp.List [ Sexp.Atom "status"; Sexp.Atom "observation_unavailable" ]
+              | Sexp.List [ Sexp.Atom "error"; _ ] -> Sexp.List [ Sexp.Atom "error"; Sexp.List [ Sexp.Atom "old missing named preflight reference" ] ]
+              | Sexp.List [ Sexp.Atom "stages"; _ ] -> Sexp.List [ Sexp.Atom "stages"; Sexp.List [] ]
+              | field -> field))
+          | _ -> failwith "Expected retained run"
+        in
+        let stored = match stored with
+          | Sexp.List fields -> Sexp.List (List.map fields ~f:(function
+              | Sexp.List [ Sexp.Atom "runs"; Sexp.List runs ] ->
+                Sexp.List [ Sexp.Atom "runs"; Sexp.List (List.map runs ~f:rewrite_run) ]
+              | field -> field))
+          | _ -> failwith "Expected registry"
+        in
+        Out_channel.write_all registry ~data:(Sexp.to_string stored))
+      in
+      let reopened_rejection = create ~directory:rejection_dir () in
+      let%bind recovered_rejection = settled reopened_rejection root (Refresh rejected_run.run) in
+      check_rejection (List.find_exn recovered_rejection.runs ~f:(fun r -> Run_ref.equal r.run rejected_run.run));
+      let%bind count = launches root "admission-rejected" in
+      require (count = 1) "Historical rejection recovery relaunched producer";
+      require
+        (Poly.equal (Sys_unix.file_exists (Filename.concat root "attempt-admission-rejected/inspect-called")) `No)
+        "Historical rejection recovery required broken named preflight inspection";
+      let%bind () = Service.shutdown reopened_rejection in
       let race_service = create () in
       let%bind () =
         Deferred.List.iter
@@ -2304,7 +3109,15 @@ let main () =
                    match stage.status with
                    | Running | Pending -> false
                    | _ -> true))
-                "Unavailable final observation retained stale active stages";
+                 "Unavailable final observation retained stale active stages";
+             if String.equal profile "exit-race-unavailable"
+             then
+               require
+                 (Option.value_map run.error ~default:false ~f:(fun error ->
+                    String.is_substring error ~substring:"ASIC command failed (exited with code 2)"
+                    && String.is_substring error ~substring:"fixture terminal inspection unavailable"
+                    && not (String.is_substring error ~substring:"monitor.ml")))
+                 "Unavailable observation masked producer error or exposed a monitor backtrace";
             let%bind before = launches root profile in
             let%bind (_ : Asic.Snapshot.t) =
               settled race_service root (Run { key = profile; preview })
@@ -2358,12 +3171,55 @@ let main () =
       require
         (String.equal result.state "completed" && Option.is_some result.attempt)
         "Seven-stage finalization failed eligibility/hydration";
-      require
-        (String.equal
-           (Option.value_exn (summary finalized run.id).terminal).physical_completion
-           "full")
-        "Seven-stage finalized terminal result did not hydrate";
-      Deferred.unit)
+       require
+         (String.equal
+            (Option.value_exn (summary finalized run.id).terminal).physical_completion
+            "full")
+         "Seven-stage finalized terminal result did not hydrate";
+       (* The optional synthesis route needs explicit provider support in the
+          current query environment, never inferred from CLI4 or a checkpoint. *)
+       Out_channel.write_all (Filename.concat root "synthesis-finalization") ~data:"";
+       let synthesis = create ~directory:(state_dir ^ "-synthesis-finalization") () in
+       let%bind registered =
+         handle synthesis root
+           (Register { attempt = physical_attempt; stream_id = "stream-terminal" })
+       in
+       let run = (List.hd_exn registered.runs).run in
+       let%bind loaded = settled synthesis root (Load_summary run) in
+       let execution_file = (summary loaded run.id).execution_file in
+       let finalize key acceptance =
+         Asic.Operation.Finalize { key; run; execution_file; acceptance }
+       in
+       let%bind unsupported = settled synthesis root (finalize "unsupported" None) in
+       let result snapshot key =
+         List.find_exn snapshot.Asic.Snapshot.finalizations ~f:(fun f ->
+           String.equal f.Asic.Finalization.key key)
+       in
+       require
+         (String.equal (result unsupported "unsupported").state "failed"
+          && Option.is_none (result unsupported "unsupported").attempt)
+         "Synthesis collection inferred implicit provider support";
+       Out_channel.write_all (Filename.concat root "synthesis-collection-capability") ~data:"";
+       let acceptance : Asic.Acceptance.t =
+         { support_tools = root; precheck_python = "/usr/bin/python3"
+         ; testbench = root ^ "/bench.v"; testbench_top = "top"; replay_trace = root ^ "/trace" }
+       in
+       let%bind denied = settled synthesis root (finalize "synthesis-accept" (Some acceptance)) in
+       require
+         (String.equal (result denied "synthesis-accept").state "failed"
+          && Option.is_none (result denied "synthesis-accept").attempt)
+         "Synthesis-only acceptance was admitted";
+       let%bind collected = settled synthesis root (finalize "synthesis-collect" None) in
+       require
+         (String.equal (result collected "synthesis-collect").state "completed"
+          && Option.is_some (result collected "synthesis-collect").attempt)
+         "Explicitly supported synthesis collection did not complete";
+       let terminal = Option.value_exn (summary collected run.id).terminal in
+       require
+         (String.equal terminal.physical_completion "synthesis"
+          && String.equal terminal.acceptance "not_evaluated")
+         "Synthesis collection fabricated physical completion or acceptance";
+       Deferred.unit)
 ;;
 
 let () =

@@ -52,3 +52,27 @@ val peek_snapshot
 (** Daemon shutdown only: cancel and reap owned processes and flush registry writes.
     Historical producers are never signalled by reader cancellation/shutdown. *)
 val shutdown : t -> unit Deferred.t
+
+module For_testing : sig
+  (** Practical fresh physical-prefix deadline in seconds:
+      [stage_count * (2 * stage_timeout + 180) + 900 + 90]. The two calls per
+      stage are execution and publication validation; the allowances cover
+      runtime probes/cleanup, startup/readiness and Workbench terminal overhead.
+      This is not an exact upper bound on provider filesystem/collateral work.
+      Source build/emission is separately timed. Rejects timeouts outside
+      [1..86400] and unknown endpoints before bounded integer arithmetic. *)
+  val execution_budget_seconds
+    :  Hardcaml_workbench_project_integration.Asic_config.t
+    -> Asic.Selection.t
+    -> float
+
+  (** Pure admission boundary shared with the producer path. It validates exact
+      execution/report association, supported recipe and selected publications. *)
+  val validate_finalization_execution
+    :  stream_id:string
+    -> acceptance_requested:bool
+    -> metadata:Yojson.Safe.t
+    -> report:Yojson.Safe.t
+    -> Yojson.Safe.t
+    -> unit
+end

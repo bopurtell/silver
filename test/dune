@@ -1,0 +1,84 @@
+(data_only_dirs fixtures baselines pt8_frontend_review)
+
+(alias
+ (name native-smoke)
+ (deps (alias ../terminal/test-native-smoke)))
+
+(alias
+ (name contracts)
+ (deps
+  (alias_rec ../protocol/runtest)
+  (alias_rec ../provider/runtest)
+  (alias_rec ../project_integration/runtest)
+  (alias_rec ../adapters/runtest)
+  (alias integration/pyramid/runtest)))
+
+(alias
+ (name backend)
+ (deps (alias_rec ../backend/test/runtest)))
+
+(alias
+ (name presentation)
+ (deps (alias_rec ../terminal/runtest)))
+
+(alias
+ (name setup)
+ (deps (alias_rec ../setup/test/runtest)))
+
+(alias
+ (name api)
+ (deps (alias_rec ../daemon/test/runtest)))
+
+(alias
+ (name support)
+ (deps (alias_rec support/runtest)))
+
+(alias
+ (name local)
+ (deps
+  (alias contracts)
+  (alias backend)
+  (alias presentation)
+   (alias setup)
+   (alias support)))
+
+; Real-tool actions are opt-in leaves, never dependencies of local/runtest.
+(alias
+ (name real-elaboration)
+ (deps (alias integration/pyramid/real-elaboration)))
+
+(alias
+ (name real-synthesis)
+ (deps (alias integration/pyramid/real-synthesis)))
+
+(alias
+ (name real-floorplan)
+ (deps (alias integration/pyramid/real-floorplan)))
+
+(alias
+ (name real-placement)
+ (deps (alias integration/pyramid/real-placement)))
+
+(alias
+ (name real-cts)
+ (deps (alias integration/pyramid/real-cts)))
+
+(alias
+ (name real-routing)
+ (deps (alias integration/pyramid/real-routing)))
+
+(alias
+ (name real-timing)
+ (deps (alias integration/pyramid/real-timing)))
+
+(alias
+ (name real-signoff)
+ (deps (alias integration/pyramid/real-signoff)))
+
+(alias
+ (name real-pyramid)
+ (deps (alias integration/pyramid/real-pyramid)))
+
+(alias
+ (name real-preflight)
+ (deps (alias integration/pyramid/real-preflight)))

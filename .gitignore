@@ -1,5 +1,6 @@
 # dune
 _build/
+_build_pt8_workbench/
 *.install
 
 # ocaml
@@ -32,4 +33,4 @@ release-group/*
 __pycache__/
 
 # Private isolated-review environments, logs and binary snapshots
-.dev/isolated-review/
+.dev/

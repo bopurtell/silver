@@ -169,7 +169,8 @@ module Form = struct
   let help t =
     [ "Suite: " ^ t.suite.id ^ " — " ^ t.suite.label
     ; label t
-    ; "Ctrl-U clears; Backspace edits; Enter accepts field; Esc abandons form"
+    ; "Ctrl-U clears; Ctrl-BS/Ctrl-W word; Backspace edits; Enter accepts field; Esc \
+       abandons form"
     ]
     @
     if t.field = 0

@@ -53,7 +53,11 @@ val metadata
 
 val resources
   : Config.t -> root:string -> environment:V1.Environment_selection.t
-  -> kind:string -> target:string -> string list -> Dune_adapter.Invocation.t
+   -> kind:string -> target:string -> string list -> Dune_adapter.Invocation.t
+
+val workloads
+  : Config.t -> root:string -> environment:V1.Environment_selection.t
+  -> Asic_workloads.Query.t -> Dune_adapter.Invocation.t
 
 val run_prepared
   :  Config.t
@@ -95,7 +99,8 @@ val inspect_finalization
 (** Public read-only rich inspection. [detail] carries row ID and expected INDEX digest.
     Without detail, [expected_analysis_digest] pins supplementary timing evidence. *)
 val inspection
-  :  ?expected_analysis_digest:string
+   :  ?expected_analysis_digest:string
+   -> ?refresh_timing:bool
   -> Config.t
   -> root:string
   -> environment:V1.Environment_selection.t
