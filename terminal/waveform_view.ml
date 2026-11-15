@@ -502,7 +502,8 @@ let graph t data ~width ~height signals =
           left ^ String.concat (List.init columns ~f:(fun _ -> middle)) ^ right
         in
         let row text =
-          "│" ^ text ^ String.make (Int.max 0 (columns - String.length text)) ' ' ^ "│"
+          let used = Bonsai_term.View.width (Bonsai_term.View.text text) in
+          "│" ^ text ^ String.make (Int.max 0 (columns - used)) ' ' ^ "│"
         in
         let rows =
           List.concat_map lanes ~f:(fun lane ->
@@ -516,30 +517,47 @@ let graph t data ~width ~height signals =
                    then String.prefix (reason ^ "; no graph") columns
                    else "")
               | None ->
-                let chars =
+                (* Every array element is one terminal cell, never one UTF-8 byte.
+                    A binary scalar edge has an unambiguous direction from its exact
+                    exit value, even when the event lies inside a compressed cell.
+                    X/Z recovery at the inclusive start has no known incoming rail.
+                   Two or more edges remain opaque: do not invent their ordering. *)
+                let glyphs =
                   Array.mapi lane.samples ~f:(fun i value ->
                     if lane.transitions.(i) >= 2
-                    then '#'
+                    then "#"
                     else if lane.transitions.(i) = 1
-                    then '|'
+                    then (
+                       if s.width > 1
+                       then if y = 0 then "┬" else if y = 2 then "┴" else "│"
+                       else if not lane.binary_edges.(i)
+                       then "│"
+                      else (
+                        match lane.end_samples.(i), y with
+                        | Some "1", 0 -> "┌"
+                        | Some "1", _ -> "┘"
+                        | Some "0", 0 -> "┐"
+                        | Some "0", _ -> "└"
+                        | _ -> "?"))
                     else if s.width > 1
-                    then if y = 1 then '=' else '-'
+                    then if y = 1 then " " else "─"
                     else (
                       match value with
-                      | Some "1" -> if y = 0 then '_' else ' '
-                      | _ -> if y = 1 then '_' else ' '))
+                      | Some "1" -> if y = 0 then "─" else " "
+                      | Some "0" -> if y = 1 then "─" else " "
+                      | _ -> "?"))
                 in
                 if s.width > 1 && y = 1
                 then (
                   let rec label i =
-                    if i < Array.length chars
+                    if i < Array.length glyphs
                     then
                       if lane.transitions.(i) <> 0
                       then label (i + 1)
                       else (
                         let finish = ref (i + 1) in
                         while
-                          !finish < Array.length chars
+                          !finish < Array.length glyphs
                           && lane.transitions.(!finish) = 0
                           && Option.equal
                                String.equal
@@ -557,11 +575,13 @@ let graph t data ~width ~height signals =
                                  ~signedness:Unsigned
                           in
                           if String.length hex + 2 <= !finish - i
-                          then String.iteri hex ~f:(fun j c -> chars.(i + 1 + j) <- c));
+                          then
+                            String.iteri hex ~f:(fun j c ->
+                              glyphs.(i + 1 + j) <- String.of_char c));
                         label !finish)
                   in
                   label 0);
-                row (String.of_char_list (Array.to_list chars))))
+                row (String.concat (Array.to_list glyphs))))
         in
         let rows = List.take rows (Int.max 0 (height - 2)) in
         let blanks =
@@ -1000,14 +1020,14 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
           (match Time.cell_bounds mapping ~column with
            | Some (first, last) ->
              sprintf
-               "Compressed | edge # dense (ordering hidden) · cell %Ld..%Ld · exact \
+               "Compressed edges · # dense (ordering hidden) · cell %Ld..%Ld · exact \
                 cursor"
                first
                last
            | None -> "Compressed graph; cursor exact")
         | Window_cells { compressed = true }, None ->
-          "Compressed | edge # dense (ordering hidden) · exact cursor off-screen"
-        | _ -> "Exact tick cells · | transition, # dense; cursor values exact"
+          "Compressed edges · # dense (ordering hidden) · exact cursor off-screen"
+        | _ -> "Exact tick cells · joined edges, # dense; cursor values exact"
       in
       let description =
         if Int64.equal (Time.stop mapping) (snd (D.time_bounds data))
@@ -1382,6 +1402,137 @@ let render
     |> Host_view.colored appearance R.Foreground
 ;;
 
+let%test_unit "connected original-event rails, compressed direction, pulses and bus boxes" =
+  let data =
+    D.parse
+      "$timescale 1ns $end $var wire 1 ! bit $end $var wire 4 @ bus $end \
+       $var wire 1 % unknown $end $enddefinitions $end \
+       #0 0! b1010 @ 0% #15 1! b1011 @ #25 0! b1100 @ \
+       #35 1! b1101 @ x% #36 0! b1110 @ 0% #45 1! b1111 @ #99"
+    |> Or_error.ok_exn
+  in
+  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    { id = "rails"
+    ; attempt_id = "attempt"
+    ; case_id = None
+    ; label = "rails"
+    ; kind = "waveform"
+    ; media_type = "text/vcd"
+    ; size = None
+    ; sha256 = None
+    ; availability = Available
+    }
+  in
+  let t = receive (create ~project:"p" artifact) (Ok data) |> fun t -> input t (Char 'f') in
+  let signals = Array.to_list (D.signals data) in
+  let rows width = graph t data ~width ~height:9 signals |> String.split_lines in
+  let compressed = rows 12 in
+  (* Each cell covers ten ticks. The first rise is inside cell 1: its start
+     sample is still zero, but its exit is one. The narrow pulse in cell 3
+     returns to zero and must not disappear or become an invented edge. *)
+  assert (String.equal (List.nth_exn compressed 1) "│ ┌┐#┌─────│");
+  assert (String.equal (List.nth_exn compressed 2) "│─┘└#┘     │");
+  assert (String.equal (List.nth_exn compressed 3) "│─┬┬#┬─────│");
+  assert (String.equal (List.nth_exn compressed 4) "│ ││#│ F   │");
+  assert (String.equal (List.nth_exn compressed 5) "│─┴┴#┴─────│");
+  List.iter [ 102; 202 ] ~f:(fun width ->
+    let expanded = rows width in
+    let high = List.nth_exn expanded 1 in
+    let low = List.nth_exn expanded 2 in
+    (* With enough cells the one-tick pulse is visible as joined corners.
+       Repeated expanded tick cells must not repeat transition corners. *)
+    assert (String.is_substring high ~substring:(if width = 102 then "┌┐" else "┌─┐"));
+    assert (String.is_substring low ~substring:(if width = 102 then "┘└" else "┘ └"));
+    assert (not (String.is_substring high ~substring:"#"));
+    let bus = List.nth_exn expanded 4 in
+    List.iter [ "A"; "B"; "C"; "F" ] ~f:(fun substring ->
+      assert (String.is_substring bus ~substring));
+    assert (not (String.is_substring bus ~substring:"D")));
+  (* Even a transient unknown hidden inside a cell disqualifies the lane. *)
+  assert (String.is_substring (List.nth_exn (rows 102) 6) ~substring:"X/Z in window");
+  List.iter [ 3; 12; 102; 202 ] ~f:(fun width ->
+    let output = rows width in
+    assert (List.length output = 9);
+    List.iter output ~f:(fun row ->
+      assert (Bonsai_term.View.width (Bonsai_term.View.text row) = width)))
+;;
+
+let%test_unit "inclusive-start X/Z recovery is undirected but binary edges retain corners" =
+  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    { id = "recovery"
+    ; attempt_id = "attempt"
+    ; case_id = None
+    ; label = "recovery"
+    ; kind = "waveform"
+    ; media_type = "text/vcd"
+    ; size = None
+    ; sha256 = None
+    ; availability = Available
+    }
+  in
+  List.iter [ 0; 5 ] ~f:(fun start ->
+    List.iter [ "0"; "1" ] ~f:(fun recovered ->
+      let opposite = if String.equal recovered "0" then "1" else "0" in
+      List.iter [ "x"; "z"; opposite ] ~f:(fun incoming ->
+        let data =
+          D.parse
+            (sprintf
+               "$timescale 1ns $end $var wire 1 ! bit $end $enddefinitions $end \
+                #0 %s! #%d %s! #%d %s! #%d"
+               incoming
+               start
+               recovered
+               (start + 5)
+               opposite
+               (start + 10))
+          |> Or_error.ok_exn
+        in
+        let t =
+          { (receive (create ~project:"p" artifact) (Ok data)) with
+            start = Int64.of_int start
+          ; span = 10L
+          }
+        in
+        let signals = Array.to_list (D.signals data) in
+        List.iter [ 7; 13; 24 ] ~f:(fun width ->
+          let mapping =
+            Time.create_window ~columns:(width - 2) ~start:t.start ~stop:(stop t data)
+          in
+          let cells =
+            Array.init (width - 2) ~f:(fun column ->
+              Option.value_exn (Time.cell_bounds mapping ~column))
+          in
+          let lane = D.project_window data ~signals ~cells |> Or_error.ok_exn |> List.hd_exn in
+          let directed = String.equal incoming opposite in
+          assert (Option.is_none lane.reason);
+          assert (lane.transitions.(0) = 1);
+          assert (Bool.equal lane.binary_edges.(0) directed);
+          assert (Option.equal String.equal lane.samples.(0) (Some recovered));
+          assert (Option.equal String.equal lane.end_samples.(0) (Some recovered));
+          let rows = graph t data ~width ~height:4 signals |> String.split_lines in
+          let first_high, first_low =
+            if not directed
+            then "│", "│"
+            else if String.equal recovered "1"
+            then "┌", "┘"
+            else "┐", "└"
+          in
+          assert (String.is_prefix (List.nth_exn rows 1) ~prefix:("│" ^ first_high));
+          assert (String.is_prefix (List.nth_exn rows 2) ~prefix:("│" ^ first_low));
+          (* Once recovered, the next real binary edge is directional even in
+             a compressed cell. Recovery must not suppress the known graph. *)
+          assert (
+            String.is_substring
+              (List.nth_exn rows 1)
+              ~substring:(if String.equal opposite "1" then "┌" else "┐"));
+          assert (
+            String.is_substring
+              (List.nth_exn rows 2)
+              ~substring:(if String.equal opposite "1" then "┘" else "└"));
+          List.iter rows ~f:(fun row ->
+            assert (Bonsai_term.View.width (Bonsai_term.View.text row) = width))))))
+;;
+
 let%test_unit "exact cursor, clamped pan, selection and explicit X lane marker" =
   let data =
     D.parse
@@ -1752,7 +1903,7 @@ let%test_unit "wide integer raster fills the plot and preserves a regular clock"
   let text = graph t data ~width ~height:8 (Array.to_list (D.signals data)) in
   assert (not (String.is_substring text ~substring:"Signals"));
   let rows = String.split_lines text |> Fn.flip List.drop 1 |> Fn.flip List.take 2 in
-  assert (List.exists rows ~f:(fun row -> String.is_substring row ~substring:"|"));
+  assert (List.exists rows ~f:(fun row -> String.is_substring row ~substring:"┌"));
   assert (String.is_substring (List.nth_exn (String.split_lines text) 4) ~substring:"A");
   let page = lane_page (Array.to_list (D.signals data)) ~focused:(Some 1) ~height:5 in
   assert (List.length page = 1 && (List.hd_exn page).index = 1);
@@ -1779,7 +1930,7 @@ let%test_unit "wide integer raster fills the plot and preserves a regular clock"
       not (String.is_empty (String.strip (slice row ~start:(width - 2) ~count:1)))));
   (* Physical duration stays fixed; individual edges are localized to their original-event
      cells rather than assuming a fixed character period. *)
-  assert (String.is_substring text ~substring:"|");
+  assert (String.is_substring text ~substring:"┘");
   let compressed = raster ~columns:(width - 2) ~target:4096 in
   assert (compressed.code < -1);
   assert (String.is_substring compressed.description ~substring:"multiple transitions");
@@ -1835,7 +1986,7 @@ let%test_unit "waveform uses Workbench frames, palette and compact inspectable m
         |> box ~width:1 ~height:1
       in
       let expected_stroke =
-        Bonsai_term.View.text ~attrs:(Host_view.Role.attrs appearance Metric) "_"
+        Bonsai_term.View.text ~attrs:(Host_view.Role.attrs appearance Metric) "─"
       in
       assert (String.equal (ansi stroke) (ansi expected_stroke));
       let background =
@@ -2413,7 +2564,7 @@ let%test_unit "native cursor is exact at transitions and preserves every glyph i
       plot
   in
   let glyph = sample plain cursor_x 1 |> output Notty.Cap.dumb |> String.strip in
-  assert (String.equal glyph "|");
+  assert (String.equal glyph "┌");
   List.iter Appearance.Scheme.all ~f:(fun scheme ->
     List.iter Appearance.Preset.all ~f:(fun preset ->
       List.iter Appearance.Color.all ~f:(fun color ->
