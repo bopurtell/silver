@@ -64,3 +64,17 @@ Help changes should point to real controls rather than promise future shortcuts.
 - [Adoption guide](../../fs3_adoption.md)
 - [Inspector/tmux guidance](../../fs1_investigation.md)
 - [Terminal entrypoint](../../../terminal/main.ml)
+
+## Added bounded scope — isolated review tooling (2026-11-05)
+
+Explicitly requested extension: task-local example setup and a reproducible launcher
+for a worktree's own daemon/client, with pinned provider environment, private state
+and preferences, endpoint handoff, identity reporting and actionable preflight.
+This implementation was **not part of the original ticket scope/estimate above**.
+It supports adoption review without disturbing the owner's manual-validation pair.
+
+Implementation and verification: [WB-052 isolated review notes](../../wb052_isolated_review.md).
+Fixtures and a disposable committed-source example cover this extension. Status stays
+**partial**: this does not close the original SSH/tmux, contextual-help, inspector
+exit/reconnect or representative remote-journey criteria. The notes list those
+remaining checks separately; no shared construction-plan/catalog changes are needed.
