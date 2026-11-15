@@ -554,17 +554,20 @@ def pty_acceptance(args, evidence, fixture, check):
             check(unit == 'ticks/cell' and amount > 5, prefix + ': compressed cells honestly represent multiple ticks')
             check('Cursor cell 0..%d ticks' % (amount - 1) in compressed0.text(),
                   prefix + ': compressed legend exposes the actual cursor cell tick interval')
-            terminal.key(b'l')
+            terminal.key(b'L')
             compressed1, cc1 = shot('compressed-1', 1)
             cursor_attr_change(check, compressed0, compressed1, cc0, cc1, prefix + '-compressed-same-cell')
             check(cc0 == cc1, prefix + ': adjacent compressed ticks can share the same highlighted column')
             value(compressed1, '1')
-            terminal.key(b'llll')
+            terminal.key(b'H')
+            compressed_back, ccb = shot('compressed-back', 0)
+            cursor_attr_change(check, compressed1, compressed_back, cc1, ccb, prefix + '-compressed-exact-left')
+            terminal.key(b'LLLLL')
             compressed5, cc5 = shot('compressed-5', 5)
             cursor_attr_change(check, compressed0, compressed5, cc0, cc5, prefix + '-compressed-different-value')
             check(cc5 == cc0, prefix + ': exact value can change within the same compressed cursor cell')
             value(compressed5, '0')
-            terminal.key(b'l' * (amount - 5))
+            terminal.key(b'L' * (amount - 5))
             compressed_next, ccn = shot('compressed-next-cell', amount)
             cursor_attr_change(check, compressed0, compressed_next, cc0, ccn, prefix + '-compressed-cell-boundary')
             check(ccn == cc0 + 1, prefix + ': crossing the compressed tick bucket moves exactly one plot cell')
@@ -583,6 +586,25 @@ def pty_acceptance(args, evidence, fixture, check):
             check(rulers[2]['start'] > 0 and all(l['tick'] >= rulers[2]['start'] for l in rulers[2]['labels']),
                   prefix + ': panned ruler retains absolute time rather than rebasing labels to zero')
             (directory / (prefix + '-ruler-measurements.json')).write_text(json.dumps(rulers, indent=2) + '\n')
+
+            # The 120-column viewport has its own fitted raster. Lowercase
+            # navigation follows that actual grid, even from inside a bucket.
+            set_tick(0)
+            narrow0, nc0 = shot('narrow-column-0', 0)
+            narrow_amount, narrow_unit = raster_scale(narrow0.text())
+            check(narrow_unit == 'ticks/cell' and narrow_amount > 5,
+                  prefix + ': narrow viewport retains a compressed column grid')
+            terminal.key(b'LLLLL')
+            narrow5, nc5 = shot('narrow-column-5', 5)
+            check(nc5 == nc0, prefix + ': narrow exact-tick movement stays within its compressed column')
+            terminal.key(b'l')
+            narrow_next, ncn = shot('narrow-column-right', narrow_amount)
+            cursor_attr_change(check, narrow5, narrow_next, nc5, ncn, prefix + '-narrow-column-right')
+            check(ncn == nc0 + 1, prefix + ': narrow l advances to the next plotted column boundary')
+            terminal.key(b'h')
+            narrow_back, ncb = shot('narrow-column-left', 0)
+            cursor_attr_change(check, narrow_next, narrow_back, ncn, ncb, prefix + '-narrow-column-left')
+            check(ncb == nc0, prefix + ': narrow h returns to the preceding plotted column boundary')
 
             terminal.resize(original_width, original_height, waveform=not workspace, hints=not workspace)
             set_tick(0)
@@ -667,7 +689,7 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.key(b'40\r')
         terminal.capture('cursor-40', ['Cursor 40 ticks', 'window 40..'])
         started = time.monotonic()
-        os.write(terminal.master, b'l')
+        os.write(terminal.master, b'L')
         deadline = started + 15
         while True:
             text = terminal.drain(.01)
@@ -792,6 +814,8 @@ def pty_acceptance(args, evidence, fixture, check):
             appearance_samples.append(dict(scheme=scheme, preset=preset or 'A - Instrument',
                 stroke_foregrounds=sorted({a[0] for a in stroke_attrs}),
                 background=shot.cells[-2][-2][1][1], corner=shot.cells[0][0][0], window=window(shot.text())))
+            check(raster_scale(shot.text()) == (1, 'cells/tick'),
+                  label + ': lowercase column navigation is checked at one cell per tick')
             terminal.key(b'l')
             moved = plot_shot(label + '-cursor-right', ['Cursor 1 ticks'])
             first_column = expected_cursor_column(*window(shot.text()), 0, raster_scale(shot.text()))
@@ -1159,7 +1183,7 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.capture('workspace-enabled-signal', ['[*] outputs.occupancy'])
         check(True, 'Signals lists disabled names; Enter enables without consuming global Space prefix')
         focus_pane('Waves')
-        terminal.key(b'l')
+        terminal.key(b'L')
         terminal.capture('workspace-waves-focused-navigation', ['Cursor 1 ticks', '[*] outputs.occupancy'])
         focus_pane('Logs')
         terminal.palette('Zoom focused tile')

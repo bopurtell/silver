@@ -1,0 +1,121 @@
+{
+  "ticket": "WB-068",
+  "schema_version": 1,
+  "measurement": "Real direct PTY; host input-to-cursor-header observation upper bounds",
+  "settings": {
+    "viewport": [180, 50],
+    "single_samples_per_direction_per_case": 8,
+    "hold_seconds": 2,
+    "repeat_rates_hz": [30, 120],
+    "initial_selected_buses": 8,
+    "release_tail_limit_ms": 50,
+    "post_release_observation_min_ms": 1000,
+    "cursor_stability_required_ms": 500
+  },
+  "fixtures": {
+    "small": {
+      "signals": 8, "timestamps": 2048, "changes": 16384,
+      "bytes": 226568, "bounds_ticks": [0, 20470],
+      "sha256": "bf444ece8f4c687eaa2b7fec4592b1e478737c0c7179a8decdbf7ecd50ddfb20"
+    },
+    "large": {
+      "signals": 128, "timestamps": 3072, "changes": 393216,
+      "bytes": 5585290, "bounds_ticks": [0, 30710],
+      "sha256": "eaba6fe58f99c786b2714661351399d959778b474081938b8284d6eaaec035a0"
+    }
+  },
+  "zooms": {
+    "expanded": "16 cells/tick",
+    "default": "2 cells/tick",
+    "compressed": "16 ticks/cell"
+  },
+  "binary_sha256": {
+    "baseline_client": "cf6815f3f6a78f85d4f42fbc33661fca26a6ca85e5c517a0228e24bb7a1b85e3",
+    "after_client": "c58610178063d27515009a52c28053dee806daf41d52b591eb4dae91022e09eb",
+    "daemon_both": "d8f08e4de5c19aaa764566d4c9894b2bb7c94b534151cff7b16a0cdd940e4a4c"
+  },
+  "raw_evidence": {
+    "baseline": "_build/wb068-evidence/wb068-evidence-2al8y3a0",
+    "column": "_build/wb068-evidence/column-u6fuyy6z",
+    "tick": "_build/wb068-evidence/tick-a04ibski",
+    "updated_baseline_probe_smoke": "_build/wb068-evidence/baseline-ewtboz7r",
+    "contents": "result.json, summary.json, bin/client, bin/daemon, per-fixture VCD, snapshots, pty.ansi, pty-events.jsonl, keys.jsonl"
+  },
+  "case_metric_columns": [
+    "fixture", "zoom", "single_header_median_ms", "single_header_max_ms",
+    "same_column_single_moves_of_16", "held_header_median_min_ms",
+    "held_header_median_max_ms", "held_header_max_ms",
+    "observed_step_headers_of_600", "release_tail_max_ms"
+  ],
+  "baseline_h_l": {
+    "cases": [
+      ["small", "expanded", 3.498, 8.442, 0, 2.762, 4.139, 9.585, 600, 0],
+      ["small", "default", 4.859, 7.562, 0, 2.627, 5.933, 13.749, 600, 0],
+      ["small", "compressed", 2.521, 3.497, 16, 2.417, 11.504, 18.858, 597, 0],
+      ["large", "expanded", 4.200, 9.018, 0, 3.185, 5.740, 13.804, 599, 0],
+      ["large", "default", 6.799, 10.948, 0, 3.256, 7.786, 13.751, 600, 0],
+      ["large", "compressed", 3.015, 5.200, 16, 3.738, 11.120, 21.588, 559, 3.835]
+    ],
+    "holds": 24,
+    "all_final_ticks_match_sent_raw_steps": true,
+    "holds_with_post_release_cursor_changes": 1,
+    "worst_release": {"fixture": "large", "zoom": "compressed", "key": "h", "rate_hz": 120, "tail_ms": 3.835, "ticks_after_release_observation": -1},
+    "censored_drains": 0,
+    "max_sender_lateness_ms": 5.146
+  },
+  "after_column_h_l": {
+    "cases": [
+      ["small", "expanded", 3.209, 5.101, 0, 2.829, 4.706, 14.044, 600, 0],
+      ["small", "default", 2.811, 6.524, 0, 2.468, 6.425, 13.317, 600, 0],
+      ["small", "compressed", 3.423, 6.920, 0, 2.353, 5.991, 9.160, 600, 0],
+      ["large", "expanded", 4.974, 8.893, 0, 3.362, 4.748, 10.802, 600, 0],
+      ["large", "default", 3.986, 9.671, 0, 3.121, 4.498, 12.931, 600, 0],
+      ["large", "compressed", 3.842, 9.573, 0, 2.895, 9.351, 15.548, 593, 4.525]
+    ],
+    "holds": 24,
+    "assertions_passed": [
+      "96 isolated keys reached exact expected raster targets and changed column in the pre-key grid",
+      "24 holds reached exact expected final cursor and viewport using actual sent byte count",
+      "24 holds sent exactly 60 or 240 bytes",
+      "24 release tails <= 50 ms and all drains stabilized without censoring"
+    ],
+    "holds_with_post_release_cursor_changes": 1,
+    "worst_release": {"fixture": "large", "zoom": "compressed", "key": "h", "rate_hz": 120, "tail_ms": 4.525, "ticks_after_release_observation": -16},
+    "censored_drains": 0,
+    "max_sender_lateness_ms": 2.353
+  },
+  "after_tick_H_L": {
+    "cases": [
+      ["large", "expanded", 3.591, 8.437, 0, 3.496, 5.233, 11.851, 600, 0],
+      ["large", "default", 4.081, 9.514, 0, 3.584, 5.476, 15.870, 599, 0],
+      ["large", "compressed", 4.821, 7.166, 16, 4.410, 12.206, 22.097, 592, 0]
+    ],
+    "holds": 12,
+    "assertions_passed": [
+      "48 isolated H/L keys moved exactly one raw tick and reached expected viewport state",
+      "12 holds reached exact expected final tick and viewport",
+      "12 holds sent exactly 60 or 240 bytes",
+      "12 release tails <= 50 ms and all drains stabilized without censoring"
+    ],
+    "holds_with_post_release_cursor_changes": 0,
+    "censored_drains": 0,
+    "max_sender_lateness_ms": 5.157
+  },
+  "commands": {
+    "baseline_build": "scripts/with-switch.sh dune build -j3 terminal/main.exe daemon/main.exe",
+    "after_column": "scripts/with-switch.sh python3 scripts/probe-wb068-repeat.py --step-mode column --samples 8 --rates 30 120",
+    "after_tick": "scripts/with-switch.sh python3 scripts/probe-wb068-repeat.py --step-mode tick --sizes large --samples 8 --rates 30 120",
+    "updated_baseline_probe_smoke": "scripts/with-switch.sh python3 scripts/probe-wb068-repeat.py --step-mode baseline --client _build/wb068-evidence/wb068-evidence-2al8y3a0/bin/client --daemon _build/wb068-evidence/wb068-evidence-2al8y3a0/bin/daemon --sizes small --samples 2 --rates 30",
+    "regenerate_expanded_summary_stdout": "python3 scripts/summarize-wb068-repeat.py --baseline _build/wb068-evidence/wb068-evidence-2al8y3a0/result.json --column _build/wb068-evidence/column-u6fuyy6z/result.json --tick _build/wb068-evidence/tick-a04ibski/result.json"
+  },
+  "limitations": [
+    "Synthetic 8-bit traces, one viewport, eight selected buses even in the 128-signal catalog; no tmux or physical keyboard transport.",
+    "Columns inferred from the displayed integer raster; h/H holds start at the left window edge and include automatic panning.",
+    "Host input-to-header timing includes event dispatch, rendering, PTY transport, ANSI reconstruction and scheduling; it does not isolate render CPU cost.",
+    "Held correlation matches observed ticks to the actual per-step expected sequence including grid rounding and panning. Missing intermediate headers are counted, not interpolated; no tick-delta correlation is used for column mode.",
+    "Periodic terminal output is not release backlog. Output-quiet timing is omitted from this comparison.",
+    "50 ms is an explicit diagnostic release budget, not a physical one-display-frame acceptance proof. No sustained release backlog was reproduced before or after.",
+    "Original baseline raw evidence was moved intact; its embedded historical absolute paths still name the previous scripts location.",
+    "Local raw evidence and preserved executables under _build survive this run but can be removed by dune clean. This JSON is the durable metric record."
+  ]
+}

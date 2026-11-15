@@ -152,8 +152,11 @@ let matches_index t (index : Asic_inspection.Index.t) =
   Run_ref.equal index.run t.run
   && String.equal index.domain t.domain
   && String.equal index.stage t.stage
-  && Option.value_map t.analysis ~default:true ~f:(fun target ->
-    Option.equal Asic_inspection.Analysis_target.equal index.analysis (Some target))
+   && Option.value_map t.analysis ~default:true ~f:(fun target ->
+     Option.equal Asic_inspection.Analysis_target.equal index.analysis (Some target)
+     || Option.exists (Asic_inspection.Reinspection.of_diagnostics index.diagnostics)
+          ~f:(fun r -> Asic_inspection.Analysis_target.equal r.original target
+            && Option.equal Asic_inspection.Analysis_target.equal index.analysis (Some r.recomputed)))
 ;;
 
 let operation ?(refresh = false) t =
@@ -349,7 +352,12 @@ let reconcile t (snapshot : Asic.Snapshot.t) =
     List.find snapshot.runs ~f:(fun run -> Run_ref.equal run.Asic.Run.run t.run)
     |> Option.map ~f:(fun run -> run.reference, run.cursor, run.execution_file)
   in
-  let index = List.find snapshot.inspections ~f:(matches_index t) in
+   let index = List.find snapshot.inspections ~f:(matches_index t) in
+   let analysis =
+     match t.analysis, index with
+     | Some _, Some i when Option.is_some (Asic_inspection.Reinspection.of_diagnostics i.diagnostics) -> i.analysis
+     | _ -> t.analysis
+   in
   let digest index =
     Option.map index ~f:(fun i -> i.Asic_inspection.Index.source_digest)
   in
@@ -425,7 +433,7 @@ let reconcile t (snapshot : Asic.Snapshot.t) =
            then Some (key ^ ": " ^ op.state)
            else None)))
   in
-  normalize { t with observation; detail; pending_error }
+   normalize { t with analysis; observation; detail; pending_error }
 ;;
 
 let cycle_axis t axis =
@@ -470,7 +478,8 @@ let build_detail_lines ?(now = Time_ns.now ()) (t : t) ~width =
          then [ "CACHED UNVERIFIED — explicit refresh required" ]
          else [])
       @ (if i.truncated then [ "Index truncated by provider" ] else [])
-      @ List.map i.diagnostics ~f:(fun d -> "Diagnostic: " ^ d))
+      @ List.filter_map i.diagnostics ~f:(fun d ->
+        if Asic_inspection.Reinspection.is_metadata d then None else Some ("Diagnostic: " ^ d)))
   in
   let row =
     List.find (visible t) ~f:(fun r ->
@@ -655,6 +664,7 @@ type input =
   | Character of char
   | Text of string
   | Backspace
+  | Delete_word
 
 let input ~width ~height t action =
   let t = clamp t ~width ~height in
@@ -671,18 +681,8 @@ let input ~width ~height t action =
     | Text text -> local (append_filter_text t text)
     | _ when t.pasting -> local (reject_filter_text t)
     | Back | Open -> local { t with editing = false }
-    | Backspace ->
-      let rec previous offset last =
-        if offset >= String.length t.filter
-        then last
-        else
-          previous
-            (offset
-             + Stdlib.Uchar.utf_decode_length
-                 (Stdlib.String.get_utf_8_uchar t.filter offset))
-            offset
-      in
-      local { t with filter = String.prefix t.filter (previous 0 0) }
+    | Backspace -> local { t with filter = Text_edit.drop_character t.filter }
+    | Delete_word -> local { t with filter = Text_edit.delete_word t.filter }
     | _ -> local t)
   else (
     match action with
@@ -799,7 +799,7 @@ let input ~width ~height t action =
           ; operation_key = Some (index_key t)
           }
       , Some (operation ~refresh:true t) )
-    | Character _ | Text _ | Backspace -> local t)
+    | Character _ | Text _ | Backspace | Delete_word -> local t)
 ;;
 
 let rows ?(now = Time_ns.now ()) ~width ~height t =
@@ -819,8 +819,8 @@ let rows ?(now = Time_ns.now ()) ~width ~height t =
          | None ->
            if t.editing
            then
-             "FILTER INPUT — Enter/Esc finish · Backspace deletes codepoint · Ctrl-U \
-              clears · Ctrl-C exits"
+             "FILTER INPUT — Enter/Esc finish · Ctrl-BS/Ctrl-W word · Ctrl-U clears · \
+              Ctrl-C exits"
            else
              "Enter detail · Esc back · Space c x close · j/k scroll · n/N page · / \
               filter · s sort · c/g/p axes · v ≤1ns · t stage · r refresh · d \
@@ -877,7 +877,8 @@ let rows ?(now = Time_ns.now ()) ~width ~height t =
                "Clock/name | Value/unit | Status | Producer/corner/group | Reported \
                 fields · "
              else "")
-            (String.concat ~sep:"; " i.diagnostics)
+             (String.concat ~sep:"; " (List.filter i.diagnostics
+               ~f:(fun d -> not (Asic_inspection.Reinspection.is_metadata d))))
         ]
         @ (List.drop rows (pos / viewport * viewport)
            |> Fn.flip List.take viewport

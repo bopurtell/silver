@@ -955,12 +955,27 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             (match selected_run with
              | Some run -> Overview_tiles.workflow_for_run ~asic:data.asic ~run
              | None -> Planned_run.workflow host.planned_run)
-          :: Overview_tiles.stage_rows ~selected_run ~asic:data.asic ~observation:None ()
+          :: (match selected_run, Planned_run.workflow host.planned_run with
+              | None, Some w -> Overview_tiles.workflow_endpoint_rows w
+              | _ -> Overview_tiles.stage_rows ~selected_run ~asic:data.asic ~observation:None ())
       in
       let facts =
         Option.bind selected_run ~f:data.summary
         |> Option.value_map ~default:[] ~f:(fun summary ->
           Overview_tiles.summary_rows ~freshness:policy.freshness summary)
+      in
+      let facts =
+        facts
+        @ Option.value_map
+            (Option.bind selected_run ~f:(fun run -> Overview_tiles.execution ~asic:data.asic ~run))
+            ~default:[]
+            ~f:(fun execution ->
+              Option.value_map execution.error ~default:[] ~f:(fun error ->
+                [ Overview_tiles.row
+                    ~role:Warning
+                    ~details:(String.split_lines error)
+                    "Observation"
+                    (Presentation.failure_summary error ^ " (details: d)") ]))
       in
       let interaction =
         if (not local.utility_detail) || not policy.hints
@@ -1018,7 +1033,11 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             then
               Option.bind selected_run ~f:(stopped_observation data)
               |> Option.value_map ~default:[] ~f:(fun error ->
-                [ Overview_tiles.row ~role:Warning "Observation error" error ])
+                [ Overview_tiles.row
+                    ~role:Warning
+                    ~details:(String.split_lines error)
+                    "Observation error"
+                    (Presentation.failure_summary error) ])
             else [])
          @ (if H.compact_summary host tile && not local.utility_detail
             then Overview_tiles.checklist_rows ~compact:true ~stages ~aggregate:facts ()
@@ -1398,6 +1417,9 @@ let planned_asic_source_rows host tile =
       in
       headline
       @ List.take selection 1
+      @ (if Planned_run.equal_status model.status Failed
+         then [ { Planned_run.role = Error; text = model.message } ]
+         else [])
       @ [ { Planned_run.role = Fact
           ; text = Planned_run.launch_label model ^ ": " ^ model.launch.message
           }
@@ -1427,7 +1449,11 @@ let planned_source_rows host tile =
         (String.lowercase (Sexp.to_string (Planned_run.sexp_of_status model.status))
          ^ ": "
          ^ model.message)
-    ; row Fact ("Workflow: " ^ model.launch.message)
+    ; row
+        (if Planned_run.equal_launch_status model.launch.state Launch_failed
+         then Error
+         else Fact)
+        ("Workflow: " ^ model.launch.message)
     ]
     @ Option.value_map host.stage_preparation ~default:[] ~f:(fun reason ->
       [ row Warning reason ])
@@ -1470,8 +1496,8 @@ let planned_source_rows host tile =
       if detail
       then
         Overview_tiles.inspection_lines
-          [ Overview_tiles.elaboration_row ~now:(Time_ns.now ()) ~selected:false (Some w)
-          ]
+           [ Overview_tiles.elaboration_row ~now:(Time_ns.now ()) ~selected:false (Some w)
+           ]
         |> List.map ~f:(row Fact)
       else []))
   else if host.H.planned_preparation
@@ -1540,7 +1566,13 @@ let planned_formatted_rows ?indicator_frames host tile ~width =
       then None
       else if i = 0
       then Some (plan_indicator model.status)
-      else if i = if detail then 1 else 2
+      else if i
+              =
+              if detail
+              then 1
+              else if Planned_run.equal_status model.status Failed
+              then 3
+              else 2
       then Some (producer_indicator model.launch.state)
       else None
     in
@@ -1723,6 +1755,27 @@ let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~w
 let execution_annotations host data (tile : W.Tile.t) =
   let row = Simulation_view.row in
   let local = H.local host tile.id in
+  let simulation_snapshots =
+    Option.value_map host.registry ~default:[] ~f:(fun registry ->
+      List.filter_map registry.tiles ~f:(fun candidate ->
+        if W.Workspace_id.equal candidate.workspace tile.workspace
+           && H.simulation_kind candidate.kind
+        then (H.simulation host candidate.id).snapshot
+        else None))
+  in
+  let job_label (job : Job.t) =
+    let simulation =
+      let detail_matches (snapshot : Simulation.Snapshot.t) =
+        Option.exists snapshot.detail ~f:(fun detail -> Job_id.equal detail.job job.id)
+      in
+      Option.first_some
+        (List.find simulation_snapshots ~f:detail_matches)
+        (List.find simulation_snapshots ~f:(fun snapshot ->
+           List.exists snapshot.attempts ~f:(fun summary ->
+             Job_id.equal summary.job job.id)))
+    in
+    Presentation.execution_job_label ?simulation job
+  in
   let project_tests = String.equal tile.kind "project-tests" in
   let jobs =
     List.filter data.jobs ~f:(fun job ->
@@ -1750,7 +1803,9 @@ let execution_annotations host data (tile : W.Tile.t) =
        ~f:row)
   @ (if (H.policy host tile).hints then [ row ~hint:true "b build | t test" ] else [])
   @ Option.value_map (List.find jobs ~f:selected) ~default:[] ~f:(fun job ->
-    List.map (Presentation.job_outcome_lines job) ~f:row
+    List.map
+      (("Kind: " ^ Job.Kind.to_string job.kind) :: Presentation.job_outcome_lines job)
+      ~f:row
     @
     if project_tests
     then List.map ("ATTEMPT OUTPUT" :: List.take (data.log_lines job.id) 4) ~f:row
@@ -1771,7 +1826,7 @@ let execution_annotations host data (tile : W.Tile.t) =
       ~selected:(selected job)
       ~indicator:(job_indicator job.state)
       ~spans:[ Simulation_view.span ~start:(cell_width prefix) tone status ]
-      (prefix ^ status ^ "  " ^ Job.Kind.to_string job.kind))
+      (prefix ^ status ^ "  " ^ job_label job))
 ;;
 
 let simulation_view_rows ?indicator_frames ?now host data tile ~width =
@@ -1905,6 +1960,14 @@ let rows host data tile ~width ~height =
            Hierarchy_view.rows ~icons:host.appearance.icons view ~height)
        | "planned-run" ->
          planned_rows host tile ~width |> List.map ~f:(fun row -> row.Planned_run.text)
+       | "workloads" ->
+         Workloads_view.rows
+           local.workloads
+           ~asic:data.asic
+           ~filter:local.filter
+           ~width
+           ~height
+         |> List.map ~f:E.text
        | "resources" | "resource-summary" ->
          let view =
            Resources_view.reconcile
@@ -2264,7 +2327,9 @@ let tile_view
     Option.value_map host.H.focus ~default:false ~f:(W.Tile_id.equal tile.id)
   in
   let binding =
-    if Resources_view.is_kind tile.kind && Option.is_some local.resources.explicit
+    if String.equal tile.kind "workloads"
+    then "explicit workload evidence"
+    else if Resources_view.is_kind tile.kind && Option.is_some local.resources.explicit
     then "explicit resource source"
     else if Testing_workspace.is_pane tile.kind
             || P.Waveforms.is_pane tile.kind
@@ -2769,7 +2834,16 @@ let tile_view
            (List.drop rows local.scroll))
   in
   let body =
-    if Resources_view.is_kind tile.kind
+    if String.equal tile.kind "workloads"
+    then
+      Workloads_view.rows
+        local.workloads
+        ~asic:data.asic
+        ~filter:local.filter
+        ~width:body_width
+        ~height:body_height
+      |> E.render ~attrs:(evidence_attrs appearance)
+    else if Resources_view.is_kind tile.kind
     then (
       let view =
         Resources_view.reconcile
@@ -3381,7 +3455,10 @@ let render_workspace
           ~role:Focus
           ~width
           ~height:1
-          [ "FILTER INPUT | Enter/Esc finish | Ctrl-U clear | query: " ^ filter ]
+          [ "FILTER INPUT | Enter/Esc finish | Ctrl-BS/Ctrl-W word | Ctrl-U clear | \
+             query: "
+            ^ filter
+          ]
       ])
     else if not host.chrome
     then []
@@ -3470,6 +3547,11 @@ let render_palette host dimensions background =
       | Some (H.Resource_path bundle) ->
         (if bundle then "IMPORT EMITTED BUNDLE" else "IMPORT RETAINED RESOURCE EVIDENCE")
         ^ " — exact absolute directory; Enter reads; no run allocation"
+      | Some H.Workload_path ->
+        "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
+      | Some (H.Workload_bundle (left, _)) ->
+        (if left then "CAPTURE A" else "CAPTURE B")
+        ^ " — exact absolute verified bundle directory; source digest stays frozen"
       | Some (H.Finalization_attempt run) ->
         "INSPECT FINALIZATION for "
         ^ run_label run
@@ -3567,10 +3649,10 @@ let render_palette host dimensions background =
       if not (String.is_empty host.notice)
       then host.notice
       else if Option.is_some p.argument
-      then "Enter accepts input · Esc return · Ctrl-C exits"
+      then "Enter accepts input · Esc return · Ctrl-BS/Ctrl-W word · Ctrl-C exits"
       else
         sprintf
-          "%d/%d · Tab/Shift-Tab ↑/↓ · Enter run · Esc return"
+          "%d/%d · Tab/Shift-Tab ↑/↓ · Enter run · Esc return · Ctrl-BS/Ctrl-W word"
           (if List.is_empty ranked then 0 else p.index + 1)
           (List.length ranked)
     in
@@ -5357,6 +5439,75 @@ let%test_unit "generic job icons retain exact identity and completion vocabulary
           assert (View.width view = width && View.height view = height))))
 ;;
 
+let%test_unit "execution rows use readable labels while selected detail retains raw kinds"
+  =
+  let host, data, find = refinement_fixture P.Testing.definition in
+  let tile = find "execution" in
+  let base = List.hd_exn Baseline_fixture.jobs in
+  List.iter
+    [ "simulation", "discover", "sim discover"
+    ; "simulation", "run", "sim run"
+    ; "dune", "test", "dune test"
+    ; "project-driver", "generate-rtl", "RTL generate"
+    ; "provider", "run", "provider.run"
+    ]
+    ~f:(fun (namespace, name, label) ->
+      let job = { base with kind = { namespace; name } } in
+      let host =
+        H.set_local
+          host
+          tile.id
+          { (H.local host tile.id) with cursor = Some (Job_id.to_string job.id) }
+      in
+      let rows = execution_annotations host { data with jobs = [ job ] } tile in
+      let job_row = List.last_exn rows in
+      assert job_row.selected;
+      assert (String.is_suffix job_row.text ~suffix:("  " ^ label));
+      assert (
+        List.exists rows ~f:(fun row ->
+          String.equal row.text ("Kind: " ^ namespace ^ "." ^ name))))
+;;
+
+let%test_unit "execution labels reuse simulation history from their own workspace" =
+  let host, data, find = refinement_fixture P.Testing.definition in
+  let tile = find "execution" in
+  let catalog = find "simulation-catalog" in
+  let base = List.hd_exn Baseline_fixture.jobs in
+  let job = { base with kind = { namespace = "simulation"; name = "run" } } in
+  let summary : Simulation.Summary.t =
+    { id = "attempt"
+    ; job = job.id
+    ; suite = "fifo"
+    ; seed = "1"
+    ; execution_timing = None
+    ; created_at = "now"
+    ; parent = None
+    ; lifecycle = Finished
+    ; outcome = Passed
+    }
+  in
+  let snapshot : Simulation.Snapshot.t =
+    { configured = true
+    ; discovery = None
+    ; discovery_digest = None
+    ; discovery_job = None
+    ; discovery_error = None
+    ; attempts = [ summary ]
+    ; next_before = None
+    ; detail = None
+    ; byte_page = None
+    ; history_error = None
+    }
+  in
+  let view = { Simulation_view.empty with snapshot = Some snapshot } in
+  let host = H.set_simulation host catalog.id view in
+  let rows = execution_annotations host { data with jobs = [ job ] } tile in
+  assert (String.is_suffix (List.last_exn rows).text ~suffix:"  sim run fifo");
+  let other_job = { job with id = Job_id.of_string "other-job" } in
+  let rows = execution_annotations host { data with jobs = [ other_job ] } tile in
+  assert (String.is_suffix (List.last_exn rows).text ~suffix:"  sim run")
+;;
+
 let%test_unit "execution images paint typed states and condense only display identities" =
   let host, data, find = refinement_fixture P.Testing.definition in
   let id = "Failed-0123456789abcdef0123456789-Complete" in
@@ -5389,6 +5540,8 @@ let%test_unit "execution images paint typed states and condense only display ide
         in
         let annotations = execution_annotations host data tile in
         assert (List.last_exn annotations).selected;
+        assert (
+          List.exists annotations ~f:(fun row -> String.equal row.text "Kind: dune.test"));
         assert (Option.equal String.equal (H.local host tile.id).cursor (Some id));
         let commands =
           H.catalog host ~project:None ~jobs:[ { job with state = Running } ]
@@ -5406,7 +5559,7 @@ let%test_unit "execution images paint typed states and condense only display ide
             let text = plain_text image in
             assert (String.is_substring text ~substring:(Overview_tiles.short_id id));
             assert (not (String.is_substring text ~substring:id));
-            assert (String.is_substring text ~substring:(Job.Kind.to_string job.kind));
+            assert (String.is_substring text ~substring:"dune test");
             let status = Job.State.to_string state in
             let role =
               match state with
@@ -5426,7 +5579,7 @@ let%test_unit "execution images paint typed states and condense only display ide
                   String.is_substring line ~substring:(Overview_tiles.short_id id))
             in
             let x =
-              let suffix = status ^ "  " ^ Job.Kind.to_string job.kind in
+              let suffix = status ^ "  dune test" in
               List.find_exn
                 (List.init (100 - String.length suffix) ~f:Fn.id)
                 ~f:(fun x ->
@@ -8966,7 +9119,10 @@ let%test_unit "WB-054 artifact keyboard seam dispatches unavailable selection re
           | _ -> assert false
         in
         match snd dispatch with
-        | Unavailable reason -> assert (String.equal reason expected)
+        | Unavailable reason ->
+          if Char.equal key 'w'
+          then assert (String.is_substring reason ~substring:"No available supported VCD")
+          else assert (String.equal reason expected)
         | _ -> assert false))
 ;;
 
@@ -8980,8 +9136,8 @@ let%test_unit "WB-054 production selection catalog promotes original runnable id
     ; label = "waves"
     ; kind = "waveform"
     ; media_type = "text/vcd"
-    ; size = None
-    ; sha256 = None
+    ; size = Some 123
+    ; sha256 = Some (String.make 64 'a')
     ; availability = Available
     }
   in
@@ -9098,6 +9254,9 @@ let%test_unit "WB-054 production selection catalog promotes original runnable id
                 (H.catalog empty_artifacts ~project:None ~jobs:[])))
     in
     match action with
-    | Unavailable reason -> assert (String.equal reason "no artifact selected")
+    | Unavailable reason ->
+      if Char.equal key 'w'
+      then assert (String.is_substring reason ~substring:"No available supported VCD")
+      else assert (String.equal reason "no artifact selected")
     | _ -> assert false)
 ;;

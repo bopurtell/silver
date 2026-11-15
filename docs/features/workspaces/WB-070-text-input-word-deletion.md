@@ -3,7 +3,7 @@ id: WB-070
 title: Ctrl-Backspace word deletion in the palette and text inputs
 category: workspaces
 feature_sets: [FS5]
-status: proposed
+status: delivered
 kind: defect
 priority: P2
 severity: S3
@@ -56,3 +56,35 @@ None beyond confirming the input list.
 ## References
 - [Word deletion helper](../../../terminal/waveform_view.ml)
 - [Palette controls](../../frontend_composition.md)
+
+## Delivery notes — 2026-11-05
+
+Implementation is **delivered, awaiting owner acceptance**. The acceptance checklist
+above remains unchecked pending owner review; automated evidence is recorded below.
+
+- Extracted the waveform helper into `terminal/text_edit.ml`, including native
+  decoder handling for Ctrl-Backspace, Ctrl-W, and Meta-Backspace. Plain DEL remains
+  single-code-point Backspace, with Ctrl-W available when a terminal cannot encode
+  Ctrl-Backspace distinctly.
+- Reused deletion in palette queries and argument forms (including simulation
+  launch), synthesis/resource/hierarchy/catalog/log filters, inspector filters, and
+  the shared Timing filter. Input help now mentions `Ctrl-BS/Ctrl-W word`.
+- Preserved waveform word boundaries: ASCII alphanumeric/underscore and non-ASCII
+  text form words; trailing ASCII separators are skipped before deleting a word.
+  UTF-8 code points are not split. Backspace removes a code point, not an entire
+  grapheme cluster. Paste guards and local editing behavior are retained.
+- Waveform edits only extract/reuse the text helper; cursor behavior is outside this
+  delivery and remains owned by the separate waveform session.
+
+### Verification
+
+Passed using `scripts/with-switch.sh` with builds limited to `-j 10`:
+
+- `dune build -j 10 terminal/main.exe terminal/terminal_presentation.cma`
+- `dune runtest -j 10 terminal`, including existing waveform tests and new native
+  decoding, Unicode, palette/form, focused-filter and paste-isolation regressions.
+- Focused `ocamlformat --check` and `git diff --check`.
+
+Repository-wide `@fmt` did not pass because of formatting differences outside the
+focused formatted files. Physical-terminal gesture/help review and owner acceptance
+are pending; automated tests do not constitute that acceptance.
