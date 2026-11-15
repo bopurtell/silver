@@ -3,7 +3,7 @@ id: WB-065
 title: Broader ASIC lifecycle/cancellation race coverage
 category: infrastructure
 feature_sets: [FS1]
-status: partial
+status: closed
 kind: validation
 priority: P2
 severity: n/a
@@ -19,6 +19,14 @@ related: [WB-044, WB-062]
 ---
 
 # WB-065 — Broader ASIC lifecycle/cancellation race coverage
+
+## Closure — 2026-11-15
+
+Merged in PR #10 and closed at the owner's request. Acceptance is for the bounded
+lifecycle matrix documented below, including its explicit remaining limits, rather
+than exhaustive race or real-EDA coverage. After integration with the current main
+development branch, `dune runtest -j10 daemon/test` passed. Earlier full-suite evidence
+remains recorded below; no new full-suite or physical-flow campaign is claimed.
 
 ## Request
 Carry forward construction-plan lifecycle/cancellation coverage gaps across late
@@ -103,3 +111,14 @@ the daemon or launching execution: cursor 19 → 21, run `observing` → `failed
 unavailable; reconciliation cannot create results the failed stage never published.
 
 This closes the concrete incident, not the entire broader lifecycle matrix above.
+
+## Bounded matrix delivery (2026-11-05)
+
+The [coverage matrix and verification record](../../asic_lifecycle_matrix.md)
+maps prior evidence, new backend/HTTP/frontend receipt specimens and remaining
+limits. Queued/pre-allocation/late-allocation and postcheck cancellation, identity
+rejection, detached/concurrent clients, reconnect/shutdown ownership, and stale
+selection responses are covered. Two pending-task run identity omissions were fixed.
+Full build, tests and lint passed at `-j5`; changed OCaml files pass formatting,
+while global formatting retains baseline failures. Delivery is bounded to this
+matrix, not exhaustive physical-stage or crash races.

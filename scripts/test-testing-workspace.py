@@ -165,6 +165,11 @@ def run(args):
         done = session.done(aid)
         check(field(done, 'outcome') == 'Passed', 'selected subset produces actual normalized fixture result')
         terminal.palette('Unzoom workspace')
+        terminal.key(b'\x1b[Z')  # Execution: labels use the job's captured subset.
+        terminal.palette('Zoom focused tile')
+        terminal.capture('execution-readable-labels', ['sim discover', 'sim run fixture/second'])
+        terminal.palette('Unzoom workspace')
+        terminal.key(b'\t')  # Catalog
         terminal.key(b'\t')  # Attempts shares the just launched attempt.
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
         terminal.key(b'\t')  # Cases

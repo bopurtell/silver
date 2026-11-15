@@ -1,1 +1,71 @@
-(data_only_dirs test)
+(alias
+ (name test-contracts)
+ (deps (alias test/contracts)))
+
+(alias
+ (name test-backend)
+ (deps (alias test/backend)))
+
+(alias
+ (name test-presentation)
+ (deps (alias test/presentation)))
+
+(alias
+ (name test-setup)
+ (deps (alias test/setup)))
+
+(alias
+ (name test-api)
+ (deps (alias test/api)))
+
+(alias
+ (name test-local)
+ (deps (alias test/local)))
+
+(alias
+ (name test-native-smoke)
+ (deps (alias test/native-smoke)))
+
+(alias
+ (name test-support)
+ (deps (alias test/support)))
+
+(alias
+ (name test-real-elaboration)
+ (deps (alias test/real-elaboration)))
+
+(alias
+ (name test-real-synthesis)
+ (deps (alias test/real-synthesis)))
+
+(alias
+ (name test-real-floorplan)
+ (deps (alias test/real-floorplan)))
+
+(alias
+ (name test-real-placement)
+ (deps (alias test/real-placement)))
+
+(alias
+ (name test-real-cts)
+ (deps (alias test/real-cts)))
+
+(alias
+ (name test-real-routing)
+ (deps (alias test/real-routing)))
+
+(alias
+ (name test-real-timing)
+ (deps (alias test/real-timing)))
+
+(alias
+ (name test-real-signoff)
+ (deps (alias test/real-signoff)))
+
+(alias
+ (name test-real-pyramid)
+ (deps (alias test/real-pyramid)))
+
+(alias
+ (name test-real-preflight)
+ (deps (alias test/real-preflight)))

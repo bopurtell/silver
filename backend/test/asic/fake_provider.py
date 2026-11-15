@@ -26,13 +26,27 @@ def envelope(contract, version=1, **fields):
 
 
 def plan():
-    return envelope('methodology-plan', plan_identity='a' * 64,
-                    bundle_identity='b' * 64)
+    value = envelope('methodology-plan', plan_identity='a' * 64,
+                     bundle_identity='b' * 64)
+    if (option('--profile') or '').startswith('sram-'):
+        value['bundle_manifest'] = json.dumps(dict(operation='Hardening', macro_contract=dict(
+            schema_version=2, execution='fresh_full', macros=[dict(
+                module='RM_IHPSG13_1P_256x16_c2_bm_bist', physical_intent=dict(orientation='R0'))])))
+    return value
+
+
+def lifecycle_gate(name, value):
+    """Two FIFO rendezvous: arrival is acknowledged before the parent releases us."""
+    prefix = os.path.join(root, 'wb065-' + name)
+    with open(prefix + '.ready', 'w') as out:
+        out.write(value)
+    with open(prefix + '.release') as src:
+        src.read()
 
 
 if args == ['lifecycle-exit']:
     sys.exit(0)
-elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malformed'], ['lifecycle-cancel']]:
+elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malformed'], ['lifecycle-cancel'], ['wb065-unrelated']]:
     mode = args[0]
 
     def stop_fixture(_signal, _frame):
@@ -51,10 +65,34 @@ elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malforme
         for _ in range(9):
             sys.stdout.write('x' * (1024 * 1024))
             sys.stdout.flush()
-    time.sleep(30)
+    if mode == 'wb065-unrelated':
+        signal.pause()
+    else:
+        time.sleep(30)
 elif args == ['--version', '--json']:
-    emit(dict(cli_contract=dict(version=4, capabilities=dict(
-        namedflow1=True, timing_stage1=os.path.exists('timing-capability')))))
+    capabilities = dict(namedflow1=True, timing_stage1=os.path.exists('timing-capability'))
+    if os.path.exists('sram-capability'):
+        capabilities['sram_segmented1'] = True
+        with open(os.path.join(os.path.dirname(__file__), 'sram_scope.json')) as src:
+            capabilities['sram_segmented1_scope'] = json.load(src)
+        if os.path.exists('sram-bad-scope'):
+            capabilities['sram_segmented1_scope']['checkpoint_schema'] = 2
+        if os.path.exists('sram-revoke-count'):
+            with open('sram-revoke-count') as src:
+                count = int(src.read()) + 1
+            with open('sram-revoke-count', 'w') as out:
+                out.write(str(count))
+            if count >= 3:
+                capabilities['sram_segmented1'] = False
+    metadata = dict(cli_contract=dict(version=4, capabilities=capabilities))
+    if os.path.exists('synthesis-collection-capability') or os.path.exists('inactive-synthesis-capability'):
+        capabilities['synthesis_collection1'] = dict(schema_version=1, profile='synthesis-total-tasks-v1',
+            total_container_tasks=6, fresh_only=True, acceptance=False,
+            opt_in='HARDCAML_ASIC_SYNTHESIS_TASK_LIMIT=6')
+    if os.path.exists('synthesis-collection-capability') or os.path.exists('active-synthesis-envelope'):
+        metadata['execution_envelope'] = dict(schema_version=1, profile='synthesis-total-tasks-v1',
+            total_container_tasks=6, configured_executor_max_workers=6, reduced_usable_executor_concurrency=True)
+    emit(metadata)
 elif args[:2] == ['flow', 'list']:
     if os.path.exists('fail-discovery'):
         sys.exit(1)
@@ -96,6 +134,9 @@ elif args[:1] == ['stages']:
     signal.signal(signal.SIGTERM, terminate)
     emit(envelope('stage-observation', event='observation_allocated',
                   attempt=attempt, stream_id=stream))
+    if profile == 'admission-rejected':
+        print('strict synthesis envelope requires one fresh synthesis-only stage recipe', file=sys.stderr)
+        sys.exit(2)
     if profile.startswith('exit-race'):
         for _ in range(500):
             if os.path.exists(os.path.join(attempt, 'in-flight')):
@@ -117,7 +158,10 @@ elif args[:1] == ['stages']:
                              occurrence_id=stream + '/implementation.' + stage,
                              action_key='implementation.' + stage, status='completed',
                              exit_code=0, duration_seconds=1.0, best_effort=False,
-                             verdict=None) for stage in stages])
+                              verdict=None) for stage in stages])
+        if profile.startswith('sram-failed'):
+            execution.update(status='failed', exit_code=2)
+            execution['occurrences'][-1].update(status='failed', exit_code=2)
         method = envelope('historical-methodology', state='recorded',
                           plan_identity='a' * 64, bundle_identity='b' * 64,
                           reference=dict(attempt_id=stream))
@@ -126,11 +170,28 @@ elif args[:1] == ['stages']:
         with open(os.path.join(attempt, 'observation.json'), 'w') as out:
             json.dump(envelope('stage-observation', 2, stream_id=stream, cursor=0,
                                writer_active=False, observation_status='final',
-                               state=dict(execution, outcome=dict(status='completed', exit_code=0)),
+                               state=dict(execution, outcome=dict(status=execution['status'], exit_code=execution['exit_code'])),
                                methodology=method, execution_file=os.path.join(attempt, 'execution.json')), out)
     emit(envelope('stage-observation', event='observation_terminal',
                   execution_file=os.path.join(attempt, 'execution.json')))
+    if profile.startswith('sram-failed'):
+        sys.exit(2)
 elif args[:2] == ['observation', 'read-updates']:
+    if os.path.basename(args[2]) == 'attempt-admission-rejected':
+        stream = option('--stream-id')
+        allocation = dict(request=dict(expected_plan_identity='a' * 64,
+            methodology_launch=dict(attempt_id=stream, expected_plan_identity='a' * 64)))
+        recipe = dict(plan=dict(schema_version=4, initial_boundary=None,
+                               stages=['synthesis', 'floorplan', 'placement']))
+        outcome = dict(status='failed', exit_code=2,
+            error='strict synthesis envelope requires one fresh synthesis-only stage recipe')
+        emit(envelope('stage-observation', 2, stream_id=stream,
+            after=int(option('--after')), cursor=3, events=[
+                envelope('stage-observation', 2, stream_id=stream, sequence=i,
+                         event=name, data=data)
+                for i, (name, data) in enumerate([
+                    ('allocated', allocation), ('planned', recipe), ('outcome', outcome)], 1)]))
+        sys.exit(0)
     stage_fixture = os.path.join(args[2], 'observation.json')
     cursor = 0
     if os.path.basename(args[2]).startswith('attempt-exit-race'):
@@ -142,6 +203,11 @@ elif args[:2] == ['observation', 'read-updates']:
                   after=int(option('--after')), cursor=cursor, events=[]))
 elif args[:2] == ['observation', 'inspect']:
     attempt = args[2]
+    if os.path.basename(attempt) == 'attempt-admission-rejected':
+        with open(os.path.join(attempt, 'inspect-called'), 'w') as out:
+            out.write('unexpected mandatory inspect')
+        print('observation inspect: missing required named preflight reference', file=sys.stderr)
+        sys.exit(2)
     stage_fixture = os.path.join(attempt, 'observation.json')
     if os.path.exists(stage_fixture):
         with open(stage_fixture) as src:
@@ -207,12 +273,17 @@ elif args[:1] == ['report']:
     if os.path.exists('revision'):
         count += 1
     boundary = 'signoff' if profile == 'terminal' else 'synthesis'
+    synthesis_collection = profile == 'terminal' and os.path.exists('synthesis-finalization')
+    if synthesis_collection:
+        boundary = 'synthesis'
     reference = dict(path=attempt, boundary=boundary, identity=str(count))
     references = [reference]
     if profile == 'terminal':
         stages = ['synthesis', 'floorplan', 'placement', 'cts', 'routing', 'signoff']
         if os.path.exists('seven-stage-finalization'):
             stages.insert(-1, 'timing')
+        if synthesis_collection:
+            stages = ['synthesis']
         references = [dict(path=os.path.join(attempt, stage) if stage != 'signoff' else attempt,
                            boundary=stage, identity=str(count))
                       for stage in stages]
@@ -237,7 +308,7 @@ elif args[:1] == ['report']:
                                            status='failed', exit_code=2)])
     if profile == 'terminal':
         stages = [ref['boundary'] for ref in references]
-        execution.update(exit_code=0, plan=dict(schema_version=(4 if os.path.exists('seven-stage-finalization') else 3), initial_boundary=None, stages=stages),
+        execution.update(exit_code=0, plan=dict(schema_version=(4 if synthesis_collection or os.path.exists('seven-stage-finalization') else 3), initial_boundary=None, stages=stages),
                          occurrences=[dict(action_key='implementation.' + stage,
                                            occurrence_id=stream + '/implementation.' + stage,
                                            status='completed', exit_code=0) for stage in stages])
@@ -267,6 +338,11 @@ elif args[:1] == ['report']:
                                [(ref, count if ref['boundary'] == 'synthesis' else count + 1000)
                                 for ref in references]]))
 elif args[:1] == ['finalize']:
+    control_file = os.path.join(root, 'wb065-finalize.json')
+    control = {}
+    if os.path.exists(control_file):
+        with open(control_file) as src:
+            control = json.load(src)
     if os.path.exists('finalize-no-allocation'):
         print('fixture allocation failure', file=sys.stderr)
         sys.exit(2)
@@ -300,16 +376,30 @@ elif args[:1] == ['finalize']:
     def stop_finalization(_signal, _frame):
         receipt.update(status='interrupted', ended_at='recorded', exit_code=143)
         save_receipt()
+        if control.get('late_allocation'):
+            emit(envelope('segment-finalization', event='allocated', attempt=attempt,
+                          attempt_id=operation_id))
+            lifecycle_gate(control['late_allocation_gate'], attempt)
         with open(os.path.join(attempt, 'terminated'), 'w') as out:
             out.write('owned finalize received SIGTERM')
         sys.exit(143)
 
     signal.signal(signal.SIGTERM, stop_finalization)
     save_receipt()
+    if control.get('before_allocation'):
+        lifecycle_gate(control['before_allocation'], attempt)
+    if control.get('initial_inspect_gate'):
+        with open(os.path.join(attempt, 'wb065-inspect.json'), 'w') as out:
+            json.dump(dict(gate=control['initial_inspect_gate']), out)
+        receipt['phase'] = 'external_postcheck' if request['accept'] else 'collection'
+        save_receipt()
     emit(envelope('segment-finalization', event='allocated', attempt=attempt, attempt_id=operation_id))
     receipt['phase'] = 'external_postcheck' if request['accept'] else 'collection'
     save_receipt()
-    time.sleep(30 if os.path.exists('finalize-hold') else 0.3)
+    if control.get('after_allocation'):
+        lifecycle_gate(control['after_allocation'], attempt)
+    else:
+        time.sleep(30 if os.path.exists('finalize-hold') else 0.3)
     failed = request['accept']
     results = dict(schema_version=1, run_id=operation_id, build_identity='b' * 64,
                    provenance=dict(contract='hardcaml-asic.segment-finalization',
@@ -331,7 +421,23 @@ elif args[:1] == ['finalization-inspect']:
         print('fixture finalization inspection unavailable', file=sys.stderr)
         sys.exit(2)
     with open(os.path.join(args[1], 'operation.json')) as src:
-        emit(json.load(src))
+        receipt = json.load(src)
+    gate_file = os.path.join(args[1], 'wb065-inspect.json')
+    if os.path.exists(gate_file):
+        with open(gate_file) as src:
+            control = json.load(src)
+        os.unlink(gate_file)  # Only this exact reader consumes the one-shot gate.
+
+        def stop_reader(_signal, _frame):
+            with open(os.path.join(args[1], 'reader-terminated'), 'w') as out:
+                out.write(control['gate'])
+            # A successful late response must still be fenced by cancellation.
+            emit(receipt)
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, stop_reader)
+        lifecycle_gate(control['gate'], args[1])
+    emit(receipt)
 else:
     print('Unsupported fixture argv: ' + repr(args), file=sys.stderr)
     sys.exit(2)
