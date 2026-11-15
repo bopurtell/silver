@@ -19,6 +19,7 @@ type local =
   ; utility_detail : bool
   ; synthesis : Synthesis_view.State.t
   ; resources : Resources_view.t
+  ; workloads : Workloads_view.t
   ; terminal_result : Terminal_result_view.State.t
   ; artifacts : Artifact_view.t option
   ; artifact_generation : int
@@ -62,6 +63,13 @@ type action =
   | Hierarchy_detail of W.Tile_id.t
   | Discover_asic
   | Open_resources
+  | Open_workloads
+  | Workload_import
+  | Workload_result of string * string option
+  | Workload_input of Workloads_view.input
+  | Workload_capture of bool
+  | Workload_reference of W.Tile_id.t * Simulation.Artifact.t
+  | Workload_testing
   | Resource_target of Asic_resources.Target.t option
   | Resource_import of bool
   | Resource_import_path of bool * string
@@ -154,6 +162,8 @@ type argument =
   | Preparation_inputs of string * string
   | Finalization_attempt of Run_ref.t
   | Resource_path of bool
+  | Workload_path
+  | Workload_bundle of bool * Workloads_view.capture_token
   | Acceptance of Run_ref.t * string * string
   | Simulation_selection of W.Tile_id.t * string * string * Simulation_view.Form.t
 
@@ -257,6 +267,7 @@ let default_local =
   ; utility_detail = false
   ; synthesis = Synthesis_view.State.empty
   ; resources = Resources_view.empty
+  ; workloads = Workloads_view.empty
   ; terminal_result = Terminal_result_view.State.empty
   ; artifacts = None
   ; artifact_generation = 0
@@ -1211,6 +1222,7 @@ let reconnect t ~replacement =
           , { local with
               artifact_generation = local.artifact_generation + 1
             ; resources = Resources_view.reconnect local.resources
+            ; workloads = Workloads_view.reconnect local.workloads
             ; artifacts =
                 Option.map local.artifacts ~f:(fun view ->
                   { view with
@@ -1658,11 +1670,31 @@ let navigation_preferences ~project_key t =
         ; timing
         })
     in
-    Navigation_preferences.create
-      ~project_key
-      ~session:(W.Session_id.to_string registry.session_id)
-      ~active:(Option.map t.active ~f:W.Workspace_id.to_string)
-      ~workspaces)
+    let saved =
+      Navigation_preferences.create
+        ~project_key
+        ~session:(W.Session_id.to_string registry.session_id)
+        ~active:(Option.map t.active ~f:W.Workspace_id.to_string)
+        ~workspaces
+    in
+    let saved =
+      Navigation_preferences.with_testing_artifacts
+        saved
+        (List.filter_map t.testing ~f:(fun (id, (_, _, state)) ->
+           if List.exists workspaces ~f:(fun w ->
+                String.equal w.Navigation_preferences.id id)
+           then Option.map (Testing_workspace.artifact_metadata state) ~f:(fun a -> id, a)
+           else None))
+    in
+    Navigation_preferences.with_workloads
+      saved
+      (List.filter_map registry.tiles ~f:(fun tile ->
+         if String.equal tile.kind "workloads"
+         then
+           Some
+             ( W.Tile_id.to_string tile.id
+             , Workloads_view.remember (local t tile.id).workloads )
+         else None)))
 ;;
 
 let valid_navigation_workspaces (saved : Navigation_preferences.t) t =
@@ -1740,7 +1772,25 @@ let navigation_input_changes before after =
 ;;
 
 let restore_navigation_selections saved t ~scope =
+  let t =
+    List.fold saved.Navigation_preferences.workloads ~init:t ~f:(fun t (id, saved_view) ->
+      let valid = valid_navigation_workspaces saved t in
+      if List.exists valid ~f:(fun pref ->
+           List.exists pref.members ~f:(fun m ->
+             String.equal m.tile id && String.equal m.kind "workloads"))
+      then (
+        let id = W.Tile_id.of_string id in
+        let l = local t id in
+        set_local t id { l with workloads = Workloads_view.restore saved_view })
+      else t)
+  in
   List.fold (valid_navigation_workspaces saved t) ~init:t ~f:(fun t pref ->
+    let metadata =
+      List.Assoc.find
+        saved.Navigation_preferences.testing_artifacts
+        pref.id
+        ~equal:String.equal
+    in
     let workspace = W.Workspace_id.of_string pref.id in
     let members =
       Option.value_map t.registry ~default:[] ~f:(fun registry ->
@@ -1758,6 +1808,7 @@ let restore_navigation_selections saved t ~scope =
         let state =
           Option.value_map saved.attempt ~default:state ~f:(fun attempt ->
             Testing_workspace.restore_selection
+              ?metadata
               state
               ~attempt
               ~case_id:saved.case_id
@@ -2395,6 +2446,7 @@ let project_scoped_kind kind =
   || P.Waveforms.is_pane kind
   || List.mem
        [ "simulation"
+       ; "workloads"
        ; "hierarchy"
        ; "execution"
        ; "project-tests"
@@ -3435,6 +3487,21 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         "resource inventory table memory macro"
         Open_resources
     ; command
+        "workloads.open"
+        "Open Workloads workspace"
+        "PT8 retained inspection comparison"
+        Open_workloads
+    ; command
+        "workloads.import"
+        "Workloads: Import exact retained result.json"
+        "absolute path read only"
+        Workload_import
+    ; command
+        "workloads.launch"
+        "Workloads: Launch fresh PT.8 workload… (Testing)"
+        "simulation suite discovery form"
+        Workload_testing
+    ; command
         "resources.import-coarse"
         "Resources: Import retained resource evidence"
         "exact coarse source absolute path no run allocation"
@@ -3622,6 +3689,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ; "timing"
         ; "synthesis"
         ; "resources"
+        ; "workloads"
         ; "resource-summary"
         ; "asic"
         ; "project"
@@ -3713,6 +3781,47 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ; command "logs.follow" "Resume log follow" "tail" Resume_log
         ]
       @ presentation_commands t tile
+      @ (if not (String.equal tile.kind "workloads")
+         then []
+         else
+           List.map
+             [ "results", "Retained result list (Esc)", Workloads_view.Show_results
+             ; "detail", "Open selected result (Enter)", Open
+             ; "refresh", "Refresh exact source/pair (r)", Refresh
+             ; "provenance", "Inspect controls and provenance (d)", Show_provenance
+             ; "compare", "Compare captured A / B (c)", Show_compare
+             ; "swap", "Swap A / B and query provider", Swap
+             ]
+             ~f:(fun (id, title, input) ->
+               command
+                 ("workloads." ^ id)
+                 ("Workloads: " ^ title)
+                 "PT8 evidence"
+                 (Workload_input input))
+           @ (let unavailable =
+                if Workloads_view.capture_ready (local t tile.id).workloads
+                then None
+                else Some "Open the selected result's validated detail before capture"
+              in
+              [ command
+                  ?unavailable
+                  "workloads.capture-a"
+                  "Workloads: Capture A left result"
+                  "source digest verified bundle locator legacy exact path"
+                  (Workload_capture true)
+              ; command
+                  ?unavailable
+                  "workloads.capture-b"
+                  "Workloads: Capture B right result"
+                  "source digest verified bundle locator legacy exact path"
+                  (Workload_capture false)
+              ])
+           @ List.map Workloads_view.axes ~f:(fun axis ->
+             command
+               ("workloads.axis." ^ axis)
+               ("Workloads: Axis " ^ axis)
+               "explicit comparison intent"
+               (Workload_input (Axis axis))))
       @ (if not (String.equal tile.kind "resources")
          then []
          else
@@ -4106,8 +4215,12 @@ let testing_context_commands t (tile : W.Tile.t) =
             artifact_reason
         ; placeholder
             "testing.artifact.waveform"
-            "Simulation: Open selected artifact as embedded waveform (w)"
-            artifact_reason
+            "Simulation: Open selected case VCD as embedded waveform (w)"
+            (Testing_workspace.waveform_unavailable (testing_state t tile.id))
+        ; placeholder
+            "testing.artifact.waveform-workspace"
+            "Simulation: Open selected case in Waveforms workspace (W)"
+            (Testing_workspace.waveform_unavailable (testing_state t tile.id))
         ]
     | _ -> [])
 ;;
@@ -4115,6 +4228,16 @@ let testing_context_commands t (tile : W.Tile.t) =
 (* Production selection commands, shared with catalog/keyboard regression seams. The
    caller supplies the existing submission-key allocator; promotion retains these exact
    command records and their captured identities. *)
+let waveform_eligible_for_tile t (tile : W.Tile.t) artifact =
+  let state =
+    if Testing_workspace.is_pane tile.kind
+    then testing_state t tile.id
+    else Testing_workspace.set_view Testing_workspace.empty (simulation t tile.id)
+  in
+  Option.is_some (simulation t tile.id).case_id
+  && Testing_workspace.waveform_eligible state artifact
+;;
+
 let simulation_selection_commands t (tile : W.Tile.t) ~submission_key =
   let v = simulation t tile.id in
   Option.value_map (Simulation_view.detail v) ~default:[] ~f:(fun d ->
@@ -4157,17 +4280,22 @@ let simulation_selection_commands t (tile : W.Tile.t) ~submission_key =
           ("Simulation: Open external viewer " ^ a.label)
           "trace waveform"
           (Simulation_export (a, true))
-      ; command
-          ("simulation.waveform." ^ a.id)
-          ("Simulation: Open embedded waveform " ^ a.label)
-          "vcd wave retained full-area"
-          (Simulation_waveform a)
-      ; command
-          ("simulation.waveform-workspace." ^ a.id)
-          ("Simulation: Open Waveforms workspace " ^ a.label)
-          "vcd dedicated signals waves picker logs"
-          (Simulation_waveform_workspace a)
-      ]))
+      ]
+      @
+      if waveform_eligible_for_tile t tile a
+      then
+        [ command
+            ("simulation.waveform." ^ a.id)
+            ("Simulation: Open embedded waveform " ^ a.label)
+            "vcd wave retained full-area"
+            (Simulation_waveform a)
+        ; command
+            ("simulation.waveform-workspace." ^ a.id)
+            ("Simulation: Open Waveforms workspace " ^ a.label)
+            "vcd dedicated signals waves picker logs"
+            (Simulation_waveform_workspace a)
+        ]
+      else []))
 ;;
 
 (* Shared by production keyboard routing and contextual catalog ordering. *)
@@ -4180,7 +4308,11 @@ let testing_shortcut t key =
       | 'r' -> Some "simulation.rerun-case"
       | 'f' -> Some "simulation.rerun-failed"
       | ('e' | 'v' | 'w' | 'W') when String.equal tile.kind "simulation-artifacts" ->
-        (match Testing_workspace.artifact (testing_state t tile.id) with
+        (match
+           if Char.equal key 'w' || Char.equal key 'W'
+           then Testing_workspace.waveform_artifact (testing_state t tile.id)
+           else Testing_workspace.artifact (testing_state t tile.id)
+         with
          | Some artifact ->
            Some
              ((match key with
@@ -4193,6 +4325,7 @@ let testing_shortcut t key =
            (match key with
             | 'e' -> Some "testing.artifact.export"
             | 'w' -> Some "testing.artifact.waveform"
+            | 'W' -> Some "testing.artifact.waveform-workspace"
             | _ -> None))
       | _ -> None))
 ;;
@@ -4331,7 +4464,8 @@ let decode_event (event : Bonsai_term.Event.t) : input option =
 
 let%test_unit "Shift-R decodes to quick-launch character" =
   let open Bonsai_term.Event.Key in
-  List.iter [ ASCII 'R'; Uchar (Uchar.of_char 'R'); ASCII 'r'; Uchar (Uchar.of_char 'r') ]
+  List.iter
+    [ ASCII 'R'; Uchar (Uchar.of_char 'R'); ASCII 'r'; Uchar (Uchar.of_char 'r') ]
     ~f:(fun key ->
       assert (
         Poly.equal
@@ -4341,12 +4475,19 @@ let%test_unit "Shift-R decodes to quick-launch character" =
 
 let%test_unit "Shift-R decoder preserves legacy keys and modifier boundaries" =
   List.iter [ 'r'; 'R' ] ~f:(fun ch ->
-    List.iter [ Bonsai_term.Event.Key.ASCII ch; Uchar (Uchar.of_char ch) ] ~f:(fun key ->
-      assert (
-        Poly.equal (decode_event (Key_press { key; mods = [] })) (Some (Character ch)));
-      List.iter
-        [ [ Bonsai_term.Event.Modifier.Ctrl ]; [ Meta ]; [ Ctrl; Shift ]; [ Meta; Shift ] ]
-        ~f:(fun mods -> assert (Option.is_none (decode_event (Key_press { key; mods }))))));
+    List.iter
+      [ Bonsai_term.Event.Key.ASCII ch; Uchar (Uchar.of_char ch) ]
+      ~f:(fun key ->
+        assert (
+          Poly.equal (decode_event (Key_press { key; mods = [] })) (Some (Character ch)));
+        List.iter
+          [ [ Bonsai_term.Event.Modifier.Ctrl ]
+          ; [ Meta ]
+          ; [ Ctrl; Shift ]
+          ; [ Meta; Shift ]
+          ]
+          ~f:(fun mods ->
+            assert (Option.is_none (decode_event (Key_press { key; mods }))))));
   assert (
     Poly.equal
       (decode_event (Key_press { key = Tab; mods = [ Shift ] }))
@@ -4357,8 +4498,12 @@ let finalization_form t =
   Option.exists t.palette ~f:(fun p ->
     match p.argument with
     | Some
-        (Finalization_attempt _ | Resource_path _ | Acceptance _ | Simulation_selection _)
-      -> true
+        ( Finalization_attempt _
+        | Resource_path _
+        | Workload_path
+        | Workload_bundle _
+        | Acceptance _
+        | Simulation_selection _ ) -> true
     | _ -> false)
 ;;
 
@@ -4742,6 +4887,8 @@ let input t event ~commands : t * effect =
                | Some
                    ( Finalization_attempt _
                    | Resource_path _
+                   | Workload_path
+                   | Workload_bundle _
                    | Acceptance _
                    | Simulation_selection _ ) -> String.length p.query >= 4096
                | None | Some (Plan_endpoint _ | Preparation_inputs _) -> false ->
@@ -4788,6 +4935,8 @@ let input t event ~commands : t * effect =
                   | Some
                       ( Finalization_attempt _
                       | Resource_path _
+                      | Workload_path
+                      | Workload_bundle _
                       | Acceptance _
                       | Simulation_selection _ ) ->
                     String.length p.query > reference_limit t
@@ -4800,6 +4949,9 @@ let input t event ~commands : t * effect =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                 | Resource_path bundle -> Resource_import_path (bundle, p.query)
+                | Workload_path -> Workload_result (p.query, None)
+                | Workload_bundle (left, generation) ->
+                  Workload_input (Workloads_view.Capture (left, p.query, generation))
                 | Finalization_attempt run ->
                   Asic (Asic.Operation.Inspect_finalization { run; attempt = p.query })
                 | Acceptance (run, execution_file, key) ->
@@ -4816,14 +4968,9 @@ let input t event ~commands : t * effect =
                        (tile, Launch { submission_key; discovery_digest; selection }))
                 | (Plan_endpoint (flow, profile) | Preparation_inputs (flow, profile)) as
                   argument ->
-                  let args =
-                    String.split (String.strip p.query) ~on:' '
-                    |> List.filter ~f:(Fn.non String.is_empty)
-                  in
-                  let endpoint = List.hd_exn args
-                  and assignments = List.tl_exn args in
                   let selection =
-                    { Asic.Selection.flow; profile; endpoint; assignments }
+                    Launch_preferences.Prompt.selection p.query ~flow ~profile
+                    |> Or_error.ok_exn
                   in
                   (match argument with
                    | Preparation_inputs _ -> Select_preparation selection
@@ -4901,6 +5048,26 @@ let input t event ~commands : t * effect =
           (match capture t with
            | None -> t, No_effect
            | Some capture -> t, Execute (capture, action))
+        | ( ( Character ('j' | 'k' | 'r' | 'd' | 'c' | '[' | ']')
+            | Next | Previous | Enter | Escape )
+          , 0 )
+          when Option.exists (focused t) ~f:(fun tile ->
+                 String.equal tile.kind "workloads") ->
+          let input =
+            match event with
+            | Enter -> Workloads_view.Open
+            | Escape -> Back
+            | Character 'r' -> Refresh
+            | Character 'd' -> Show_provenance
+            | Character 'c' -> Show_compare
+            | Character '[' -> Scroll (-8)
+            | Character ']' -> Scroll 8
+            | Character 'k' | Previous -> Move (-1)
+            | _ -> Move 1
+          in
+          (match capture t with
+           | None -> t, No_effect
+           | Some capture -> t, Execute (capture, Workload_input input))
         | (Character ('j' | 'k' | 'r' | 'i') | Next | Previous | Enter), 0
           when Option.exists (focused t) ~f:(fun tile ->
                  String.equal tile.kind "hierarchy") ->
@@ -6320,6 +6487,7 @@ let%test_unit "actual catalog and palette can cancel an allocated owned launch b
     ; fresh_intent = None
     ; workflows = []
     ; resources = None
+    ; workloads = None
     ; flows = []
     ; catalog_default = None
     ; description_json = None

@@ -955,12 +955,27 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             (match selected_run with
              | Some run -> Overview_tiles.workflow_for_run ~asic:data.asic ~run
              | None -> Planned_run.workflow host.planned_run)
-          :: Overview_tiles.stage_rows ~selected_run ~asic:data.asic ~observation:None ()
+          :: (match selected_run, Planned_run.workflow host.planned_run with
+              | None, Some w -> Overview_tiles.workflow_endpoint_rows w
+              | _ -> Overview_tiles.stage_rows ~selected_run ~asic:data.asic ~observation:None ())
       in
       let facts =
         Option.bind selected_run ~f:data.summary
         |> Option.value_map ~default:[] ~f:(fun summary ->
           Overview_tiles.summary_rows ~freshness:policy.freshness summary)
+      in
+      let facts =
+        facts
+        @ Option.value_map
+            (Option.bind selected_run ~f:(fun run -> Overview_tiles.execution ~asic:data.asic ~run))
+            ~default:[]
+            ~f:(fun execution ->
+              Option.value_map execution.error ~default:[] ~f:(fun error ->
+                [ Overview_tiles.row
+                    ~role:Warning
+                    ~details:(String.split_lines error)
+                    "Observation"
+                    (Presentation.failure_summary error ^ " (details: d)") ]))
       in
       let interaction =
         if (not local.utility_detail) || not policy.hints
@@ -1018,7 +1033,11 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             then
               Option.bind selected_run ~f:(stopped_observation data)
               |> Option.value_map ~default:[] ~f:(fun error ->
-                [ Overview_tiles.row ~role:Warning "Observation error" error ])
+                [ Overview_tiles.row
+                    ~role:Warning
+                    ~details:(String.split_lines error)
+                    "Observation error"
+                    (Presentation.failure_summary error) ])
             else [])
          @ (if H.compact_summary host tile && not local.utility_detail
             then Overview_tiles.checklist_rows ~compact:true ~stages ~aggregate:facts ()
@@ -1398,6 +1417,9 @@ let planned_asic_source_rows host tile =
       in
       headline
       @ List.take selection 1
+      @ (if Planned_run.equal_status model.status Failed
+         then [ { Planned_run.role = Error; text = model.message } ]
+         else [])
       @ [ { Planned_run.role = Fact
           ; text = Planned_run.launch_label model ^ ": " ^ model.launch.message
           }
@@ -1427,7 +1449,11 @@ let planned_source_rows host tile =
         (String.lowercase (Sexp.to_string (Planned_run.sexp_of_status model.status))
          ^ ": "
          ^ model.message)
-    ; row Fact ("Workflow: " ^ model.launch.message)
+    ; row
+        (if Planned_run.equal_launch_status model.launch.state Launch_failed
+         then Error
+         else Fact)
+        ("Workflow: " ^ model.launch.message)
     ]
     @ Option.value_map host.stage_preparation ~default:[] ~f:(fun reason ->
       [ row Warning reason ])
@@ -1470,8 +1496,8 @@ let planned_source_rows host tile =
       if detail
       then
         Overview_tiles.inspection_lines
-          [ Overview_tiles.elaboration_row ~now:(Time_ns.now ()) ~selected:false (Some w)
-          ]
+           [ Overview_tiles.elaboration_row ~now:(Time_ns.now ()) ~selected:false (Some w)
+           ]
         |> List.map ~f:(row Fact)
       else []))
   else if host.H.planned_preparation
@@ -1540,7 +1566,13 @@ let planned_formatted_rows ?indicator_frames host tile ~width =
       then None
       else if i = 0
       then Some (plan_indicator model.status)
-      else if i = if detail then 1 else 2
+      else if i
+              =
+              if detail
+              then 1
+              else if Planned_run.equal_status model.status Failed
+              then 3
+              else 2
       then Some (producer_indicator model.launch.state)
       else None
     in
@@ -1905,6 +1937,14 @@ let rows host data tile ~width ~height =
            Hierarchy_view.rows ~icons:host.appearance.icons view ~height)
        | "planned-run" ->
          planned_rows host tile ~width |> List.map ~f:(fun row -> row.Planned_run.text)
+       | "workloads" ->
+         Workloads_view.rows
+           local.workloads
+           ~asic:data.asic
+           ~filter:local.filter
+           ~width
+           ~height
+         |> List.map ~f:E.text
        | "resources" | "resource-summary" ->
          let view =
            Resources_view.reconcile
@@ -2264,7 +2304,9 @@ let tile_view
     Option.value_map host.H.focus ~default:false ~f:(W.Tile_id.equal tile.id)
   in
   let binding =
-    if Resources_view.is_kind tile.kind && Option.is_some local.resources.explicit
+    if String.equal tile.kind "workloads"
+    then "explicit workload evidence"
+    else if Resources_view.is_kind tile.kind && Option.is_some local.resources.explicit
     then "explicit resource source"
     else if Testing_workspace.is_pane tile.kind
             || P.Waveforms.is_pane tile.kind
@@ -2769,7 +2811,16 @@ let tile_view
            (List.drop rows local.scroll))
   in
   let body =
-    if Resources_view.is_kind tile.kind
+    if String.equal tile.kind "workloads"
+    then
+      Workloads_view.rows
+        local.workloads
+        ~asic:data.asic
+        ~filter:local.filter
+        ~width:body_width
+        ~height:body_height
+      |> E.render ~attrs:(evidence_attrs appearance)
+    else if Resources_view.is_kind tile.kind
     then (
       let view =
         Resources_view.reconcile
@@ -3470,6 +3521,11 @@ let render_palette host dimensions background =
       | Some (H.Resource_path bundle) ->
         (if bundle then "IMPORT EMITTED BUNDLE" else "IMPORT RETAINED RESOURCE EVIDENCE")
         ^ " — exact absolute directory; Enter reads; no run allocation"
+      | Some H.Workload_path ->
+        "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
+      | Some (H.Workload_bundle (left, _)) ->
+        (if left then "CAPTURE A" else "CAPTURE B")
+        ^ " — exact absolute verified bundle directory; source digest stays frozen"
       | Some (H.Finalization_attempt run) ->
         "INSPECT FINALIZATION for "
         ^ run_label run
@@ -8966,7 +9022,10 @@ let%test_unit "WB-054 artifact keyboard seam dispatches unavailable selection re
           | _ -> assert false
         in
         match snd dispatch with
-        | Unavailable reason -> assert (String.equal reason expected)
+        | Unavailable reason ->
+          if Char.equal key 'w'
+          then assert (String.is_substring reason ~substring:"No available supported VCD")
+          else assert (String.equal reason expected)
         | _ -> assert false))
 ;;
 
@@ -8980,8 +9039,8 @@ let%test_unit "WB-054 production selection catalog promotes original runnable id
     ; label = "waves"
     ; kind = "waveform"
     ; media_type = "text/vcd"
-    ; size = None
-    ; sha256 = None
+    ; size = Some 123
+    ; sha256 = Some (String.make 64 'a')
     ; availability = Available
     }
   in
@@ -9098,6 +9157,9 @@ let%test_unit "WB-054 production selection catalog promotes original runnable id
                 (H.catalog empty_artifacts ~project:None ~jobs:[])))
     in
     match action with
-    | Unavailable reason -> assert (String.equal reason "no artifact selected")
+    | Unavailable reason ->
+      if Char.equal key 'w'
+      then assert (String.is_substring reason ~substring:"No available supported VCD")
+      else assert (String.equal reason "no artifact selected")
     | _ -> assert false)
 ;;

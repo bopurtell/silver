@@ -1,6 +1,33 @@
-# Hardcaml Workbench
+# Silver
+
+Formerly Hardcaml Workbench. The repository is now
+[`bopurtell/silver`](https://github.com/bopurtell/silver), checked out as `silver/`.
+Existing `hardcaml-workbench` commands, `hardcaml_workbench*` packages and OCaml
+modules, configuration filenames, environment variables, and saved state paths
+remain supported under their existing names.
 
 A development workbench for inspecting, running, measuring, and debugging Hardcaml designs.
+
+**Picking up in a new session?** Read the [cross-repository checkpoint](docs/session_checkpoint.md)
+for PT.0–PT.8 status, paused acceptance and preservation constraints. Refactor
+continuations are grouped under [migration guides](docs/migration_guides/README.md).
+
+For tests **of Workbench itself**, start at [test/README.md](test/README.md) and
+[the testing guide](docs/testing.md): subsystem-owned tests, explicit suite selectors,
+and opt-in native/real-provider acceptance are distinct from hardware verification
+launched inside the application's Testing workspace.
+
+**Everyday example development:** use the [checkout-backed main launcher](../hardcaml_asic_example/docs/workbench_main.md):
+`scripts/workbench_main.py daemon` and `client` from the example checkout. It opens
+the actual editable repository, uses persistent `.dev/workbench-main` state and
+`_flow_results/workbench` results, and exposes FIFO/PT.8 suites and normal physical
+endpoints. The older [captured development session](docs/development_session.md)
+uses an independent copied project and is historical acceptance guidance.
+
+**PT.8 Workloads (2026-11-05):** inspect verified workload results, capture explicit
+A/B variants and launch a fresh example workload through Testing. The
+[isolated session launch guide](docs/pt8_workloads.md) provides the server/client
+commands and accepted retained→fresh-run walkthrough, preserving existing sessions.
 
 **Current direction (2026-10-16):** configurable Bonsai Term tiles over typed
 provider/module contracts, a command palette and named workspaces linked to a shared

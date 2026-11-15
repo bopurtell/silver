@@ -1,0 +1,113 @@
+; Each explicit selection reruns external work even when Dune inputs are unchanged.
+; All real actions share one workspace lock. The aggregate is one serial runner,
+; deliberately not a fan-out of endpoint aliases.
+(rule
+ (alias real-elaboration)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint elaboration
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-synthesis)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint synthesis
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-floorplan)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint floorplan
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-placement)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint placement
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-cts)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint cts
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-routing)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint routing
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-timing)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint timing
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-signoff)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --endpoint signoff
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+(rule
+ (alias real-pyramid)
+ (deps (universe) (sandbox none) (alias real-inputs) resolve.py configure.py)
+ (locks real-eda)
+ (action
+  (run python3 -B %{dep:runner.py} --pyramid
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=}
+   --daemon %{exe:../../../daemon/main.exe}
+   --client %{exe:../../../terminal/main.exe})))
+
+; Resolution helpers are stdlib-only and never install or launch tools. Production
+; executable closures are tracked by the exe dependencies on each real action.
+(rule
+ (alias real-preflight)
+ (deps (universe) (sandbox always) (alias real-inputs) resolve.py configure.py)
+ (action
+  (run python3 -B %{dep:runner.py} --preflight-only
+   --config %{env:HARDCAML_WORKBENCH_REAL_TEST_CONFIG=})))
+
+(alias
+ (name real-inputs)
+ (deps runner.py resolve.py configure.py))
+
+(rule
+ (alias runtest)
+ (deps (sandbox always) test_runner.py runner.py resolve.py configure.py configure_private.py dune ../../../dune ../../dune)
+ (action
+  (progn
+   (run timeout 30s python3 -B %{dep:test_runner.py} -v)
+   (run timeout 30s python3 -B %{dep:runner.py} --self-test))))
