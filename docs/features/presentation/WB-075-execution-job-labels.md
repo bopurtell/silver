@@ -3,7 +3,7 @@ id: WB-075
 title: Human-readable job labels in the execution tile
 category: presentation
 feature_sets: [FS0, FS2, FS5]
-status: delivered
+status: closed
 kind: defect
 priority: P2
 severity: S3
@@ -42,10 +42,10 @@ the raw form reads like an internal ID.
 Process-tree views (WB-005) and generic job detail (WB-064).
 
 ## Acceptance criteria
-- [ ] Execution rows show readable labels that still distinguish structured simulation from generic tests.
-- [ ] Unknown or provider-added kinds fall back to `namespace.name`.
-- [ ] Job detail shows the exact raw kind.
-- [ ] Test scripts that match the old strings are updated.
+- [x] Execution rows show readable labels that still distinguish structured simulation from generic tests.
+- [x] Unknown or provider-added kinds fall back to `namespace.name`.
+- [x] Job detail shows the exact raw kind.
+- [x] Test scripts that match the old strings are updated.
 
 ## Dependencies
 None.
@@ -62,8 +62,9 @@ Confirm label wording; include the case or suite name on run rows when it fits?
 
 ## Delivery notes — 2026-11-05
 
-Implementation is **delivered, awaiting owner acceptance**. The acceptance checklist
-above remains unchecked pending owner review; automated evidence is recorded below.
+Implementation was merged in PR #8. The owner requested closure on 2026-11-15;
+the acceptance checklist is closed on that basis and the automated evidence below.
+The incomplete PTY verification recorded below remains a historical limitation.
 
 Execution rows now use the following presentation-only labels:
 
@@ -82,7 +83,7 @@ never borrowed from an unrelated selected attempt. Single-case detail adds
 `suite/case`; multi-case/whole-suite detail and retained history add the suite.
 Without matching context the label remains `sim run`. Normal row-width clipping
 still applies. Selected-job detail includes `Kind: <exact raw kind>`; protocol kinds
-are unchanged. Label wording and contextual readability await owner review.
+are unchanged. The owner subsequently requested closure of this feature.
 
 ### Verification
 
@@ -111,5 +112,6 @@ and end-to-end verification remains incomplete. Evidence is retained locally at
 `/tmp/opencode/testing-workspace-iqxke0at` and
 `/tmp/opencode/testing-workspace-a73oonct`. The temporary `_build_labels` directory
 was subsequently cleaned. Repository-wide `@fmt` also encountered formatting
-differences outside the focused formatted files. Neither PTY nor owner acceptance
-is claimed.
+differences outside the focused formatted files. That verification did not establish
+PTY or owner acceptance; the subsequent owner closure does not turn these PTY
+attempts into passing runs.

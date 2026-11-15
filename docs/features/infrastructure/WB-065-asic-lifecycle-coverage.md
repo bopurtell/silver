@@ -3,7 +3,7 @@ id: WB-065
 title: Broader ASIC lifecycle/cancellation race coverage
 category: infrastructure
 feature_sets: [FS1]
-status: delivered
+status: closed
 kind: validation
 priority: P2
 severity: n/a
@@ -19,6 +19,14 @@ related: [WB-044, WB-062]
 ---
 
 # WB-065 — Broader ASIC lifecycle/cancellation race coverage
+
+## Closure — 2026-11-15
+
+Merged in PR #10 and closed at the owner's request. Acceptance is for the bounded
+lifecycle matrix documented below, including its explicit remaining limits, rather
+than exhaustive race or real-EDA coverage. After integration with the current main
+development branch, `dune runtest -j10 daemon/test` passed. Earlier full-suite evidence
+remains recorded below; no new full-suite or physical-flow campaign is claimed.
 
 ## Request
 Carry forward construction-plan lifecycle/cancellation coverage gaps across late

@@ -15,7 +15,8 @@ Padding and cursor placement use terminal-cell geometry, not UTF-8 byte length.
 
 Full-trace Fit (`f`), default extent (`d`), column navigation (`h/l`, arrows), and
 exact tick navigation (`H/L`) remain available. The owner confirmed cursor stepping
-works before this appearance follow-up; appearance acceptance remains pending.
+works before this appearance follow-up, then confirmed the connected rendering
+works wonderfully. WB-068 was closed at the owner's request on 2026-11-15.
 
 Verification: 32 focused waveform tests and four test modules, the terminal test
 suite, client/daemon/probe builds, independent development-waveform controls, and

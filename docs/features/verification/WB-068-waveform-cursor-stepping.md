@@ -3,7 +3,7 @@ id: WB-068
 title: Waveform cursor repeat lag and step units
 category: verification
 feature_sets: [FS2, FS5]
-status: needs-triage
+status: closed
 kind: defect
 priority: P2
 severity: S3
@@ -46,11 +46,11 @@ Count prefixes (`20 l`), which are WB-067. Lazy trace loading and four-state
 graphics remain WB-028.
 
 ## Acceptance criteria
-- [ ] Recorded before/after latency for held h/l on a bounded fixture.
-- [ ] In column mode, every press moves the cursor at least one visible column.
-- [ ] Tick mode moves exactly one timestep and shows that unit in the ruler or help.
-- [ ] Holding h/l for 2 s stops within one frame of release, with no queued backlog.
-- [ ] Cursor never leaves trace bounds; off-screen indicators stay correct.
+- [x] Recorded before/after latency for held h/l on a bounded fixture.
+- [x] In column mode, every press moves the cursor at least one visible column, except when clamped at trace endpoints.
+- [x] Tick mode moves exactly one timestep and shows that unit in the ruler or help.
+- [x] Holding h/l stops promptly without queued backlog: accepted by the owner, with the recorded sub-frame release tails below; no physical-display frame measurement is claimed.
+- [x] Cursor never leaves trace bounds; off-screen indicators stay correct.
 
 ## Dependencies
 None required. WB-067's counts multiply whichever step unit this ticket defines.
@@ -67,8 +67,16 @@ need deeper view changes if profiling shows it is the main cost.
 ## Delivery notes — 2026-11-05
 
 Implemented on `bpurtell/waveform-cursor-stepping`, based on `oxcaml`, in
-`../bpurtell-feature2`. Delivery evidence below is engineering verification;
-owner acceptance and the acceptance checkboxes remain pending.
+the former `../bpurtell-feature2` worktree; merged in PR #9. The owner confirmed
+cursor navigation works, then confirmed the connected-waveform appearance follow-up
+works wonderfully. Closed at the owner's request on 2026-11-15.
+
+Merge integration adapted stepping to the full-range original-event cell mapping;
+the original integer-raster implementation and measurements below are historical.
+The connected scalar rails and bus outlines retain dense-transition and unknown-state
+handling. See [the updated waveform handoff](../../development_waveform_handoff.md)
+for the follow-up implementation and verification. Historical measurement limits and
+the incomplete fixture-dependent regression below remain unchanged.
 
 ### Behavior and implementation
 

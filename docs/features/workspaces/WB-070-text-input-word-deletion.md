@@ -3,7 +3,7 @@ id: WB-070
 title: Ctrl-Backspace word deletion in the palette and text inputs
 category: workspaces
 feature_sets: [FS5]
-status: delivered
+status: closed
 kind: defect
 priority: P2
 severity: S3
@@ -39,10 +39,10 @@ synthesis filter — offer only Backspace and Ctrl-U.
 Cursor movement inside inputs, Alt-word motions and configurable bindings (WB-014).
 
 ## Acceptance criteria
-- [ ] Ctrl-Backspace and Ctrl-W delete the previous word in the palette and all listed inputs.
-- [ ] Plain Backspace still deletes one code point; non-ASCII text is never split.
-- [ ] Terminals that send plain DEL for Ctrl-Backspace still have Ctrl-W.
-- [ ] Existing waveform filter tests keep passing against the shared helper.
+- [x] Ctrl-Backspace and Ctrl-W delete the previous word in the palette and all listed inputs.
+- [x] Plain Backspace still deletes one code point; non-ASCII text is never split.
+- [x] Terminals that send plain DEL for Ctrl-Backspace still have Ctrl-W.
+- [x] Existing waveform filter tests keep passing against the shared helper.
 
 ## Dependencies
 None.
@@ -59,8 +59,8 @@ None beyond confirming the input list.
 
 ## Delivery notes — 2026-11-05
 
-Implementation is **delivered, awaiting owner acceptance**. The acceptance checklist
-above remains unchecked pending owner review; automated evidence is recorded below.
+Implementation was merged in PR #8. The owner requested closure on 2026-11-15;
+the acceptance checklist is closed on that basis and the automated evidence below.
 
 - Extracted the waveform helper into `terminal/text_edit.ml`, including native
   decoder handling for Ctrl-Backspace, Ctrl-W, and Meta-Backspace. Plain DEL remains
@@ -86,5 +86,6 @@ Passed using `scripts/with-switch.sh` with builds limited to `-j 10`:
 - Focused `ocamlformat --check` and `git diff --check`.
 
 Repository-wide `@fmt` did not pass because of formatting differences outside the
-focused formatted files. Physical-terminal gesture/help review and owner acceptance
-are pending; automated tests do not constitute that acceptance.
+focused formatted files. At implementation verification, physical-terminal
+gesture/help review and owner acceptance were pending. The owner's subsequent
+closure request does not claim additional terminal testing was recorded.
