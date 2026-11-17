@@ -110,6 +110,20 @@ def run(args, evidence):
             attempts.append(session.done(field(field(snap, 'attempts')[0], 'id')))
         proxy = embedded.DelayedBytesProxy(session.url, evidence)
         session.url = proxy.url
+        viewer_receipt = evidence / 'viewer.json'
+        viewer = evidence / 'record-viewer.py'
+        viewer.write_text('#!' + sys.executable + '\nimport hashlib,json,pathlib,sys\n'
+            'p=pathlib.Path(sys.argv[1])\n'
+            'pathlib.Path(' + repr(str(viewer_receipt)) + ').write_text(json.dumps(dict('
+            'path=str(p),sha256=hashlib.sha256(p.read_bytes()).hexdigest())))\n')
+        viewer.chmod(0o700)
+        wrapper = evidence / 'client-with-viewer'
+        wrapper.write_text('#!' + sys.executable + '\nimport os,sys\nos.execv(' +
+            repr(str(args.client)) + ', [' + repr(str(args.client)) +
+            ', "--simulation-viewer", ' + repr(str(viewer)) + '] + sys.argv[1:])\n')
+        wrapper.chmod(0o700)
+        session.args = argparse.Namespace(**vars(args))
+        session.args.client = wrapper
         terminal = Terminal(session)
         terminal.capture('startup', ['Overview'])
         terminal.palette('Switch to Testing')
@@ -157,6 +171,45 @@ def run(args, evidence):
         copies = re.findall(rb'\x1b\]52;c;([A-Za-z0-9+/=]+)\x07', bytes(terminal.data))
         check(copies == [copies[0], copies[0]], 'F9 resends the exact retained path')
         terminal.key(b'\x1b[19~')  # F8 returns to Testing
+
+        # Hold a real HTTP byte reply until after an actual attempt-selection
+        # command. Cancellation must clean up without waiting for that reply.
+        before_exports = set((evidence / 'tmp').glob('hardcaml*'))
+        before_copies = len(re.findall(rb'\x1b\]52;c;', bytes(terminal.data)))
+        gate = proxy.arm('cancel-external-export')
+        terminal.key(b'v')
+        check(gate['ready'].wait(10), 'external export reached deliberately held byte reply')
+        partials = set((evidence / 'tmp').glob('hardcaml*')) - before_exports
+        check(bool(partials) and all(not p.name.endswith('-verified') for p in partials),
+            'in-flight export owns private partial storage before cancellation')
+        reopen(attempts[0])
+        deadline = time.monotonic() + 5
+        while any(p.exists() for p in partials) and time.monotonic() < deadline:
+            terminal.drain(.05)
+        check(all(not p.exists() for p in partials),
+            'UI attempt switch removes partial storage while HTTP reply is still held')
+        check(not gate['release'].is_set() and not gate['timed_out'],
+            'cleanup precedes explicit transport release, not the export timeout')
+        check(not viewer_receipt.exists(), 'cancelled export never launches external viewer')
+        gate['release'].set()
+        check(gate['delivered'].wait(5) and not gate['timed_out'],
+            'late cancelled reply released within bounded gate deadline')
+        terminal.drain(.3)
+        check(set((evidence / 'tmp').glob('hardcaml*')) == before_exports,
+            'late reply cannot recreate partial storage or publish cancelled export')
+        check(not viewer_receipt.exists() and
+            len(re.findall(rb'\x1b\]52;c;', bytes(terminal.data))) == before_copies,
+            'late cancelled reply triggers neither viewer nor clipboard handoff')
+        reopen(attempts[1])
+        terminal.key(b'v')
+        deadline = time.monotonic() + 10
+        while not viewer_receipt.exists() and time.monotonic() < deadline:
+            terminal.drain(.05)
+        check(viewer_receipt.exists(), 'fresh export after cancellation releases busy reservation')
+        receipt = json.loads(viewer_receipt.read_text())
+        check(receipt['sha256'] == hashlib.sha256(exported.read_bytes()).hexdigest()
+            and Path(receipt['path']).parent.name.endswith('-verified'),
+            'headless recording viewer receives only the verified byte-exact file')
         terminal.palette('Simulation: Select case exact256')
         gate = proxy.arm('late-exact-quick')
         terminal.key(b'w')

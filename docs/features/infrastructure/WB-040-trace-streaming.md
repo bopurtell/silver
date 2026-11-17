@@ -63,10 +63,43 @@ budgets. Streaming reduces memory pressure but does not remove disk or transport
 
 ## Delivery — 2026-11-05
 
-**Implementation complete for the declared bounded slice; owner acceptance pending.**
+**Implementation complete for the declared bounded slice; real-host acceptance pending.**
 `partial` records that distinction, rather than treating automated evidence as owner
 sign-off. Worktree: `../bpurtell-feature4`, branch `bpurtell/streaming-trace-export`,
 based on `oxcaml`. No embedded waveform loading change is included.
+
+### Acceptance update — 2026-11-17
+
+- Merged into `oxcaml` through PR #11, merge commit `d631152` (branch tip `39ba42d`).
+- Owner explicitly accepted the declared 64/16 MiB limits, concurrency/deadline,
+  verified-publication and temporary/retained-file policies.
+- Large real terminal-host/provider export acceptance remains pending. The old
+  `bpurtell-feature4` worktree is no longer present;
+  its committed implementation is included in the merge.
+- The sibling `hardcaml_asic_example` now provides a `controlled-fifo` /
+  `export-stress` case with exact 1/16/64 MiB VCD selections. Its
+  `docs/large_trace_export.md` records startup, export and attempt-change
+  cancellation controls. A 64 MiB real Cyclesim fixture passed 15,105,379 checks
+  over 1,258,782 edges and parsed successfully with GTKWave's `vcd2fst`;
+  this is fixture evidence, not yet real-host HTTP/viewer acceptance.
+- The owner's 1 MiB export matched its metadata and the independent fixture's
+  SHA-256 (`e4d181d38137e7b21451612c91b5638490b0751c01ec017af96abf1d0af57813`)
+  and converted successfully with headless `vcd2fst`.
+- Deterministic production-daemon/terminal-PTY cancellation coverage passed in
+  `terminal/test_waveform_handoff_pty.py`. A proxy holds a real artifact-byte reply;
+  a UI attempt switch removes private partial storage before release. The late
+  reply cannot recreate storage, publish, launch a viewer or copy a path. A fresh
+  export then succeeds and a headless recording viewer receives the verified,
+  byte-exact file. No GUI or manual cancellation timing is required for this check.
+  Evidence: `/tmp/opencode/pt8-waveform-pty-iprere61/checks.json` (21 passing checks),
+  with binary hashes in `binaries.json` and transport gates in `delayed-byte-proxy.json`.
+
+  Reproduce from `silver/` with prebuilt matching binaries:
+
+  ```sh
+  ./scripts/with-switch.sh python3 -B terminal/test_waveform_handoff_pty.py \
+    --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe
+  ```
 
 ### Selected limits and storage policy
 
@@ -137,9 +170,10 @@ the artifact cap requires a separately justified provider/storage policy.
   resource, and main modules). Changed export/backend additions were formatted and
   checked separately; this is not recorded as a clean global formatting pass.
 
-Owner acceptance still requires review of the chosen 64/16 MiB slice and temporary/
-retained-file policy, plus real terminal-host/provider/viewer exercise on the owner's
-environment. Automated implementation checks do not substitute for that acceptance.
+The owner accepted the chosen 64/16 MiB slice and temporary/retained-file policy on
+2026-11-17. Deterministic terminal-level cancellation and headless handoff evidence
+is recorded above; manual reaction-speed cancellation is unnecessary. The large
+real-provider export and shared ASIC handoff acceptance remain to be recorded.
 
 ## References
 - [FS2-F02 streaming](../../backlog/fs2_followups.md#fs2-f02--large-trace-streaming).
