@@ -315,6 +315,14 @@ def positive(config, key, default, maximum=None):
     return value
 
 
+def build_target(config):
+    target = atom(config, 'build_target')
+    require(not target.startswith(('/', '-', '_build/')) and target.endswith('.exe')
+            and all(x not in ('', '.', '..') for x in target.split('/'))
+            and '@' not in target and '\\' not in target, 'Unsafe preparation build_target')
+    return target
+
+
 def validate_configs(root, configs, provider):
     asic, prep, sim = (configs[name] for name in (ASIC, PREPARATION, SIMULATION))
     require(asic is not None and prep is not None, 'Missing ASIC/preparation configs; use --rewrite')
@@ -331,10 +339,7 @@ def validate_configs(root, configs, provider):
     if timeout:
         positive({'stage_timeout_seconds': timeout}, 'stage_timeout_seconds', 3600)
     # stage_timeout_seconds is a sexp option, unlike the mandatory preparation timeout.
-    target = atom(prep, 'build_target')
-    require(not target.startswith(('/', '-', '_build/')) and target.endswith('.exe')
-            and all(x not in ('', '.', '..') for x in target.split('/'))
-            and '@' not in target and '\\' not in target, 'Unsafe preparation build_target')
+    build_target(prep)
     local_path(root, atom(prep, 'results_root'))
     positive(prep, 'timeout_seconds', 600)
     if sim is not None:
@@ -346,10 +351,11 @@ def validate_configs(root, configs, provider):
 
 def generated_configs(args, root, old, provider):
     previous = old[ASIC] or {}
+    target = build_target(old[PREPARATION] or {'build_target': 'bin/project.exe'})
     toolchain = args.toolchain or previous.get('toolchain')
     require(isinstance(toolchain, (str, Path)), 'Supply --toolchain when no ASIC config exists')
     asic = {'schema_version': '1',
-            'project_executable': str(root / '_build/default/bin/project.exe'),
+            'project_executable': str(root / '_build/default' / target),
             'provider_executable': str(provider),
             'results_root': str(root / STATE / 'asic-results'),
             'toolchain': dependency(toolchain, directory=True)}
@@ -357,7 +363,7 @@ def generated_configs(args, root, old, provider):
         selected = getattr(args, key) or optional_atom(previous, key)
         asic[key] = [dependency(selected, directory=key != 'python')] if selected else []
     asic['stage_timeout_seconds'] = ['3600']
-    prep = {'schema_version': '1', 'build_target': 'bin/project.exe',
+    prep = {'schema_version': '1', 'build_target': target,
             'results_root': str(root / STATE / 'preparation-results'), 'timeout_seconds': '600'}
     sim = None
     if old[SIMULATION] is not None or args.simulation_provider:

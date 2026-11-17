@@ -49,8 +49,9 @@ def main():
     example.audit_for_launch(project, provider, env)
     review.validate_environment(env, project, review.DEFAULT_LIBRARIES)
     # Audit above runs before the first project build or provider execution.
+    target = example.build_target(example.read_config(project, example.PREPARATION))
     command = [str(switch / 'bin/dune'), 'build', '-j', '1', '--root', str(project),
-               'bin/project.exe']
+               target]
     print('Build command: ' + repr(command), flush=True)
     subprocess.run(command, cwd=project, env=env, check=True)
     launcher = [sys.executable, '-B', str(review.REPO / 'scripts/isolated_review.py'),

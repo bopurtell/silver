@@ -73,6 +73,32 @@ class IsolatedExampleTest(unittest.TestCase):
         self.setup()
         self.assertEqual(original, (self.root / example.STATE / (example.ASIC + '.original')).read_bytes())
 
+    def test_rewrite_preserves_current_project_target_and_relocates_executable(self):
+        self.rewrite()
+        prep = self.configs()[example.PREPARATION]
+        prep['build_target'] = 'asics/fifo_demo/cli/project.exe'
+        self.write_config(example.PREPARATION, prep)
+        self.args.rewrite = True
+        self.setup()
+        configs = self.configs()
+        self.assertEqual(prep['build_target'], configs[example.PREPARATION]['build_target'])
+        self.assertEqual(str(self.root / '_build/default' / prep['build_target']),
+                         configs[example.ASIC]['project_executable'])
+
+    def test_rewrite_rejects_unsafe_project_targets_before_writing(self):
+        self.rewrite()
+        for target in ('/owner/project.exe', '../project.exe', '-bad.exe',
+                       '_build/default/project.exe', 'a/@bad.exe'):
+            with self.subTest(target=target):
+                prep = self.configs()[example.PREPARATION]
+                prep['build_target'] = target
+                self.write_config(example.PREPARATION, prep)
+                before = (self.root / example.ASIC).read_bytes()
+                self.args.rewrite = True
+                with self.assertRaisesRegex(example.SetupError, 'Unsafe preparation build_target'):
+                    self.setup()
+                self.assertEqual(before, (self.root / example.ASIC).read_bytes())
+
     def test_owner_project_executable_is_rejected(self):
         self.rewrite()
         config = self.configs()[example.ASIC]
