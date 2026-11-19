@@ -101,6 +101,27 @@ based on `oxcaml`. No embedded waveform loading change is included.
     --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe
   ```
 
+### Real-path acceptance update — 2026-11-19
+
+The owner authorized automated evidence for the remaining acceptance items.
+The new opt-in [real export integration runner](../../streaming_export_acceptance.md)
+uses actual daemon/HTTP/terminal paths with a headless recording viewer.
+
+- **Shared ASIC binary handoff: complete.** Ten checks passed against the retained
+  real 4,751,922-byte GDS. Export and headless handoff took 11.52 seconds; source,
+  registered metadata, exported file and viewer digests matched. Exact run/terminal
+  identity, private publication/permissions and unchanged retained inputs passed.
+  Evidence: `/tmp/opencode/wb040-real-export-ohrrlpiw/`.
+- **64 MiB real simulation export: blocked.** The fresh real FIFO provider run
+  passed and registered the exact expected 67,108,864-byte VCD/digest, but the client
+  export hit its unchanged 120-second deadline. No viewer launched and no partial
+  storage remained. Reproduced twice; latest evidence:
+  `/tmp/opencode/wb040-real-export-23wxtlws/`.
+- **Remaining work:** profile/fix large real-path export latency without weakening
+  integrity, memory or deadline guarantees, then rerun `--case simulation`. The
+  per-page full-file hashing (about 64 GiB for this fixture) is a known cost to
+  investigate. The new test correctly fails; WB-040 remains `partial`.
+
 ### Selected limits and storage policy
 
 | Resource | Explicit limit/policy |
@@ -172,8 +193,9 @@ the artifact cap requires a separately justified provider/storage policy.
 
 The owner accepted the chosen 64/16 MiB slice and temporary/retained-file policy on
 2026-11-17. Deterministic terminal-level cancellation and headless handoff evidence
-is recorded above; manual reaction-speed cancellation is unnecessary. The large
-real-provider export and shared ASIC handoff acceptance remain to be recorded.
+is recorded above; manual reaction-speed cancellation is unnecessary. Shared ASIC
+handoff acceptance now passes. Large real-provider simulation export acceptance is
+blocked by the reproducible timeout recorded in the 2026-11-19 update.
 
 ## References
 - [FS2-F02 streaming](../../backlog/fs2_followups.md#fs2-f02--large-trace-streaming).
