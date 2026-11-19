@@ -29,6 +29,60 @@ scripts/with-switch.sh dune build -j 20
 Installed executable names are `hardcaml-workbench-init` and
 `hardcaml-workbench-workspace`. Examples below use the local build directly.
 
+## Open a project before configuring hardware
+
+From a checkout with `dune-project`, open its absolute root and use the daemon's
+existing execution environment:
+
+```sh
+hardcaml-workbench --plain --project-root /absolute/path/to/project --environment inherited
+hardcaml-workbench --project-root /absolute/path/to/project --environment inherited
+```
+
+The plain command reports the selected root, environment, and generic Dune
+workspace. The interactive command opens the workspace; press **Space c c** for
+the command palette. Generic views do not require a hardware manifest, driver,
+or ASIC provider. Use `--discover-project` for the nearest qualifying ancestor
+of the client's current directory, or `--environment opam:SWITCH` to select a
+switch installed on the daemon host.
+
+## Attach over SSH or tmux
+
+If the client runs inside SSH, run it (optionally inside tmux) on the SSH host
+and attach to the daemon's loopback endpoint there. If the client runs on your
+laptop, forward the remote daemon's loopback port and attach locally:
+
+```sh
+ssh -N -L 127.0.0.1:18080:127.0.0.1:8080 DAEMON_HOST
+# In a second local terminal; use the actual daemon port above.
+hardcaml-workbench --connect http://127.0.0.1:18080 \
+  --project-root /absolute/path/on/daemon/host --environment inherited
+```
+
+- `--connect` attaches only. If it fails, check the daemon and port forward;
+  the client does not start a replacement daemon. Use an explicit absolute
+  daemon-host project root for a forwarded connection instead of discovering
+  it from your laptop's current directory.
+- Project execution, `inherited`/opam selection, and provider paths belong to
+  the **daemon host**. Configured external artifact viewers and their private
+  exports belong to the **terminal client host**. An SSH-host client launches
+  its viewer there; a local client using a forward launches its viewer locally.
+  Pass an absolute executable path on the client host when enabling a viewer.
+- **F8** shows connection details; **[** and **]** scroll, **r** reconnects
+  there, and **F8** returns. Automatic reconnect reopens the same project and
+  environment without resubmitting jobs. Reopening the client against the same
+  daemon does not reload cached ASIC provider configuration.
+- In an evidence explorer, **Esc** backs out one level (filter, detail, then
+  explorer); **Space c x** closes the focused inspector after leaving text
+  input. Inspector **r** refreshes evidence. In tmux, detach and reattach to
+  keep the same client; if standalone Escape feels delayed, see
+  [the tmux Escape tradeoff](fs1_investigation.md#escape-responsiveness-in-tmux--2026-10-16-followup).
+  Workbench does not change your tmux settings.
+- **Refresh hardware integration** explicitly reloads the manifest/project
+  driver. **Discover ASIC flows and runs** queries the already loaded provider.
+  Neither installs or rebuilds a provider; after changing ASIC provider
+  configuration, start a fresh daemon session when it is safe to do so.
+
 ## Initialize an existing project
 
 ```sh

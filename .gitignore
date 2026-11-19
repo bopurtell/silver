@@ -32,3 +32,5 @@ release-group/*
 # python scratch
 __pycache__/
 
+# Private isolated-review environments, logs and binary snapshots
+.dev/

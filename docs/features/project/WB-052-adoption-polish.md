@@ -64,3 +64,29 @@ Help changes should point to real controls rather than promise future shortcuts.
 - [Adoption guide](../../fs3_adoption.md)
 - [Inspector/tmux guidance](../../fs1_investigation.md)
 - [Terminal entrypoint](../../../terminal/main.ml)
+
+## Added bounded scope — isolated review tooling (2026-11-05)
+
+Explicitly requested extension: task-local example setup and a reproducible launcher
+for a worktree's own daemon/client, with pinned provider environment, private state
+and preferences, endpoint handoff, identity reporting and actionable preflight.
+This implementation was **not part of the original ticket scope/estimate above**.
+It supports adoption review without disturbing the owner's manual-validation pair.
+
+Implementation and verification: [WB-052 isolated review notes](../../wb052_isolated_review.md).
+
+## Recovery and adoption pass — 2026-11-19
+
+- Recovered the isolated review tooling onto `oxcaml` (`92b3f3d`), retaining the
+  configured build target fix without the old branch tip's unrelated deletions.
+- The [adoption guide](../../fs3_adoption.md) and F8 connection details now cover
+  generic project opening, attach-only behavior, host-local paths and viewers,
+  reconnect, inspector exits, and explicit refresh. Missing-project and invalid
+  endpoint diagnostics suggest a next action.
+- Fixtures and a disposable committed-source example passed on the recovered
+  build. A real loopback SSH/tmux run exercised the new help, detach/reattach,
+  recovery after a daemon restart, client reopen, and forwarded attachment.
+- The automated retained-evidence inspector test passed, including Esc from
+  detail/filter and direct close. The automated viewer-locality test passed in
+  loopback mode. Status stays **partial** until it runs against a second host;
+  see the [automated acceptance commands](../../wb052_isolated_review.md#automated-inspector-and-viewer-acceptance).

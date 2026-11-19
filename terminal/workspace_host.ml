@@ -3419,7 +3419,9 @@ let presentation_commands t (tile : W.Tile.t) =
 
 let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
   let needs_project =
-    if Option.is_none project then Some "Open a project first" else None
+    if Option.is_none project
+    then Some "Restart client with --project-root ROOT or --discover-project"
+    else None
   in
   let base =
     [ command
@@ -3467,13 +3469,13 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ?unavailable:needs_project
         "project.discover"
         "Refresh hardware integration"
-        "driver discover"
+        "driver discover explicit refresh manifest reload (not ASIC provider config)"
         Refresh_integration
     ; command
         ?unavailable:needs_project
         "asic.discover"
         "Discover ASIC flows and runs"
-        "synthesis provider"
+        "synthesis provider explicit refresh loaded provider catalog (not config reload)"
         Discover_asic
     ; command
         "artifact.inspect"

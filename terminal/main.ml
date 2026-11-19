@@ -226,7 +226,8 @@ let explicit_client endpoint =
              || String.equal host "::1") -> Ok (Http.Client.create endpoint)
   | _ ->
     Or_error.error_string
-      "--connect must be an http://localhost, http://127.0.0.1, or http://[::1] endpoint"
+      "--connect requires http://localhost, http://127.0.0.1, or http://[::1]; for a remote \
+       daemon, forward its port over SSH and use the local endpoint"
 ;;
 
 let connect_client ~endpoint ~diagnostics =
@@ -2833,7 +2834,7 @@ and reconnect session =
   in
   match loaded with
   | Error message ->
-    session.status <- "reconnect failed: " ^ message;
+    session.status <- "reconnect failed: " ^ message ^ "; retrying automatically (F8 details)";
     session.reconnect_delay_ms <- Int.min 5_000 (session.reconnect_delay_ms * 2)
   | Ok (client, hello, opened, snapshot) ->
     let instance_changed =
@@ -2906,7 +2907,8 @@ let submission_key action =
 let submit session action =
   match session.opened with
   | None ->
-    session.status <- "build/test requires --project-root";
+    session.status
+    <- "No project open; restart client with --project-root ROOT or --discover-project";
     return ()
   | Some opened ->
     let action_name, protocol_action =
@@ -2939,7 +2941,8 @@ let submit session action =
 let refresh_integration session =
   match current_project session with
   | None ->
-    session.status <- "integration refresh requires --project-root";
+    session.status
+    <- "No project open; restart client with --project-root ROOT or --discover-project";
     return ()
   | Some project ->
     session.status <- "requesting integration refresh...";
@@ -3503,7 +3506,7 @@ let project_lines session ~width =
   match session.opened, current_project session with
   | None, _ ->
     [ "Project: none"
-    ; "Open one with --project-root ROOT"
+     ; "Restart client: --project-root ROOT or --discover-project"
     ; "Generic Dune workspace: unavailable"
     ]
   | Some opened, Some project ->
@@ -3775,7 +3778,27 @@ let artifact_lines session =
 let connection_detail_lines session ~width =
   let field label value = label :: Presentation.wrap_value ~width ~indent:"  " value in
   let root value = "Root:" :: Presentation.wrap_path ~width ~indent:"  " value in
-  Option.value_map
+  (* Help is prose, unlike exact endpoint/identity/path values. Prefer word boundaries,
+     with a hard split only when a single word exceeds the available width. *)
+  let guidance label value =
+    let content_width = Int.max 1 (width - 2) in
+    let rec wrap remaining =
+      if String.length remaining <= content_width
+      then [ "  " ^ remaining ]
+      else (
+        let length =
+          String.rfindi (String.prefix remaining (content_width + 1)) ~f:(fun _ c ->
+            Char.equal c ' ')
+          |> Option.filter ~f:(fun index -> index > 0)
+          |> Option.value ~default:content_width
+        in
+        ("  " ^ String.prefix remaining length)
+        :: wrap (String.lstrip (String.drop_prefix remaining length)))
+    in
+    label :: wrap value
+  in
+  guidance "Details controls:" "F8 return; [/] scroll; r reconnect; Ctrl-C exit."
+  @ Option.value_map
     (Export_clipboard.details session.export_clipboard)
     ~default:[]
     ~f:(fun path ->
@@ -3789,25 +3812,70 @@ let connection_detail_lines session ~width =
   @ field "Daemon instance:" (V1.Daemon_instance_id.to_string session.hello.instance_id)
   @ field "Protocol:" (sprintf "v%d" V1.version)
   @ field "Connection:" session.status
-  @
-  match session.opened with
-  | None ->
-    field "Project:" "none" @ field "Requested environment:" session.environment_label
-  | Some opened ->
-    let project = Option.value (current_project session) ~default:opened.project in
-    let component = function
-      | Project_integration.Component_status.Absent -> "absent"
-      | Available { version = None } -> "available"
-      | Available { version = Some version } -> sprintf "available v%d" version
-      | Unusable { reason } -> "unusable: " ^ reason
-    in
-    field "Project:" project.name
-    @ root (Project_root.to_absolute_path opened.project.root)
-    @ field "Requested environment:" session.environment_label
-    @ field "Resolved environment:" opened.environment.provenance
-    @ field "Dune version:" opened.environment.dune_version
-    @ field "Manifest integration:" (component project.integration.manifest)
-    @ field "Driver integration:" (component project.integration.driver)
+  @ (match session.opened with
+     | None ->
+       field "Project:" "none" @ field "Requested environment:" session.environment_label
+     | Some opened ->
+       let project = Option.value (current_project session) ~default:opened.project in
+       let component = function
+         | Project_integration.Component_status.Absent -> "absent"
+         | Available { version = None } -> "available"
+         | Available { version = Some version } -> sprintf "available v%d" version
+         | Unusable { reason } -> "unusable: " ^ reason
+       in
+       field "Project:" project.name
+       @ root (Project_root.to_absolute_path opened.project.root)
+       @ field "Requested environment:" session.environment_label
+       @ field "Resolved environment:" opened.environment.provenance
+       @ field "Dune version:" opened.environment.dune_version
+       @ field "Manifest integration:" (component project.integration.manifest)
+       @ field "Driver integration:" (component project.integration.driver))
+  @ guidance
+      "Attachment:"
+      (match session.requested_endpoint with
+       | Some _ ->
+         "Explicit --connect: attach only; reconnect never starts a daemon. Check the \
+          daemon and any SSH port forward if attachment fails."
+       | None ->
+         "Automatic local daemon connection/startup. Use --connect URL to attach to a \
+          specific loopback endpoint without automatic startup.")
+  @ guidance
+      "Root / environment:"
+      "Restart the client with --project-root ROOT (directory containing dune-project) \
+       or --discover-project (nearest ancestor from the client's current directory). \
+       For a remote daemon, an absolute root on the daemon host is safest; discovery \
+       searches the client host, not the daemon host. \
+       --environment inherited uses the daemon's environment, not this client's shell; \
+       opam:SWITCH selects a switch on the daemon host. Reconnect keeps these selections."
+  @ guidance
+      "Reconnect / reopen:"
+      "Transport failures retry automatically; reconnect reopens the same project and \
+       resyncs state without resubmitting jobs or reloading configuration. In workspace \
+       panes, r is contextual; use F8 then r to reconnect. Reopening a client against the same \
+       daemon does not reload its cached ASIC provider configuration."
+  @ guidance
+      "Explicit discovery / refresh:"
+      "Space c c: Refresh hardware integration reloads the manifest/project driver; \
+       Discover ASIC flows and runs queries the loaded ASIC provider. Inspector r \
+       refreshes current evidence. None installs or rebuilds a provider. After changing \
+       ASIC provider configuration, use a fresh daemon session to load it."
+  @ guidance
+      "Host / viewer locality:"
+      "Project/provider paths are interpreted on the daemon host; root discovery and \
+       --workspace-config read on the client host. External viewers and private exports \
+       run on the terminal-client host. A client running over SSH launches its viewer \
+       there, not on your laptop; use an absolute executable path on that host."
+  @ guidance
+      "Inspector exits:"
+      "Esc backs out one level (filter, detail, then explorer). After finishing text \
+       input, Space c x closes the focused evidence inspector directly. Timing detail \
+       returns to paths when available. In the waveform, finish any edit/identity view \
+       first, then Esc/q returns to Testing. Ctrl-C exits the client."
+  @ guidance
+      "tmux Escape delay:"
+      "If standalone Esc is slow, inspect tmux escape-time. You may explicitly set \
+       set -sg escape-time 10 in your tmux configuration; a lower delay can split slow \
+       key sequences over SSH. Workbench does not change this setting."
 ;;
 
 let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimensions) =
@@ -4045,7 +4113,9 @@ let host_data session : Host_view.data =
     | Some asic ->
       [ (if asic.configured
          then "Project-owned ASIC flows (Space c c: discover / describe / plan / launch)"
-         else "No ASIC provider configured for this project")
+          else
+            "No ASIC provider configured; generic Dune views still work. Configure the \
+             project provider, then use a fresh daemon session.")
       ]
       @ List.map asic.operations ~f:(fun op ->
         sprintf
@@ -9041,9 +9111,20 @@ let command =
   Command.async_or_error
     ~summary:"Connect to Silver"
     (let%map_open.Command endpoint =
-       flag "--connect" (optional string) ~doc:"URL attach without automatic startup"
+        flag
+          "--connect"
+          (optional string)
+          ~doc:
+            "URL attach to a loopback HTTP daemon without automatic startup (remote: \
+             SSH port forward); omitted: connect/start local daemon"
      and project_root =
-       flag "--project-root" (optional string) ~doc:"ROOT open a Dune project"
+        flag
+          "--project-root"
+          (optional string)
+          ~doc:
+            "ROOT open a directory containing dune-project; explicit path is resolved \
+             on the daemon host (remote: use an absolute path); omit to connect without \
+             opening a project"
      and workspace_config =
        flag
          "--workspace-config"
@@ -9080,7 +9161,9 @@ let command =
        flag
          "--environment"
          (optional_with_default "inherited" string)
-         ~doc:"inherited|opam:SWITCH project command environment (default: inherited)"
+          ~doc:
+            "inherited|opam:SWITCH project command environment on the daemon host \
+             (default: inherited from daemon, not client shell)"
      and plain = flag "--plain" no_arg ~doc:" print status without terminal control"
      and timing_neighbors =
        flag
@@ -9149,8 +9232,9 @@ let command =
             (Command.Arg_type.create (fun path ->
                Artifact_export.executable path |> Or_error.ok_exn)))
          ~doc:
-           "ABSOLUTE_EXECUTABLE enable x to export sanitized ASIC text to a private \
-            local .txt and open it (no shell; disabled by default)"
+            "ABSOLUTE_EXECUTABLE enable x to export sanitized ASIC text to a private \
+             terminal-client-host .txt and open it there (over SSH: remote client host, \
+             not laptop; no shell; disabled by default)"
      and artifact_binary_viewer =
        flag
          "--artifact-binary-viewer"
@@ -9161,7 +9245,8 @@ let command =
          ~doc:
            "ABSOLUTE_EXECUTABLE external viewer for verified ASIC binary files (b) and \
             simulation traces (palette, <=64 MiB); alias --simulation-viewer; receives \
-            one private terminal-host path, no shell; disabled by default"
+             one private terminal-client-host path and runs there (over SSH: remote \
+             client host, not laptop); no shell; disabled by default"
      and hierarchy =
        flag
          "--hierarchy"
