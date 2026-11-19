@@ -45,6 +45,15 @@ val checks_lines : Asic.Summary.t -> string list
 (** Cell-aware wrapping shared by the pure evidence views. *)
 val wrap : width:int -> string -> string list
 
+val select_cell_row
+  :  State.t
+  -> summary:Asic.Summary.t option
+  -> filter:string
+  -> width:int
+  -> height:int
+  -> row:int
+  -> State.t option
+
 (** Pure, cell-width-bounded strings, at most [height] rows. No host dependency, provider
     effects, JSON parsing, or inferred cell semantics. Rendering also reconciles
     defensively, but does not persist that reconciled state. *)

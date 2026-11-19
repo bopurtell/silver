@@ -700,6 +700,67 @@ let inline_signal_row ~appearance ~columns ~active ~enabled (s : D.signal) ~valu
     ]
 ;;
 
+let signal_page t data ~hints ~value_layout ~width ~height =
+  let signals = filtered t data in
+  let columns = signal_columns t ~width in
+  let rows_per_signal =
+    match value_layout with
+    | Inline -> 1
+    | Stacked -> 2
+  in
+  let page =
+    Option.bind (List.nth signals t.focus) ~f:(fun s ->
+      let value = D.value_at data s ~time:t.cursor |> Option.value ~default:"unset" in
+      let available =
+        match value_layout with
+        | Inline -> columns.value_width
+        | Stacked -> Int.max 1 (width - 5)
+      in
+      let _, first, last = value_chunk ~columns:available ~offset:t.value_offset value in
+      if first > 0 || last < String.length value
+      then Some (sprintf "Value %d..%d/%d · { } page" first last (String.length value))
+      else None)
+  in
+  let footer =
+    Option.first_some
+      (editing_prompt ~width t)
+      (if not (String.is_empty t.notice)
+       then Some t.notice
+       else
+         Option.first_some
+           page
+           (if hints
+            then Some "j/k browse · Enter toggle · / filter · Space c c commands"
+            else None))
+  in
+  let editing_error = Option.is_some t.editing && not (String.is_empty t.notice) in
+  let visible =
+    Int.max
+      1
+      ((height
+        - 1
+        - (if Option.is_some footer then 1 else 0)
+        - if editing_error then 1 else 0)
+       / rows_per_signal)
+  in
+  let first = Int.max 0 (t.focus - visible + 1) in
+  let page = List.take (List.drop signals first) visible in
+  List.length signals, columns, rows_per_signal, footer, editing_error, first, page
+;;
+
+let select_signal_row t ~hints ~value_layout ~width ~height ~row =
+  match t.loaded with
+  | Ready data when row > 0 && row < height && Option.is_none t.editing ->
+    let _, _, rows_per_signal, _, _, first, page =
+      signal_page t data ~hints ~value_layout ~width ~height
+    in
+    let i = (row - 1) / rows_per_signal in
+    if i < List.length page && first + i <> t.focus
+    then { t with focus = first + i; value_offset = 0 }
+    else t
+  | _ -> t
+;;
+
 let render_signals
   ?(appearance = Appearance.default)
   ?(hints = true)
@@ -720,55 +781,11 @@ let render_signals
       [ text R.Failure ("VCD unavailable: " ^ e) ]
       @ Option.to_list (Option.map (editing_prompt ~width t) ~f:(text R.Muted))
     | Ready data ->
-      let signals = filtered t data in
-      let columns = signal_columns t ~width in
-      let rows_per_signal =
-        match value_layout with
-        | Inline -> 1
-        | Stacked -> 2
+      let matching, columns, _, footer, editing_error, first, page =
+        signal_page t data ~hints ~value_layout ~width ~height
       in
-      let page =
-        Option.bind (List.nth signals t.focus) ~f:(fun s ->
-          let value = D.value_at data s ~time:t.cursor |> Option.value ~default:"unset" in
-          let available =
-            match value_layout with
-            | Inline -> columns.value_width
-            | Stacked -> Int.max 1 (width - 5)
-          in
-          let _, first, last =
-            value_chunk ~columns:available ~offset:t.value_offset value
-          in
-          if first > 0 || last < String.length value
-          then
-            Some (sprintf "Value %d..%d/%d · { } page" first last (String.length value))
-          else None)
-      in
-      let footer =
-        Option.first_some
-          (editing_prompt ~width t)
-          (if not (String.is_empty t.notice)
-           then Some t.notice
-           else
-             Option.first_some
-               page
-               (if hints
-                then Some "j/k browse · Enter toggle · / filter · Space c c commands"
-                else None))
-      in
-      let editing_error = Option.is_some t.editing && not (String.is_empty t.notice) in
-      let visible =
-        Int.max
-          1
-          ((height
-            - 1
-            - (if Option.is_some footer then 1 else 0)
-            - if editing_error then 1 else 0)
-           / rows_per_signal)
-      in
-      let first = Int.max 0 (t.focus - visible + 1) in
       let rows =
-        List.drop signals first
-        |> Fn.flip List.take visible
+        page
         |> List.concat_mapi ~f:(fun i s ->
           let active = first + i = t.focus in
           let enabled = Set.mem t.selected s.D.index in
@@ -798,7 +815,7 @@ let render_signals
          R.Muted
          (sprintf
             "%d matching · %d enabled · filter: %s"
-            (List.length signals)
+            matching
             (Set.length t.selected)
             t.filter)
        :: rows)
@@ -2241,6 +2258,12 @@ let%test_unit "inline columns use display cells; stacked and paging preserve exa
     && filtered_columns.value_start < wide_columns.value_start);
   let wide = render_signals ~hints:false t ~width:300 ~height:4 |> plain in
   assert (String.is_substring wide ~substring:(longest_name ^ " [64] = " ^ bits));
+  let click row =
+    select_signal_row t ~hints:true ~value_layout:Stacked ~width:70 ~height:8 ~row
+  in
+  assert ((click 2).focus = 0 && (click 4).focus = 1);
+  assert (Set.equal (click 2).selected t.selected);
+  List.iter [ 0; 5; 6; 7; 8 ] ~f:(fun row -> assert (phys_equal (click row) t));
   (* Column positions are based on the whole filtered list, including the disabled
      off-screen entry, not whichever name is currently focused. *)
   assert (

@@ -216,6 +216,7 @@ let rows ?(string_compression = true) t =
   @ List.map (visible_cases t) ~f:(fun c ->
     row
       ~selected:(Option.equal String.equal t.case_id (Some c.id))
+      ~target:(Catalog_case c.id)
       ((if Option.equal String.equal t.case_id (Some c.id) then "> " else "  ")
        ^ (if List.mem t.selected c.id ~equal:String.equal then "[x] " else "[ ] ")
        ^ c.id
@@ -224,6 +225,7 @@ let rows ?(string_compression = true) t =
   @ [ row "SUITES" ]
   @ List.map (suites t) ~f:(fun s ->
     row
+      ~target:(Catalog_suite s.id)
       ((if Option.equal String.equal t.suite_id (Some s.id) then "> " else "  ")
        ^ s.id
        ^ " — "

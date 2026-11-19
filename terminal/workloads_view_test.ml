@@ -31,6 +31,24 @@ let loaded () =
   V.reconcile t asic, asic
 ;;
 
+let%test_unit "only wrapped retained result rows carry a browse target" =
+  let _, asic = loaded () in
+  let path = "/retained/a/result.json" in
+  let view = { V.empty with mode = Results; error = Some path } in
+  let page = V.page_with_targets view ~asic ~filter:"a" ~width:9 ~height:100 in
+  let hits = List.filter_map page ~f:fst in
+  assert (List.length hits > 1);
+  assert (List.for_all hits ~f:(String.equal path));
+  let detail = { view with mode = Detail } in
+  assert (
+    List.for_all
+      (V.page_with_targets detail ~asic ~filter:"" ~width:9 ~height:100)
+      ~f:(fun (target, _) -> Option.is_none target));
+  let clicked = V.browse_result view (Some path) in
+  assert (V.equal_mode clicked.mode Results && Option.is_none clicked.pending);
+  assert (Option.equal String.equal clicked.selected (Some path))
+;;
+
 let%test_unit "raw metric tokens and rational components survive presentation" =
   let t, asic = loaded () in
   let text =

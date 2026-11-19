@@ -160,6 +160,17 @@ let wrap ~width row =
 
 let clip ~width row = List.hd (wrap ~width row) |> Option.value ~default:[]
 
+let page_with_targets ~width ~height ~offset rows =
+  let wrapped =
+    List.concat_map rows ~f:(fun (target, row) ->
+      List.map (wrap ~width row) ~f:(fun line -> target, line))
+  in
+  let offset =
+    Int.clamp_exn offset ~min:0 ~max:(Int.max 0 (List.length wrapped - height))
+  in
+  List.take (List.drop wrapped offset) (Int.max 0 height)
+;;
+
 let page ~width ~height ~offset rows =
   if height <= 0
   then []

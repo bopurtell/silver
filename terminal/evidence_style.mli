@@ -61,4 +61,11 @@ val wrap : width:int -> row -> row list
 
 val clip : width:int -> row -> row
 val page : width:int -> height:int -> offset:int -> row list -> row list
+val page_with_targets
+  :  width:int
+  -> height:int
+  -> offset:int
+  -> ('a * row) list
+  -> ('a * row) list
+
 val render : attrs:(Role.t -> Bonsai_term.Attr.t list) -> row list -> Bonsai_term.View.t

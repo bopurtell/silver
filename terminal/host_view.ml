@@ -928,7 +928,7 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
                        (Overview_tiles.checklist_id item)))
                 item
             in
-            match item with
+            let row = match item with
             | Elaboration_preparation ->
               let workflow = Overview_tiles.workflow_for_run ~asic:data.asic ~run in
               let linked =
@@ -947,7 +947,9 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
                 details =
                   row.details @ Overview_tiles.analysis_details ~run (data.summary run)
               }
-            | _ -> row)
+            | _ -> row
+            in
+            { row with cursor_id = Some (Overview_tiles.checklist_id item) })
         | _ ->
           Overview_tiles.elaboration_row
             ~now
@@ -1262,6 +1264,8 @@ let compact_rows ?(now = Time_ns.now ()) host data tile =
         ())
 ;;
 
+let cells_source_height ~hints height = height + Bool.to_int (not hints && height >= 5)
+
 let semantic_rows host data tile ~width ~height =
   let local = H.local host tile.W.Tile.id
   and policy = H.policy host tile in
@@ -1289,13 +1293,9 @@ let semantic_rows host data tile ~width ~height =
               else 0
             in
             let source_height =
-              base_height
-              +
-              if (not policy.hints)
-                 && ((Synthesis_view.Mode.equal mode Summary && base_height >= 8)
-                     || (Synthesis_view.Mode.equal mode Cells && base_height >= 5))
-              then 1
-              else 0
+              if Synthesis_view.Mode.equal mode Cells
+              then cells_source_height ~hints:policy.hints height
+              else base_height + Bool.to_int ((not policy.hints) && base_height >= 8)
             in
             let rows =
               Synthesis_view.semantic_rows
@@ -1680,12 +1680,12 @@ let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width host data t
       ~log_lines:data.log_lines
 ;;
 
-let annotated_view_rows ?indicator_frames host ~width annotations =
+let annotated_physical_rows ?indicator_frames host ~width annotations =
   annotations
   |> List.concat_map
        ~f:
          (fun
-           { Simulation_view.text; indicator = kind; value_start; selected; spans; _ } ->
+           { Simulation_view.text; indicator = kind; value_start; selected; spans; target; _ } ->
          let role = Option.value_map kind ~default:Role.Foreground ~f:indicator_role in
          let icon =
            Option.value_map
@@ -1742,14 +1742,24 @@ let annotated_view_rows ?indicator_frames host ~width annotations =
                ]
              |> box ~width ~height:1
            in
-           selected && i = 0, view))
+           selected && i = 0, (target, view)))
 ;;
 
-let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~width =
+let annotated_view_rows ?indicator_frames host ~width annotations =
+  annotated_physical_rows ?indicator_frames host ~width annotations
+  |> List.map ~f:(fun (selected, (_, view)) -> selected, view)
+;;
+
+let simulation_physical_rows ?indicator_frames ?now host data tile ~width =
   simulation_annotations ?now ~identifier_width:(Int.max 1 (width - 8)) host data tile
   |> List.filter ~f:(fun row ->
     (not row.Simulation_view.hint) || (H.policy host tile).hints)
-  |> annotated_view_rows ?indicator_frames host ~width
+  |> annotated_physical_rows ?indicator_frames host ~width
+;;
+
+let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~width =
+  simulation_physical_rows ?indicator_frames ?now host data tile ~width
+  |> List.map ~f:(fun (selected, (_, view)) -> selected, view)
 ;;
 
 let execution_annotations host data (tile : W.Tile.t) =
@@ -1824,6 +1834,7 @@ let execution_annotations host data (tile : W.Tile.t) =
     in
     row
       ~selected:(selected job)
+      ~target:(Job job.id)
       ~indicator:(job_indicator job.state)
       ~spans:[ Simulation_view.span ~start:(cell_width prefix) tone status ]
       (prefix ^ status ^ "  " ^ job_label job))
@@ -1880,6 +1891,45 @@ let simulation_viewport_start host tile ~height rows =
   ensure_visible ~start:local.scroll ~height ~length:(List.length rows) ~selected
 ;;
 
+let run_candidates data ~filter =
+  let substring = String.lowercase filter in
+  List.filter data.runs ~f:(fun (run, status) ->
+    String.is_substring (String.lowercase (run_label run ^ " " ^ status)) ~substring)
+;;
+
+let run_cursor host tile =
+  Option.first_some
+    (H.local host tile.W.Tile.id).cursor
+    (Option.map (tile_run host tile) ~f:run_label)
+;;
+
+let run_page host tile ~height candidates =
+  let local = H.local host tile.W.Tile.id in
+  let selected = run_cursor host tile in
+  let index =
+    List.findi candidates ~f:(fun _ (run, _) ->
+      Option.equal String.equal selected (Some (run_label run)))
+    |> Option.value_map ~default:0 ~f:fst
+  in
+  let available = Int.min height (H.policy host tile).run_selector_rows in
+  let start =
+    Int.clamp_exn
+      local.scroll
+      ~min:(Int.max 0 (index - Int.max 1 available + 1))
+      ~max:index
+  in
+  selected, start, List.take (List.drop candidates start) (Int.max 0 available)
+;;
+
+let browse_index values ~cursor ~delta =
+  let index =
+    Option.bind cursor ~f:(fun cursor ->
+      List.findi values ~f:(fun _ value -> String.equal cursor value) |> Option.map ~f:fst)
+    |> Option.value ~default:(if delta > 0 then -1 else 1)
+  in
+  Int.max 0 (Int.min (List.length values - 1) (index + delta))
+;;
+
 let rows host data tile ~width ~height =
   let local = H.local host tile.W.Tile.id in
   let scope =
@@ -1888,33 +1938,15 @@ let rows host data tile ~width ~height =
     | Some s -> W.resolve_tile s tile.id |> Result.ok |> Option.bind ~f:(fun r -> r.run)
   in
   let run_rows () =
-    let candidates =
-      List.filter data.runs ~f:(fun (r, label) ->
-        String.is_substring
-          (String.lowercase (run_label r ^ " " ^ label))
-          ~substring:(String.lowercase local.filter))
-    in
-    let available = Int.min height (H.policy host tile).run_selector_rows in
-    let selected = Option.first_some local.cursor (Option.map scope ~f:run_label) in
-    let selected_index =
-      List.findi candidates ~f:(fun _ (run, _) ->
-        Option.equal String.equal selected (Some (run_label run)))
-      |> Option.value_map ~default:0 ~f:fst
-    in
-    let start =
-      Int.clamp_exn
-        local.scroll
-        ~min:(Int.max 0 (selected_index - Int.max 1 available + 1))
-        ~max:selected_index
-    in
+    let candidates = run_candidates data ~filter:local.filter in
+    let selected, _, page = run_page host tile ~height candidates in
     let status_width =
       Int.min
         (Int.max 0 (width / 3))
         (List.fold candidates ~init:0 ~f:(fun n (_, status) ->
            Int.max n (cell_width status)))
     in
-    List.drop candidates start
-    |> Fn.flip List.take (Int.max 0 available)
+    page
     |> List.map ~f:(fun (run, label) ->
       run_selector_row
         ~string_compression:(H.policy host tile).string_compression
@@ -2093,6 +2125,206 @@ let rows host data tile ~width ~height =
   else List.drop rows local.scroll
 ;;
 
+let observation_banner host data tile ~width =
+  if String.equal tile.W.Tile.kind "stage-checklist"
+  then
+    Option.bind (tile_run host tile) ~f:(stopped_observation data)
+    |> Option.value_map ~default:[] ~f:(fun _ -> wrap_cells ~width observation_qualifier)
+  else []
+;;
+
+let checklist_page host data tile ~height rows =
+  let hints = checklist_hints host data tile in
+  let evidence_height = Int.min 3 (Int.max 1 (height - 1)) in
+  let hint_height = Int.min (List.length hints) (Int.max 0 (height - evidence_height)) in
+  let available = Int.max 0 (height - hint_height) in
+  let selected =
+    List.findi rows ~f:(fun _ r -> r.Overview_tiles.active)
+    |> Option.value_map ~default:0 ~f:fst
+  in
+  let start =
+    Int.clamp_exn
+      (H.local host tile.id).scroll
+      ~min:(Int.max 0 (selected - Int.max 1 available + 1))
+      ~max:selected
+  in
+  hints, hint_height, available, List.drop rows start
+;;
+
+let workspace_page host tile ~width ~height rows =
+  let chips =
+    List.mapi rows ~f:(fun i row ->
+      let i =
+        Option.bind host.H.registry ~f:(fun registry ->
+          List.findi registry.workspaces ~f:(fun _ w ->
+            Option.equal W.Workspace_id.equal row.Overview_tiles.workspace (Some w.id)))
+        |> Option.value_map ~default:i ~f:fst
+      in
+      let role =
+        if row.active
+        then Role.Active_tab
+        else if Overview_tiles.Role.equal row.role Active
+        then Selection
+        else Inactive_tab
+      in
+      ( View.text
+          ~attrs:(Role.attrs host.appearance role)
+          (sprintf
+             " %s%d %s%s "
+             (if row.active then "[" else " ")
+             (i + 1)
+             row.label
+             (if row.active then "]" else " "))
+      , row.workspace ))
+  in
+  if List.sum (module Int) chips ~f:(fun (view, _) -> View.width view) <= width
+  then `Strip chips
+  else (
+    let selected =
+      Option.map (H.workspace_cursor host tile.W.Tile.id) ~f:(fun w -> w.id)
+    in
+    let index =
+      List.findi rows ~f:(fun _ row ->
+        Option.equal W.Workspace_id.equal row.Overview_tiles.workspace selected)
+      |> Option.value_map ~default:0 ~f:fst
+    in
+    `Rows
+      (List.drop rows (Int.max 0 (index - height + 2))
+       |> Fn.flip List.take (Int.max 1 (height - 1))))
+;;
+
+let inspection_physical_rows ~width rows =
+  List.concat_map rows ~f:(fun entry ->
+    Overview_tiles.inspection_lines [ entry ]
+    |> List.concat_mapi ~f:(fun i line ->
+      List.map (wrap_cells ~width line) ~f:(fun text ->
+        text, if i = 0 then entry.cursor_id else None)))
+;;
+
+let workspace_tab_at host data tile ~width ~height ~column ~row =
+  let local = H.local host tile.W.Tile.id in
+  if not (String.equal tile.kind "workspace-tabs")
+     || local.utility_detail || Option.is_some local.artifacts || Option.is_some local.inspection
+     || column < 0 || column >= width || row < 0 || row >= height
+  then None
+  else
+    Option.bind (utility_rows host data tile) ~f:(fun rows ->
+      match workspace_page host tile ~width ~height rows with
+      | `Strip chips -> if row = 0 then Overview_tiles.chip_at chips ~column else None
+      | `Rows page -> List.nth page row |> Option.bind ~f:(fun r -> r.workspace))
+;;
+
+let mixed_checklist host data tile =
+  Option.exists (tile_run host tile) ~f:(fun run ->
+    List.exists (Overview_tiles.checklist_items ~asic:data.asic ~run) ~f:(function
+      | Timing_analysis _ | Elaboration_preparation -> true
+      | Physical_stage _ -> false))
+;;
+
+let stage_strip_model ?now host tile ~run ~width stages =
+  let selected_id =
+    H.stage_cursor (H.local host tile.W.Tile.id) ~run ~stages
+    |> Option.map ~f:(fun stage -> stage.Asic.Stage.id)
+  in
+  Overview_tiles.Stage_strip.model
+    ?now
+    ~appearance:host.appearance
+    ~width
+    ~run
+    ~selected_id
+    stages
+;;
+
+let stage_strip_hints host data tile ~height =
+  let hints = checklist_hints host data tile in
+  hints, Int.min (List.length hints) (Int.max 0 (height - 2))
+;;
+
+let select_more_body_row host data tile ~width ~height ~column ~row =
+  let local = H.local host tile.W.Tile.id in
+  if column < 0
+     || column >= width
+     || row < 0
+     || row >= height
+     || Option.is_some local.artifacts
+     || Option.is_some local.inspection
+  then host
+  else (
+    let use opt f = Option.value_map opt ~default:host ~f in
+    let at xs i = if i < 0 then None else List.nth xs i in
+    match tile.kind with
+    | "synthesis"
+      when Synthesis_view.Mode.equal (Synthesis_view.State.mode local.synthesis) Cells ->
+      use (tile_run host tile) (fun run ->
+        let height = cells_source_height ~hints:(H.policy host tile).hints height in
+        use
+          (Synthesis_view.select_cell_row
+             local.synthesis
+             ~summary:(data.summary run)
+             ~filter:local.filter
+             ~width
+             ~height
+             ~row)
+          (fun synthesis -> H.set_local host tile.id { local with synthesis }))
+    | "preparation" | "stage-checklist" ->
+      use (utility_rows host data tile) (fun rows ->
+        match tile.kind with
+        | "preparation" ->
+          let id =
+            if local.utility_detail
+            then
+              at (List.drop (inspection_physical_rows ~width rows) local.scroll) row
+              |> Option.bind ~f:snd
+            else
+              at (List.drop rows local.scroll) row
+              |> Option.bind ~f:(fun r -> r.cursor_id)
+          in
+          use id (fun id ->
+            H.set_local host tile.id { local with cursor = Some id; scroll = 0 })
+        | "stage-checklist" when not local.utility_detail ->
+          let banner = List.length (observation_banner host data tile ~width) in
+          let height = Int.max 0 (height - banner)
+          and row = row - banner in
+          let run = tile_run host tile in
+          let target =
+            match H.horizontal_stages host tile, run with
+            | true, Some run ->
+              let appearance = host.H.appearance
+              and attrs = utility_attrs host.appearance in
+              let chips =
+                if mixed_checklist host data tile
+                then
+                  Overview_tiles.checklist_strip_lines
+                    ~appearance
+                    ~attrs
+                    ~width
+                    ~height
+                    rows
+                else (
+                  let stages = Overview_tiles.observed_stages ~asic:data.asic ~run in
+                  let model = stage_strip_model host tile ~run ~width stages in
+                  let _, hints = stage_strip_hints host data tile ~height in
+                  Overview_tiles.Stage_strip.chip_lines
+                    ~appearance
+                    ~attrs
+                    ~width
+                    ~height:(height - hints)
+                    model)
+              in
+              at chips row |> Option.bind ~f:(Overview_tiles.chip_at ~column)
+            | _ ->
+              let _, hints, _, page = checklist_page host data tile ~height rows in
+              at page (row - hints) |> Option.bind ~f:(fun r -> r.cursor_id)
+          in
+          use target (fun id ->
+            H.set_local
+              host
+              tile.id
+              { local with cursor = Some id; stage_run = tile_run host tile; scroll = 0 })
+        | _ -> host)
+    | _ -> host)
+;;
+
 let panel_geometry host tile ~width ~height =
   let policy = H.policy host tile in
   let appearance = host.H.appearance in
@@ -2104,20 +2336,147 @@ let panel_geometry host tile ~width ~height =
     ~vertical_padding:0
 ;;
 
-let body_geometry host tile ~width ~height =
-  let policy = H.policy host tile in
-  let g = panel_geometry host tile ~width ~height in
-  let body_height =
-    Int.max
-      0
-      (g.content_height
-       - (if g.border = 0
-             && (T.show_title policy || T.show_badge policy (H.binding_kind tile))
-          then 1
-          else 0)
-       - if policy.run_reference then 1 else 0)
+let timing_paths_page (view : Timing_workspace.t) ~height =
+  let visible = Inspection_view.visible view in
+  let position =
+    List.findi visible ~f:(fun _ row ->
+      Option.equal String.equal view.selected (Some row.Asic_inspection.Row.id))
+    |> Option.value_map ~default:0 ~f:fst
   in
-  g.inner_width, g.inner_height, g.horizontal_padding, g.content_width, body_height
+  let heading_rows = Int.min 4 (Int.max 0 (height - 1)) in
+  let capacity = Int.max 1 (height - heading_rows) in
+  visible, heading_rows, List.take (List.drop visible (position / capacity * capacity)) capacity
+;;
+
+(** Physical rows carry their original target through wrapping. Plain annotations
+    (hints, logs, outcome detail) never borrow an adjacent target. *)
+let select_body_row ?(column = 0) host data tile ~width ~height ~row =
+  let local = H.local host tile.W.Tile.id in
+  if width <= 0
+     || row < 0
+     || row >= height
+     || Option.is_some local.artifacts
+     || Option.is_some local.inspection
+  then host
+  else if String.equal tile.kind "workloads"
+  then (
+    match List.nth (Workloads_view.page_with_targets local.workloads ~asic:data.asic ~filter:local.filter ~width ~height) row with
+    | Some (Some path, _) when not (Option.equal String.equal local.workloads.selected (Some path)) ->
+      H.set_local host tile.id { local with workloads = Workloads_view.browse_result local.workloads (Some path) }
+    | _ -> host)
+  else if String.equal tile.kind "resources"
+  then (
+    let view = Resources_view.reconcile local.resources ~run:(tile_run host tile) ~filter:local.filter data.asic in
+    let page = Resources_view.page_with_targets view ~asic:data.asic ~filter:local.filter ~width ~height in
+    match List.nth page row with
+    | Some (Some (`Resource id), _) when not (Option.equal String.equal view.selected (Some id)) ->
+      H.set_local host tile.id { local with resources = Resources_view.browse_resource view (Some id) }
+    | Some (Some (`Source id), _) when not (Option.equal String.equal view.artifact (Some id)) ->
+      H.set_local host tile.id { local with resources = Resources_view.browse_source view (Some id) }
+    | _ -> host)
+  else if String.equal tile.kind "timing-paths"
+  then (
+    match H.timing host tile with
+    | None -> host
+    | Some view ->
+      let _, header, page = timing_paths_page view ~height in
+      (match List.nth page (row - header) with
+       | Some path when not (Option.equal String.equal view.selected (Some path.id)) ->
+         H.set_timing
+           host
+           tile
+           { view with
+             selected = Some path.id
+           ; requested = None
+           ; detail = None
+           ; info = false
+           ; scroll = 0
+           ; operation_key = None
+           ; error = None
+           ; pending_error = None
+           }
+       | _ -> host))
+  else if String.equal tile.kind "run-selector"
+  then (
+    let _, start, page =
+      run_page host tile ~height (run_candidates data ~filter:local.filter)
+    in
+    match List.nth page row with
+    | None -> host
+    | Some (run, _) ->
+      H.set_local
+        host
+        tile.id
+        { local with cursor = Some (run_label run); scroll = start })
+  else (
+    let target =
+      let at rows offset =
+        List.nth (List.drop rows offset) row
+        |> Option.bind ~f:(fun (_, (target, _)) -> target)
+      in
+      if simulation_cursor_pane tile.kind
+      then (
+        let rows = simulation_physical_rows host data tile ~width in
+        at rows (simulation_viewport_start host tile ~height rows))
+      else if List.mem [ "execution"; "project-tests" ] tile.kind ~equal:String.equal
+      then
+        at
+          (annotated_physical_rows host ~width (execution_annotations host data tile))
+          local.scroll
+      else None
+    in
+    match target with
+    | None -> select_more_body_row host data tile ~width ~height ~column ~row
+    | Some (Job id) ->
+      H.set_local
+        host
+        tile.id
+        { local with cursor = Some (Job_id.to_string id); scroll = 0 }
+    | Some target ->
+      let host =
+        H.update_testing host tile.id (fun state ->
+          match target with
+          | Simulation_view.Attempt id ->
+            if Option.equal String.equal (Testing_workspace.view state).attempt (Some id)
+            then state
+            else (
+              let state = Testing_workspace.select_attempt state id in
+              Testing_workspace.set_view
+                state
+                { (Testing_workspace.view state) with busy = false })
+          | Case id -> Testing_workspace.select_case state id
+          | Artifact id -> Testing_workspace.select_artifact state id
+          | Catalog_case id ->
+            Testing_workspace.update_catalog state (fun c ->
+              Simulation_catalog.select_case c id)
+          | Catalog_suite id ->
+            Testing_workspace.update_catalog state (fun c ->
+              if Option.equal String.equal (Simulation_catalog.suite_id c) (Some id)
+              then c
+              else Simulation_catalog.select_suite c id)
+          | Job _ -> state)
+      in
+      H.set_local host tile.id { (H.local host tile.id) with follow = true })
+;;
+
+let body_bounds host tile (g : Panel.geometry) =
+  let policy = H.policy host tile in
+  let header =
+    Bool.to_int
+      (g.border = 0 && (T.show_title policy || T.show_badge policy (H.binding_kind tile)))
+    + Bool.to_int policy.run_reference
+  in
+  { W.Geometry.x = g.border + g.horizontal_padding
+  ; y = g.border + g.vertical_padding + header
+  ; width = g.content_width
+  ; height = Int.max 0 (g.content_height - header)
+  }
+;;
+
+let body_geometry host tile ~width ~height =
+  let g = panel_geometry host tile ~width ~height in
+  let body = body_bounds host tile g in
+  g.inner_width, g.inner_height, g.horizontal_padding, body.width, body.height
 ;;
 
 let timing_status_role (row : Asic_inspection.Row.t) =
@@ -2166,16 +2525,7 @@ let timing_body
   in
   match pane with
   | Timing_workspace.Paths ->
-    let visible = Inspection_view.visible view in
-    let position =
-      List.findi visible ~f:(fun _ row ->
-        Option.equal String.equal view.selected (Some row.Asic_inspection.Row.id))
-      |> Option.value_map ~default:0 ~f:fst
-    in
-    let capacity = Int.max 1 (height - 4) in
-    let page =
-      List.drop visible (position / capacity * capacity) |> Fn.flip List.take capacity
-    in
+    let visible, heading_rows, page = timing_paths_page view ~height in
     let all = Option.value ~default:"ALL" in
     let sort =
       match view.sort with
@@ -2226,7 +2576,7 @@ let timing_body
       ; text Muted "Path / endpoint                         Value · reported status"
       ]
     in
-    let header = List.take header (Int.max 0 (height - 1) |> Int.min 4) in
+    let header = List.take header heading_rows in
     let path row =
       let selected =
         Option.equal String.equal view.selected (Some row.Asic_inspection.Row.id)
@@ -2343,14 +2693,7 @@ let tile_view
       | Follow -> if H.project_scoped_kind tile.kind then "project" else "follow")
   in
   let _, _, _, body_width, body_height = body_geometry host tile ~width ~height in
-  let observation_banner =
-    if String.equal tile.kind "stage-checklist"
-    then
-      Option.bind (tile_run host tile) ~f:(stopped_observation data)
-      |> Option.value_map ~default:[] ~f:(fun _ ->
-        wrap_cells ~width:body_width observation_qualifier)
-    else []
-  in
+  let observation_banner = observation_banner host data tile ~width:body_width in
   let full_body_height = body_height in
   let banner_height = Int.min body_height (List.length observation_banner) in
   let body_height = Int.max 0 (body_height - banner_height) in
@@ -2431,12 +2774,7 @@ let tile_view
           | kind when P.Waveforms.is_pane kind ->
             P.Waveforms.title (Option.value_exn (P.Waveforms.pane kind))
           | "run-selector" ->
-            let total =
-              List.count data.runs ~f:(fun (run, status) ->
-                String.is_substring
-                  (String.lowercase (run_label run ^ " " ^ status))
-                  ~substring:(String.lowercase local.filter))
-            in
+            let total = List.length (run_candidates data ~filter:local.filter) in
             sprintf
               "runs %d/%d (cap %d)"
               (Int.min total (Int.min body_height policy.run_selector_rows))
@@ -2539,12 +2877,7 @@ let tile_view
             when String.equal tile.kind "run-selector"
                  && Option.is_none local.inspection
                  && Option.is_none local.artifacts ->
-            let candidates =
-              List.filter data.runs ~f:(fun (run, status) ->
-                String.is_substring
-                  (String.lowercase (run_label run ^ " " ^ status))
-                  ~substring:(String.lowercase local.filter))
-            in
+            let candidates = run_candidates data ~filter:local.filter in
             let status_width =
               Int.min
                 (Int.max 0 (body_width / 3))
@@ -2561,27 +2894,8 @@ let tile_view
               List.fold candidates ~init:0 ~f:(fun n (run, _) ->
                 Int.max n (cell_width (time run)))
             in
-            (* [rows] already applies the selector's cursor paging. Resolve each row
-               against the same typed candidate and keep status styling out of IDs. *)
-            let selected =
-              Option.first_some
-                local.cursor
-                (Option.map (tile_run host tile) ~f:run_label)
-            in
-            let selected_index =
-              List.findi candidates ~f:(fun _ (run, _) ->
-                Option.equal String.equal selected (Some (run_label run)))
-              |> Option.value_map ~default:0 ~f:fst
-            in
-            let available = Int.min body_height policy.run_selector_rows in
-            let start =
-              Int.clamp_exn
-                local.scroll
-                ~min:(Int.max 0 (selected_index - Int.max 1 available + 1))
-                ~max:selected_index
-            in
-            List.drop candidates start
-            |> Fn.flip List.take (Int.max 0 available)
+            let selected, _, page = run_page host tile ~height:body_height candidates in
+            page
             |> List.map ~f:(fun (run, status) ->
               run_selector_view
                 ~string_compression:policy.string_compression
@@ -2619,19 +2933,14 @@ let tile_view
                })
            else rows
          in
-         Overview_tiles.inspection_lines rows
-         |> List.concat_map ~f:(wrap_cells ~width:body_width)
+         inspection_physical_rows ~width:body_width rows
+         |> List.map ~f:fst
          |> Fn.flip List.drop local.scroll
          |> lines ~appearance ~width:body_width ~height:body_height
        | Some rows
          when String.equal tile.kind "stage-checklist"
               && Option.value horizontal_stages ~default:(H.horizontal_stages host tile)
-              && Option.exists (tile_run host tile) ~f:(fun run ->
-                List.exists
-                  (Overview_tiles.checklist_items ~asic:data.asic ~run)
-                  ~f:(function
-                  | Timing_analysis _ | Elaboration_preparation -> true
-                  | _ -> false)) ->
+              && mixed_checklist host data tile ->
          Overview_tiles.render_checklist_strip
            ?indicator_frames
            ~indicator_fg:(Role.foreground appearance Running)
@@ -2644,13 +2953,6 @@ let tile_view
          |> box ~width:body_width ~height:body_height
        | Some rows
          when String.equal tile.kind "stage-checklist"
-              && (not
-                    (Option.exists (tile_run host tile) ~f:(fun run ->
-                       List.exists
-                         (Overview_tiles.checklist_items ~asic:data.asic ~run)
-                         ~f:(function
-                         | Timing_analysis _ | Elaboration_preparation -> true
-                         | _ -> false))))
               && Option.value horizontal_stages ~default:(H.horizontal_stages host tile)
               && Option.is_some (tile_run host tile) ->
          let run = Option.value_exn (tile_run host tile) in
@@ -2667,19 +2969,7 @@ let tile_view
              ~height:body_height
              rows
          else (
-           let selected_id =
-             H.stage_cursor local ~run ~stages
-             |> Option.map ~f:(fun stage -> stage.Asic.Stage.id)
-           in
-           let model =
-             Overview_tiles.Stage_strip.model
-               ~now
-               ~appearance
-               ~width:body_width
-               ~run
-               ~selected_id
-               stages
-           in
+           let model = stage_strip_model ~now host tile ~run ~width:body_width stages in
            let model =
              match model.selected with
              | None -> model
@@ -2706,8 +2996,7 @@ let tile_view
                    }
                }
            in
-           let hints = checklist_hints host data tile in
-           let hint_height = Int.min (List.length hints) (Int.max 0 (body_height - 2)) in
+           let hints, hint_height = stage_strip_hints host data tile ~height:body_height in
            let strip =
              Overview_tiles.Stage_strip.render
                ?indicator_frames
@@ -2725,24 +3014,8 @@ let tile_view
              ]
            |> box ~width:body_width ~height:body_height)
        | Some rows when String.equal tile.kind "stage-checklist" ->
-         let hints = checklist_hints host data tile in
-         (* Short Overview tiles must spend their scarce rows on stage evidence. At least
-            one row remains even at the smallest viewport; roomier tiles retain three
-            evidence rows before spending space on additional hints. *)
-         let evidence_height = Int.min 3 (Int.max 1 (body_height - 1)) in
-         let hint_height =
-           Int.min (List.length hints) (Int.max 0 (body_height - evidence_height))
-         in
-         let available = Int.max 0 (body_height - hint_height) in
-         let selected_index =
-           List.findi rows ~f:(fun _ row -> row.Overview_tiles.active)
-           |> Option.value_map ~default:0 ~f:fst
-         in
-         let start =
-           Int.clamp_exn
-             local.scroll
-             ~min:(Int.max 0 (selected_index - Int.max 1 available + 1))
-             ~max:selected_index
+         let hints, hint_height, available, page =
+           checklist_page host data tile ~height:body_height rows
          in
          View.vcat
            [ lines ~appearance ~role:Muted ~width:body_width ~height:hint_height hints
@@ -2755,42 +3028,14 @@ let tile_view
                ~width:body_width
                ~height:available
                ~candidate_rows:rows
-               (List.drop rows start)
+               page
            ]
          |> box ~width:body_width ~height:body_height
        | Some rows when String.equal tile.kind "workspace-tabs" ->
-         let tabs =
-           List.mapi rows ~f:(fun i row ->
-             let i =
-               Option.bind host.registry ~f:(fun registry ->
-                 List.findi registry.workspaces ~f:(fun _ w ->
-                   Option.equal
-                     W.Workspace_id.equal
-                     row.Overview_tiles.workspace
-                     (Some w.id)))
-               |> Option.value_map ~default:i ~f:fst
-             in
-             let role =
-               if row.Overview_tiles.active
-               then Role.Active_tab
-               else if Overview_tiles.Role.equal row.role Active
-               then Selection
-               else Inactive_tab
-             in
-             View.text
-               ~attrs:(Role.attrs appearance role)
-               (sprintf
-                  " %s%d %s%s "
-                  (if row.active then "[" else " ")
-                  (i + 1)
-                  row.label
-                  (if row.active then "]" else " ")))
-         in
-         let tabline = View.hcat tabs in
          let navigation =
-           if View.width tabline <= body_width
-           then tabline
-           else
+           match workspace_page host tile ~width:body_width ~height:body_height rows with
+           | `Strip chips -> View.hcat (List.map chips ~f:fst)
+           | `Rows page ->
              Overview_tiles.render
                ?indicator_frames
                ~indicator_fg:(Role.foreground appearance Running)
@@ -2799,15 +3044,7 @@ let tile_view
                ~attrs:(utility_attrs appearance)
                ~width:body_width
                ~height:(Int.max 1 (body_height - 1))
-               (let index =
-                  List.findi rows ~f:(fun _ row ->
-                    Option.equal
-                      W.Workspace_id.equal
-                      row.Overview_tiles.workspace
-                      (Option.map (H.workspace_cursor host tile.id) ~f:(fun w -> w.id)))
-                  |> Option.value_map ~default:0 ~f:fst
-                in
-                List.drop rows (Int.max 0 (index - body_height + 2)))
+               page
          in
          View.vcat
            [ navigation
@@ -3117,6 +3354,96 @@ let tile_layout host ({ Dimensions.width; height } : Dimensions.t) =
         else packed)
   in
   available, compact, layout
+;;
+
+(** Hit-test the workspace layer at a zero-based terminal cell. A frame,
+    padding or heading hit still identifies the tile, but only body cells
+    have a body-relative (column,row). The caller owns overlay routing. *)
+let pointer_hit host (dimensions : Dimensions.t) ~x ~y =
+  let top = Bool.to_int (show_global_header host) in
+  if x < 0 || x >= dimensions.width || y < top || y >= dimensions.height
+  then None
+  else (
+    let available, _, layout = tile_layout host dimensions in
+    let y = y - top in
+    if y >= available
+    then None
+    else
+      List.find_map layout ~f:(fun (tile, (g : W.Geometry.t)) ->
+        let col = x - g.x
+        and row = y - g.y in
+        if col < 0 || row < 0 || col >= g.width || row >= g.height
+        then None
+        else (
+          let p = panel_geometry host tile ~width:g.width ~height:g.height in
+          let body = body_bounds host tile p in
+          let bx = col - body.x
+          and by = row - body.y in
+          let body_cell =
+            Option.some_if
+              (bx >= 0 && by >= 0 && bx < body.width && by < body.height)
+              (bx, by)
+          in
+          Some (tile, body_cell))))
+;;
+
+let%test_unit "pointer follows packed tiles, borders and compact resize" =
+  let s = W.initial ~session_id:(W.Session_id.of_string "mouse-geometry") in
+  let workspace = List.hd_exn s.workspaces in
+  let make id width =
+    { (List.hd_exn s.tiles) with
+      W.Tile.id = W.Tile_id.of_string id
+    ; workspace = workspace.id
+    ; kind = "logs"
+    ; hidden = false
+    ; requested_geometry = { x = 50; y = 50; width; height = 6 }
+    }
+  in
+  let left = make "first" 12
+  and right = make "second" 15 in
+  let host = H.receive H.empty { s with tiles = [ left; right ] } in
+  let host =
+    { host with
+      layout_mode = Preferred
+    ; appearance = { host.appearance with preset = Instrument }
+    ; focus = Some right.id
+    }
+  in
+  let host =
+    H.set_local
+      host
+      right.id
+      { (H.local host right.id) with
+        presentation =
+          { T.inherit_ with
+            frame = Some true
+          ; padding = Some 1
+          ; run_reference = Some true
+          ; header = Some true
+          ; title = Some true
+          }
+      }
+  in
+  let dimensions = { Dimensions.width = 40; height = 10 } in
+  let cell x y = pointer_hit host dimensions ~x ~y in
+  List.iter [ 0, 0; 12, 3; 28, 2; 4, 7; 0, 9; -1, 2; 40, 0 ] ~f:(fun (x, y) ->
+    assert (Option.is_none (cell x y)));
+  List.iter [ 13, 1; 27, 1; 13, 6; 27, 6; 14, 3; 15, 2 ] ~f:(fun (x, y) ->
+    let tile, body = Option.value_exn (cell x y) in
+    assert (W.Tile_id.equal tile.id right.id && Option.is_none body));
+  assert ([%equal: (int * int) option] (snd (Option.value_exn (cell 15 3))) (Some (0, 0)));
+  let host = { host with layout_mode = Fit; chrome = false } in
+  let dimensions = { Dimensions.width = 9; height = 4 } in
+  List.iter [ 0, 0; 8, 3 ] ~f:(fun (x, y) ->
+    let tile, _ = Option.value_exn (pointer_hit host dimensions ~x ~y) in
+    assert (W.Tile_id.equal tile.id right.id));
+  assert (Option.is_none (pointer_hit host dimensions ~x:13 ~y:1));
+  (* At three columns the renderer drops both the frame and the padding.
+     The title re-enters the content above the run reference. *)
+  let dimensions = { Dimensions.width = 3; height = 3 } in
+  let body y = snd (Option.value_exn (pointer_hit host dimensions ~x:0 ~y)) in
+  assert (Option.is_none (body 0) && Option.is_none (body 1));
+  assert ([%equal: (int * int) option] (body 2) (Some (0, 0)))
 ;;
 
 let reconcile_simulation_viewports host data dimensions =
@@ -3798,6 +4125,82 @@ let refinement_fixture (definition : P.Definition.t) =
   host, data, find
 ;;
 
+let%test_unit "Runs pointer selection follows filtered capped page and never binds a run" =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = find "run-selector" in
+  let active = Option.value_exn (tile_run host tile) in
+  let before = { active with id = "before" }
+  and after = { active with id = "after" } in
+  let hidden = { active with id = "excluded" } in
+  let data =
+    { data with
+      runs = [ before, "match"; hidden, "skip"; active, "match"; after, "match" ]
+    }
+  in
+  let host =
+    H.set_local
+      host
+      tile.id
+      { (H.local host tile.id) with
+        filter = "MATCH"
+      ; cursor = None
+      ; scroll = 1
+      ; presentation = { T.inherit_ with run_selector_rows = Some 2 }
+      }
+  in
+  let values =
+    run_candidates data ~filter:"match" |> List.map ~f:(fun (r, _) -> run_label r)
+  in
+  assert (browse_index values ~cursor:(run_cursor host tile) ~delta:1 = 2);
+  assert (browse_index values ~cursor:(run_cursor host tile) ~delta:(-1) = 0);
+  let click row = select_body_row host data tile ~width:45 ~height:4 ~row in
+  List.iter [ -1; 2; 3; 4 ] ~f:(fun row -> assert (phys_equal host (click row)));
+  let clicked = click 1 in
+  assert (
+    Option.equal String.equal (H.local clicked tile.id).cursor (Some (run_label after)));
+  assert (Option.equal Run_ref.equal (tile_run clicked tile) (Some active));
+  assert (phys_equal clicked.registry host.registry)
+;;
+
+let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
+  let host, data, find = refinement_fixture P.Testing.definition in
+  let tile = find "project-tests" in
+  let job =
+    { (List.hd_exn Baseline_fixture.jobs) with
+      kind = { namespace = "dune"; name = "test" }
+    ; id = Job_id.of_string "long-wrapped-attempt-id"
+    }
+  in
+  let data =
+    { data with
+      jobs = [ job ]
+    ; log_lines = (fun _ -> [ "> long-wrapped-attempt-id Complete" ])
+    }
+  in
+  let width = 9 in
+  let physical host =
+    annotated_physical_rows host ~width (execution_annotations host data tile)
+  in
+  let rows = physical host in
+  assert (List.count rows ~f:(fun (_, (target, _)) -> Option.is_some target) > 1);
+  let host =
+    H.set_local host tile.id { (H.local host tile.id) with scroll = List.length rows - 1 }
+  in
+  let clicked = select_body_row host data tile ~width ~height:2 ~row:0 in
+  assert (
+    Option.equal
+      String.equal
+      (H.local clicked tile.id).cursor
+      (Some (Job_id.to_string job.id)));
+  List.iteri (physical clicked) ~f:(fun row (_, (target, _)) ->
+    if Option.is_none target
+    then
+      assert (
+        phys_equal
+          clicked
+          (select_body_row clicked data tile ~width ~height:(row + 1) ~row)))
+;;
+
 let%test_unit "WB002 stock Overview stage cards render typed freshness markers" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let analysis : Asic.Timing_analysis.t =
@@ -3964,6 +4367,97 @@ let%test_unit "hierarchy unavailable presentation is nonempty and clips small pa
       assert (View.width image <= width && View.height image <= height))
 ;;
 
+let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = find "workspace-tabs" in
+  let registry = Option.value_exn host.registry in
+  let w = List.hd_exn registry.workspaces in
+  let other = { w with id = W.Workspace_id.of_string "second"; name = "Second" } in
+  let host = { host with registry = Some { registry with workspaces = [ w; other ] } } in
+  let click ~width ~row ~column =
+    workspace_tab_at host data tile ~width ~height:3 ~row ~column
+  in
+  let chips =
+    match
+      workspace_page
+        host
+        tile
+        ~width:120
+        ~height:3
+        (Option.value_exn (utility_rows host data tile))
+    with
+    | `Strip chips -> chips
+    | `Rows _ -> assert false
+  in
+  let boundary = View.width (fst (List.hd_exn chips)) in
+  List.iter
+    [ click ~width:120 ~row:0 ~column:boundary; click ~width:4 ~row:1 ~column:0 ]
+    ~f:(fun target -> assert (Option.equal W.Workspace_id.equal target (Some other.id)));
+  assert (Option.is_none (click ~width:120 ~row:0 ~column:119));
+  assert (Option.is_none (click ~width:4 ~row:2 ~column:0))
+;;
+
+let%test_unit "preparation pointer selects wrapped history headings but not attempt \
+               metadata"
+  =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = { (find "workspace-tabs") with kind = "preparation" } in
+  let host = { host with preparation = Some (Preparation_view.fixture_snapshot ()) } in
+  let local = { (H.local host tile.id) with utility_detail = true } in
+  let host = H.set_local host tile.id local in
+  let physical =
+    inspection_physical_rows ~width:12 (Option.value_exn (utility_rows host data tile))
+  in
+  let old =
+    List.findi_exn physical ~f:(fun _ (_, id) ->
+      Option.equal String.equal id (Some "old-success"))
+    |> fst
+  in
+  let host = H.set_local host tile.id { local with scroll = old } in
+  let click row =
+    select_more_body_row host data tile ~width:12 ~height:4 ~column:0 ~row
+  in
+  assert (
+    Option.equal String.equal (H.local (click 1) tile.id).cursor (Some "old-success"));
+  assert (phys_equal host (click 2))
+;;
+
+let%test_unit "vertical checklist pointer follows the rendered viewport and skips hints" =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = find "stage-checklist" in
+  let registry = Option.value_exn host.registry in
+  let host =
+    H.receive
+      host
+      { registry with
+        workspaces = List.map registry.workspaces ~f:(fun w -> { w with preset = None })
+      }
+  in
+  let run = Option.value_exn (tile_run host tile) in
+  let items = Overview_tiles.checklist_items ~asic:data.asic ~run in
+  let host = H.browse_checklist host tile.id ~run ~items ~delta:4 in
+  let _, hints, available, page =
+    checklist_page
+      host
+      data
+      tile
+      ~height:5
+      (Option.value_exn (utility_rows host data tile))
+  in
+  let click row =
+    select_more_body_row host data tile ~width:64 ~height:5 ~column:0 ~row
+  in
+  if hints > 0 then assert (phys_equal host (click 0));
+  let i, entry =
+    List.findi_exn (List.take page available) ~f:(fun _ entry ->
+      Option.is_some entry.Overview_tiles.cursor_id && not entry.active)
+  in
+  let local = H.local (click (hints + i)) tile.id in
+  assert (Option.equal String.equal local.cursor entry.cursor_id);
+  assert (Option.equal Run_ref.equal local.stage_run (Some run));
+  assert (not local.utility_detail)
+;;
+
 let%test_unit "stopped exact-run observation qualifies actual checklist layouts" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let tile = find "stage-checklist" in
@@ -4006,6 +4500,11 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
   in
   assert (not (H.compact_summary vertical tile));
   check vertical ();
+  let banner = observation_banner vertical data tile ~width:24 in
+  assert (List.length banner > 1);
+  List.iteri banner ~f:(fun row _ ->
+    assert (phys_equal vertical
+              (select_more_body_row vertical data tile ~width:24 ~height:12 ~column:0 ~row)));
   let detail =
     H.set_local host tile.id { (H.local host tile.id) with utility_detail = true }
   in
@@ -4678,6 +5177,22 @@ let%test_unit "long cooperative lists follow typed wrapped cursors and respect m
     { Simulation_view.empty with snapshot = Some snapshot; attempt = Some attempt.id }
   in
   let host = H.set_simulation host (find "simulation-catalog").id view in
+  let catalog_tile = find "simulation-catalog" in
+  let physical = simulation_physical_rows host data catalog_tile ~width:18 in
+  let i =
+    List.findi_exn physical ~f:(fun _ (_, (target, _)) ->
+      match target with
+      | Some (Catalog_case "case-17") -> true
+      | _ -> false)
+    |> fst
+  in
+  let scrolled = H.set_local host catalog_tile.id
+      { (H.local host catalog_tile.id) with scroll = i + 1; follow = false } in
+  let clicked = select_body_row scrolled data catalog_tile ~width:18 ~height:4 ~row:0 in
+  let catalog host = Testing_workspace.catalog (H.testing_state host catalog_tile.id) in
+  assert (Option.equal String.equal (Simulation_catalog.case_id (catalog clicked)) (Some "case-17"));
+  assert (List.equal String.equal (Simulation_catalog.selected_cases (catalog clicked))
+            (Simulation_catalog.selected_cases (catalog host)));
   let overview = simulation_annotations host data (find "simulation-catalog") in
   let first_case =
     List.findi_exn overview ~f:(fun _ row -> row.Simulation_view.selected) |> fst
@@ -6090,6 +6605,13 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
   let state = { state with selected = Some "29" } in
   let host = H.set_timing host paths state in
   let data = { data with asic = Some snapshot } in
+  let _, headers, page = timing_paths_page state ~height:10 in
+  let clicked = List.findi_exn page ~f:(fun _ path -> not (String.equal path.id "29")) in
+  let select row = select_body_row host data paths ~width:70 ~height:10 ~row in
+  assert (phys_equal host (select (headers - 1)));
+  let selected = Option.value_exn (H.timing (select (headers + fst clicked)) paths) in
+  assert (Option.equal String.equal selected.selected (Some (snd clicked).id));
+  assert (Option.is_none selected.requested);
   List.iter [ paths; detail; context ] ~f:(fun tile ->
     let image = tile_view host data tile ~width:70 ~height:14 in
     assert (String.is_prefix (plain_text image) ~prefix:"╭");

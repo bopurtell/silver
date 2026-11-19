@@ -73,6 +73,28 @@ let text view snapshot =
   |> String.concat ~sep:"\n"
 ;;
 
+let%test_unit "resource hit targets survive wrapping; headings never select a resource" =
+  let view, snapshot = imported () in
+  let page = V.page_with_targets view ~filter:"" ~asic:snapshot ~width:26 ~height:60 in
+  assert (
+    List.exists page ~f:(function
+      | Some (`Resource "data"), row ->
+        String.is_substring (Evidence_style.text row) ~substring:"data"
+      | _ -> false));
+  assert (
+    List.for_all page ~f:(fun (hit, row) ->
+      (not (String.is_substring (Evidence_style.text row) ~substring:"Resource |"))
+      || Option.is_none hit));
+  let filtered =
+    V.page_with_targets view ~filter:"program" ~asic:snapshot ~width:26 ~height:60
+  in
+  assert (
+    not
+      (List.exists filtered ~f:(function
+        | Some (`Resource "data"), _ -> true
+        | _ -> false)))
+;;
+
 let%test_unit "retry admission and receipt floors reject previous-key failures before \
                and after acknowledgement"
   =
@@ -324,6 +346,11 @@ let%test_unit "all76 sources reachable through exact digest-bound pagination; by
     |> String.concat ~sep:"\n"
   in
   assert (String.is_substring rendered ~substring:"opaque-75");
+  let page = V.page_with_targets last ~filter:"" ~asic:snapshot ~width:80 ~height:24 in
+  assert (List.exists page ~f:(function
+    | Some (`Source "opaque-75"), line ->
+      String.is_prefix (Evidence_style.text line) ~prefix:"> "
+    | _ -> false));
   let _, op = V.input view ~filter:"" ~asic:snapshot Open in
   (match op with
    | Some (Read_artifact { artifact_id; offset; limit; _ }) ->

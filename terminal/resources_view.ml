@@ -337,6 +337,21 @@ let begin_request t operation =
   , Some operation )
 ;;
 
+let browse_resource t selected =
+  { t with
+    selected
+  ; scroll = 0
+  ; offset = 0
+  ; history = []
+  ; pending = None
+  ; generation = t.generation + 1
+  }
+;;
+
+let browse_source t artifact =
+  { t with artifact; scroll = 0; pending = None; generation = t.generation + 1 }
+;;
+
 let input t ~filter ~asic event =
   let request t =
     match page_operation t with
@@ -400,28 +415,13 @@ let input t ~filter ~asic event =
     , None )
   | Scroll delta -> { t with scroll = Int.max 0 (t.scroll + delta) }, None
   | Move delta when equal_mode t.mode Table ->
-    ( { t with
-        selected =
-          move (List.map (visible t ~filter) ~f:(fun r -> r.R.Row.id)) t.selected delta
-      ; scroll = 0
-      ; offset = 0
-      ; history = []
-      ; pending = None
-      ; generation = t.generation + 1
-      }
-    , None )
+    browse_resource t (move (List.map (visible t ~filter) ~f:(fun r -> r.R.Row.id)) t.selected delta), None
   | Move delta when equal_mode t.mode Sources ->
     let ids =
       Option.value_map (current_catalog t asic) ~default:[] ~f:(fun p ->
         List.map p.entries ~f:(fun a -> a.R.Artifact.id))
     in
-    ( { t with
-        artifact = move ids (Option.first_some t.artifact (List.hd ids)) delta
-      ; scroll = 0
-      ; pending = None
-      ; generation = t.generation + 1
-      }
-    , None )
+    browse_source t (move ids (Option.first_some t.artifact (List.hd ids)) delta), None
   | Move delta -> { t with scroll = Int.max 0 (t.scroll + delta) }, None
   | Open when equal_mode t.mode Sources ->
     let artifact =
@@ -1000,7 +1000,8 @@ let contents t ~filter ~asic =
   @ lines
 ;;
 
-let rows t ~filter ~asic ~width ~height =
+let page_with_targets t ~filter ~asic ~width ~height =
+  let plain rows = List.map rows ~f:(fun row -> None, row) in
   let lines =
     if equal_mode t.mode Table
     then (
@@ -1013,63 +1014,67 @@ let rows t ~filter ~asic ~width ~height =
       let capacity = Int.max 1 (height / 3) in
       let start = Int.max 0 (selected - capacity + 1) in
       let entries = List.drop candidates start |> Fn.flip List.take capacity in
-      [ missing
-          "Enter detail · / filter · Ctrl-U clear · r refresh · a sources · g/t/e \
-           geometry/timing/electrical · Space c c imports/select/compare"
-      ]
-      @ List.map (source_lines t) ~f:(E.clip ~width)
-      @ List.map (execution_lines t asic) ~f:(E.clip ~width)
-      @ [ fact
-            "Filter"
-            (sprintf
-               "%s · %d matching retained rows"
-               (if String.is_empty filter then "(none)" else filter)
-               (List.length candidates))
-        ; E.plain "Resource | implementation | actual role | synthesis | final"
-        ]
+      plain
+        ([ missing
+             "Enter detail · / filter · Ctrl-U clear · r refresh · a sources · g/t/e \
+              geometry/timing/electrical · Space c c imports/select/compare"
+         ]
+         @ List.map (source_lines t) ~f:(E.clip ~width)
+         @ List.map (execution_lines t asic) ~f:(E.clip ~width)
+         @ [ fact
+               "Filter"
+               (sprintf
+                  "%s · %d matching retained rows"
+                  (if String.is_empty filter then "(none)" else filter)
+                  (List.length candidates))
+           ; E.plain "Resource | implementation | actual role | synthesis | final"
+           ])
       @ List.map entries ~f:(fun r ->
-        E.plain
-          (sprintf
-             "%s%s | %s | %s | %s | %s"
-             (if Option.equal String.equal t.selected (Some r.R.Row.id)
-              then "> "
-              else "  ")
-             r.id
-             r.implementation
-             r.role
-             r.synthesis
-             r.final)
-        |> E.clip ~width)
-      @ (if Option.is_none t.index
-         then
-           [ missing
-               "No loaded resource index — r loads the selected run; palette \
-                selects/imports a source"
-           ]
-         else if List.is_empty candidates
-         then (
-           match t.index with
-           | Some i when not (R.Inventory_status.equal i.inventory_status Available) ->
-             [ missing (inventory i) ]
-           | Some i when List.is_empty i.rows ->
-             [ E.plain "Verified empty resource inventory" ]
-           | _ -> [ missing "No resource matches this filter in the available inventory" ])
-         else [])
-      @ Option.value_map
-          (List.find candidates ~f:(fun r ->
-             Option.equal String.equal t.selected (Some r.R.Row.id)))
-          ~default:
-            (if List.is_empty candidates
-             then []
-             else
-               [ missing
-                   "Selected resource is outside this filter; Enter selects the first \
-                    match"
-               ])
-          ~f:row_facts
-      @ Option.value_map t.index ~default:[] ~f:(fun i ->
-        [ fact "Resource verdict" i.verdict ]
-        @ List.map i.diagnostics ~f:(fact "Qualification")))
+        ( Some (`Resource r.R.Row.id)
+        , E.plain
+            (sprintf
+               "%s%s | %s | %s | %s | %s"
+               (if Option.equal String.equal t.selected (Some r.R.Row.id)
+                then "> "
+                else "  ")
+               r.id
+               r.implementation
+               r.role
+               r.synthesis
+               r.final)
+          |> E.clip ~width ))
+      @ plain
+          ((if Option.is_none t.index
+            then
+              [ missing
+                  "No loaded resource index — r loads the selected run; palette \
+                   selects/imports a source"
+              ]
+            else if List.is_empty candidates
+            then (
+              match t.index with
+              | Some i when not (R.Inventory_status.equal i.inventory_status Available) ->
+                [ missing (inventory i) ]
+              | Some i when List.is_empty i.rows ->
+                [ E.plain "Verified empty resource inventory" ]
+              | _ ->
+                [ missing "No resource matches this filter in the available inventory" ])
+            else [])
+           @ Option.value_map
+               (List.find candidates ~f:(fun r ->
+                  Option.equal String.equal t.selected (Some r.R.Row.id)))
+               ~default:
+                 (if List.is_empty candidates
+                  then []
+                  else
+                    [ missing
+                        "Selected resource is outside this filter; Enter selects the \
+                         first match"
+                    ])
+               ~f:row_facts
+           @ Option.value_map t.index ~default:[] ~f:(fun i ->
+             [ fact "Resource verdict" i.verdict ]
+             @ List.map i.diagnostics ~f:(fact "Qualification"))))
     else if equal_mode t.mode Sources
     then (
       let page = current_catalog t asic in
@@ -1082,39 +1087,44 @@ let rows t ~filter ~asic ~width ~height =
       in
       let capacity = Int.max 1 (height / 3) in
       let start = Int.max 0 (position - capacity + 1) in
-      [ missing
-          "j/k select · Enter read text · n/p catalog pages · Esc table · [/] scroll \
-           metadata"
-      ]
-      @ List.map (source_lines t) ~f:(E.clip ~width)
-      @ List.map (execution_lines t asic) ~f:(E.clip ~width)
-      @ Option.value_map
-          page
-          ~default:[ missing "Catalog page unavailable — a loads authorized sources" ]
-          ~f:(fun p ->
-            [ fact
-                "Source references"
-                (sprintf "%d–%d / %d" p.offset p.next_offset p.total)
-            ])
+      plain
+        ([ missing
+             "j/k select · Enter read text · n/p catalog pages · Esc table · [/] scroll \
+              metadata"
+         ]
+         @ List.map (source_lines t) ~f:(E.clip ~width)
+         @ List.map (execution_lines t asic) ~f:(E.clip ~width)
+         @ Option.value_map
+             page
+             ~default:[ missing "Catalog page unavailable — a loads authorized sources" ]
+             ~f:(fun p ->
+               [ fact
+                   "Source references"
+                   (sprintf "%d–%d / %d" p.offset p.next_offset p.total)
+               ]))
       @ (List.drop entries start
          |> Fn.flip List.take capacity
          |> List.mapi ~f:(fun n a ->
-           E.plain
-             ((if start + n = position then "> " else "  ")
-              ^ a.R.Artifact.label
-              ^ " · "
-              ^ a.format)
-           |> E.clip ~width))
-      @ Option.value_map (List.nth entries position) ~default:[] ~f:(fun artifact ->
-        [ fact "Selected source" artifact.label
-        ; fact "Opaque ID" artifact.id
-        ; fact "Format" artifact.format
-        ; fact "SHA256" artifact.sha256
-        ]))
-    else contents t ~filter ~asic
+           ( Some (`Source a.R.Artifact.id)
+           , E.plain
+               ((if start + n = position then "> " else "  ")
+                ^ a.R.Artifact.label
+                ^ " · "
+                ^ a.format)
+             |> E.clip ~width )))
+      @ plain
+          (Option.value_map (List.nth entries position) ~default:[] ~f:(fun artifact ->
+             [ fact "Selected source" artifact.label
+             ; fact "Opaque ID" artifact.id
+             ; fact "Format" artifact.format
+             ; fact "SHA256" artifact.sha256
+             ])))
+    else plain (contents t ~filter ~asic)
   in
   let scroll = if equal_mode t.mode Table then 0 else t.scroll in
-  let wrapped = List.concat_map lines ~f:(E.wrap ~width) in
-  let offset = Int.min scroll (Int.max 0 (List.length wrapped - height)) in
-  List.drop wrapped offset |> Fn.flip List.take (Int.max 0 height)
+  E.page_with_targets ~width ~height ~offset:scroll lines
+;;
+
+let rows t ~filter ~asic ~width ~height =
+  page_with_targets t ~filter ~asic ~width ~height |> List.map ~f:snd
 ;;

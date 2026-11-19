@@ -22,6 +22,7 @@ val selected_node : t -> Hierarchy.Node.t option
 val move : t -> int -> t
 val toggle : t -> t
 val visible : t -> (int * Hierarchy.Node.t) list
+val viewport : t -> height:int -> (int * Hierarchy.Node.t) list
 
 (** At most [height] compact tree rows, including the selected node when it exists and
     [height > 0]. Labels are terminal-safe; original evidence is preserved.

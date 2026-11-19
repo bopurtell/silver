@@ -322,8 +322,8 @@ let attempt_details (a : Preparation.Attempt.t) =
 ;;
 
 let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
-  let row status label value details =
-    O.row ~status ~role:(O.status_role status) ~details label value
+  let row ?cursor_id status label value details =
+    O.row ?cursor_id ~status ~role:(O.status_role status) ~details label value
   in
   let scope =
     "Current project; independent of selected historical ASIC run; session-only history"
@@ -394,8 +394,9 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
               ~default:"none"
         ]
       in
-      [ row
-          (outcome a.outcome)
+       [ row
+           ~cursor_id:a.id
+           (outcome a.outcome)
           "Project attempt"
           (a.id ^ " — " ^ outcome_label a.outcome)
           details
@@ -448,6 +449,7 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
     match detail, Option.bind snapshot ~f:(fun s -> s.latest), current with
     | true, Some latest, Some inspected when not (String.equal latest.id inspected.id) ->
       row
+        ~cursor_id:latest.id
         (outcome latest.outcome)
         "Latest project attempt"
         (latest.id ^ " — " ^ outcome_label latest.outcome)
@@ -490,7 +492,7 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
            artifact"
       ]
     @ List.map all ~f:(fun a ->
-      row (outcome a.outcome) "History" a.id (attempt_details a))
+      row ~cursor_id:a.id (outcome a.outcome) "History" a.id (attempt_details a))
     @ (List.filter jobs ~f:(fun (j : Job.t) ->
          Option.exists project ~f:(Project_id.equal j.project)
          && String.equal j.kind.namespace "dune"

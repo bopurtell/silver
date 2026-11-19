@@ -258,19 +258,36 @@ type span =
   ; tone : tone
   }
 
+type row_target =
+  | Job of Job_id.t
+  | Attempt of string
+  | Case of string
+  | Artifact of string
+  | Catalog_case of string
+  | Catalog_suite of string
+
 type row =
   { text : string
   ; indicator : Indicator.t option
   ; value_start : int option
   ; hint : bool
   ; selected : bool
+  ; target : row_target option
   ; spans : span list
   }
 
 (** [selected] marks a navigator cursor for viewport following. It belongs only to the
     first physical line of a row; legacy rows default to [false]. *)
-let row ?indicator ?value_start ?(hint = false) ?(selected = false) ?(spans = []) text =
-  { text; indicator; value_start; hint; selected; spans }
+let row
+  ?indicator
+  ?value_start
+  ?(hint = false)
+  ?(selected = false)
+  ?target
+  ?(spans = [])
+  text
+  =
+  { text; indicator; value_start; hint; selected; target; spans }
 ;;
 
 let plain_rows texts = List.map texts ~f:(fun text -> row text)
@@ -464,7 +481,7 @@ let annotated_rows ?(now = Time_ns.now ()) ?(string_compression = true) t ~log_l
   List.concat_map rows ~f:(fun row ->
     String.split_lines row.text
     |> List.mapi ~f:(fun i text ->
-      { text = Artifact_view.safe text
+      { row with text = Artifact_view.safe text
       ; indicator = (if i = 0 then row.indicator else None)
       ; value_start = (if i = 0 then row.value_start else None)
       ; hint = row.hint

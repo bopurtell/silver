@@ -205,3 +205,29 @@
    --daemon %{exe:../daemon/main.exe}
    --client %{exe:main.exe}
    --ephemeral --timeout-seconds 180)))
+
+(rule
+ (alias test-mouse-pty)
+ (deps
+  (sandbox always)
+  test_mouse_pty.py
+  ../scripts/synthetic-flow-demo.py
+  ../scripts/test-fs2-native.py
+  ../scripts/test-fs0.py
+  ../scripts/fixtures/fs2_wire.py
+  ../demo/synthetic_flow/provider.py
+  ../demo/synthetic_flow/simulation_provider.py
+  ../demo/synthetic_flow/simulation_wire.py
+  ../demo/synthetic_flow/scenarios.json
+  ../demo/synthetic_flow/http_client.py
+  ../test/support/__init__.py
+  ../test/support/screen.py
+  ../test/support/terminal.py)
+ (action
+  (run python3 -B %{dep:test_mouse_pty.py}
+   --daemon %{exe:../daemon/main.exe}
+   --client %{exe:main.exe})))
+
+(alias
+ (name test-native-smoke)
+ (deps (alias test-mouse-pty)))
