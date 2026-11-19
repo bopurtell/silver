@@ -92,6 +92,15 @@ assert pathlib.Path(sys.argv[0]).parent.name == 'bin'
             self.assertTrue(all('daemon' not in str(c.args[0][0]) for c in popen.call_args_list))
         self.assertFalse((self.base / 'sessions').exists())
 
+    def test_check_uses_common_config_location(self):
+        common = self.root / '.workbench'
+        common.mkdir()
+        for name in (setup.ASIC, setup.PREPARATION):
+            (self.root / name).rename(common / name)
+        self.args.check = True
+        self.assertEqual(0, self.launch())
+        self.assertFalse((self.base / 'sessions').exists())
+
     def test_missing_library_actionable_and_no_start(self):
         self.args.require_library = ['missing_wb052']
         with self.assertRaisesRegex(review.LaunchError, 'missing libraries') as error:

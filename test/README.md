@@ -58,6 +58,13 @@ flock /tmp/opencode/workbench-pt8-build.lock \
 
 ## Opt-in real fresh-prefix tests
 
+For WB-040's real FIFO 64 MiB export and retained ASIC GDS handoff, use the
+[streaming export acceptance runner](../docs/streaming_export_acceptance.md).
+It lives at `test/integration/streaming_export.py`, takes explicit prebuilt and
+retained-evidence inputs, and is not selected by the default/local/native-smoke
+aliases. Both real paths pass after the bounded authenticated-block index fix;
+the simulation case retains the 64 MiB/120-second timeout regression gate.
+
 Each endpoint alias runs one independent fresh build/emission and its entire selected
 physical prefix. **None is selected by `@runtest`, `@test-local`, or `@all`.**
 

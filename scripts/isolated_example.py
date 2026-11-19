@@ -10,6 +10,8 @@ Add --clone-from /source/hardcaml_asic_example --revision HEAD --rewrite to crea
 a disposable, detached checkout of committed source (never copies dirty files).
 The destination must not exist. No branches, source index operations or commits
 are made. An existing explicit task copy needs no Git operations.
+Configs may live in .workbench/ or at the legacy project root. If both exist,
+their bytes must match; rewrite preserves their locations and equality.
 
 --env-file is a COMPLETE captured string->string environment, not an overlay.
 PATH, OPAM_SWITCH_PREFIX and OCAMLPATH must be present explicitly. Setup stores
@@ -190,11 +192,30 @@ def parse_sexp(text):
     return result
 
 
+def config_paths(root, name):
+    """Match Config_location: common first, legacy allowed only if byte-identical."""
+    common = no_symlink_components(root / '.workbench')
+    require(not common.exists() or common.is_dir(), f'Not a config directory: {common}')
+    paths = [no_symlink_components(common / name),
+             no_symlink_components(root / name)]
+    present = []
+    for path in paths:
+        if path.exists():
+            info = path.stat()
+            require(stat.S_ISREG(info.st_mode) and info.st_size <= 65536,
+                    f'Config must be a regular file of at most 65536 bytes: {path}')
+            present.append(path)
+    if len(present) == 2:
+        require(present[0].read_bytes() == present[1].read_bytes(),
+                f'Conflicting configuration files: {present[0]} and {present[1]} differ')
+    return present
+
+
 def read_config(root, name):
-    path = root / name
-    if not path.exists():
+    paths = config_paths(root, name)
+    if not paths:
         return None
-    require(path.stat().st_size <= 65536, f'Config too large: {path}')
+    path = paths[0]
     sexp = parse_sexp(path.read_text())
     require(isinstance(sexp, list), f'Not a config record: {path}')
     result = {}
@@ -443,13 +464,15 @@ def setup(args):
                 f'{state} must be private (mode 0700) for captured environment')
         # Retain originals once in the private directory; refuse to overwrite them.
         for name in FIELDS:
-            original = root / name
+            originals = config_paths(root, name)
             backup = state / (name + '.original')
-            if original.exists() and not backup.exists():
-                atomic_write(backup, original.read_text())
+            if originals and not backup.exists():
+                atomic_write(backup, originals[0].read_text())
         for name, config in configs.items():
             if config is not None:
-                atomic_write(root / name, sexp([[k, v] for k, v in config.items()]) + '\n')
+                # Keep identical duplicates identical; preserve the source layout.
+                for path in config_paths(root, name) or [root / name]:
+                    atomic_write(path, sexp([[k, v] for k, v in config.items()]) + '\n')
         atomic_write(state / 'environment.json', json.dumps(env, indent=2, sort_keys=True) + '\n')
         receipt = {'schema_version': 1, 'project_root': str(root),
                    'provider_executable': str(provider),

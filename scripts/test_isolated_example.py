@@ -85,6 +85,56 @@ class IsolatedExampleTest(unittest.TestCase):
         self.assertEqual(str(self.root / '_build/default' / prep['build_target']),
                          configs[example.ASIC]['project_executable'])
 
+    def test_common_only_configs_rewritten_in_place(self):
+        self.rewrite()
+        common = self.root / '.workbench'
+        common.mkdir()
+        for name in (example.ASIC, example.PREPARATION):
+            (self.root / name).rename(common / name)
+        prep = self.configs()[example.PREPARATION]
+        prep['build_target'] = 'asics/fifo_demo/cli/project.exe'
+        (common / example.PREPARATION).write_text(example.sexp(list(map(list, prep.items()))))
+        self.args.rewrite = True
+        self.setup()
+        self.assertEqual(prep['build_target'], self.configs()[example.PREPARATION]['build_target'])
+        self.assertFalse((self.root / example.ASIC).exists())
+        example.audit_for_launch(self.root, self.provider, example.environment(self.env))
+
+    def test_identical_common_and_legacy_configs_stay_identical_after_rewrite(self):
+        self.rewrite()
+        common = self.root / '.workbench'
+        common.mkdir()
+        for name in (example.ASIC, example.PREPARATION):
+            (common / name).write_bytes((self.root / name).read_bytes())
+        self.provider = self.tools / 'new-provider'
+        self.provider.write_text('#!/bin/sh\nexit 99\n')
+        self.provider.chmod(0o700)
+        self.args.provider_executable = self.provider
+        self.args.rewrite = True
+        self.setup()
+        for name in (example.ASIC, example.PREPARATION):
+            self.assertEqual((common / name).read_bytes(), (self.root / name).read_bytes())
+        self.assertEqual(str(self.provider), self.configs()[example.ASIC]['provider_executable'])
+
+    def test_conflicting_locations_rejected_before_rewrite(self):
+        self.rewrite()
+        common = self.root / '.workbench'
+        common.mkdir()
+        legacy = self.root / example.ASIC
+        before = legacy.read_bytes()
+        (common / example.ASIC).write_bytes(before + b'\n')
+        self.args.rewrite = True
+        with self.assertRaisesRegex(example.SetupError, 'Conflicting configuration files'):
+            self.setup()
+        self.assertEqual(before, legacy.read_bytes())
+
+    def test_common_config_symlinks_rejected_by_reader(self):
+        common = self.root / '.workbench'
+        common.mkdir()
+        (common / example.ASIC).symlink_to(self.base / 'missing')
+        with self.assertRaisesRegex(example.SetupError, 'Symlink'):
+            example.read_config(self.root, example.ASIC)
+
     def test_rewrite_rejects_unsafe_project_targets_before_writing(self):
         self.rewrite()
         for target in ('/owner/project.exe', '../project.exe', '-bad.exe',

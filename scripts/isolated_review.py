@@ -122,19 +122,11 @@ def validate_environment(env, project, libraries):
 
 
 def configured_provider(project):
-    config = project / 'hardcaml-workbench-asic.sexp'
-    require(config.is_file(), f'Missing {config}; run isolated example setup first.')
-    # The generated ASIC config is a flat sexp record. Only read the executable
-    # field; require an unambiguous quoted or whitespace-delimited absolute atom.
-    token = r'(?:"(?:[^"\\]|\\.)*"|[^\s()]+)'
-    text = config.read_text()
-    matches = re.findall(r'\(\s*"?provider_executable"?\s+(' + token + r')\s*\)', text)
-    require(len(matches) == 1, f'Cannot identify one provider_executable in {config}')
-    value = json.loads(matches[0]) if matches[0].startswith('"') else matches[0]
-    require(Path(value).is_absolute(), f'Provider path in {config} must be absolute')
-    roots = re.findall(r'\(\s*"?results_root"?\s+(' + token + r')\s*\)', text)
-    require(len(roots) == 1, f'Cannot identify one results_root in {config}')
-    result_value = json.loads(roots[0]) if roots[0].startswith('"') else roots[0]
+    config = isolated_example.read_config(project, isolated_example.ASIC)
+    require(config is not None, 'Missing ASIC config; run isolated example setup first.')
+    value = isolated_example.atom(config, 'provider_executable')
+    require(Path(value).is_absolute(), 'Provider path in ASIC config must be absolute')
+    result_value = isolated_example.atom(config, 'results_root')
     results = Path(result_value)
     results = (results if results.is_absolute() else project / results).resolve()
     for protected in (OWNER_PROJECT.resolve(), MAIN_CHECKOUT.resolve()):

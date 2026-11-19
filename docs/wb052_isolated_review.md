@@ -1,5 +1,69 @@
 # WB-052 — isolated review tooling extension
 
+## Current verification — 2026-11-19
+
+The recovered implementation is in `../bpurtell-feature5-recovery` on base
+`92b3f3d`. The recorded commands and paths in the Nov 5 evidence below are
+historical. On the recovery checkout, the daemon and terminal built with
+`-j6`, terminal tests passed, and the isolated Python suite passed 35 fixtures.
+The setup supports `.workbench/` and legacy root-level configs; when both exist
+they must match byte-for-byte. The smoke helper can select a simulation provider
+relative to the cloned example root.
+
+The real-example smoke (`/tmp/opencode/wb052-1yh7_1kg`) used committed example
+revision `df7be91d230de84bf5c40bf47a79bbdc9f68e78e` and recorded provider
+generation `a6b95e48dd784eeb99ccc2e797f10faa`. It audited the disposable clone,
+built `asics/fifo_demo/cli/project.exe` with `-j 1`, handed the private endpoint
+to the plain client, and stopped the owned daemon. The client reported 25
+generic workspace items with zero jobs.
+
+The final loopback SSH/tmux walkthrough (`/tmp/opencode/wb052-real-ssh-ql40v_4k`)
+used the rebuilt recovery pair. At 120×40 the F8 navigation controls were visible
+on entry, and scrolling exposed each help section. The client survived tmux
+detach/reattach and reconnected after a private daemon restart. Both reopening
+over SSH and attaching a local client through an SSH forward passed. The private
+tmux `escape-time` stayed at 500 ms. The run verified cleanup of SSH, tmux, the
+daemon, and temporary keys. It did not exercise retained-evidence inspector exits
+or viewer launch on separate hosts; the regression tests below cover those cases.
+Separately, the terminal waveform PTY regression passed all 21 checks on the
+recovery binaries, including a headless recording viewer receiving the verified
+byte-exact file (`/tmp/opencode/pt8-waveform-pty-0ua_zizb`). That local run does
+not establish viewer placement across two hosts.
+
+### Automated inspector and viewer acceptance
+
+Run from the recovery checkout with its prebuilt daemon and client:
+
+```sh
+python3 -B terminal/test_inspector_exits_pty.py \
+  --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe
+
+python3 -B terminal/test_viewer_ssh_locality.py \
+  --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe \
+  --loopback
+```
+
+The inspector test passed 12 checks covering the table and row detail, Esc from
+detail and filter input, Esc to close the explorer, reopening, and direct close
+with Space c x. It checks that the workspace and retained evidence stay intact.
+Evidence: `/tmp/opencode/wb052-inspector-d3bd99d80bd1`.
+
+The viewer test passed 14 checks with a private loopback SSH server. In each
+client's private temporary directory, a recorder observed a verified export with
+the expected byte count and digest. Evidence: `/tmp/opencode/wb052-viewer-ssh-_dh403pu`.
+For a two-host run, replace `--loopback` with:
+
+```sh
+--ssh-host YOUR_SSH_ALIAS --remote-client /absolute/path/to/matching/main.exe
+```
+
+The configured host needs Python 3 and loopback TCP forwarding in both directions.
+Use the same client executable on both hosts (the test compares SHA-256) and an
+SSH alias that can authenticate noninteractively. The test provisions its own
+fixture, daemon, and recording viewers; it needs no existing run or GUI. It
+requires distinct hostnames in two-host mode and checks each viewer's reported
+hostname, private verified path, and VCD bytes. The two-host run is still pending.
+
 ## Scope and ownership
 
 This is an **explicitly added bounded adoption-tooling extension**, not a claim that

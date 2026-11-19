@@ -4,6 +4,8 @@
 Only committed source is cloned. No installation, physical flow or owner process
 control is performed. Run after building this worktree's daemon/client with -j 1.
 The selected generation and toolchain are read-only dependencies by contract.
+Select --simulation-provider-relative for the committed source layout. Only the
+task-local provider's owner-execute bit is added; no shared source is changed.
 """
 import argparse
 import json
@@ -22,6 +24,10 @@ def main():
     for name in ('source', 'generation', 'switch-prefix', 'toolchain'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--revision', required=True)
+    parser.add_argument('--simulation-provider-relative', type=Path,
+                        default=Path('simulation/provider.py'),
+                        help='executable provider in the committed clone; current layout: '
+                             'ip/controlled_fifo/verif/simulation/provider.py')
     parser.add_argument('--parent', type=Path, default=Path('/tmp/opencode'))
     args = parser.parse_args()
     base = Path(tempfile.mkdtemp(prefix='wb052-', dir=args.parent))
@@ -30,6 +36,9 @@ def main():
     switch = args.switch_prefix.resolve(strict=True)
     provider = generation / 'bin/hardcaml-asic-flow'
     project = base / 'example'
+    example.require(not args.simulation_provider_relative.is_absolute(),
+                    '--simulation-provider-relative must be task-relative')
+    simulation_provider = example.local_path(project, str(project / args.simulation_provider_relative))
     # Explicit complete environment: do not inherit ambient provider overlays,
     # Git redirects, build redirects, credentials, or owner preferences.
     env = {'PATH': f'{generation}/bin:{switch}/bin:/usr/bin:/bin',
@@ -44,8 +53,16 @@ def main():
         '--project-root', str(project), '--provider-executable', str(provider),
         '--env-file', str(env_file), '--clone-from', str(args.source),
         '--revision', args.revision, '--rewrite', '--toolchain', str(args.toolchain),
-        '--simulation-provider', str(project / 'simulation/provider.py')])
+        '--simulation-provider', str(simulation_provider)])
     example.setup(setup_args)
+    example.require(simulation_provider.is_file(),
+                    f'Missing simulation provider: {simulation_provider}; '
+                    'select --simulation-provider-relative for this committed layout')
+    # The example tracks its shebang-bearing Python provider as mode 0644.
+    # Make only this newly cloned task-local file directly launchable.
+    example.require(simulation_provider.read_bytes().startswith(b'#!'),
+                    f'Simulation provider has no executable shebang: {simulation_provider}')
+    simulation_provider.chmod(simulation_provider.stat().st_mode | 0o100)
     example.audit_for_launch(project, provider, env)
     review.validate_environment(env, project, review.DEFAULT_LIBRARIES)
     # Audit above runs before the first project build or provider execution.

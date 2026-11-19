@@ -3363,7 +3363,8 @@ let main_hint_text host =
     when Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind "timing")
     -> "Space c c | Tab focus | Enter paths | d details | r refresh | Esc back | q exit"
   | None ->
-    "Space c c commands | Tab/Shift-Tab focus | j/k browse | Enter inspect | q exit"
+    "Space c c commands | Tab/Shift-Tab focus | j/k browse | Enter inspect | F8 details | \
+     q exit"
 ;;
 
 let render_workspace
