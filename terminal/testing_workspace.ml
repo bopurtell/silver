@@ -507,13 +507,14 @@ let rows
               in
               [ row
                   ~selected:(Option.equal String.equal t.view.attempt (Some a.id))
+                  ~target:(Attempt a.id)
                   ~indicator:(Simulation_view.attempt_indicator a.lifecycle a.outcome)
                   ~spans:(Simulation_view.attempt_spans ~prefix a.lifecycle a.outcome)
                   (prefix
                    ^ atom S.Lifecycle.sexp_of_t a.lifecycle
                    ^ "/"
                    ^ atom S.Outcome.sexp_of_t a.outcome)
-              ; row
+              ; row ~target:(Attempt a.id)
                   ("    "
                    ^ Execution_time_view.line ~now a.execution_timing
                    ^ " · "
@@ -536,6 +537,7 @@ let rows
             in
             row
               ~selected:(Option.equal String.equal t.view.case_id (Some c.case_id))
+              ~target:(Case c.case_id)
               ~indicator:(Simulation_view.case_indicator ~lifecycle:d.lifecycle c.status)
               ~value_start:
                 (Bonsai_term.View.width
@@ -564,6 +566,7 @@ let rows
             let availability = atom S.Artifact.Availability.sexp_of_t a.availability in
             row
               ~selected:(Option.equal String.equal t.selected_artifact (Some a.id))
+              ~target:(Artifact a.id)
               ~indicator:Artifact
               ~spans:
                 [ Simulation_view.span

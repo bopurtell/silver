@@ -309,7 +309,7 @@ let checks_lines (summary : Asic.Summary.t) =
     ]
 ;;
 
-let table ~state ~(projection : Synthesis.t) ~width ~height =
+let table_entries ~state ~(projection : Synthesis.t) ~width ~height =
   let candidates = State.cell_rows state in
   let header = clip ~width "  Count  Cell type" in
   let available = Int.max 0 (height - 1) in
@@ -323,9 +323,10 @@ let table ~state ~(projection : Synthesis.t) ~width ~height =
   let body =
     if List.is_empty candidates
     then
-      [ (if List.is_empty projection.rows
-         then "No cell breakdown reported"
-         else "No cells match. Ctrl-U clears filter")
+      [ ( (if List.is_empty projection.rows
+           then "No cell breakdown reported"
+           else "No cells match. Ctrl-U clears filter")
+        , None )
       ]
     else
       List.drop candidates start
@@ -336,9 +337,56 @@ let table ~state ~(projection : Synthesis.t) ~width ~height =
           then ">"
           else " "
         in
-        sprintf "%s %5s  %s" marker (count_text row) row.name)
+        sprintf "%s %5s  %s" marker (count_text row) row.name, Some row.name)
   in
-  List.take (header :: List.map body ~f:(clip ~width)) (Int.max 0 height)
+  List.take
+    ((header, None) :: List.map body ~f:(fun (line, id) -> clip ~width line, id))
+    (Int.max 0 height)
+;;
+
+let table ~state ~projection ~width ~height =
+  List.map (table_entries ~state ~projection ~width ~height) ~f:fst
+;;
+
+let cells_entries ~state ~projection ~filter ~width ~height =
+  let heading = "Cells | " ^ sort_text (State.sort state) in
+  let filter_line =
+    if String.is_empty filter
+    then []
+    else
+      [ sprintf "Filter: %S (%d matches)" filter (List.length (State.cell_rows state)) ]
+  in
+  let headings =
+    if height <= 3 && not (List.is_empty filter_line)
+    then filter_line
+    else heading :: filter_line
+  in
+  let footer =
+    if height >= 5
+    then [ "j/k select | Enter inspect | / filter | s sort | Esc back" ]
+    else []
+  in
+  let plain = List.map ~f:(fun line -> clip ~width line, None) in
+  plain (List.take headings height)
+  @ table_entries
+      ~state
+      ~projection
+      ~width
+      ~height:(height - List.length headings - List.length footer)
+  @ plain footer
+;;
+
+let select_cell_row state ~summary ~filter ~width ~height ~row =
+  let state = State.reconcile state ~summary ~filter in
+  Option.bind state.cache ~f:(fun cache ->
+    if row < 0 || row >= height || not (Mode.equal state.mode Cells)
+    then None
+    else
+      List.nth
+        (cells_entries ~state ~projection:cache.projection ~filter ~width ~height)
+        row
+      |> Option.bind ~f:snd
+      |> Option.map ~f:(fun name -> { state with selected = Some name; offset = 0 }))
 ;;
 
 let page ~state ~width ~height lines =
@@ -399,34 +447,7 @@ let rows state ~summary ~filter ~width ~height =
              ~height:(height - List.length intro - List.length footer)
          @ List.map footer ~f:(clip ~width)
        | Cells ->
-         let heading = "Cells | " ^ sort_text (State.sort state) in
-         let filter_line =
-           if String.is_empty filter
-           then []
-           else
-             [ sprintf
-                 "Filter: %S (%d matches)"
-                 filter
-                 (List.length (State.cell_rows state))
-             ]
-         in
-         let headings =
-           if height <= 3 && not (List.is_empty filter_line)
-           then filter_line
-           else heading :: filter_line
-         in
-         let footer =
-           if height >= 5
-           then [ "j/k select | Enter inspect | / filter | s sort | Esc back" ]
-           else []
-         in
-         List.take (List.map headings ~f:(clip ~width)) height
-         @ table
-             ~state
-             ~projection
-             ~width
-             ~height:(height - List.length headings - List.length footer)
-         @ List.map footer ~f:(clip ~width)
+          List.map (cells_entries ~state ~projection ~filter ~width ~height) ~f:fst
        | Details ->
          (match
             List.find projection.rows ~f:(fun row ->
@@ -1021,6 +1042,11 @@ module%test Tests = struct
     let t = State.move t ~summary:(Some s) ~filter:"" ~delta:19 in
     let output = rows t ~summary:(Some s) ~filter:"" ~width:30 ~height:4 in
     assert (List.exists output ~f:(String.is_substring ~substring:">     0  cell-00"));
+    let click row = select_cell_row t ~summary:(Some s) ~filter:"" ~width:30 ~height:4 ~row in
+    assert (Option.is_none (click 1));
+    let browsed = Option.value_exn (click 2) in
+    assert (Mode.equal (State.mode browsed) Cells);
+    [%test_result: string option] (State.selected browsed) ~expect:(Some "cell-01");
     [%test_result: string list]
       (rows t ~summary:(Some s) ~filter:"" ~width:0 ~height:4)
       ~expect:[];

@@ -269,6 +269,19 @@ individual checks and that explicit acceptance operation remain separate facts.
 
 In the client:
 
+The workspace accepts terminal mouse input by default. Click a workspace tab
+to switch immediately, or click a tile to focus it. In Runs, clicking a run
+highlights it; **Enter** still applies that run
+to the workspace. Wheel down/up over the focused tile browses like **j/k**. A
+wheel over another tile does nothing until you click to focus it. **Ctrl+wheel**
+moves focus like **Tab/Shift+Tab** within the current workspace. Palettes and
+modal views prevent clicks and wheels from reaching tiles underneath.
+
+If your terminal uses Ctrl+wheel for zoom, or tmux handles the wheel itself,
+Silver only receives the events they forward. Tab and Shift+Tab work either
+way. Start the client with `--no-mouse` for terminal-native text selection and
+scrollback.
+
 1. **Space c c → Apply default layout (add missing tiles)** supplies the dashboard
    while preserving existing tiles, pins and contexts.
 2. Use **Tab** to focus the run selector and **Enter** to select the registered run.

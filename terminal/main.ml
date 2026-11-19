@@ -4161,6 +4161,9 @@ let host_data session : Host_view.data =
   }
 ;;
 
+let hierarchy_tree_height height = Int.max 1 (height - 5)
+let hierarchy_header_height height = if height <= 3 then 1 else 4
+
 let hierarchy_pane session (tile : Workspace.Tile.t) ~width ~height =
   if not (String.equal tile.kind "hierarchy")
   then None
@@ -4202,7 +4205,7 @@ let hierarchy_pane session (tile : Workspace.Tile.t) ~width ~height =
             ^ Configuration_id.to_string h.configuration
           ; "DUT: unknown | " ^ local.hierarchy_status
           ]
-        , V.rows view ~height:(Int.max 1 (height - 5)) )
+        , V.rows view ~height:(hierarchy_tree_height height) )
     in
     let hints =
       if (Host.policy session.host tile).hints
@@ -4220,6 +4223,13 @@ let hierarchy_pane session (tile : Workspace.Tile.t) ~width ~height =
          ~width
          ~height
          (List.map rows ~f:Terminal_presentation.Artifact_view.safe))
+;;
+
+let picker_page rt ~height =
+  let visible = Int.max 1 (height - 2) in
+  let first = Int.max 0 (rt.picker_index - visible + 1) in
+  List.take (List.drop rt.artifacts first) visible
+  |> List.mapi ~f:(fun i artifact -> first + i, artifact)
 ;;
 
 let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
@@ -4291,17 +4301,14 @@ let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
             rt.view <- Waveform_view.prepare_waves rt.view ~width;
             Waveform_view.render_waves ~appearance ~hints rt.view ~width ~height)
        | Picker ->
-         let visible = Int.max 1 (height - 2) in
-         let first = Int.max 0 (rt.picker_index - visible + 1) in
          ([ "Pinned: "
             ^ Waveform_view.shorten ~width:(Int.max 8 (width - 8)) rt.pin.artifact.label
           ]
-          @ (List.drop rt.artifacts first
-             |> Fn.flip List.take visible
-             |> List.mapi ~f:(fun i a ->
+          @ (picker_page rt ~height
+             |> List.map ~f:(fun (i, a) ->
                sprintf
                  "%s%s %s · %s"
-                 (if first + i = rt.picker_index then ">" else " ")
+                 (if i = rt.picker_index then ">" else " ")
                  (if Waveform_view.picker_matches_pin ~pinned:rt.pin.artifact a
                   then "*"
                   else " ")
@@ -4349,24 +4356,90 @@ let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
          |> lines))
 ;;
 
+let displayed_host session =
+  match session.presentation_preference_notice with
+  | None -> session.host
+  | Some notice ->
+    { session.host with
+      chrome = true
+    ; notice =
+        String.concat
+          ~sep:" | "
+          (List.filter [ notice; session.host.notice ] ~f:(Fn.non String.is_empty))
+    }
+;;
+
+(** Called on the host that painted the hit, before focus-dependent geometry changes. *)
+let select_pointer_row session (tile : Workspace.Tile.t) dimensions ~column ~row =
+  let displayed = displayed_host session in
+  let _, _, cells = Host_view.tile_layout displayed dimensions in
+  List.find cells ~f:(fun (candidate, _) -> Workspace.Tile_id.equal candidate.id tile.id)
+  |> Option.iter ~f:(fun (_, geometry) ->
+    let _, _, _, width, height =
+      Host_view.body_geometry displayed tile ~width:geometry.width ~height:geometry.height
+    in
+    if column >= 0 && column < width && row >= 0 && row < height
+    then
+      if String.equal tile.kind "workspace-tabs"
+      then
+        Host_view.workspace_tab_at displayed (host_data session) tile ~width ~height ~column ~row
+        |> Option.iter ~f:(fun id ->
+          if not (Option.equal Workspace.Workspace_id.equal session.host.active (Some id))
+          then activate_workspace session id)
+      else if String.equal tile.kind "hierarchy"
+      then (
+        let module V = Terminal_presentation.Hierarchy_view in
+        let local = Host.local session.host tile.id in
+        let index = row - hierarchy_header_height height in
+        if index >= 0
+        then
+          Option.iter local.hierarchy ~f:(fun view ->
+            List.nth (V.viewport view ~height:(hierarchy_tree_height height)) index
+            |> Option.iter ~f:(fun (_, node) ->
+              session.host
+              <- Host.set_local
+                   session.host
+                   tile.id
+                   { local with hierarchy = Some (V.select view node.key) })))
+      else if Waveforms.is_pane tile.kind
+      then
+        List.Assoc.find
+          session.waveform_workspaces
+          (Workspace.Workspace_id.to_string tile.workspace)
+          ~equal:String.equal
+        |> Option.iter ~f:(fun rt ->
+          match Waveforms.pane tile.kind with
+          | Some Picker when row > 0 ->
+            List.nth (picker_page rt ~height) (row - 1)
+            |> Option.iter ~f:(fun (index, _) -> rt.picker_index <- index)
+          | Some Signals ->
+            rt.view
+            <- Waveform_view.select_signal_row
+                 rt.view
+                 ~width
+                 ~height
+                 ~row
+                 ~hints:(Host.policy displayed tile).hints
+                 ~value_layout:session.waveform_value_layout
+          | _ -> ())
+      else
+        session.host
+        <- Host_view.select_body_row
+             ~column
+             session.host
+             (host_data session)
+             tile
+             ~width
+             ~height
+             ~row)
+;;
+
 let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   let render_host () =
     session.last_dimensions <- Some dimensions;
     reconcile_synthesis session;
     let data = host_data session in
     session.host <- Host_view.reconcile_simulation_viewports session.host data dimensions;
-    let host =
-      match session.presentation_preference_notice with
-      | None -> session.host
-      | Some notice ->
-        { session.host with
-          chrome = true
-        ; notice =
-            String.concat
-              ~sep:" | "
-              (List.filter [ notice; session.host.notice ] ~f:(Fn.non String.is_empty))
-        }
-    in
     reconcile_waveform_workspaces session;
     Host_view.render
       ~now
@@ -4375,7 +4448,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
         match hierarchy_pane session tile ~width ~height with
         | Some pane -> Some pane
         | None -> waveform_pane session tile ~width ~height)
-      host
+      (displayed_host session)
       data
       dimensions
   in
@@ -7270,11 +7343,7 @@ let browse_host session delta =
     let values =
       if String.equal tile.kind "run-selector"
       then
-        (host_data session).runs
-        |> List.filter ~f:(fun (r, label) ->
-          String.is_substring
-            (String.lowercase (Host_view.run_label r ^ " " ^ label))
-            ~substring:(String.lowercase local.filter))
+        Host_view.run_candidates (host_data session) ~filter:local.filter
         |> List.map ~f:(fun (run, _) -> Host_view.run_label run)
       else
         project_jobs session
@@ -7283,13 +7352,12 @@ let browse_host session delta =
           || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
         |> List.map ~f:(fun job -> Job_id.to_string job.id)
     in
-    let index =
-      Option.bind local.cursor ~f:(fun cursor ->
-        List.findi values ~f:(fun _ value -> String.equal cursor value)
-        |> Option.map ~f:fst)
-      |> Option.value ~default:(if delta > 0 then -1 else 1)
+    let cursor =
+      if String.equal tile.kind "run-selector"
+      then Host_view.run_cursor session.host tile
+      else local.cursor
     in
-    let index = Int.max 0 (Int.min (List.length values - 1) (index + delta)) in
+    let index = Host_view.browse_index values ~cursor ~delta in
     let cursor = List.nth values index in
     let visible =
       Option.bind session.last_dimensions ~f:(fun dimensions ->
@@ -8201,7 +8269,75 @@ let capture_appearance_frames ~directory =
   printf "Captured experimental A-E skins (synthetic data) in %s\n%!" directory
 ;;
 
-let tui session ~exit ~dimensions graph =
+let pointer_captured session =
+  let host = session.host in
+  Option.is_none host.registry
+  || session.show_connection_details
+  || session.waveform_visible
+  || Option.is_some session.hierarchy_view
+  || Option.is_some session.artifact_view
+  || Option.is_some host.palette
+  || host.paste
+  || host.editing_filter
+  || host.prefix > 0
+  || Option.is_some host.inspection_paste
+  || Option.exists (Host.focused host) ~f:(fun tile ->
+    Option.is_some (Host_view.inspection_explorer host tile)
+    || Option.is_some (Host_view.artifact_inspector host tile)
+    || Option.exists (Host.inspection host tile.id) ~f:(fun view -> view.editing)
+    || (Waveforms.is_pane tile.kind
+        && Option.exists (waveform_context session) ~f:(fun (view, _) ->
+          Option.is_some view.editing || Option.is_some view.identity_scroll)))
+;;
+
+let handle_pointer session ~exit ~kind ~mods ~x ~y =
+  let open Bonsai_term in
+  let navigate key mods =
+    host_handler session (Event.Key_press { key; mods }) ~exit
+    |> Option.value ~default:Effect.Ignore
+  in
+  match session.last_dimensions with
+  | None -> Effect.Ignore
+  | Some dimensions
+    when pointer_captured session
+         || x < 0
+         || y < 0
+         || x >= dimensions.width
+         || y >= dimensions.height -> Effect.Ignore
+  | Some dimensions ->
+    (match (kind : Event.mouse_kind), mods with
+     | Scroll direction, [ Event.Modifier.Ctrl ] ->
+       navigate
+         Tab
+         (match direction with
+          | `Up -> [ Shift ]
+          | `Down -> [])
+     | (Left | Scroll _), [] ->
+       (match Host_view.pointer_hit (displayed_host session) dimensions ~x ~y with
+        | None -> Effect.Ignore
+        | Some (tile, body) ->
+          (match kind with
+           | Left ->
+             Option.iter body ~f:(fun (column, row) ->
+               select_pointer_row session tile dimensions ~column ~row);
+             (* A workspace tab may have switched away and restored that
+                workspace's focus. Never focus a tile from the old workspace. *)
+             if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
+             then session.host <- { session.host with focus = Some tile.id };
+             Effect.Ignore
+           | Scroll direction
+             when Option.exists session.host.focus ~f:(Workspace.Tile_id.equal tile.id) ->
+             navigate
+               (ASCII
+                  (match direction with
+                   | `Down -> 'j'
+                   | `Up -> 'k'))
+               []
+           | _ -> Effect.Ignore))
+     | _ -> Effect.Ignore)
+;;
+
+let tui session ~no_mouse ~exit ~dimensions graph =
   let open Bonsai_term in
   let open Bonsai.Let_syntax in
   (* Session navigation is currently mutable. Give those mutations a reactive invalidation
@@ -8258,7 +8394,7 @@ let tui session ~exit ~dimensions graph =
     and indicator_frames in
     render ~now ?indicator_frames session dimensions
   in
-  let handle (event : Event.t) =
+  let handle_keyboard (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
     else if match event with
@@ -8362,41 +8498,44 @@ let tui session ~exit ~dimensions graph =
            Effect.of_deferred_thunk (fun () -> reconnect session)
          | _ -> Effect.Ignore))
   in
+  let publish ~update ~write previous effect =
+    let active, focus, selections = Host.navigation_input_changes previous session.host in
+    if active || Option.is_some focus
+    then session.navigation_revision <- session.navigation_revision + 1;
+    Option.iter focus ~f:(fun id ->
+      if not (List.mem session.navigation_focus_touched id ~equal:String.equal)
+      then session.navigation_focus_touched <- id :: session.navigation_focus_touched);
+    let touched id =
+      if not (List.mem session.navigation_touched id ~equal:String.equal)
+      then session.navigation_touched <- id :: session.navigation_touched;
+      session.host <- Host.cancel_navigation_timing session.host id
+    in
+    List.iter selections ~f:touched;
+    (* Publish local state immediately; publish any deferred response when it completes
+       too. Do not await a provider/HTTP read before local feedback. *)
+    Effect.Many
+      [ invalidate update
+      ; Effect.bind effect ~f:(fun () ->
+          Effect.bind
+            (Export_clipboard.flush
+               session.export_clipboard
+               ~enabled:(not (Option.exists (Sys.getenv "TERM") ~f:(String.equal "dumb")))
+               ~write)
+            ~f:(fun () ->
+              Effect.bind
+                (Effect.of_deferred_thunk (fun () -> save_navigation_preferences session))
+                ~f:(fun () -> invalidate update)))
+      ]
+  in
   let handler =
     Bonsai.map2 update_revision write_to_tty ~f:(fun update write event ->
       let previous = session.host in
-      let effect = handle event in
-      let active, focus, selections =
-        Host.navigation_input_changes previous session.host
-      in
-      if active || Option.is_some focus
-      then session.navigation_revision <- session.navigation_revision + 1;
-      Option.iter focus ~f:(fun id ->
-        if not (List.mem session.navigation_focus_touched id ~equal:String.equal)
-        then session.navigation_focus_touched <- id :: session.navigation_focus_touched);
-      let touched id =
-        if not (List.mem session.navigation_touched id ~equal:String.equal)
-        then session.navigation_touched <- id :: session.navigation_touched;
-        session.host <- Host.cancel_navigation_timing session.host id
-      in
-      List.iter selections ~f:touched;
-      (* Publish local state immediately; publish any deferred response when it completes
-         too. Do not await a provider/HTTP read before local feedback. *)
-      Effect.Many
-        [ invalidate update
-        ; Effect.bind effect ~f:(fun () ->
-            Effect.bind
-              (Export_clipboard.flush
-                 session.export_clipboard
-                 ~enabled:
-                   (not (Option.exists (Sys.getenv "TERM") ~f:(String.equal "dumb")))
-                 ~write)
-              ~f:(fun () ->
-                Effect.bind
-                  (Effect.of_deferred_thunk (fun () ->
-                     save_navigation_preferences session))
-                  ~f:(fun () -> invalidate update)))
-        ])
+      let publish = publish ~update ~write previous in
+      match event with
+      | Event.Mouse { kind = (Left | Scroll _) as kind; mods; position = { x; y } }
+        when not no_mouse -> publish (handle_pointer session ~exit ~kind ~mods ~x ~y)
+      | Mouse _ -> Effect.Ignore
+      | _ -> publish (handle_keyboard event))
   in
   ~view, ~handler
 ;;
@@ -8765,6 +8904,7 @@ let run_legacy
   ~project_root
   ~environment
   ~plain
+  ~no_mouse
   ~action
   ~target
   ~configuration
@@ -8863,8 +9003,8 @@ let run_legacy
             let%bind result =
               Bonsai_term.start_with_exit
                 ~dispose:true
-                ~mouse:No_mouse_events
-                (tui session)
+                ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+                (tui session ~no_mouse)
             in
             let%map () = session.preference_saves in
             result)
@@ -8973,6 +9113,7 @@ let run
   ~project_root
   ~environment
   ~plain
+  ~no_mouse
   ~api
   ~asic_operation
   ~workspace_operation
@@ -9017,6 +9158,7 @@ let run
         ~project_root
         ~environment
         ~plain
+        ~no_mouse
         ~action
         ~target
         ~configuration
@@ -9165,6 +9307,8 @@ let command =
             "inherited|opam:SWITCH project command environment on the daemon host \
              (default: inherited from daemon, not client shell)"
      and plain = flag "--plain" no_arg ~doc:" print status without terminal control"
+     and no_mouse =
+       flag "--no-mouse" no_arg ~doc:" disable terminal mouse reporting (keyboard and native text selection)"
      and timing_neighbors =
        flag
          "--timing-prefetch-neighbors"
@@ -9338,6 +9482,7 @@ let command =
             ~project_root
             ~environment
             ~plain
+            ~no_mouse
             ~api
             ~asic_operation
             ~workspace_operation

@@ -239,7 +239,12 @@ class PrivateJourneyTests(unittest.TestCase):
             evidence.mkdir()
             owner_manifest = '(lang hardcaml-workbench 1)\n(project (name controlled_fifo_specimen))\n(dune (driver ./fifo))\n'
             (source / "hardcaml-workbench.sexp").write_text(owner_manifest)
-            config = dict(project="consumer", project_name="SRAM qualification", environment={"PATH": "/usr/bin"},
+            tools = root / "tools"
+            tools.mkdir()
+            docker = tools / "docker"
+            docker.write_text("#!/bin/sh\nexit 1\n")
+            docker.chmod(0o700)
+            config = dict(project="consumer", project_name="SRAM qualification", environment={"PATH": f"{tools}:/usr/bin"},
                 source_closure=[dict(source=str(source), destination="consumer")],
                 build_target="memory/consumer.exe", provider=sys.executable, dune=sys.executable,
                 toolchain=str(root), python=sys.executable, support_tools=str(root), pdk_root=str(root),
@@ -253,7 +258,6 @@ class PrivateJourneyTests(unittest.TestCase):
                 return json.dumps(dict(cli_contract=dict(
                     version=4, capabilities=dict(namedflow1=True, timing_stage1=True))))
             with mock.patch.object(rung, "containers", return_value=[]), \
-                    mock.patch.object(runner.shutil, "which", return_value="/usr/bin/docker"), \
                     mock.patch.object(rung, "command", side_effect=controlled_command):
                 rung.prepare()
             self.assertEqual((source / "hardcaml-workbench.sexp").read_text(), owner_manifest)

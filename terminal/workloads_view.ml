@@ -558,6 +558,16 @@ type input =
   | Capture of bool * string * capture_token
   | Scroll of int
 
+let browse_result t selected =
+  let changed = not (Option.equal String.equal selected t.selected) in
+  { (invalidate t) with
+    selected
+  ; query = (if changed then None else t.query)
+  ; descriptor = (if changed then None else t.descriptor)
+  ; document = (if changed then None else t.document)
+  }
+;;
+
 let input t ~asic ~filter event =
   let candidates =
     results (snapshot asic)
@@ -614,14 +624,7 @@ let input t ~asic ~filter event =
         (Int.max 0 (Int.min (List.length candidates - 1) (index + delta)))
       |> Option.map ~f:fst
     in
-    let changed = not (Option.equal String.equal selected t.selected) in
-    ( { (invalidate t) with
-        selected
-      ; query = (if changed then None else t.query)
-      ; descriptor = (if changed then None else t.descriptor)
-      ; document = (if changed then None else t.document)
-      }
-    , None )
+    browse_result t selected, None
   | Move delta -> { t with scroll = Int.max 0 (t.scroll + delta) }, None
 ;;
 
@@ -635,7 +638,8 @@ let capture_rows name = function
     ]
 ;;
 
-let rows t ~asic ~filter ~width ~height =
+let page_with_targets t ~asic ~filter ~width ~height =
+  let plain rows = List.map rows ~f:(fun row -> None, row) in
   let header =
     [ E.plain "Workloads · project evidence (independent of Main)"
     ; E.plain
@@ -676,94 +680,104 @@ let rows t ~asic ~filter ~width ~height =
         List.drop entries (Int.max 0 (index - Int.max 1 (height / 4) + 1))
         |> Fn.flip List.take (Int.max 1 (height / 4))
       in
-      [ E.plain
-          ("Retained results · filter: "
-           ^ filter
-           ^ " · palette: Import exact absolute result.json")
-      ]
+      plain
+        [ E.plain
+            ("Retained results · filter: "
+             ^ filter
+             ^ " · palette: Import exact absolute result.json")
+        ]
       @ List.map entries ~f:(fun (path, d) ->
-        E.plain
-          ((if Option.equal String.equal t.selected (Some path) then "> " else "  ")
-           ^ path
-           ^ " · "
-           ^ fst (freshness d.freshness)))
+        ( Some path
+        , E.plain
+            ((if Option.equal String.equal t.selected (Some path) then "> " else "  ")
+             ^ path
+             ^ " · "
+             ^ fst (freshness d.freshness)) ))
       @
       if List.is_empty entries
       then
-        [ E.plain
-            "No matching retained results. Import a result, or launch PT.8 in Testing."
-        ]
+        plain
+          [ E.plain
+              "No matching retained results. Import a result, or launch PT.8 in Testing."
+          ]
       else []
     | Detail ->
-      status
-      @ Option.to_list
-          (Option.map t.selected ~f:(fun s ->
-             E.plain
-               ("Result: "
-                ^ Filename.basename (Filename.dirname s)
-                ^ "/"
-                ^ Filename.basename s)))
-      @ Option.value_map
-          t.document
-          ~default:[ E.plain "No matching document loaded — Enter or r" ]
-          ~f:result_rows
-      @ qualifications
+      plain
+        (status
+         @ Option.to_list
+             (Option.map t.selected ~f:(fun s ->
+                E.plain
+                  ("Result: "
+                   ^ Filename.basename (Filename.dirname s)
+                   ^ "/"
+                   ^ Filename.basename s)))
+         @ Option.value_map
+             t.document
+             ~default:[ E.plain "No matching document loaded — Enter or r" ]
+             ~f:result_rows
+         @ qualifications)
     | Provenance ->
-      status
-      @ Option.to_list
-          (Option.map t.selected ~f:(fun s -> E.plain ("Selected result: " ^ s)))
-      @ capture_rows "A" t.left
-      @ capture_rows "B" t.right
-      @ Option.value_map t.descriptor ~default:[] ~f:(fun d ->
-        [ E.plain ("Digest: " ^ Option.value d.digest ~default:"unavailable")
-        ; E.plain ("Reader: " ^ Option.value d.provider_identity ~default:"unavailable")
-        ])
-      @ Option.to_list
-          (Option.map t.error ~f:(fun s -> E.plain ("Full read diagnostic: " ^ s)))
-      @ Option.to_list
-          (Option.bind t.descriptor ~f:(fun d ->
-             Option.map d.error ~f:(fun s -> E.plain ("Full source diagnostic: " ^ s))))
-      @ Option.value_map
-          t.document
-          ~default:[ E.plain "No source document loaded" ]
-          ~f:(fun j ->
-            Json.facts "Controls / " (Json.field j "controls")
-            @ Json.facts "Outcome / " (Json.field j "outcome")
-            @ Json.facts "Binding / " (Json.field j "binding")
-            @ List.concat_map
-                (Json.list (Json.field j "metrics"))
-                ~f:(Json.facts "Metric / ")
-            @ List.concat_map
-                (Json.list (Json.field j "differences"))
-                ~f:(Json.facts "Difference / ")
-            @ Json.facts "Provenance / " (Json.field j "provenance")
-            @ Json.facts "Left / " (Json.field j "left")
-            @ Json.facts "Right / " (Json.field j "right"))
+      plain
+        (status
+         @ Option.to_list
+             (Option.map t.selected ~f:(fun s -> E.plain ("Selected result: " ^ s)))
+         @ capture_rows "A" t.left
+         @ capture_rows "B" t.right
+         @ Option.value_map t.descriptor ~default:[] ~f:(fun d ->
+           [ E.plain ("Digest: " ^ Option.value d.digest ~default:"unavailable")
+           ; E.plain ("Reader: " ^ Option.value d.provider_identity ~default:"unavailable")
+           ])
+         @ Option.to_list
+             (Option.map t.error ~f:(fun s -> E.plain ("Full read diagnostic: " ^ s)))
+         @ Option.to_list
+             (Option.bind t.descriptor ~f:(fun d ->
+                Option.map d.error ~f:(fun s -> E.plain ("Full source diagnostic: " ^ s))))
+         @ Option.value_map
+             t.document
+             ~default:[ E.plain "No source document loaded" ]
+             ~f:(fun j ->
+               Json.facts "Controls / " (Json.field j "controls")
+               @ Json.facts "Outcome / " (Json.field j "outcome")
+               @ Json.facts "Binding / " (Json.field j "binding")
+               @ List.concat_map
+                   (Json.list (Json.field j "metrics"))
+                   ~f:(Json.facts "Metric / ")
+               @ List.concat_map
+                   (Json.list (Json.field j "differences"))
+                   ~f:(Json.facts "Difference / ")
+               @ Json.facts "Provenance / " (Json.field j "provenance")
+               @ Json.facts "Left / " (Json.field j "left")
+               @ Json.facts "Right / " (Json.field j "right")))
     | Compare ->
-      List.map
-        [ "A", t.left; "B", t.right ]
-        ~f:(fun (name, c) ->
-          E.plain
-            (name
-             ^ ": "
-             ^ Option.value_map c ~default:"not captured" ~f:(fun c ->
-               Filename.basename (Filename.dirname c.result)
-               ^ "/"
-               ^ Filename.basename c.result)))
-      @ [ E.plain ("Axis: " ^ t.axis) ]
-      @ status
-      @ Option.value_map
-          t.document
-          ~default:
-            [ E.plain "No comparison loaded — capture both sides and choose Compare" ]
-          ~f:comparison_rows
-      @ qualifications
+      plain
+        (List.map
+           [ "A", t.left; "B", t.right ]
+           ~f:(fun (name, c) ->
+             E.plain
+               (name
+                ^ ": "
+                ^ Option.value_map c ~default:"not captured" ~f:(fun c ->
+                  Filename.basename (Filename.dirname c.result)
+                  ^ "/"
+                  ^ Filename.basename c.result)))
+         @ [ E.plain ("Axis: " ^ t.axis) ]
+         @ status
+         @ Option.value_map
+             t.document
+             ~default:
+               [ E.plain "No comparison loaded — capture both sides and choose Compare" ]
+             ~f:comparison_rows
+         @ qualifications)
   in
-  E.page
+  E.page_with_targets
     ~width
     ~height
     ~offset:(if equal_mode t.mode Results then 0 else t.scroll)
-    (header @ contents)
+    (plain header @ contents)
+;;
+
+let rows t ~asic ~filter ~width ~height =
+  page_with_targets t ~asic ~filter ~width ~height |> List.map ~f:snd
 ;;
 
 type saved =

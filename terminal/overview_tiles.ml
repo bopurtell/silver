@@ -57,6 +57,9 @@ type row =
   (** Static semantic marker, separate from stage status and its running animation. A
       status takes precedence so a row never acquires two indicators. *)
   ; active : bool
+  ; cursor_id : string option
+  (** Stable preparation attempt or run-scoped checklist ID for this row's heading.
+      Metadata and detail lines do not inherit it. *)
   ; workspace : Workspace.Workspace_id.t option
   ; details : string list
   ; display_run : Run_ref.t option
@@ -71,6 +74,7 @@ let row
   ?status
   ?indicator
   ?(active = false)
+  ?cursor_id
   ?workspace
   ?(details = [])
   ?display_run
@@ -85,6 +89,7 @@ let row
   ; status
   ; indicator
   ; active
+  ; cursor_id
   ; workspace
   ; details
   ; display_run
@@ -1158,7 +1163,18 @@ let render
   View.zcat [ view; View.rectangle ~width ~height () ]
 ;;
 
-let render_checklist_strip
+(* Keep the identity next to the actual image: status glyphs and clipping can change the
+   width of a chip independently of its packing budget. *)
+let chip_at chips ~column =
+  let rec find column = function
+    | [] -> None
+    | (view, target) :: rest ->
+      if column < View.width view then target else find (column - View.width view) rest
+  in
+  if column < 0 then None else find column chips
+;;
+
+let checklist_strip_lines
   ?indicator_frames
   ?indicator_fg
   ?selected_bg
@@ -1187,24 +1203,67 @@ let render_checklist_strip
           ~indent:""
           row
       in
+      let item = item, row.cursor_id in
       if used > 0 && used + 3 + cells > width
-      then (View.hcat (List.rev current), active) :: packed, [ item ], cells, row.active
+      then (List.rev current, active) :: packed, [ item ], cells, row.active
       else
         ( packed
-        , item :: (if used = 0 then current else View.text " · " :: current)
+        , item :: (if used = 0 then current else (View.text " · ", None) :: current)
         , used + (if used = 0 then 0 else 3) + cells
         , active || row.active ))
   in
-  let lines = List.rev ((View.hcat (List.rev current), active) :: packed) in
+  let lines = List.rev ((List.rev current, active) :: packed) in
   let selected =
     List.findi lines ~f:(fun _ (_, active) -> active)
     |> Option.value_map ~default:0 ~f:fst
   in
   let start = Int.max 0 (selected - Int.max 1 height + 1) in
-  List.drop lines start
-  |> Fn.flip List.take (Int.max 0 height)
-  |> List.map ~f:fst
+  List.drop lines start |> Fn.flip List.take (Int.max 0 height) |> List.map ~f:fst
+;;
+
+let render_checklist_strip
+  ?indicator_frames
+  ?indicator_fg
+  ?selected_bg
+  ~appearance
+  ~attrs
+  ~width
+  ~height
+  rows
+  =
+  checklist_strip_lines
+    ?indicator_frames
+    ?indicator_fg
+    ?selected_bg
+    ~appearance
+    ~attrs
+    ~width
+    ~height
+    rows
+  |> List.map ~f:(fun chips -> View.hcat (List.map chips ~f:fst))
   |> View.vcat
+;;
+
+let%test_unit "wrapped checklist chips select only their cells, including after a \
+               viewport shift"
+  =
+  let item i =
+    row ~cursor_id:(Int.to_string i) ~active:(i = 4) ~status:Completed "same" "ok"
+  in
+  let page width height =
+    checklist_strip_lines
+      ~appearance:Appearance.default
+      ~attrs:(fun _ -> [])
+      ~width
+      ~height
+      (List.init 5 ~f:item)
+  in
+  let line = List.hd_exn (page 160 1) in
+  let first_width = View.width (fst (List.hd_exn line)) in
+  assert (Option.is_none (chip_at line ~column:first_width));
+  assert (Option.equal String.equal (chip_at line ~column:(first_width + 3)) (Some "1"));
+  assert (
+    Option.equal String.equal (chip_at (List.hd_exn (page 8 1)) ~column:0) (Some "4"))
 ;;
 
 let inspection_lines rows =
@@ -1355,6 +1414,33 @@ module Stage_strip = struct
     { lines; selected; selected_line }
   ;;
 
+  let chip_lines
+    ?indicator_frames
+    ?indicator_fg
+    ?selected_bg
+    ~appearance
+    ~attrs
+    ~width
+    ~height
+    t
+    =
+    List.take t.lines (Int.max 0 (height - 1))
+    |> List.map ~f:(fun line ->
+      List.concat_mapi line ~f:(fun i item ->
+        (if i = 0 then [] else [ View.text ~attrs:(attrs Role.Muted) " | ", None ])
+        @ [ ( render_row
+                ?indicator_frames
+                ?indicator_fg
+                ?selected_bg
+                ~appearance
+                ~attrs
+                ~width
+                ~indent:""
+                item.row
+            , Some item.stage.id )
+          ]))
+  ;;
+
   let render
     ?indicator_frames
     ?indicator_fg
@@ -1379,21 +1465,8 @@ module Stage_strip = struct
         [ t.selected_line ]
     in
     let lines =
-      List.take t.lines (Int.max 0 (height - 1))
-      |> List.map ~f:(fun line ->
-        View.hcat
-          (List.concat_mapi line ~f:(fun i item ->
-             (if i = 0 then [] else [ View.text ~attrs:(attrs Role.Muted) " | " ])
-             @ [ render_row
-                   ?indicator_frames
-                   ?indicator_fg
-                   ?selected_bg
-                   ~appearance
-                   ~attrs
-                   ~width
-                   ~indent:""
-                   item.row
-               ])))
+      chip_lines ?indicator_frames ?indicator_fg ?selected_bg ~appearance ~attrs ~width ~height t
+      |> List.map ~f:(fun chips -> View.hcat (List.map chips ~f:fst))
     in
     (* Selection stays visible even when wrapping exceeds the available strip height. *)
     let view = View.vcat (lines @ if height = 0 then [] else [ selected ]) in

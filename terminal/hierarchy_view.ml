@@ -178,7 +178,7 @@ let display_label text =
   Buffer.contents buffer
 ;;
 
-let rows ?(icons = Appearance.Icons.Ascii) t ~height =
+let viewport t ~height =
   if height <= 0
   then []
   else (
@@ -192,26 +192,30 @@ let rows ?(icons = Appearance.Icons.Ascii) t ~height =
     in
     t.visible
     |> Fn.flip List.drop start
-    |> Fn.flip List.take height
-    |> List.map ~f:(fun (depth, node) ->
-      let kind =
-        if not (Set.mem t.evidence.branches node.key)
-        then if String.equal node.key t.evidence.hierarchy.root then Indicator.Top else Leaf
-        else if Set.mem t.expanded node.key
-        then Expanded
-        else Collapsed
-      in
-      let marker =
-        (* Keep the marker column even with icons Off; labels and selection stay put. *)
-        if Appearance.Icons.equal icons None_ then " " else Indicator.text icons kind
-      in
-      sprintf
-        "%s%s%s %s : %s"
-        (if String.equal node.key t.selected_key then ">" else " ")
-        (String.make (2 * Int.min depth 32) ' ')
-        marker
-        (display_label (Option.value node.instance_name ~default:"<root>"))
-        (display_label node.circuit_name)))
+    |> Fn.flip List.take height)
+;;
+
+let rows ?(icons = Appearance.Icons.Ascii) t ~height =
+  viewport t ~height
+  |> List.map ~f:(fun (depth, node) ->
+    let kind =
+      if not (Set.mem t.evidence.branches node.key)
+      then if String.equal node.key t.evidence.hierarchy.root then Indicator.Top else Leaf
+      else if Set.mem t.expanded node.key
+      then Expanded
+      else Collapsed
+    in
+    let marker =
+      (* Keep the marker column even with icons Off; labels and selection stay put. *)
+      if Appearance.Icons.equal icons None_ then " " else Indicator.text icons kind
+    in
+    sprintf
+      "%s%s%s %s : %s"
+      (if String.equal node.key t.selected_key then ">" else " ")
+      (String.make (2 * Int.min depth 32) ' ')
+      marker
+      (display_label (Option.value node.instance_name ~default:"<root>"))
+      (display_label node.circuit_name))
 ;;
 
 module%test Tests = struct
