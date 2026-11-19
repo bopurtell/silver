@@ -71,7 +71,7 @@ The captured run/finalization reference and source bytes were preserved. This
 closes the shared ASIC binary handoff acceptance item; it is not a new physical
 design/signoff qualification or a measurement at the 16 MiB upper boundary.
 
-### 64 MiB simulation: blocked by export timeout
+### Initial 64 MiB simulation: blocked by export timeout (fixed below)
 
 Evidence: `/tmp/opencode/wb040-real-export-23wxtlws/` (also reproduced in the first
 run, `/tmp/opencode/wb040-real-export-tb2n90u7/`).
@@ -84,14 +84,35 @@ deadline. At the test's final check (~125.6 seconds, allowing for cleanup), ther
 was **no viewer launch and no remaining partial export**. The success assertion
 correctly fails.
 
-WB-040 stays `partial`. Follow up by profiling the real page path and making the
-declared 64 MiB export complete within the approved deadline while retaining
-bounded memory and exact identity/digest checks. One known cost is that
-`backend/artifact_file.ml` hashes the complete artifact for every 64 KiB page:
-64 MiB entails roughly 64 GiB of logical read/hash work. That is a candidate
-bottleneck, not a completed profiling diagnosis. Do not treat increasing the
-deadline, reducing the acceptance size, or weakening mutation checks as a passing
-result for the current contract.
+This kept WB-040 `partial` until the fix below. The previous
+`backend/artifact_file.ml` hashed the complete artifact for every 64 KiB page:
+64 MiB entailed roughly 64 GiB of logical read/hash work. The regression is preserved
+at its original size and deadline.
+
+### Fixed: both real paths pass together
+
+Evidence: `/tmp/opencode/wb040-real-export-ob2okfku/`. **All 19 checks passed**:
+
+| Path | Bytes | Export + headless handoff |
+| --- | ---: | ---: |
+| Real FIFO VCD | 67,108,864 | 7.51 seconds |
+| Retained ASIC GDS | 4,751,922 | 11.33 seconds |
+
+The new backend index stores at most 32 KiB of SHA-256 block digests from one
+full-file verification scan. Each warm read authenticates the complete blocks
+containing its requested slice. A device/inode/size/nanosecond-mtime/ctime change
+forces a full rescan; a post-read fingerprint check rejects races. The cache
+retains neither whole-file bytes nor descriptors, and the client still checks the
+whole exported file's registered digest before verified publication and handoff.
+
+Focused file, ASIC-artifact and simulation-service tests passed, including warm
+cross-block/EOF slices, atomic inode replacement and out-of-page tampering with
+exact size and mtime preserved. The existing per-operation allocation ceiling
+of 2 MiB still passes. The deterministic cancellation test passed all 21 checks
+against the rebuilt applications (`/tmp/opencode/pt8-waveform-pty-zl3h0uzi/`).
+
+WB-040 is now `closed` within the owner-approved limits and headless acceptance
+scope. Historical failures above remain recorded rather than being overwritten.
 
 The separate deterministic cancellation test remains documented in WB-040 and
 selected by `@test-native-smoke`. Manual reaction-speed cancellation is unnecessary.

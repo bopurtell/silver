@@ -37,7 +37,21 @@ let () =
         (size = max_bytes
          && String.equal digest expected
          && String.equal page (String.suffix chunk 6 ^ String.prefix chunk 14))
-        "Hash or cross-buffer slice mismatch";
+         "Hash or cross-buffer slice mismatch";
+       (* Warm reads must authenticate full blocks even when the requested slice
+          crosses a block boundary, ends at EOF, or requests no payload. *)
+       List.iter [ 0, 65536; 65530, 20; max_bytes - 7, 20; max_bytes, 1 ]
+         ~f:(fun (offset, limit) ->
+           let size, digest, page =
+             allocated (fun () -> Files.read_page src ~max_bytes ~offset ~limit)
+           in
+           let length = Int.min limit (max_bytes - offset) in
+           let expected_page =
+             String.init length ~f:(fun i -> chunk.[(offset + i) mod String.length chunk])
+           in
+           require
+             (size = max_bytes && String.equal digest expected && String.equal page expected_page)
+             "Indexed cross-block/EOF read lost content or digest identity");
       let reserved = ref 0 in
       let size, digest =
         allocated (fun () ->
@@ -75,11 +89,51 @@ let () =
       require
         (String.equal (In_channel.read_all dst) "keep")
         "Failed capture published bytes";
-      require
-        (not
+       require
+         (not
            (List.exists (Sys_unix.ls_dir dir) ~f:(fun name ->
               String.is_substring name ~substring:".tmp-")))
-        "Failed capture left temporary bytes";
+         "Failed capture left temporary bytes";
+       (* Warm the index, then change bytes outside the requested block, keeping
+          size and mtime exactly unchanged. ctime must invalidate the full digest,
+          including a zero-length EOF read. This is not a stat-only page cache. *)
+       let original = String.make 131079 'a' in
+       Out_channel.write_all src ~data:original;
+       Core_unix.utimes src ~access:1. ~modif:1.;
+       let _, original_digest, _ = Files.read_page src ~max_bytes ~offset:0 ~limit:10 in
+       let before = Core_unix.Ns_precision.stat src in
+       let changed = String.make 131072 'a' ^ "changed" in
+       Out_channel.write_all src ~data:changed;
+       Core_unix.utimes src ~access:1. ~modif:1.;
+       let after = Core_unix.Ns_precision.stat src in
+       require
+         (Int64.equal before.st_size after.st_size
+          && Time_ns.equal before.st_mtime after.st_mtime)
+         "Mutation fixture must preserve exact size/mtime";
+       let _, changed_digest, page = Files.read_page src ~max_bytes ~offset:0 ~limit:10 in
+       require
+         (String.equal page (String.make 10 'a')
+          && not (String.equal original_digest changed_digest)
+          && String.equal changed_digest (Files.digest changed))
+         "Out-of-page edit with restored mtime reused stale file digest";
+       let _, _, last = Files.read_page src ~max_bytes ~offset:131070 ~limit:65536 in
+       require (String.equal last "aachanged") "Indexed short final block mismatch";
+       Out_channel.write_all src ~data:original;
+       Core_unix.utimes src ~access:1. ~modif:1.;
+       let _, restored_digest, eof =
+         Files.read_page src ~max_bytes ~offset:(String.length original) ~limit:1
+       in
+       require
+         (String.equal restored_digest original_digest && String.is_empty eof)
+         "EOF read reused a stale index after content restoration";
+       (* Atomic replacement must not inherit a previous inode's block index. *)
+       Out_channel.write_all dst ~data:changed;
+       Core_unix.utimes dst ~access:1. ~modif:1.;
+       Core_unix.rename ~src:dst ~dst:src;
+       let _, replaced_digest, _ = Files.read_page src ~max_bytes ~offset:0 ~limit:10 in
+       require
+         (String.equal replaced_digest changed_digest)
+         "Replacement inode reused a previous file's digest";
       (* Deterministic mutation during the scan: never return a partial page/hash. *)
       List.iter
         [ "short"; String.make 131073 'g'; String.make 131072 'm' ]

@@ -3,7 +3,7 @@ id: WB-040
 title: Bounded-memory large-trace streaming
 category: infrastructure
 feature_sets: [FS2, FS1]
-status: partial
+status: closed
 kind: enhancement
 priority: P2
 severity: n/a
@@ -63,9 +63,9 @@ budgets. Streaming reduces memory pressure but does not remove disk or transport
 
 ## Delivery — 2026-11-05
 
-**Implementation complete for the declared bounded slice; real-host acceptance pending.**
-`partial` records that distinction, rather than treating automated evidence as owner
-sign-off. Worktree: `../bpurtell-feature4`, branch `bpurtell/streaming-trace-export`,
+**Closed after the 2026-11-19 real-path fix and acceptance below.** At initial delivery,
+implementation was complete for the bounded slice but owner acceptance was pending.
+Original worktree: `../bpurtell-feature4`, branch `bpurtell/streaming-trace-export`,
 based on `oxcaml`. No embedded waveform loading change is included.
 
 ### Acceptance update — 2026-11-17
@@ -122,6 +122,36 @@ uses actual daemon/HTTP/terminal paths with a headless recording viewer.
   per-page full-file hashing (about 64 GiB for this fixture) is a known cost to
   investigate. The new test correctly fails; WB-040 remains `partial`.
 
+### Closeout — 2026-11-19
+
+The timeout above is fixed, and the owner-approved scope is now accepted through
+automated real-path evidence. The 120-second deadline and 64/16 MiB caps are unchanged.
+
+- `backend/artifact_file.ml` retains a single immutable SHA-256 block index (at
+  most 32 KiB of block digests for a 64 MiB file). The first full scan establishes
+  the whole-file digest and block hashes together. Warm pages read and authenticate
+  the complete intersecting 64 KiB blocks rather than repeatedly hashing 64 MiB.
+- The index key includes device, inode, size and **nanosecond** mtime/ctime.
+  Changed identity or timestamps force a fresh full scan. Every warm read verifies
+  block content and checks the descriptor fingerprint again afterward. Path checks,
+  registered size/digest fences and client whole-file hash/readback remain intact.
+  No file contents or descriptors are retained in the index, and it is bounded to
+  one entry even with multiple readers. Capture still performs its full scan/copy.
+- New regressions cover warm cross-block/EOF reads, short final blocks, replacement
+  inodes, content restoration and out-of-page tampering with **exact size/mtime
+  preserved**. Existing capture/mutation and allocation-limit checks still pass.
+- **Real simulation and ASIC acceptance: all 19 checks passed together.** The
+  67,108,864-byte FIFO trace exported with the expected SHA-256 and headless handoff
+  in **7.51 seconds**. The real 4,751,922-byte ASIC GDS exported in **11.33 seconds**.
+  Exact metadata, private publication and unchanged retained ASIC inputs passed.
+  Evidence: `/tmp/opencode/wb040-real-export-ob2okfku/`.
+- **Cancellation/recovery: all 21 PTY checks passed** against the rebuilt binaries.
+  Evidence: `/tmp/opencode/pt8-waveform-pty-zl3h0uzi/`.
+- Focused artifact-file, ASIC-artifact and simulation-service tests passed, including
+  the existing <2 MiB per-operation allocation checks. Changed OCaml files passed
+  formatting checks; backend lint passed with an existing unrelated ambiguous
+  docstring warning in `asic_workloads_storage.mli`.
+
 ### Selected limits and storage policy
 
 | Resource | Explicit limit/policy |
@@ -166,8 +196,9 @@ the artifact cap requires a separately justified provider/storage policy.
   requested slice. Simulation capture incrementally copies/hashes to a private
   temporary file. Simulation and ASIC byte-page reads retain path/descriptor,
   regular-file, size, mutation and registered digest checks.
-- Every backend page still rehashes the entire file; no weak stat-only cache was
-  introduced. A 64 MiB/1,024-page export entails about 64 GiB logical read/hash work.
+- Backend pages now use the bounded content-authenticated index described in the
+  closeout above. Before that fix, per-page full-file hashing required about 64 GiB
+  logical read/hash work for a 64 MiB/1,024-page export and caused the timeout.
   ASIC catalog listing/text display remain bounded whole-file consumers outside
   byte streaming. This delivery establishes bounded export memory, not a new
   throughput guarantee or end-to-end HTTP performance acceptance.
@@ -194,8 +225,8 @@ the artifact cap requires a separately justified provider/storage policy.
 The owner accepted the chosen 64/16 MiB slice and temporary/retained-file policy on
 2026-11-17. Deterministic terminal-level cancellation and headless handoff evidence
 is recorded above; manual reaction-speed cancellation is unnecessary. Shared ASIC
-handoff acceptance now passes. Large real-provider simulation export acceptance is
-blocked by the reproducible timeout recorded in the 2026-11-19 update.
+handoff and large real-provider simulation export acceptance now pass. The earlier
+timeout evidence is preserved above as the regression that motivated the fix.
 
 ## References
 - [FS2-F02 streaming](../../backlog/fs2_followups.md#fs2-f02--large-trace-streaming).
