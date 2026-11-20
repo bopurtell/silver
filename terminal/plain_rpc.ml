@@ -15,10 +15,10 @@ let digest text =
 let keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
   match operation with
   | Get -> List.filter snapshot.operations ~f:active |> List.map ~f:(fun op -> op.key)
-  | Discover -> [ "discover" ]
+  | Discover | Select_chip _ -> [ "discover" ]
   | Resources operation -> [ Asic_resources.Operation.key operation ]
   | Workloads operation -> [ Asic_workloads.Operation.key operation ]
-  | Describe flow -> [ "describe:" ^ flow ]
+  | Describe flow -> [ Asic.Chip_target.describe_key snapshot.chip_target flow ]
   | Plan selection ->
     [ "plan:" ^ digest (Sexp.to_string_mach (Asic.Selection.sexp_of_t selection)) ]
   | Run { key; _ } -> [ "run:" ^ key ]
@@ -375,6 +375,8 @@ let%test_unit "Observe waits for its read, independently of a long execution" =
     ; resources = None
     ; workloads = None
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None
@@ -462,6 +464,8 @@ let%test_unit "Observe does not await the lifetime of a coalesced automatic obse
   let snapshot : Asic.Snapshot.t =
     { configured = true
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None
@@ -504,6 +508,8 @@ let%test_unit "a targeted operation failure fails without treating historical fa
   let snapshot : Asic.Snapshot.t =
     { configured = true
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None

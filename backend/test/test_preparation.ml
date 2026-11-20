@@ -18,6 +18,7 @@ let instance_id = V1.Daemon_instance_id.of_string "preparation-test"
 
 let selection : Preparation.Selection.t =
   { flow = "tiny-flow"
+  ; chip_target = None
   ; profile = "fast"
   ; endpoint = "synthesis"
   ; assignments = [ "SYNTH_STRATEGY=AREA 0"; "SYNTH_HIERARCHICAL=true" ]
@@ -304,9 +305,10 @@ let with_service ?(selected = selection) f =
           ; "SYNTH_STRATEGY=AREA 0"
           ; "--set"
           ; "SYNTH_HIERARCHICAL=true"
-          ; "--results-root"
-          ; c.results_root
           ]
+          @ Option.value_map selected.chip_target ~default:[] ~f:(fun t ->
+            [ "--chip"; t.chip; "--variant"; t.variant ])
+          @ [ "--results-root"; c.results_root ]
           @ Option.value_map expected_plan_identity ~default:[] ~f:(fun id ->
             [ "--expected-plan-identity"; id ])))
       "Emission argv changed";
@@ -860,7 +862,9 @@ let run_fixture () =
 ;;
 
 let run_staging_fixture () =
+  let selection = { selection with chip_target = Some { chip = "memory"; variant = "low-power" } } in
   with_service
+    ~selected:selection
     (fun
         ~service
         ~project
@@ -934,7 +938,7 @@ let run_staging_fixture () =
        require
          (Option.equal Preparation.Staged.equal after_cancel.staged first.staged)
          "Cancel consumed staged input";
-       let%bind second = stage ~selected:{ selection with profile = "other" } () >>| ok in
+       let%bind second = stage ~selected:{ selection with chip_target = Some { chip = "memory"; variant = "fast" } } () >>| ok in
        let second_stage = Option.value_exn second.staged in
        let%bind stale = launch first_stage.id "old-token" in
        conflict stale "Superseded selection token launched";
@@ -950,6 +954,31 @@ let run_staging_fixture () =
        write_config ();
        let%bind staged = stage () >>| ok in
        let staged = Option.value_exn staged.staged in
+       (* Source-only project: discovery reads its existing executable. Changing
+          the picker fences new requests but cannot retarget an existing receipt. *)
+       Core_unix.unlink (Filename.concat root "hardcaml-workbench-asic.sexp");
+       let source_cli = Config.source_executable config ~root in
+       Core_unix.mkdir_p (Filename.dirname source_cli);
+       Out_channel.write_all source_cli ~data:{|#!/bin/sh
+case "$1 $2" in
+"chip list") echo '{"schema_version":1,"default_chip":"memory","chips":[{"id":"memory","label":"Memory","default_variant":"low-power","variants":[{"id":"low-power","label":"Low power"},{"id":"fast","label":"Fast"}]}]}' ;;
+"flow list") echo '{"contract":"hardcaml-asic.flow-list","schema_version":1,"declaration":{"contract":"hardcaml-asic.flow-catalog","schema_version":1,"entries":[{"methodology":{"id":"tiny-flow"},"profiles":[{"id":"fast"}],"default_profile":"fast"}]}}' ;;
+*) exit 2 ;;
+esac
+|};
+       Core_unix.chmod source_cli ~perm:0o700;
+       let asic operation =
+         let%bind _ = Service.asic service { instance_id; project; operation } >>| ok in
+         let%bind () = Hardcaml_workbench_backend.Asic_service.completion service.asic_service in
+         Service.asic service { instance_id; project; operation = Get } >>| ok
+       in
+       let%bind discovered = asic Discover in
+       require (not discovered.configured
+                && Option.equal Asic.Chip_target.equal discovered.chip_target selection.chip_target)
+         "Source-only catalog default lost";
+       let%bind _ = asic (Select_chip {chip="memory"; variant="fast"}) in
+       let%bind stale = stage () in
+       conflict stale "Stale direct target accepted for preparation staging";
        let jobs = (ok (Service.snapshot service { instance_id })).jobs in
        require
          (!builds = 0
@@ -980,6 +1009,7 @@ let run_staging_fixture () =
           && Preparation.Selection.equal (latest completed).selection staged.selection
           && List.length completed.history = 1)
          "Staged launch did not run exact captured preparation once";
+       let%bind _ = asic (Select_chip (Option.value_exn selection.chip_target)) in
        let%bind _ = stage () >>| ok in
        let%bind stale = launch staged.id "after-supersession" in
        conflict stale "Launched superseded stage with new key";
@@ -1810,6 +1840,7 @@ let validate_receipt_file path =
   let selected = Receipt.field snapshot "selected" in
   let selection : Preparation.Selection.t =
     { flow = Receipt.text (Receipt.field selected "flow")
+    ; chip_target = None
     ; profile = Receipt.text (Receipt.field selected "profile")
     ; endpoint = Receipt.text (Receipt.field snapshot "endpoint")
     ; assignments =

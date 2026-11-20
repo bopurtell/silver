@@ -1657,6 +1657,14 @@ and perform_asic_request
         then session.host <- { session.host with notice = "ASIC: " ^ message }
       | Ok snapshot ->
         session.asic_applied_id <- request_id;
+        let changed =
+          not (Option.equal Asic.Chip_target.equal
+            (Launch_preferences.chip_target session.asic) snapshot.chip_target)
+        in
+        if changed then
+          session.host <- { session.host with
+            stage_generation = session.host.stage_generation + 1;
+            stage_preparation = None; planned_preparation = false };
         session.asic <- Some snapshot;
         session.host
         <- { session.host with
@@ -4808,28 +4816,28 @@ let host_catalog_base session =
              ("Preparation " ^ a.id ^ ": artifact " ^ Artifact_id.to_string id)
              "bundle published inspect read-only"
              (Preparation_open_artifact id)))))
-  @ Option.value_map session.remembered_selection ~default:[] ~f:(fun selection ->
-    let available =
-      Option.value_map session.asic ~default:false ~f:(fun asic ->
-        Launch_preferences.available selection asic.flows)
-    in
-    [ Host.command
-        ?unavailable:
-          (if available
-           then None
-           else
-             Some
-               "Remembered flow/profile is not currently discovered; discover it \
-                explicitly")
-        "asic.plan-remembered"
-        (sprintf
-           "Plan remembered inputs: %s / %s → %s"
-           selection.flow
-           selection.profile
-           selection.endpoint)
-        "run synth last used"
-        (Asic (Plan selection))
-    ])
+  @ Option.value_map
+      (Launch_preferences.for_target session.asic session.remembered_selection)
+      ~default:[]
+      ~f:(fun selection ->
+        let available =
+          Option.value_map session.asic ~default:false ~f:(fun asic ->
+            Launch_preferences.available selection asic.flows)
+        in
+        [ Host.command
+            ?unavailable:
+              (if available
+               then None
+               else
+                 Some
+                   "Remembered flow/profile is not currently discovered; discover it \
+                    explicitly")
+            "asic.plan-remembered"
+            (Artifact_view.safe
+               ("Plan remembered inputs: " ^ Launch_preferences.label selection))
+            "run synth last used"
+            (Asic (Plan selection))
+        ])
   @ Terminal_presentation.Stage_launch_commands.commands
       session.host
       ~asic:session.asic
@@ -4839,7 +4847,8 @@ let host_catalog_base session =
       ~preview:(Option.bind session.asic ~f:(fun asic -> asic.preview))
       ~view_pending:(Option.is_some session.view_on_allocation)
   @ Option.value_map session.asic ~default:[] ~f:(fun asic ->
-    List.concat_map asic.flows ~f:(fun flow ->
+    Terminal_presentation.Stage_launch_commands.chip_commands asic
+    @ List.concat_map asic.flows ~f:(fun flow ->
       (Host.command
          ("asic.describe." ^ flow.id)
          ("Describe ASIC flow " ^ flow.id)
@@ -4848,13 +4857,25 @@ let host_catalog_base session =
        :: List.map flow.profiles ~f:(fun profile ->
          Host.command
            ("asic.plan." ^ flow.id ^ "." ^ profile)
-           ("Plan ASIC " ^ flow.id ^ " / " ^ profile ^ " (enter endpoint)")
+           (Artifact_view.safe
+              ("Plan ASIC "
+               ^ flow.id
+               ^ " / "
+               ^ profile
+               ^ " (enter endpoint) — "
+               ^ Launch_preferences.chip_label asic.chip_target))
            "run synth preview"
            (Edit_plan (flow.id, profile))))
       @ List.map flow.profiles ~f:(fun profile ->
         Host.command
           ("preparation.inputs." ^ flow.id ^ "." ^ profile)
-          ("Preparation inputs: " ^ flow.id ^ " / " ^ profile)
+          (Artifact_view.safe
+             ("Preparation inputs: "
+              ^ flow.id
+              ^ " / "
+              ^ profile
+              ^ " — "
+              ^ Launch_preferences.chip_label asic.chip_target))
           "selected flow endpoint overrides EDA-less no launch"
           (Edit_preparation (flow.id, profile))))
     @ Host.asic_cancel_commands asic
@@ -5813,7 +5834,14 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           session.view_on_allocation <- Some (key, target));
       asic_request session (Launch_fresh { key; intent_id = intent.id }))
   in
-  let stage_fresh ~current ~selection ~elaboration_only ~quick ~view =
+  let stage_fresh
+    ~expected_plan_identity
+    ~current
+    ~selection
+    ~elaboration_only
+    ~quick
+    ~view
+    =
     let generation = session.host.stage_generation + 1 in
     let target = Host.launch_target session.host in
     session.host
@@ -5825,6 +5853,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     let instance = session.hello.instance_id in
     let current () =
       current ()
+      && Planned_run.current_selection session.host.planned_run selection
       && generation = session.host.stage_generation
       && phys_equal captured_client session.client
       && V1.Daemon_instance_id.equal instance session.hello.instance_id
@@ -5844,7 +5873,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               | Ok s -> staged := s.Asic.Snapshot.fresh_intent
               | Error _ -> ())
             session
-            (Stage_fresh { selection; elaboration_only; expected_plan_identity = None })
+            (Stage_fresh { selection; elaboration_only; expected_plan_identity })
       in
       let%bind () = if current () then asic_request session Get else return () in
       if not (current ())
@@ -6676,6 +6705,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          in
          async
            (stage_fresh
+              ~expected_plan_identity:None
               ~current
               ~selection:(Result.ok_or_failwith selection)
               ~elaboration_only:true
@@ -6806,7 +6836,10 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             ~run
             ~intent
             ~selection
-        | _ -> Ok ()
+        | _ ->
+          Stage_action.validate_evidence ~snapshot:session.asic
+            ~observed:(Option.bind run ~f:(fun run ->
+              Terminal_presentation.Stage_launch_commands.observed_selection session.asic run))
       in
       let observed =
         Option.bind run ~f:(fun run ->
@@ -6847,12 +6880,18 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           <- { session.host with stage_preparation = Some reason; notice = reason }
       in
       async
-        ~on_rejected:(fun () -> fail "Stage preparation target changed; press r again")
+        ~on_rejected:(fun () ->
+          fail (Option.value (Result.error (named_validation ()))
+                  ~default:"Stage preparation target changed; press r again"))
         (fun () ->
           let missing () =
             Option.value_map session.asic ~default:true ~f:(fun snapshot ->
               let flow =
-                match Option.first_some remembered observed with
+                match
+                  Option.first_some
+                    (Launch_preferences.for_target session.asic remembered)
+                    (if Option.is_some snapshot.chip_target then None else observed)
+                with
                 | Some selection -> Some selection.Asic.Selection.flow
                 | None -> Option.map snapshot.catalog_default ~f:(fun pair -> pair.flow)
               in
@@ -6882,7 +6921,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 discover (remaining - 1)))
           in
           let%bind () =
-            if Option.is_none (Stage_action.advertised_selection intent) && missing ()
+            if current () && (Option.is_some (Launch_preferences.chip_target session.asic)
+                || Option.is_none (Stage_action.advertised_selection intent)) && missing ()
             then (
               let%bind () = asic_request session Discover in
               discover 50)
@@ -6922,6 +6962,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               (* Source execution and physical chaining belong to the daemon. This
                  terminal phase captures only the authorized current input recipe. *)
               stage_fresh
+                ~expected_plan_identity:None
                 ~current:(fun () ->
                   Host.current session.host captured
                   && phys_equal captured_client session.client
@@ -6947,6 +6988,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Asic (Plan selection) ->
       async
         (stage_fresh
+           ~expected_plan_identity:None
            ~current:(fun () ->
              Host.current session.host captured && Result.is_ok (validate ()))
            ~selection
@@ -7128,14 +7170,20 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          };
       Effect.Ignore
     | Launch_asic (preview, view) ->
-      async
-        (stage_fresh
-           ~current:(fun () ->
-             Host.current session.host captured && Result.is_ok (validate ()))
-           ~selection:preview.selection
-           ~elaboration_only:false
-           ~quick:true
-           ~view)
+      if not (Planned_run.launchable session.host.planned_run preview)
+      then (
+        session.host <- { session.host with notice = "Plan changed; reopen the palette" };
+        Effect.Ignore)
+      else
+        async
+          (stage_fresh
+             ~expected_plan_identity:(Some preview.plan_identity)
+             ~current:(fun () ->
+               Host.current session.host captured && Result.is_ok (validate ()))
+             ~selection:preview.selection
+             ~elaboration_only:false
+             ~quick:true
+             ~view)
     | Launch_fresh_intent (intent, view) ->
       let target = Host.launch_target session.host in
       async (fun () ->

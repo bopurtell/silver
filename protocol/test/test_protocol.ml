@@ -670,12 +670,14 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
     ; List_artifacts summary.run
     ; Read_artifact
         { run = summary.run; artifact_id = "known"; offset = 10; limit = 1024 }
+    ; Select_chip { chip = "memory"; variant = "two" }
     ; Stage_fresh
         { selection =
             { flow = "standard"
             ; profile = "balanced"
             ; endpoint = "cts"
-            ; assignments = []
+             ; assignments = []
+             ; chip_target = Some { chip = "memory"; variant = "two" }
             }
         ; elaboration_only = false
         ; expected_plan_identity = None
@@ -703,6 +705,9 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
           }
         ]
     ; catalog_default = Some { flow = "standard"; profile = "balanced" }
+    ; chips = [ { id = "memory"; label = "Memory"; default_variant = "two"
+                ; variants = [ { id = "two"; label = "Two slots" } ] } ]
+    ; chip_target = Some { chip = "memory"; variant = "two" }
     ; description_json = None
     ; preview = None
     ; runs = []
@@ -714,7 +719,8 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
                   { flow = "flow"
                   ; profile = "profile"
                   ; endpoint = "synthesis"
-                  ; assignments = [ "x=1"; "x=1" ]
+                   ; assignments = [ "x=1"; "x=1" ]
+                   ; chip_target = None
                   }
               ; plan_identity = "exact-preview"
               ; plan_json = "opaque exact bytes"
@@ -752,7 +758,7 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
         (List.filter fields ~f:(function
           | Sexp.List
               (Sexp.Atom
-                 ( "catalog_default"
+                 ( "catalog_default" | "chips" | "chip_target"
                  | "launches"
                  | "finalizations"
                  | "artifacts"
@@ -770,6 +776,8 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
       (Asic.Snapshot.t_of_sexp legacy_snapshot)
       { snapshot with
         catalog_default = None
+      ; chips = []
+      ; chip_target = None
       ; launches = []
       ; finalizations = []
       ; artifacts = []

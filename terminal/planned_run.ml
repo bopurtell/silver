@@ -69,6 +69,7 @@ type t =
   { scope : string
   ; generation : int
   ; revision : int
+  ; chip_epoch : int
   ; intent : intent option
   ; snapshot : Asic.Snapshot.t option
   ; launch_generation : int
@@ -95,6 +96,7 @@ let empty =
   { scope = ""
   ; generation = 0
   ; revision = -1
+  ; chip_epoch = 0
   ; intent = None
   ; snapshot = None
   ; launch_generation = 0
@@ -110,6 +112,7 @@ let reset t ~scope =
   else
     { empty with
       scope
+    ; chip_epoch = t.chip_epoch + 1
     ; generation = t.generation + 1
     ; launch_generation = t.launch_generation + 1
     }
@@ -243,10 +246,25 @@ let fresh_receipt t ticket ~floor result =
     })
 ;;
 
-let receive t ~revision snapshot =
+let receive t ~revision (snapshot : Asic.Snapshot.t) =
   if revision < t.revision
   then t
   else (
+    let t =
+      if Option.equal Asic.Chip_target.equal
+           (Launch_preferences.chip_target t.snapshot) snapshot.chip_target
+      then t
+      else
+        (* Late staging receipts belong to the old target, even after a switch back.
+           Keep the independently fenced launch/producer tracking. *)
+        { t with
+          chip_epoch = t.chip_epoch + 1
+        ; generation = t.generation + 1
+        ; intent = None
+        ; fresh_mode = false
+        ; elaboration_only = false
+        }
+    in
     let intent =
       Option.filter t.intent ~f:(fun i ->
         not
@@ -499,7 +517,7 @@ let legacy_model t =
             "Requested plan operation expired or unavailable; prepare explicitly again"))
 ;;
 
-let model t =
+let raw_model t =
   if (not t.fresh_mode) && Option.is_none (fresh_intent t) && Option.is_none (workflow t)
   then legacy_model t
   else (
@@ -578,8 +596,31 @@ let model t =
     })
 ;;
 
+let snapshot t = t.snapshot
+let chip_epoch t = t.chip_epoch
+
+let current_selection t (s : Asic.Selection.t) =
+  Option.equal
+    Asic.Chip_target.equal
+    s.chip_target
+    (Launch_preferences.chip_target t.snapshot)
+;;
+
+let model t =
+  let m = raw_model t in
+  if equal_status m.status Ready
+     && Option.exists m.selection ~f:(fun s -> not (current_selection t s))
+  then
+    { m with
+      status = Stale
+    ; message = "Chip/variant changed; plan the current launch target"
+    }
+  else m
+;;
+
 let fresh_launchable t (intent : Asic.Fresh.Intent.t) =
   equal_status (model t).status Ready
+  && current_selection t intent.selection
   && Option.exists (fresh_intent t) ~f:(Asic.Fresh.Intent.equal intent)
   && not
        (Option.exists t.launch_intent ~f:(fun i ->
@@ -589,9 +630,10 @@ let fresh_launchable t (intent : Asic.Fresh.Intent.t) =
           | _ -> true))
 ;;
 
-let launchable t preview =
+let launchable t (preview : Asic.Preview.t) =
   let m = model t in
   equal_status m.status Ready
+  && current_selection t preview.selection
   && Option.equal Asic.Preview.equal m.preview (Some preview)
   && (not
         (Option.exists t.snapshot ~f:(fun s ->
@@ -906,7 +948,12 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
                and independent plan reuse"
   =
   let selection : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "synthesis"; assignments = [] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "synthesis"
+    ; assignments = []
+    }
   in
   let preview : Asic.Preview.t =
     { selection; plan_identity = "exact"; plan_json = "full raw preview" }
@@ -1108,7 +1155,12 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
 
 let%test_unit "old ready to local pending, transport failure, retry and new ready" =
   let a : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "a"; assignments = [ "x=1" ] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "a"
+    ; assignments = [ "x=1" ]
+    }
   in
   let b = { a with endpoint = "b" } in
   let preview selection identity : Asic.Preview.t =
@@ -1175,7 +1227,12 @@ let%test_unit "same-selection retry waits past every pre-receipt poll then ordin
                reads stay ready"
   =
   let selection : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "endpoint"; assignments = [] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "endpoint"
+    ; assignments = []
+    }
   in
   let preview : Asic.Preview.t =
     { selection; plan_identity = "exact-identity"; plan_json = "opaque metadata" }
@@ -1229,7 +1286,12 @@ let%test_unit "scope round trips and newer command acceptance invalidate old dis
                and receipt"
   =
   let selection : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "endpoint"; assignments = [] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "endpoint"
+    ; assignments = []
+    }
   in
   let owner = reset empty ~scope:"daemon/project" in
   let first, old_ticket = begin_plan owner selection in
@@ -1256,7 +1318,8 @@ let%test_unit "exact raw selection identity and metadata survive display project
                without normalization"
   =
   let selection : Asic.Selection.t =
-    { flow = "Flow;\027[31m"
+    { chip_target = None
+    ; flow = "Flow;\027[31m"
     ; profile = "Profile With Spaces"
     ; endpoint = "Endpoint/Case"
     ; assignments = [ "z=1"; "a=2"; "z=1" ]

@@ -60,14 +60,29 @@ let selected_checklist host ~asic =
 let selected_commands host ~asic =
   let target = selected_checklist host ~asic in
   let actions =
-    Result.map target ~f:(fun (item, run) ->
+    Result.bind target ~f:(fun (item, run) ->
       let plan =
         match item with
         | O.Elaboration_preparation -> H.Prepare_project
         | Physical_stage stage -> Prepare_stage (stage, run)
         | Timing_analysis _ -> Prepare_endpoint ("timing", run)
       in
-      plan, H.Quick_launch_selected (item, run))
+      let eligibility =
+        match item, Launch_preferences.chip_target asic with
+        | Timing_analysis _, Some _ ->
+          Stage_action.validate_evidence
+            ~snapshot:asic
+            ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
+        | Physical_stage stage, Some _ ->
+          Stage_action.resolve
+            ~stage
+            ~remembered:host.H.remembered_selection
+            ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
+            ~snapshot:asic
+          |> Result.map ~f:ignore
+        | _ -> Ok ()
+      in
+      Result.map eligibility ~f:(fun () -> plan, H.Quick_launch_selected (item, run)))
   in
   List.map
     [ "stage.quick-selected", "Quick launch selected stage", true
@@ -77,7 +92,12 @@ let selected_commands host ~asic =
       H.command
         ?unavailable:(Result.error actions)
         id
-        title
+        (Artifact_view.safe
+           (title
+            ^ Option.value_map
+                (Launch_preferences.chip_target asic)
+                ~default:""
+                ~f:(fun t -> " — " ^ Launch_preferences.chip_label (Some t))))
         (if quick then "quick launch selected checklist stage" else "stage input plan")
         (Result.map actions ~f:(fun (plan, launch) -> if quick then launch else plan)
          |> Result.ok
@@ -148,7 +168,11 @@ let named_commands host ~asic ~remembered =
   in
   let endpoints =
     let chosen =
-      Option.first_some remembered (Option.bind run ~f:(observed_selection asic))
+      Option.first_some
+        (Launch_preferences.for_target asic remembered)
+        (if Option.is_some (Launch_preferences.chip_target asic)
+         then None
+         else Option.bind run ~f:(observed_selection asic))
       |> Option.map ~f:(fun s -> s.Asic.Selection.flow)
     in
     let flow =
@@ -175,8 +199,9 @@ let named_commands host ~asic ~remembered =
         List.find stages ~f:(fun s ->
           String.equal s.id endpoint && Option.is_some s.action)
       with
-      | Some stage -> Stage_action.Physical_stage stage
-      | None -> Fresh_endpoint endpoint
+      | Some stage when Option.is_none (Launch_preferences.chip_target asic) ->
+        Stage_action.Physical_stage stage
+      | _ -> Fresh_endpoint endpoint
     in
     let action =
       if Option.is_none (H.launch_target host)
@@ -190,7 +215,14 @@ let named_commands host ~asic ~remembered =
     H.command
       ?unavailable:(Result.error action)
       ("stage.launch-view." ^ endpoint)
-      (Artifact_view.safe ("Launch " ^ endpoint ^ " and view"))
+      (Artifact_view.safe
+         ("Launch "
+          ^ endpoint
+          ^ " and view"
+          ^ Option.value_map
+              (Launch_preferences.chip_target asic)
+              ~default:""
+              ~f:(fun t -> " — " ^ Launch_preferences.chip_label (Some t))))
       ("quick launch " ^ endpoint ^ " fresh stage new run captured context")
       (Result.ok action |> Option.value ~default:H.Unavailable_launch))
 ;;
@@ -210,7 +242,10 @@ let elaboration_command host ~asic ~remembered =
   H.command
     ?unavailable:(Result.error action)
     "preparation.quick-launch"
-    "Launch elaboration bundle (build and emit; context retained)"
+    (Artifact_view.safe
+       ("Launch elaboration bundle (build and emit; context retained)"
+        ^ Option.value_map (Result.ok selection) ~default:"" ~f:(fun s ->
+          " — " ^ Launch_preferences.label s)))
     "quick launch elaboration bundle preparation build emit no ASIC allocation"
     (Result.ok action |> Option.value ~default:H.Unavailable_launch)
 ;;
@@ -241,4 +276,23 @@ let commands host ~asic ~remembered =
              "stop build emit physical workflow"
              (H.Asic (Cancel_workflow w.id)))
       else None))
+;;
+
+let chip_commands (s : Asic.Snapshot.t) =
+  List.concat_map s.chips ~f:(fun chip ->
+    List.map chip.variants ~f:(fun variant ->
+      let target : Asic.Chip_target.t = { chip = chip.id; variant = variant.id } in
+      H.command
+        ("asic.select-chip." ^ Sexp.to_string_mach (Asic.Chip_target.sexp_of_t target))
+        (Artifact_view.safe
+           ("Select launch target: "
+            ^ chip.id
+            ^ " / "
+            ^ variant.id
+            ^
+            if Option.equal Asic.Chip_target.equal (Some target) s.chip_target
+            then " (selected)"
+            else ""))
+        ("pick chip variant " ^ chip.label ^ " " ^ variant.label)
+        (Asic (Select_chip target))))
 ;;

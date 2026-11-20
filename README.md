@@ -246,6 +246,11 @@ silver --connect http://127.0.0.1:8080 --project-root /absolute/path/to/project 
 
 ### Open the current real ASIC example demo
 
+For a project with several ASIC designs, use **Space c c → Discover ASIC flows
+and runs**, then **Select launch target**. Overview shows the exact chip and
+variant to plan; importing a bundle in Resources leaves that target alone.
+See [choosing a chip and staging its flow](docs/launch-target.md).
+
 The **Resources inspector** is now available through **Space c c → Inspect
 resources (open Resources workspace)**. It can explicitly import the retained SRAM
 capture without running EDA. See [Resources controls, current provider and restart

@@ -3,7 +3,13 @@ open Hardcaml_workbench_protocol
 
 let fresh_intent ?(elaboration_only = false) id : Asic.Fresh.Intent.t =
   { id
-  ; selection = { flow = "flow"; profile = "profile"; endpoint = "cts"; assignments = [] }
+  ; selection =
+      { chip_target = None
+      ; flow = "flow"
+      ; profile = "profile"
+      ; endpoint = "cts"
+      ; assignments = []
+      }
   ; elaboration_only
   ; expected_plan_identity = None
   ; scope = "opaque-source-provider-environment-scope"
@@ -79,6 +85,8 @@ let summary run cell_count cells : Asic.Summary.t =
 let snapshot : Asic.Snapshot.t =
   { configured = true
   ; flows = []
+  ; chips = []
+  ; chip_target = None
   ; catalog_default = None
   ; description_json = None
   ; preview = None

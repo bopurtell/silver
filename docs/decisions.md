@@ -59,6 +59,10 @@ Accepted defaults:
 - Remember launch flow/profile per project, separately from inspected run.
 - Capture the invocation's project/workspace/run-context target, resolve explicit arguments and
   revalidate availability at acceptance. Never silently retarget after navigation.
+- In multi-chip projects, [launch target selection](launch-target.md) binds the
+  chip and variant before flow, profile and endpoint. It is independent of the
+  run context above. A historical run or imported bundle supplies evidence,
+  not a default design for the next launch.
 - Show effective flow/profile/endpoint; provider preview identity guards launch.
 - Prefer explicit command names for “run through stage” versus “continue from
   checkpoint”; expose only supported provider operations.

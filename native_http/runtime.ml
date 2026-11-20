@@ -120,13 +120,22 @@ let daemon_path () =
   match Sys.getenv "HARDCAML_WORKBENCH_DAEMON" with
   | Some path -> path
   | None ->
-    let sibling =
-      Filename.concat (Filename.dirname (Filename_unix.realpath Sys_unix.executable_name))
+    let client = Filename_unix.realpath Sys_unix.executable_name in
+    let dir = Filename.dirname client in
+    let installed = List.map [ "silver-daemon"; "hardcaml-workbench-daemon" ]
+                      ~f:(Filename.concat dir) in
+    (* Dune's install-tree binaries are symlinks into the same build context. *)
+    let candidates =
+      if String.equal (Filename.basename dir) "terminal"
+         && String.equal (Filename.basename client) "main.exe"
+      then installed @ [Filename.concat (Filename.dirname dir) "daemon/main.exe"]
+      else installed
     in
-    let canonical = sibling "silver-daemon" in
-    if Sys_unix.file_exists_exn canonical
-    then canonical
-    else sibling "hardcaml-workbench-daemon"
+    match List.find candidates ~f:Sys_unix.file_exists_exn with
+    | Some path -> path
+    | None ->
+      failwithf "Cannot find the Silver daemon for %s (looked in %s). Build daemon/main.exe or set HARDCAML_WORKBENCH_DAEMON."
+        client (String.concat ~sep:", " candidates) ()
 ;;
 
 let spawn paths =

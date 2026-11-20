@@ -15,12 +15,26 @@ let provider config ~root ~environment args =
   invocation ~root ~environment config.Config.provider_executable args
 ;;
 
-let discover config ~root ~environment =
-  project config ~root ~environment [ "list"; "--json" ]
+let target_args = function
+  | None -> []
+  | Some (target : Asic.Chip_target.t) -> [ "--chip"; target.chip; "--variant"; target.variant ]
 ;;
 
-let describe config ~root ~environment flow =
-  project config ~root ~environment [ "describe"; "--flow"; flow; "--json" ]
+let flow_list ~root ~environment executable chip_target =
+  invocation ~root ~environment executable ([ "flow"; "list"; "--json" ] @ target_args chip_target)
+;;
+
+let flow_describe ~root ~environment executable chip_target flow =
+  invocation ~root ~environment executable
+    ([ "flow"; "describe"; "--flow"; flow; "--json" ] @ target_args chip_target)
+;;
+
+let discover ?chip_target config ~root ~environment =
+  flow_list ~root ~environment config.Config.project_executable chip_target
+;;
+
+let describe ?chip_target config ~root ~environment flow =
+  flow_describe ~root ~environment config.Config.project_executable chip_target flow
 ;;
 
 let selection_args ~root (s : Asic.Selection.t) =
@@ -35,6 +49,7 @@ let selection_args ~root (s : Asic.Selection.t) =
   ; "--json"
   ]
   @ List.concat_map s.assignments ~f:(fun value -> [ "--set"; value ])
+  @ target_args s.chip_target
 ;;
 
 let plan config ~root ~environment selection =

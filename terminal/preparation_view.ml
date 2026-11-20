@@ -95,7 +95,10 @@ let selected snapshot cursor =
 
 let selection ~remembered ~(asic : Asic.Snapshot.t option) =
   let chosen =
-    match remembered with
+    match Launch_preferences.for_target asic remembered with
+    | Some s when Option.is_some s.chip_target
+                  && not (Option.exists asic ~f:(fun a -> Launch_preferences.available s a.flows)) ->
+      Error "Selected launch target does not advertise the remembered flow/profile"
     | Some s -> Ok s
     | None ->
       (match Option.bind asic ~f:(fun s -> s.catalog_default) with
@@ -111,6 +114,7 @@ let selection ~remembered ~(asic : Asic.Snapshot.t option) =
           | Some endpoint ->
             Ok
               { Asic.Selection.flow = p.flow
+              ; chip_target = Launch_preferences.chip_target asic
               ; profile = p.profile
               ; endpoint
               ; assignments = []
@@ -513,7 +517,8 @@ let fixture_attempt id outcome : Preparation.Attempt.t =
   in
   { id
   ; selection =
-      { flow = "flow"
+      { chip_target = None
+      ; flow = "flow"
       ; profile = "profile"
       ; endpoint = "routing"
       ; assignments = [ "X=a b" ]

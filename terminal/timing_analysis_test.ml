@@ -384,7 +384,12 @@ let executable_fixture status =
     ; reason = None
     ; action =
         Some
-          { flow = "fixture"; profile = "default"; endpoint = "timing"; assignments = [] }
+          { chip_target = None
+          ; flow = "fixture"
+          ; profile = "default"
+          ; endpoint = "timing"
+          ; assignments = []
+          }
     ; execution_timing =
         Execution_timing.make ~measured_seconds:2.798826 ~running:false ()
     }
@@ -467,7 +472,8 @@ let%test_unit "physical Timing actions require an advertised fresh catalog endpo
   let _, data, _, summary = executable_fixture Completed in
   let snapshot = Option.value_exn data.asic in
   let selection : Asic.Selection.t =
-    { flow = "new-provider"
+    { chip_target = None
+    ; flow = "new-provider"
     ; profile = "balanced"
     ; endpoint = "signoff"
     ; assignments = [ "CLOCK=9" ]
@@ -677,7 +683,8 @@ let%test_unit "historical Timing remains supplementary while upgraded catalog pe
   let host, data, find, summary = fixture () in
   let snapshot = Option.value_exn data.asic in
   let selected : Asic.Selection.t =
-    { flow = "upgraded"
+    { chip_target = None
+    ; flow = "upgraded"
     ; profile = "balanced"
     ; endpoint = "signoff"
     ; assignments = [ "CLOCK=9" ]

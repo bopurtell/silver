@@ -1,11 +1,34 @@
 open! Core
 
+module Chip_target = struct
+  type t = { chip : string; variant : string }
+  [@@deriving bin_io, compare, equal, sexp]
+
+  let describe_key target flow =
+    match target with
+    | None -> "describe:" ^ flow
+    | Some t -> "describe-chip:" ^ Sexp.to_string_mach ([%sexp_of: t * string] (t, flow))
+end
+
+module Variant = struct
+  type t = { id : string; label : string }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+module Chip = struct
+  type t = { id : string; label : string; default_variant : string; variants : Variant.t list }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
 module Selection = struct
+  (** [None] preserves legacy project argv and stored selection identities. A
+      catalog-aware request carries both IDs even when choosing the default. *)
   type t =
     { flow : string
     ; profile : string
     ; endpoint : string
     ; assignments : string list
+    ; chip_target : Chip_target.t option [@sexp.default None] [@sexp_drop_default.equal]
     }
   [@@deriving bin_io, compare, equal, sexp]
 end
@@ -384,6 +407,8 @@ end
 module Snapshot = struct
   type t =
     { configured : bool
+    ; chips : Chip.t list [@sexp.default []] [@sexp_drop_default.equal]
+    ; chip_target : Chip_target.t option [@sexp.default None] [@sexp_drop_default.equal]
     ; flows : Flow.t list
     ; catalog_default : Flow_default.t option [@sexp.default None]
     ; description_json : string option
@@ -432,6 +457,9 @@ module Operation = struct
     | Resources of Asic_resources.Operation.t
     | Workloads of Asic_workloads.Operation.t
     | Discover
+    (** Select an advertised pair and discover its named flows. This affects
+        new inputs only; it does not select or mutate a historical execution. *)
+    | Select_chip of Chip_target.t
     | Describe of string
     | Plan of Selection.t
     | Stage_fresh of

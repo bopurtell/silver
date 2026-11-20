@@ -30,6 +30,24 @@ let available (selection : Asic.Selection.t) (flows : Asic.Flow.t list) =
     && List.mem flow.profiles selection.profile ~equal:String.equal)
 ;;
 
+let chip_target (snapshot : Asic.Snapshot.t option) =
+  Option.bind snapshot ~f:(fun s -> s.chip_target)
+;;
+
+let for_target snapshot (selection : Asic.Selection.t option) =
+  Option.filter selection ~f:(fun s ->
+    Option.equal Asic.Chip_target.equal s.chip_target (chip_target snapshot))
+;;
+
+let chip_label (target : Asic.Chip_target.t option) =
+  Option.value_map target ~default:"project default" ~f:(fun t ->
+    t.chip ^ "/" ^ t.variant)
+;;
+
+let label (s : Asic.Selection.t) =
+  sprintf "%s · %s / %s → %s" (chip_label s.chip_target) s.flow s.profile s.endpoint
+;;
+
 (* This is a UI initial choice, not a provider-declared endpoint default. Only advertised
    fresh-prefix endpoints may seed a new selection. *)
 let default_endpoint (flow : Asic.Flow.t) =
@@ -109,13 +127,13 @@ module Prompt = struct
     let%bind tokens = decode text in
     match tokens with
     | endpoint :: assignments when not (String.is_empty endpoint) ->
-      Ok { Asic.Selection.flow; profile; endpoint; assignments }
+      Ok { chip_target = None; Asic.Selection.flow; profile; endpoint; assignments }
     | _ -> Or_error.error_string "Enter a nonempty endpoint before any assignments"
   ;;
 end
 
 let endpoint_query ~remembered ~(asic : Asic.Snapshot.t option) ~flow ~profile =
-  match remembered with
+  match for_target asic remembered with
   | Some (s : Asic.Selection.t)
     when String.equal s.flow flow && String.equal s.profile profile ->
     Prompt.encode (s.endpoint :: s.assignments)
@@ -131,7 +149,8 @@ let%test_unit "preferences retain exact inputs, reject other project contexts, a
                choose a fallback"
   =
   let selection : Asic.Selection.t =
-    { flow = "fixture"
+    { chip_target = None
+    ; flow = "fixture"
     ; profile = "custom"
     ; endpoint = "synthesis"
     ; assignments = [ "WIDTH=4" ]

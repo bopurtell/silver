@@ -25,14 +25,31 @@ val provider
 
 val selection_args : root:string -> Asic.Selection.t -> string list
 
+val flow_list
+  :  root:string
+  -> environment:V1.Environment_selection.t
+  -> string
+  -> Asic.Chip_target.t option
+  -> Dune_adapter.Invocation.t
+
+val flow_describe
+  :  root:string
+  -> environment:V1.Environment_selection.t
+  -> string
+  -> Asic.Chip_target.t option
+  -> string
+  -> Dune_adapter.Invocation.t
+
 val discover
-  :  Config.t
+  :  ?chip_target:Asic.Chip_target.t
+  -> Config.t
   -> root:string
   -> environment:V1.Environment_selection.t
   -> Dune_adapter.Invocation.t
 
 val describe
-  :  Config.t
+  :  ?chip_target:Asic.Chip_target.t
+  -> Config.t
   -> root:string
   -> environment:V1.Environment_selection.t
   -> string

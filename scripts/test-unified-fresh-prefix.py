@@ -573,10 +573,10 @@ def pty_acceptance(f):
         context = next(x for x in field(ws, 'contexts') if field(x, 'id') == field(overview, 'context'))
         f.http.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run ()))' %
                       (sexp(field(overview, 'id')), sexp(field(context, 'id')), field(context, 'selection_revision')))
-        t.capture('pty-focus-changed-before-allocation', ['Run: none selected'])
+        t.capture('pty-focus-changed-before-allocation', ['Overview | run none |'])
         (f.root / 'emit-release').write_text('release')
         w = f.done(field(w, 'key'))
-        t.capture('pty-focus-guarded-after-completion', ['Run: none selected'])
+        t.capture('pty-focus-guarded-after-completion', ['Overview | run none |'])
         f.check(not selected_run() and field(w, 'run'),
                 'Real async launch finishes its captured workflow without stealing a changed selected-run context')
         final_workspace = f.http.rpc(domain='workspace')

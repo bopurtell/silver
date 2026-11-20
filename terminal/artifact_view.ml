@@ -467,6 +467,8 @@ let%test_unit "artifact inspector pins run/attempt/hash and pages with exact off
   let snapshot pages : Asic.Snapshot.t =
     { configured = true
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None
@@ -736,6 +738,8 @@ let%test_unit "wrapped viewport persists its bottom clamp and reclamps on resize
   let snapshot : Asic.Snapshot.t =
     { configured = true
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None

@@ -9,6 +9,11 @@ type intent =
 val endpoint : intent -> string
 val advertised_selection : intent -> Asic.Selection.t option
 
+val validate_evidence
+  :  snapshot:Asic.Snapshot.t option
+  -> observed:Asic.Selection.t option
+  -> (unit, string) Result.t
+
 val resolve_intent
   :  intent:intent
   -> remembered:Asic.Selection.t option
@@ -16,9 +21,9 @@ val resolve_intent
   -> snapshot:Asic.Snapshot.t option
   -> (Asic.Selection.t, string) Result.t
 
-(** Explicit provider actions take priority. Otherwise replace only the endpoint of
-    captured remembered/observed inputs, or use the declared catalog default pair. No
-    status-based endpoint guesses, effects, or fallback from stale selections. *)
+(** A checklist action must match the current chip. Named fresh endpoints use that chip's
+    launch inputs, never a historical chip's recipe. Legacy single-chip projects may use
+    observed inputs when no explicit inputs were selected. *)
 val resolve
   :  stage:Asic.Stage.t
   -> remembered:Asic.Selection.t option

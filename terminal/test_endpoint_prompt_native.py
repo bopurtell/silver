@@ -2,7 +2,7 @@
 """Isolated production HTTP/PTY Plan form regression using the real catalog fixture.
 
 No source builds, emission, or physical launches: the project driver permits only
-flow list and the provider permits only version negotiation. All state is private.
+catalog reads and the provider permits only version negotiation. All state is private.
 """
 import argparse
 import importlib.util
@@ -49,7 +49,14 @@ print(json.dumps({'cli_contract':{'version':4,'capabilities':{'namedflow1':True}
     driver.write_text('''#!/usr/bin/python3
 import json,pathlib,sys
 with (pathlib.Path.cwd()/'project-calls').open('a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')
-assert sys.argv[1:]==['flow','list','--json'], 'Only catalog reads permitted'
+args=sys.argv[1:]
+chips=pathlib.Path('chip-catalog.json')
+if args==['chip','list','--json']:
+    if not chips.exists(): sys.exit(2)  # legacy executable
+    print(chips.read_text())
+    sys.exit(0)
+assert args[:3]==['flow','list','--json']
+assert (args[3:5]==['--chip','engine'] and args[5]=='--variant' and args[6] in ('small','large')) if chips.exists() else not args[3:]
 print(''' + repr(catalog) + ''')
 ''')
     preparation = session.root / 'hardcaml-workbench-preparation.sexp'
@@ -112,9 +119,35 @@ print(''' + repr(catalog) + ''')
         snapshot = session.rpc('asic')
         check(not fs0.field(snapshot, 'workflows') and not fs0.field(snapshot, 'runs'),
               'Plan stages inputs without launching a workflow or physical run')
-        check(all(json.loads(line) == ['flow', 'list', '--json']
-                  for line in (session.root / 'project-calls').read_text().splitlines()),
-              'Only real-catalog reads executed in the project driver')
+        project_calls = [json.loads(line)
+                         for line in (session.root / 'project-calls').read_text().splitlines()]
+        check(project_calls == [['chip', 'list', '--json'], ['flow', 'list', '--json']],
+              'Legacy project: optional chip catalog probe followed by the flow catalog read')
+        os.write(terminal.master, b'\x1b')
+        terminal.drain()
+        (session.root / 'chip-catalog.json').write_text(json.dumps({
+            'schema_version': 1, 'default_chip': 'engine', 'chips': [
+                {'id': 'engine', 'label': 'Engine', 'default_variant': 'small',
+                 'variants': [{'id': v, 'label': v.title()} for v in ('small', 'large')]}]}))
+        session.rpc('asic', 'Discover', wait=True)
+        terminal.capture('discovered-target', ['Launch chip: engine', 'Variant: small'])
+        terminal.palette('Plan ASIC standard / balanced')
+        terminal.capture('small-form', ['PLAN ENDPOINT', 'engine/small', '> synthesis'])
+        # A second client switches variants while the old form is open.
+        session.rpc('asic', '(Select_chip ((chip engine)(variant large)))', wait=True)
+        terminal.capture('switched-behind-form', ['PLAN ENDPOINT', 'Variant: large'])
+        os.write(terminal.master, b'\r')
+        terminal.capture('stale-chip-form', ['Variant: large'], absent=['PLAN ENDPOINT'])
+        check(not fs0.field(session.rpc('asic'), 'fresh_intent'),
+              'Entering the old form after another client switches variants stages nothing')
+        terminal.palette('Select launch target: engine / small')
+        terminal.capture('picker-switched', ['Launch chip: engine', 'Variant: small'])
+        terminal.palette('Plan ASIC standard / balanced')
+        os.write(terminal.master, b'\r')
+        staged = fs0.record(fresh_selection())
+        check(fs0.record(staged['chip_target'][0]) == {'chip': 'engine', 'variant': 'small'}
+              and staged['endpoint'] == 'synthesis' and not staged['assignments'],
+              'Palette-selected chip and variant reach the exact staged selection')
         calls = session.root / 'provider-calls'
         check(not calls.exists() or all(json.loads(line) == ['--version', '--json']
                                        for line in calls.read_text().splitlines()),

@@ -26,6 +26,7 @@ type t =
   ; index : R.Index.t option
   ; selected : string option
   ; mode : mode
+  ; raw : bool
   ; section : string
   ; offset : int
   ; history : int list
@@ -52,6 +53,7 @@ let empty =
   ; index = None
   ; selected = None
   ; mode = Table
+  ; raw = false
   ; section = "inventory"
   ; offset = 0
   ; history = []
@@ -111,6 +113,7 @@ let source_for target snapshot =
 let clear_pages t =
   { t with
     mode = Table
+  ; raw = false
   ; offset = 0
   ; history = []
   ; catalog_offset = 0
@@ -379,7 +382,13 @@ let input t ~filter ~asic event =
     ( { t with mode = Table; scroll = 0; pending = None; generation = t.generation + 1 }
     , None )
   | Show_context ->
-    ( { t with mode = Context; scroll = 0; pending = None; generation = t.generation + 1 }
+    ( { t with
+        mode = Context
+      ; raw = false
+      ; scroll = 0
+      ; pending = None
+      ; generation = t.generation + 1
+      }
     , None )
   | Show_sources -> request { t with mode = Sources; scroll = 0 }
   | Section section ->
@@ -398,6 +407,7 @@ let input t ~filter ~asic event =
         request
           { t with
             mode = Detail
+          ; raw = false
           ; selected
           ; section
           ; offset = 0
@@ -415,7 +425,10 @@ let input t ~filter ~asic event =
     , None )
   | Scroll delta -> { t with scroll = Int.max 0 (t.scroll + delta) }, None
   | Move delta when equal_mode t.mode Table ->
-    browse_resource t (move (List.map (visible t ~filter) ~f:(fun r -> r.R.Row.id)) t.selected delta), None
+    ( browse_resource
+        t
+        (move (List.map (visible t ~filter) ~f:(fun r -> r.R.Row.id)) t.selected delta)
+    , None )
   | Move delta when equal_mode t.mode Sources ->
     let ids =
       Option.value_map (current_catalog t asic) ~default:[] ~f:(fun p ->
@@ -441,7 +454,18 @@ let input t ~filter ~asic event =
     in
     if Option.is_none selected
     then { t with error = Some "No resource matches the filter" }, None
-    else request { t with mode = Detail; selected; offset = 0; history = []; scroll = 0 }
+    else
+      request
+        { t with
+          mode = Detail
+        ; raw = false
+        ; selected
+        ; offset = 0
+        ; history = []
+        ; scroll = 0
+        }
+  | Open when equal_mode t.mode Detail || equal_mode t.mode Context ->
+    { t with raw = not t.raw; scroll = 0 }, None
   | Open -> t, None
   | Capture_left | Capture_right ->
     (match t.source, t.index with
@@ -516,6 +540,188 @@ let receipt ?(floor = 0) t ~generation result =
 let fact label value = E.plain (label ^ ": " ^ value)
 let missing text = [ { E.text; role = E.Role.Muted } ]
 let number value = sprintf "%.12g" value
+let words = String.tr ~target:'_' ~replacement:' '
+
+let rec contract_sexp = function
+  | Sexp.Atom s -> words s
+  | List [ Atom key; v ] -> words key ^ ": " ^ contract_sexp v
+  | List values -> String.concat ~sep:" · " (List.map values ~f:contract_sexp)
+;;
+
+let rec json_sexp : Yojson.Basic.t -> Sexp.t = function
+  | `Assoc [ ("atom", `String s) ] -> Atom s
+  | `Assoc [ ("list", `List xs) ] -> List (List.map xs ~f:json_sexp)
+  | _ -> failwith "not an encoded contract"
+;;
+
+let structured value =
+  List.exists [ "{"; "["; "(" ] ~f:(fun prefix ->
+    String.is_prefix (String.strip value) ~prefix)
+;;
+
+let contract value =
+  let describe kind sexp =
+    match sexp with
+    | Sexp.List fields ->
+      let atom key =
+        List.find_map fields ~f:(function
+          | Sexp.List [ Atom k; Atom v ] when String.equal k key -> Some v
+          | _ -> None)
+      in
+      (match atom "width", atom "depth" with
+        | Some width, Some depth ->
+          let attribute = function
+            | Sexp.List [Atom "port"; Atom "1rw"] -> "1 read/write port"
+            | List [Atom "read_latency"; Atom n] ->
+              "read latency " ^ n ^ (if String.equal n "1" then " cycle" else " cycles")
+            | List [Atom "disabled_output"; Atom "hold"] -> "holds output when disabled"
+            | List [Atom "write_output"; Atom "unspecified"] -> "output unspecified on write"
+            | field -> contract_sexp field
+          in
+         let other =
+           List.filter fields ~f:(function
+             | Sexp.List [ Atom ("width" | "depth"); _ ] -> false
+             | _ -> true)
+         in
+         String.concat
+           ~sep:" · "
+            (((if String.equal kind "single_port_ram" then "Single-port RAM" else words kind)
+              ^ ": " ^ depth ^ " words × " ^ width ^ " bits")
+             :: List.map other ~f:attribute)
+       | _ -> words kind ^ " · " ^ contract_sexp sexp)
+    | _ -> words kind ^ " · " ^ contract_sexp sexp
+  in
+  let parsed =
+    Or_error.try_with (fun () ->
+      match Yojson.Basic.from_string value with
+      | `Assoc fields ->
+        let get key = List.Assoc.find_exn fields ~equal:String.equal key in
+        let kind = Yojson.Basic.Util.to_string (get "kind") in
+        let sexp =
+          match get "contract" with
+          | `String s -> Sexp.of_string s
+          | j -> json_sexp j
+        in
+        describe kind sexp
+      | _ -> failwith "not a request")
+  in
+  match parsed with
+  | Ok text -> text
+  | Error _ ->
+    (match String.lsplit2 value ~on:' ' with
+     | Some (kind, rest) when (not (structured kind)) && String.is_prefix rest ~prefix:"("
+       ->
+       (match Or_error.try_with (fun () -> describe kind (Sexp.of_string rest)) with
+        | Ok text -> text
+        | Error _ -> "Contract details in raw metadata")
+     | _ when structured value -> "Contract details in raw metadata"
+     | _ -> value)
+;;
+
+let decision reason =
+  if structured reason
+  then "See raw metadata"
+  else (
+    match String.lsplit2 reason ~on:' ' with
+    | Some (key, qualifier) -> words key ^ " " ^ qualifier
+    | None -> words reason)
+;;
+
+let decision_role reason : E.Role.t =
+  match List.hd (String.split reason ~on:' ') with
+  | Some "exact_mapping" -> Validated
+  | Some ("budget_exhausted" | "flop_fallback") -> Pending
+  | _ -> Plain
+;;
+
+let stage_role : string -> E.Role.t = function
+  | "matched" | "pass" -> Passed
+  | "fail" | "missing" | "unexpected" | "mismatched" -> Failed
+  | "unresolved" -> Pending
+  | "unavailable" | "not_applicable" -> Muted
+  | _ -> Plain
+;;
+
+let verdict value = E.fact ~label:"Resource verdict: " Verdict value
+
+let selection_fact (r : R.Row.t) =
+  E.plain "Selection reason: "
+  @ [ { E.text = decision r.reason; role = decision_role r.reason } ]
+;;
+
+let stage_fact (r : R.Row.t) =
+  E.plain "Realized synthesis / final: "
+  @ [ { E.text = words r.synthesis; role = stage_role r.synthesis }
+    ; { E.text = " / "; role = Plain }
+    ; { E.text = words r.final; role = stage_role r.final }
+    ]
+;;
+
+(** Header and body use the same cell allocation. Prioritize the decision when a split
+    pane has insufficient space for role or stage columns. *)
+let table_line ~width ~selected (row : R.Row.t option) =
+  let cell weight title get =
+    weight, Option.value_map row ~default:(title, E.Role.Muted) ~f:get
+  in
+  let columns =
+    [ cell 2 "Resource" (fun r -> r.id, Plain)
+  ; cell 3 "Decision" (fun r ->
+      (* Keep the decision readable in a split pane. The full qualifier,
+         including the macro name and exhausted limit, is in selection_fact. *)
+      let label = List.hd_exn (String.split (decision r.reason) ~on:'(') |> String.rstrip in
+      label, decision_role r.reason)
+    ]
+    @ (if width < 39
+       then []
+       else [ cell 3 "Implementation" (fun r -> r.implementation, Plain) ])
+    @ (if width < 65
+       then []
+       else
+         [ cell 2 "Synth" (fun r -> words r.synthesis, stage_role r.synthesis)
+         ; cell 2 "Final" (fun r -> words r.final, stage_role r.final)
+         ])
+    @ if width < 99 then [] else [ cell 3 "Actual role" (fun r -> words r.role, Plain) ]
+  in
+  let available = Int.max 0 (width - 2 - List.length columns + 1) in
+  let total = List.sum (module Int) columns ~f:fst in
+  let _, cells =
+    List.fold_map columns ~init:0 ~f:(fun used (weight, (text, role)) ->
+      let last = used + weight in
+      let size = (last * available / total) - (used * available / total) in
+      let clipped = E.clip ~width:size (E.plain text) |> E.text in
+      let pad =
+        Int.max 0 (size - Bonsai_term.View.width (Bonsai_term.View.text clipped))
+      in
+      last, { E.text = clipped ^ String.make pad ' '; role })
+  in
+  E.plain (if selected then "> " else "  ")
+  @ List.intersperse cells ~sep:{ E.text = " "; role = Plain }
+;;
+
+let field_rows ~raw (key, value) =
+  let rec describe label : Yojson.Basic.t -> E.row list = function
+    | `Assoc [] | `List [] -> [ fact label "none reported" ]
+    | `Assoc fields ->
+      List.concat_map fields ~f:(fun (k, v) -> describe (label ^ " / " ^ words k) v)
+    | `List xs ->
+      List.concat_mapi xs ~f:(fun i -> describe (sprintf "%s %d" label (i + 1)))
+    | `Null -> [ missing (label ^ ": not reported") ]
+    | `String s -> [ fact label (if structured s then "See raw metadata" else s) ]
+    | scalar -> [ fact label (Yojson.Basic.to_string scalar) ]
+  in
+  if raw
+  then [ fact key value ]
+  else if String.equal key "requested_contract"
+  then [ fact "Requested contract" (contract value) ]
+  else if String.equal key "inventory_record"
+  then [ missing "Original inventory record in raw metadata" ]
+  else if structured value
+  then (
+    match Or_error.try_with (fun () -> Yojson.Basic.from_string value) with
+    | Ok json -> describe (words key) json
+    | Error _ -> [ fact (words key) "See raw metadata" ])
+  else [ fact (words key) value ]
+;;
 
 let classification (m : R.Measurement.t) =
   match m.classification with
@@ -563,13 +769,25 @@ let inventory (i : R.Index.t) =
 
 let row_facts (r : R.Row.t) =
   [ fact "Resource" r.id
-  ; fact "Requested contract" r.contract
-  ; fact "Requirement / policy" (r.requirement ^ " / " ^ r.policy)
+  ; fact "Requested contract" (contract r.contract)
+  ; fact
+      "Requirement / policy"
+      ((match r.requirement with
+        | "exact_or_flop_fallback" -> "Prefer an exact macro; allow flops"
+        | "exact" -> "Require an exact macro"
+        | "flops" -> "Require flops"
+        | other -> words other)
+       ^ " / "
+       ^ if structured r.policy then "See raw metadata" else r.policy)
   ; fact "Selected implementation" r.implementation
-  ; fact "Selection reason" r.reason
-  ; fact "Actual role" r.role
-  ; fact "Elaborated instances" (String.concat ~sep:", " r.instances)
-  ; fact "Realized synthesis / final" (r.synthesis ^ " / " ^ r.final)
+  ; selection_fact r
+  ; fact "Actual role" (words r.role)
+  ; fact
+      "Elaborated instances"
+      (if List.is_empty r.instances
+       then "none reported"
+       else String.concat ~sep:", " r.instances)
+  ; stage_fact r
   ]
   @
   if String.equal r.role "behavioral_model"
@@ -673,7 +891,7 @@ let compare_lines t =
       | None -> [ fact row.id "A-only resource; B unavailable" ]
       | Some other ->
         [ fact "Resource" row.id
-        ; fact "Contract A / B" (row.contract ^ " / " ^ other.contract)
+        ; fact "Contract A / B" (contract row.contract ^ " / " ^ contract other.contract)
         ; fact "Requirement A / B" (row.requirement ^ " / " ^ other.requirement)
         ; fact "Policy A / B" (row.policy ^ " / " ^ other.policy)
         ; fact "Selection A / B" (row.implementation ^ " / " ^ other.implementation)
@@ -698,22 +916,39 @@ let source_lines t =
          ~default:"No selected run or explicit source"
          ~f:target_label)
   ; fact
-      "Binding"
+      "Source"
       (if Option.is_some t.explicit
-       then "Explicit source (independent of Main)"
-       else "Exact run follow/pin")
+       then "Explicit · independent of Main"
+       else "Exact run · follow/pin")
   ]
   @ Option.value_map t.source ~default:[] ~f:(fun source ->
     let role, text = freshness source.freshness in
-    [ [ { E.text; role } ] ]
+    [ [ { E.text; role }; { E.text = " · " ^ source.label; role = Muted } ] ]
     @ Option.to_list (Option.map source.error ~f:(fact "Source error")))
   @ Option.value_map t.pending ~default:[] ~f:(fun _ ->
     [ missing "Read requested (retained evidence only)" ])
   @ Option.value_map t.error ~default:[] ~f:(fun text ->
     [ [ { E.text = "Read error: " ^ text; role = E.Role.Stale } ] ])
   @ Option.value_map t.index ~default:[] ~f:(fun i ->
-    fact "Inventory" (inventory i)
-    ::
+    let bundle_design =
+      match t.target with
+      | Some (R.Target.Bundle _ | Workflow_bundle _) ->
+        (match Or_error.try_with (fun () -> Yojson.Basic.from_string i.provenance) with
+         | Ok (`Assoc fields) ->
+           (match List.Assoc.find fields "project" ~equal:String.equal with
+            | Some (`String project) ->
+              let assignments = match List.Assoc.find fields "hardware_assignments" ~equal:String.equal with
+                | Some (`Assoc xs) -> List.filter_map xs ~f:(fun (k,v) ->
+                    match v with
+                    | `String s -> Some (k ^ "=" ^ s)
+                    | `Bool _ | `Int _ -> Some (k ^ "=" ^ Yojson.Basic.to_string v)
+                    | _ -> None)
+                | _ -> [] in
+              [fact "Inspecting design" (String.concat ~sep:" · " (project :: assignments))]
+            | _ -> [])
+         | _ -> [])
+      | _ -> [] in
+    bundle_design @ [fact "Inventory" (inventory i)] @
     (if i.truncated
      then
        [ [ { E.text =
@@ -727,15 +962,23 @@ let source_lines t =
 ;;
 
 let execution_lines t asic =
+  let chip (selection : Asic.Selection.t) =
+    Option.value_map selection.chip_target ~default:[] ~f:(fun c ->
+      [ fact "Source chip / variant" (c.chip ^ " / " ^ c.variant) ])
+  in
   let run_status run =
-    [ fact
-        "Execution status"
-        (Option.bind asic ~f:(fun s ->
-           List.find s.Asic.Snapshot.runs ~f:(fun r -> Run_ref.equal r.run run))
-         |> Option.value_map
-              ~default:"unavailable (no exact execution observation loaded)"
-              ~f:(fun r -> r.status))
-    ]
+    let exact =
+      Option.bind asic ~f:(fun s ->
+        List.find s.Asic.Snapshot.runs ~f:(fun r -> Run_ref.equal r.run run))
+    in
+    Option.value_map (Option.bind exact ~f:(fun r -> r.selection)) ~default:[] ~f:chip
+    @ [ fact
+          "Execution status"
+          (exact
+           |> Option.value_map
+                ~default:"unavailable (no exact execution observation loaded)"
+                ~f:(fun r -> r.status))
+      ]
   in
   match t.target with
   | Some (R.Target.Run run) -> run_status run
@@ -752,16 +995,22 @@ let execution_lines t asic =
                 ~f:(fun f -> f.state))
       ]
   | Some (Workflow_bundle id) ->
-    [ fact
-        "Workflow elaboration status"
-        (Option.bind asic ~f:(fun s ->
-           List.find s.Asic.Snapshot.workflows ~f:(fun w -> String.equal w.id id))
-         |> Option.value_map
-              ~default:"unavailable (no exact workflow observation loaded)"
-              ~f:(fun w -> w.elaboration_status))
-    ]
+    let exact =
+      Option.bind asic ~f:(fun s ->
+        List.find s.Asic.Snapshot.workflows ~f:(fun w -> String.equal w.id id))
+    in
+    Option.value_map exact ~default:[] ~f:(fun w -> chip w.intent.selection)
+    @ [ fact
+          "Workflow elaboration status"
+          (exact
+           |> Option.value_map
+                ~default:"unavailable (no exact workflow observation loaded)"
+                ~f:(fun w -> w.elaboration_status))
+      ]
   | Some (Bundle _) ->
     [ fact "Execution association" "bundle inventory only; no execution selected" ]
+    @ Option.value_map (Option.bind asic ~f:(fun s -> s.Asic.Snapshot.chip_target))
+        ~default:[] ~f:(fun c -> [fact "Launch target" (c.chip ^ " / " ^ c.variant)])
   | Some (Coarse_run _) ->
     [ fact
         "Execution status"
@@ -802,13 +1051,15 @@ let summary t =
       in
       [ [ { E.text =
               sprintf
-                "Resources%s: %s · %s · %s · Enter"
+                "Resources%s: %s · "
                 (if i.truncated then " TRUNCATED" else "")
                 compact_inventory
-                compact_status
-                i.verdict
-          ; role = (if i.truncated then E.Role.Stale else role)
+          ; role = (if i.truncated then E.Role.Stale else Plain)
           }
+        ; { E.text = compact_status; role }
+        ; { E.text = " · "; role = Plain }
+        ; { E.text = i.verdict; role = E.status_role (E.normalize Verdict i.verdict) }
+        ; { E.text = " · Enter"; role = Muted }
         ]
       ])
   @ source_lines t
@@ -840,7 +1091,7 @@ let comparison_validation t asic =
           ]))
 ;;
 
-let contents t ~filter ~asic =
+let contents ?(width = 100) t ~filter ~asic =
   let lines =
     match t.mode with
     | Compare -> comparison_validation t asic @ compare_lines t
@@ -853,11 +1104,11 @@ let contents t ~filter ~asic =
         ])
       @ Option.value_map t.index ~default:[] ~f:(fun i ->
         [ fact "Source digest" i.digest
-        ; fact "Full provenance" i.provenance
         ; fact
             "Index coverage"
             (if i.truncated then "TRUNCATED" else "Complete retained projection")
         ]
+        @ field_rows ~raw:t.raw ("Provenance", i.provenance)
         @ List.map i.diagnostics ~f:(fact "Diagnostic")
         @ List.map i.measurements ~f:measurement)
     | Table ->
@@ -868,18 +1119,13 @@ let contents t ~filter ~asic =
              "%s · %d matches"
              (if String.is_empty filter then "(none)" else filter)
              (List.length rows))
-      ; E.plain "Resource | selected implementation | actual role | synthesis | final"
+      ; table_line ~width ~selected:false None
       ]
       @ List.map rows ~f:(fun r ->
-        E.plain
-          (sprintf
-             "%s%s | %s | %s | %s | %s"
-             (if Option.equal String.equal t.selected (Some r.id) then "> " else "  ")
-             r.id
-             r.implementation
-             r.role
-             r.synthesis
-             r.final))
+        table_line
+          ~width
+          ~selected:(Option.equal String.equal t.selected (Some r.id))
+          (Some r))
       @ (if List.is_empty rows
          then
            [ missing
@@ -900,14 +1146,20 @@ let contents t ~filter ~asic =
         (selected_row t)
         ~default:[ missing "No resource selected" ]
         ~f:(fun r ->
-          if String.equal t.section "inventory"
+          if t.raw
+          then
+            [ fact "Raw contract" r.contract
+            ; fact "Raw selection reason" r.reason
+            ; fact "Raw policy" r.policy
+            ]
+          else if String.equal t.section "inventory"
           then row_facts r
           else
             [ fact "Resource" r.id
             ; fact "Selected implementation" r.implementation
-            ; fact "Selection reason" r.reason
-            ; fact "Actual role" r.role
-            ; fact "Realized synthesis / final" (r.synthesis ^ " / " ^ r.final)
+            ; selection_fact r
+            ; fact "Actual role" (words r.role)
+            ; stage_fact r
             ])
       @ [ fact "Detail section" t.section ]
       @ Option.value_map
@@ -918,9 +1170,13 @@ let contents t ~filter ~asic =
                 "Page items"
                 (sprintf "%d–%d / %d (n/p pages)" p.offset p.next_offset p.total)
             ]
-            @ List.concat_map p.items ~f:(fun item ->
-              E.plain ("— " ^ item.R.Item.title)
-              :: List.map item.fields ~f:(fun (key, value) -> fact key value)))
+            @
+            if String.equal t.section "inventory" && not t.raw
+            then []
+            else
+              List.concat_map p.items ~f:(fun item ->
+                E.plain ("— " ^ item.R.Item.title)
+                :: List.concat_map item.fields ~f:(field_rows ~raw:t.raw)))
       @ Option.value_map (selected_row t) ~default:[] ~f:(fun r ->
         List.map r.measurements ~f:measurement
         @ [ fact
@@ -928,7 +1184,7 @@ let contents t ~filter ~asic =
               (String.concat
                  ~sep:" · "
                  (List.map r.sections ~f:(fun s ->
-                    sprintf "%s=%s(%d)" s.R.Section.id s.status s.count)))
+                    sprintf "%s: %s (%d)" (words s.R.Section.id) (words s.status) s.count)))
           ])
     | Sources ->
       Option.value_map
@@ -984,19 +1240,26 @@ let contents t ~filter ~asic =
             List.map (String.split_lines text) ~f:(fun line ->
               E.plain (Artifact_view.safe line)))
   in
-  [ missing
-      "j/k browse/scroll · Enter detail/read · Esc back · / filter · Ctrl-U clear · r \
-       refresh · a sources · d provenance · g/t/e geometry/timing/electrical · n/p pages \
-       · c compare · Space c c commands"
-  ]
+  (if equal_mode t.mode Detail || equal_mode t.mode Context
+   then
+     [ missing
+         (if t.raw
+          then "RAW METADATA · Enter for readable view"
+          else "Enter: raw metadata · Esc: table")
+     ]
+   else [])
+  @ [ missing
+        "j/k browse/scroll · Enter detail/read · Esc back · / filter · Ctrl-U clear · r \
+         refresh · a sources · d provenance · g/t/e geometry/timing/electrical · n/p \
+         pages · c compare · Space c c commands"
+    ]
   @ (if equal_mode t.mode Compare
      then []
      else
        source_lines t
        @ execution_lines t asic
        @ Option.value_map t.index ~default:[] ~f:(fun i ->
-         [ fact "Resource verdict" i.verdict ]
-         @ List.map i.diagnostics ~f:(fact "Qualification")))
+         [ verdict i.verdict ] @ List.map i.diagnostics ~f:(fact "Qualification")))
   @ lines
 ;;
 
@@ -1011,38 +1274,29 @@ let page_with_targets t ~filter ~asic ~width ~height =
           List.findi candidates ~f:(fun _ r -> String.equal r.id id) |> Option.map ~f:fst)
         |> Option.value ~default:0
       in
-      let capacity = Int.max 1 (height / 3) in
+      let top =
+        Option.value_map t.index ~default:[] ~f:(fun i -> [ verdict i.verdict ])
+        @ source_lines t
+        @ execution_lines t asic
+        @ [ fact
+              "Filter"
+              (sprintf
+                 "%s · %d matching retained rows"
+                 (if String.is_empty filter then "(none)" else filter)
+                 (List.length candidates))
+          ]
+      in
+      let top = List.take top (Int.max 0 (height - 2)) in
+      let capacity = Int.max 1 (Int.min (height / 3) (height - List.length top - 1)) in
       let start = Int.max 0 (selected - capacity + 1) in
       let entries = List.drop candidates start |> Fn.flip List.take capacity in
-      plain
-        ([ missing
-             "Enter detail · / filter · Ctrl-U clear · r refresh · a sources · g/t/e \
-              geometry/timing/electrical · Space c c imports/select/compare"
-         ]
-         @ List.map (source_lines t) ~f:(E.clip ~width)
-         @ List.map (execution_lines t asic) ~f:(E.clip ~width)
-         @ [ fact
-               "Filter"
-               (sprintf
-                  "%s · %d matching retained rows"
-                  (if String.is_empty filter then "(none)" else filter)
-                  (List.length candidates))
-           ; E.plain "Resource | implementation | actual role | synthesis | final"
-           ])
+      plain (List.map top ~f:(E.clip ~width) @ [ table_line ~width ~selected:false None ])
       @ List.map entries ~f:(fun r ->
         ( Some (`Resource r.R.Row.id)
-        , E.plain
-            (sprintf
-               "%s%s | %s | %s | %s | %s"
-               (if Option.equal String.equal t.selected (Some r.R.Row.id)
-                then "> "
-                else "  ")
-               r.id
-               r.implementation
-               r.role
-               r.synthesis
-               r.final)
-          |> E.clip ~width ))
+        , table_line
+            ~width
+            ~selected:(Option.equal String.equal t.selected (Some r.id))
+            (Some r) ))
       @ plain
           ((if Option.is_none t.index
             then
@@ -1060,6 +1314,10 @@ let page_with_targets t ~filter ~asic ~width ~height =
               | _ ->
                 [ missing "No resource matches this filter in the available inventory" ])
             else [])
+           @ [ missing
+                 "Enter detail · / filter · r refresh · a sources · d provenance · Space \
+                  c c commands"
+             ]
            @ Option.value_map
                (List.find candidates ~f:(fun r ->
                   Option.equal String.equal t.selected (Some r.R.Row.id)))
@@ -1073,8 +1331,7 @@ let page_with_targets t ~filter ~asic ~width ~height =
                     ])
                ~f:row_facts
            @ Option.value_map t.index ~default:[] ~f:(fun i ->
-             [ fact "Resource verdict" i.verdict ]
-             @ List.map i.diagnostics ~f:(fact "Qualification"))))
+             List.map i.diagnostics ~f:(fact "Qualification"))))
     else if equal_mode t.mode Sources
     then (
       let page = current_catalog t asic in
@@ -1119,7 +1376,7 @@ let page_with_targets t ~filter ~asic ~width ~height =
              ; fact "Format" artifact.format
              ; fact "SHA256" artifact.sha256
              ])))
-    else plain (contents t ~filter ~asic)
+    else plain (contents ~width t ~filter ~asic)
   in
   let scroll = if equal_mode t.mode Table then 0 else t.scroll in
   E.page_with_targets ~width ~height ~offset:scroll lines

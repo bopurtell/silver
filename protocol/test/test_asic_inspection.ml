@@ -164,6 +164,7 @@ let%test_unit "inspection wire codecs preserve unknown values and provenance" =
     { configured = true
     ; flows = []
     ; catalog_default = None
+    ; chips = []; chip_target = None
     ; description_json = None
     ; preview = None
     ; runs = []

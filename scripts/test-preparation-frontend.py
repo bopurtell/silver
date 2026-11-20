@@ -108,7 +108,8 @@ def acceptance(t, check, http, runs, presets, args):
     flows = wait(lambda: field(http.rpc(wait=False), 'flows'), 'current selected-flow catalog')
     flow = flows[0]
     t.command('Preparation inputs: ' + field(flow, 'id') + ' / ' + field(flow, 'profiles')[0])
-    t.key(b'synthesis X=frontend'); t.key(b'\r')
+    t.capture('preparation-inputs-prefill', ['> synthesis'])
+    t.key(b' X=frontend'); t.key(b'\r')
     t.capture('available-not-requested', ['no session history'])
     t.command('Unzoom workspace')
     t.focus_view('stage checklist')

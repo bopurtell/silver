@@ -1534,7 +1534,7 @@ let planned_role : Planned_run.role -> Role.t = function
   | Success -> Success
 ;;
 
-let planned_formatted_rows ?indicator_frames host tile ~width =
+let formatted_plan_history ?indicator_frames host tile ~width =
   let model = Planned_run.model host.H.planned_run in
   let detail = (H.local host tile.W.Tile.id).utility_detail in
   planned_source_rows host tile
@@ -1600,6 +1600,34 @@ let planned_formatted_rows ?indicator_frames host tile ~width =
     List.mapi texts ~f:(fun j text ->
       ( { row with text }
       , if j = 0 then icon else View.rectangle ~width:(View.width icon) ~height:1 () )))
+;;
+
+let planned_formatted_rows ?indicator_frames host tile ~width =
+  let rows = formatted_plan_history ?indicator_frames host tile ~width in
+  let detail = (H.local host tile.W.Tile.id).utility_detail in
+  let snapshot = Planned_run.snapshot host.planned_run in
+  match Launch_preferences.chip_target snapshot with
+  | None -> rows
+  | Some target ->
+    let selection =
+      Preparation_view.selection ~remembered:host.remembered_selection ~asic:snapshot
+    in
+    let input f = Result.ok selection |> Option.value_map ~default:"unavailable" ~f in
+    let target_rows =
+      [ "Launch chip: " ^ target.chip
+      ; "Variant: " ^ target.variant
+      ; "Flow: " ^ input (fun s -> s.flow)
+      ; "Profile: " ^ input (fun s -> s.profile)
+      ; "Endpoint: " ^ input (fun s -> s.endpoint)
+      ]
+      |> List.concat_map ~f:(fun line ->
+        let text = Artifact_view.safe line in
+        (if detail
+         then wrap_cells ~width text
+         else [ E.text (E.clip ~width (E.plain text)) ])
+        |> List.map ~f:(fun text -> { Planned_run.role = Fact; text }, View.none))
+    in
+    target_rows @ rows
 ;;
 
 let planned_view_rows ?indicator_frames host tile ~width =
@@ -3869,9 +3897,13 @@ let render_palette host dimensions background =
     let heading =
       match p.argument with
       | Some (H.Plan_endpoint _) ->
-        "PLAN ENDPOINT - exact provider endpoint; Enter previews; Esc closes"
+        "PLAN ENDPOINT — "
+        ^ Launch_preferences.chip_label p.capture.chip_target
+        ^ "; Enter stages inputs; Esc closes"
       | Some (H.Preparation_inputs _) ->
-        "PREPARATION INPUTS — endpoint and overrides; Enter selects; no launch"
+        "PREPARATION INPUTS — "
+        ^ Launch_preferences.chip_label p.capture.chip_target
+        ^ "; Enter selects; no launch"
       | Some (H.Resource_path bundle) ->
         (if bundle then "IMPORT EMITTED BUNDLE" else "IMPORT RETAINED RESOURCE EVIDENCE")
         ^ " — exact absolute directory; Enter reads; no run allocation"
@@ -5879,7 +5911,8 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
         in
         assert (not (run_has_producer data Fs0_fixture.run_a)));
     let selection : Asic.Selection.t =
-      { flow = "flow"
+      { chip_target = None
+      ; flow = "flow"
       ; profile = "profile"
       ; endpoint = "exact-endpoint"
       ; assignments = []
@@ -6369,7 +6402,8 @@ let%test_unit "shallow plan always shows readiness and endpoint; detail retains 
   let tile = find "planned-run" in
   let snapshot = Option.value_exn data.asic in
   let selection : Asic.Selection.t =
-    { flow = String.concat (List.init 100 ~f:(fun _ -> "界"))
+    { chip_target = None
+    ; flow = String.concat (List.init 100 ~f:(fun _ -> "界"))
     ; profile = "Exact-Profile"
     ; endpoint = "signoff"
     ; assignments = [ String.make 100 'A' ]
@@ -7908,7 +7942,8 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
     ; preview =
         Some
           { selection =
-              { flow = "ordinary"
+              { chip_target = None
+              ; flow = "ordinary"
               ; profile = "default"
               ; endpoint = "placement"
               ; assignments = []
@@ -8236,7 +8271,8 @@ let%test_unit "stage evidence is scoped honestly and never borrows synthesis cou
           { execution with
             selection =
               Some
-                { Asic.Selection.flow = "fixture"
+                { chip_target = None
+                ; Asic.Selection.flow = "fixture"
                 ; profile = "fixture"
                 ; endpoint = "synthesis"
                 ; assignments = []
@@ -8368,7 +8404,8 @@ let%test_unit "imported clock configuration retains explicit known or unknown re
           { execution with
             selection =
               Some
-                { Asic.Selection.flow = "fixture"
+                { chip_target = None
+                ; Asic.Selection.flow = "fixture"
                 ; profile = "fixture"
                 ; endpoint = "physical"
                 ; assignments = []

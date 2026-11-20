@@ -419,7 +419,8 @@ let%test_unit "preparation input form captures exact selected inputs and rejects
      assert (
        Asic.Selection.equal
          selection
-         { flow = "chosen-flow"
+         { chip_target = None
+         ; flow = "chosen-flow"
          ; profile = "chosen-profile"
          ; endpoint = "routing"
          ; assignments = [ "X=1"; "Y=exact" ]
@@ -583,7 +584,8 @@ let%test_unit "staged elaboration plan shares compact planned-run rendering and 
   let staged : Preparation.Staged.t =
     { id = "Exact-Stage-Receipt-AbC-0123456789"
     ; selection =
-        { flow = "standard"
+        { chip_target = None
+        ; flow = "standard"
         ; profile = "balanced"
         ; endpoint = "routing"
         ; assignments = []

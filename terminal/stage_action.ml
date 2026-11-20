@@ -17,12 +17,41 @@ let advertised_selection = function
   | Fresh_endpoint _ -> None
 ;;
 
+let validate_evidence ~snapshot ~(observed : Asic.Selection.t option) =
+  if Option.exists observed ~f:(fun s ->
+       not
+         (Option.equal
+            Asic.Chip_target.equal
+            s.chip_target
+            (Launch_preferences.chip_target snapshot)))
+  then
+    Error
+      "Checklist evidence belongs to a different launch target; use Plan ASIC or a named \
+       launch command"
+  else Ok ()
+;;
+
 let resolve_intent ~intent ~remembered ~observed ~(snapshot : Asic.Snapshot.t option) =
   let endpoint = endpoint intent in
-  match advertised_selection intent with
+  let chip_target = Launch_preferences.chip_target snapshot in
+  let for_target = Launch_preferences.for_target snapshot in
+  let open Result.Let_syntax in
+  let%bind () =
+    match intent with
+    | Fresh_endpoint _ -> Ok ()
+    | Physical_stage stage ->
+      let%bind () = validate_evidence ~snapshot ~observed in
+      validate_evidence ~snapshot ~observed:stage.action
+  in
+  (* An imported execution can describe a different chip or different recipe. A
+     catalog-backed fresh launch starts from this chip's own launch inputs. *)
+  let observed = if Option.is_some chip_target then None else for_target observed in
+  let remembered = for_target remembered in
+  match
+    if Option.is_some chip_target then None else for_target (advertised_selection intent)
+  with
   | Some selection -> Ok selection
   | None ->
-    let open Result.Let_syntax in
     let%bind snapshot =
       required snapshot ~none:"Discover ASIC capabilities first (press r to retry)"
     in
@@ -35,6 +64,7 @@ let resolve_intent ~intent ~remembered ~observed ~(snapshot : Asic.Snapshot.t op
           ~none:"No declared catalog default; choose explicit flow/profile inputs"
         |> Result.map ~f:(fun pair ->
           { Asic.Selection.flow = pair.flow
+          ; chip_target
           ; profile = pair.profile
           ; endpoint
           ; assignments = []
@@ -68,7 +98,8 @@ let%test_unit "fresh stage resolution captures exact inputs and rejects stale ch
     }
   in
   let selection : Asic.Selection.t =
-    { flow = "standard"
+    { chip_target = None
+    ; flow = "standard"
     ; profile = "balanced"
     ; endpoint = "synthesis"
     ; assignments = [ "CLOCK=9"; "opaque=value with spaces" ]
@@ -119,7 +150,8 @@ let%test_unit "fresh stage resolution captures exact inputs and rejects stale ch
 let%test_unit "fresh Timing intent preserves captured inputs and requires current catalog"
   =
   let observed : Asic.Selection.t =
-    { flow = "upgraded"
+    { chip_target = None
+    ; flow = "upgraded"
     ; profile = "balanced"
     ; endpoint = "signoff"
     ; assignments = [ "CLOCK=9" ]

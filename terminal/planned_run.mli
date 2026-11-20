@@ -92,6 +92,9 @@ val begin_launch : t -> key:string -> Asic.Preview.t -> t * launch_ticket
 
 val launch_receipt : t -> launch_ticket -> floor:int -> (unit, string) Result.t -> t
 val receive : t -> revision:int -> Asic.Snapshot.t -> t
+val snapshot : t -> Asic.Snapshot.t option
+val chip_epoch : t -> int
+val current_selection : t -> Asic.Selection.t -> bool
 val model : t -> model
 val launchable : t -> Asic.Preview.t -> bool
 val rows : model -> detail:bool -> row list

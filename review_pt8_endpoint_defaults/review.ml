@@ -25,7 +25,7 @@ let query ?remembered asic flow profile =
 ;;
 
 let selection : Asic.Selection.t =
-  { flow = "chosen"; profile = "one"; endpoint = "routing"; assignments = [ "Z=last"; "A=first"; "Z=again" ] }
+  { flow = "chosen"; profile = "one"; endpoint = "routing"; chip_target = None; assignments = [ "Z=last"; "A=first"; "Z=again" ] }
 ;;
 
 let accept host argument query =

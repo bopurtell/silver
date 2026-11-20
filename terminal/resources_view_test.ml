@@ -73,6 +73,136 @@ let text view snapshot =
   |> String.concat ~sep:"\n"
 ;;
 
+let%test_unit "decision table aligns Unicode cells and keeps verdict, decision and stage \
+               roles independent"
+  =
+  let view, snapshot = imported () in
+  let selected = "界é-data" in
+  let r = { (row selected) with reason = "budget_exhausted (macro=RAM, limit=1)" } in
+  let view =
+    { view with
+      index = Some { index with rows = [ r; row "x" ] }
+    ; selected = Some selected
+    }
+  in
+  List.iter [ 26; 80; 120 ] ~f:(fun width ->
+    let page = V.page_with_targets view ~filter:"" ~asic:snapshot ~width ~height:24 in
+    let header =
+      List.find_map_exn page ~f:(fun (target, row) ->
+        Option.some_if
+          (Option.is_none target
+           && String.is_substring (Evidence_style.text row) ~substring:"Decision")
+          row)
+    in
+    let start row token =
+      let line = Evidence_style.text row in
+      let i = String.substr_index_exn line ~pattern:token in
+      Bonsai_term.View.width (Bonsai_term.View.text (String.prefix line i))
+    in
+    let current =
+      List.find_map_exn page ~f:(function
+        | Some (`Resource id), row when String.equal selected id -> Some row
+        | _ -> None)
+    in
+    assert (start header "Decision" = start current "budget");
+    let has_role row token role =
+      List.exists row ~f:(fun span ->
+        Evidence_style.Role.equal span.Evidence_style.role role
+        && String.is_substring span.text ~substring:token)
+    in
+    assert (has_role current "budget" Pending);
+    assert (List.exists page ~f:(fun (_, line) -> has_role line "fail" Failed));
+    if width >= 65
+    then (
+      assert (start header "Synth" = start current "matched");
+      assert (has_role current "matched" Passed));
+    let alternate = V.contents ~width view ~filter:"" ~asic:snapshot in
+    assert (
+      List.exists alternate ~f:(fun line ->
+        String.equal (Evidence_style.text current) (Evidence_style.text line))))
+;;
+
+let%test_unit "contract and nested section metadata are readable; raw toggle performs no \
+               read"
+  =
+  let view, _ = imported () in
+  let contract =
+    {|{"kind":"single_port_ram","contract":{"list":[{"list":[{"atom":"width"},{"atom":"16"}]},{"list":[{"atom":"depth"},{"atom":"256"}]}]}}|}
+  in
+  let view =
+    { view with
+      mode = Detail
+    ; index = Some { index with rows = [ { (row "program") with contract } ] }
+    }
+  in
+  let value = {|{"data_end":{"pin":"A_ADDR[6]","slew":0.067}}|} in
+  let page : R.Detail.t =
+    { source_id = "source-a"
+    ; digest = "digest-a"
+    ; resource_id = "program"
+    ; section = "timing"
+    ; offset = 0
+    ; next_offset = 1
+    ; total = 1
+    ; items = [ { id = "1"; title = "timing 1"; fields = [ "path", value ] } ]
+    }
+  in
+  let snapshot = asic ~details:[ page ] (source (Coarse_run "/exact/capture")) in
+  let render t =
+    V.rows t ~filter:"" ~asic:snapshot ~width:100 ~height:55
+    |> List.map ~f:Evidence_style.text
+    |> String.concat ~sep:"\n"
+  in
+  let inventory = render view in
+  assert (String.is_substring inventory ~substring:"256 words × 16 bits");
+  assert (not (String.contains inventory '{'));
+  let view = { view with section = "timing" } in
+  let timing = render view in
+  assert (String.is_substring timing ~substring:"path / data end / pin: A_ADDR[6]");
+  assert (not (String.contains timing '{'));
+  let raw, op = V.input view ~filter:"" ~asic:snapshot Open in
+  assert (Option.is_none op && String.is_substring (render raw) ~substring:value);
+  let normal, op = V.input raw ~filter:"" ~asic:snapshot Open in
+  assert (Option.is_none op && String.equal timing (render normal))
+;;
+
+let%test_unit "production tile uses saved source chip rather than current planning chip" =
+  let module H = Workspace_host in
+  let definition =
+    Hardcaml_workbench_workspaces.Presets.find "resources" |> Option.value_exn
+  in
+  let host, data, find = Host_view.refinement_fixture definition in
+  let tile = find "resources" in
+  let run = Fs0_fixture.run_a in
+  let selected : Asic.Chip_target.t = { chip = "saved-chip"; variant = "SRAM" } in
+  let selection =
+    { (Fs0_fixture.fresh_intent "selected").selection with chip_target = Some selected }
+  in
+  let execution = { (Fs0_fixture.run run) with selection = Some selection } in
+  let render target =
+    let snap = Option.value_exn (asic (source target)) in
+    let asic =
+      Some
+        { snap with
+          runs = [ execution ]
+        ; chip_target = Some { chip = "plan-only"; variant = "other" }
+        }
+    in
+    let resources = V.select_target V.empty (Some target) in
+    let host = H.set_local host tile.id { (H.local host tile.id) with resources } in
+    Host_view.tile_view host { data with asic } tile ~width:100 ~height:24
+    |> Host_view.plain_text
+  in
+  let text = render (Run run) in
+  List.iter
+    [ "saved-chip / SRAM"; "Decision"; "exact mapping"; "Resource verdict: fail" ]
+    ~f:(fun substring -> assert (String.is_substring text ~substring));
+  let imported = render (Bundle "/some/bundle") in
+  assert (not (String.is_substring imported ~substring:"saved-chip"));
+  assert (String.is_substring imported ~substring:"Launch target: plan-only / other");
+  assert (not (String.is_substring imported ~substring:"Source chip / variant: plan-only"))
+;;
+
 let%test_unit "resource hit targets survive wrapping; headings never select a resource" =
   let view, snapshot = imported () in
   let page = V.page_with_targets view ~filter:"" ~asic:snapshot ~width:26 ~height:60 in
@@ -347,10 +477,11 @@ let%test_unit "all76 sources reachable through exact digest-bound pagination; by
   in
   assert (String.is_substring rendered ~substring:"opaque-75");
   let page = V.page_with_targets last ~filter:"" ~asic:snapshot ~width:80 ~height:24 in
-  assert (List.exists page ~f:(function
-    | Some (`Source "opaque-75"), line ->
-      String.is_prefix (Evidence_style.text line) ~prefix:"> "
-    | _ -> false));
+  assert (
+    List.exists page ~f:(function
+      | Some (`Source "opaque-75"), line ->
+        String.is_prefix (Evidence_style.text line) ~prefix:"> "
+      | _ -> false));
   let _, op = V.input view ~filter:"" ~asic:snapshot Open in
   (match op with
    | Some (Read_artifact { artifact_id; offset; limit; _ }) ->

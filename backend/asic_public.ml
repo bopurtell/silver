@@ -87,6 +87,43 @@ let envelope j contract version =
   j
 ;;
 
+let chip_catalog j =
+  require (integer (field "schema_version" j) = 1) "Unsupported chip catalog";
+  let name key obj =
+    let s = text (field key obj) in
+    require
+      (not (String.is_empty s) && String.length s <= 256
+       && String.for_all s ~f:(fun c -> Char.to_int c >= 32 && Char.to_int c <> 127))
+      "Invalid chip catalog text";
+    s
+  in
+  let choices key obj ~f ~id =
+    let xs = list (field key obj) in
+    require (not (List.is_empty xs) && List.length xs <= 1024) "Invalid chip catalog size";
+    let xs = List.map xs ~f in
+    require (not (List.contains_dup (List.map xs ~f:id) ~compare:String.compare))
+      "Duplicate chip catalog choice";
+    xs
+  in
+  let chips = choices "chips" j ~id:(fun (c : Asic.Chip.t) -> c.id) ~f:(fun c ->
+    let variants = choices "variants" c ~id:(fun (v : Asic.Variant.t) -> v.id)
+      ~f:(fun v -> { Asic.Variant.id = name "id" v; label = name "label" v }) in
+    let default_variant = name "default_variant" c in
+    require (List.exists variants ~f:(fun v -> String.equal v.id default_variant))
+      "Unknown default variant";
+    { Asic.Chip.id = name "id" c; label = name "label" c; default_variant; variants }) in
+  let chip = name "default_chip" j in
+  let default = List.find chips ~f:(fun c -> String.equal c.id chip)
+    |> Option.value_exn ~message:"Unknown default chip" in
+  chips, { Asic.Chip_target.chip; variant = default.default_variant }
+;;
+
+let has_target chips (target : Asic.Chip_target.t) =
+  List.exists chips ~f:(fun (c : Asic.Chip.t) ->
+    String.equal c.id target.chip
+    && List.exists c.variants ~f:(fun v -> String.equal v.id target.variant))
+;;
+
 let metadata j =
   let c = field "cli_contract" j in
   require
@@ -124,6 +161,19 @@ let validate_sram_selection ~metadata (selection : Asic.Selection.t) plan =
      || not (Poly.equal manifest_macros `Null || Poly.equal manifest_macros (`Assoc []))
   then (
     let unsupported detail = "Unsupported SRAM segmented execution: " ^ detail in
+    let contract = field "macro_contract" manifest in
+    if Poly.equal (field "schema_version" contract) (`Int 1) then (
+      require (Poly.equal (field "sram_synthesis1" (field "capabilities" (field "cli_contract" metadata))) (`Bool true))
+        (unsupported "provider does not advertise sram_synthesis1=true");
+      require (String.equal selection.endpoint "synthesis" &&
+               Poly.equal (field "execution" contract) (`String "synthesis_only") &&
+               Poly.equal (field "operation" manifest) (`String "Synthesis") &&
+               (match field "macros" contract with
+                | `List (_ :: _ as ms) -> List.for_all ms ~f:(fun m ->
+                    Poly.equal (field "module" m) (`String "RM_IHPSG13_1P_256x16_c2_bm_bist"))
+                | _ -> false))
+        (unsupported "requires fresh synthesis of registered stock SRAM instances"))
+    else (
     require
       (Poly.equal
          (field "sram_segmented1" (field "capabilities" (field "cli_contract" metadata)))
@@ -157,7 +207,6 @@ let validate_sram_selection ~metadata (selection : Asic.Selection.t) plan =
     require
       (List.mem (List.take canonical_stages 6) selection.endpoint ~equal:String.equal)
       (unsupported "only fresh prefixes through Timing are supported; macro Signoff/finalization are unsupported");
-    let contract = field "macro_contract" manifest in
     require
       (Poly.equal (field "schema_version" contract) (`Int 2)
        && Poly.equal (field "execution" contract) (`String "fresh_full")
@@ -171,7 +220,7 @@ let validate_sram_selection ~metadata (selection : Asic.Selection.t) plan =
            (`String "RM_IHPSG13_1P_256x16_c2_bm_bist")
          && Poly.equal (field "orientation" (field "physical_intent" macro)) (`String "R0")
        | _ -> false)
-      (unsupported "requires exactly one stock256x16 R0 macro");
+       (unsupported "requires exactly one stock256x16 R0 macro"));
     require
       (List.for_all
          [ "timing_intent"; "timing_native_coverage"; "timing_physical_qualification" ]
@@ -578,7 +627,7 @@ let observation_stages j =
     stages)
 ;;
 
-let stage_plan j =
+let stage_plan ?chip_target j =
   match field "stage_plan" j with
   | `Null -> observation_stages j
   | `Assoc _ as plan ->
@@ -615,6 +664,7 @@ let stage_plan j =
             | action ->
               Some
                 { Asic.Selection.flow = text (field "flow" action)
+                ; chip_target
                 ; profile = text (field "profile" action)
                 ; endpoint = text (field "endpoint" action)
                 ; assignments = List.map (list (field "assignments" action)) ~f:text
@@ -657,7 +707,7 @@ let inspection (r : Asic.Run.t) ~cursor j =
   let execution_file =
     Option.map (optional_text (field "execution_file" j)) ~f:absolute
   in
-  let stages = stage_plan j in
+  let stages = stage_plan ?chip_target:(Option.bind r.selection ~f:(fun s -> s.chip_target)) j in
   (* Inspect can race ahead of read-updates. Never attach its stage state to an older
      cursor, or retain the previous cursor's checklist. The next poll catches up. *)
   let stages = if integer (field "cursor" j) = cursor then stages else [] in

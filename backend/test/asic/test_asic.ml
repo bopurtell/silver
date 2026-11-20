@@ -25,7 +25,7 @@ let settled service root operation =
 ;;
 
 let selection profile : Asic.Selection.t =
-  { flow = "standard"; profile; endpoint = "synthesis"; assignments = [] }
+  { flow = "standard"; profile; endpoint = "synthesis"; assignments = []; chip_target = None }
 ;;
 
 let summary (snapshot : Asic.Snapshot.t) id =
@@ -801,7 +801,7 @@ let terminal_fixtures () =
     (Option.is_none (List.hd_exn invalid.metrics).value)
     "Fractional terminal cell count accepted";
   let physical : Asic.Selection.t =
-    { flow = "standard"; profile = "balanced"; endpoint = "signoff"; assignments = [] }
+    { flow = "standard"; profile = "balanced"; endpoint = "signoff"; assignments = []; chip_target = None }
   in
   let description =
     `Assoc
@@ -1765,6 +1765,7 @@ let stage_fixtures () =
             stage.action
             (Some
                { flow = "synthetic"
+               ; chip_target = None
                ; profile = "success"
                ; endpoint = "placement"
                ; assignments = [ "CLOCK_PERIOD=10" ]
@@ -2302,6 +2303,70 @@ let provider_discovery_fixture root =
   return ()
 ;;
 
+let chip_fixture root state_dir =
+  let path = Filename.concat root "chip-catalog" in
+  let service = Service.create ~state_dir:(state_dir ^ "-chips") in
+  let target chip variant = { Asic.Chip_target.chip; variant } in
+  let first = target "engine" "normal" and fast = target "engine" "fast" in
+  let fixture = {|{"schema_version":1,"default_chip":"engine","chips":[
+    {"id":"engine","label":"Engine","default_variant":"normal","variants":[
+    {"id":"normal","label":"Normal"},{"id":"fast","label":"Fast"}]},
+    {"id":"budget","label":"Budget","default_variant":"two","variants":[{"id":"two","label":"Two"}]}]}|} in
+  Monitor.protect ~finally:(fun () -> Core_unix.unlink path; Service.shutdown service) (fun () ->
+    Out_channel.write_all path ~data:fixture;
+    let%bind snap = settled service root Discover in
+    require (List.length snap.chips = 2 && Option.equal Asic.Chip_target.equal snap.chip_target (Some first))
+      "Catalog default not resolved";
+    let%bind snap = settled service root (Select_chip fast) in
+    let selected = { (selection "balanced") with chip_target = snap.chip_target } in
+    let%bind snap = settled service root (Plan selected) in
+    let preview = Option.value_exn snap.preview in
+    require (Asic.Selection.equal preview.selection selected)
+      "Preview lost selected target";
+    let%bind _ = settled service root (Describe selected.flow) in
+    let calls = In_channel.read_lines (Filename.concat root "calls")
+      |> List.map ~f:(fun line -> Public.list (Public.decode line) |> List.map ~f:Public.text) in
+    List.iter ["list"; "describe"; "plan"] ~f:(fun command ->
+      require (List.exists calls ~f:(fun args ->
+        List.is_prefix args ~prefix:["flow";command] ~equal:String.equal
+        && List.is_suffix args ~suffix:["--chip";fast.chip;"--variant";fast.variant] ~equal:String.equal))
+        ("Missing captured argv: " ^ command));
+    let%bind staged = handle service root
+      (Stage_fresh {selection=selected; elaboration_only=true; expected_plan_identity=None}) in
+    let intent = Option.value_exn staged.fresh_intent in
+    let%bind changed = settled service root (Select_chip (target "budget" "two")) in
+    require (Option.is_none changed.preview && Option.is_none changed.fresh_intent
+             && not (List.is_empty changed.flows) && Option.is_some changed.catalog_default
+             && Option.is_none changed.description_json)
+      "Changing target retained named flow state";
+    let reject op =
+      let%map r = Service.handle service ~root ~environment op in
+      require (Result.is_error r) "Stale or unavailable selection accepted" in
+    let%bind () = reject (Launch_fresh {key="stale"; intent_id=intent.id}) in
+    let%bind () = reject (Run {key="stale-preview"; preview}) in
+    let%bind () = reject (Plan selected) in
+    let%bind () = reject (Plan {selected with chip_target=changed.chip_target; flow="unknown"}) in
+    let%bind () = reject (Select_chip (target "engine" "unknown")) in
+    let restarted = Service.create ~state_dir:(state_dir ^ "-chips") in
+    let%bind () = Monitor.protect ~finally:(fun () -> Service.shutdown restarted) (fun () ->
+      let%bind cold = handle restarted root Get in
+      require (List.is_empty cold.flows && List.is_empty cold.chips
+               && Option.equal Asic.Chip_target.equal cold.chip_target changed.chip_target)
+        "Restart restored stale choices or lost the picker preference";
+      let%bind unavailable = Service.handle restarted ~root ~environment
+        (Run {key="cold";preview}) in
+      require (Result.is_error unavailable) "Cold launch accepted another chip's preview";
+      let%map discovered = settled restarted root Discover in
+      require (Option.equal Asic.Chip_target.equal discovered.chip_target changed.chip_target
+               && not (List.is_empty discovered.flows))
+        "Rediscovery replaced valid saved target with project default") in
+    Out_channel.write_all path ~data:{|{"schema_version":2}|};
+    let%map malformed = settled service root Discover in
+    require (List.exists malformed.operations ~f:(fun op ->
+      String.equal op.key "discover" && String.equal op.state "failed"))
+      "Malformed catalog silently downgraded to legacy")
+;;
+
 let main () =
   let%bind () = evidence_file_fixtures () in
   declared_clock_fixtures ();
@@ -2356,6 +2421,7 @@ let main () =
       root, state_dir)
   in
   let%bind () = provider_discovery_fixture root in
+  let%bind () = chip_fixture root state_dir in
   let%bind () = stage_service_fixtures root state_dir in
   let%bind () = execution_envelope_fixtures root state_dir in
   let%bind () = sram_workflow_fixtures root state_dir in
@@ -2534,6 +2600,8 @@ let main () =
               "Discovery did not recover coherently after failure")
       in
       let launch profile key =
+        let allocation_gate = Filename.concat root ("release-allocation-" ^ profile) in
+        Core_unix.mkfifo allocation_gate ~perm:0o600;
         let%bind planned = settled service root (Plan (selection profile)) in
         let preview = Option.value_exn planned.preview in
         let%bind reserved = handle service root (Run { key; preview }) in
@@ -2559,7 +2627,7 @@ let main () =
             let%bind () = Clock.after (Time_float.Span.of_sec 0.01) in
             allocation (tries - 1))
         in
-        let%bind early = allocation 40 in
+        let%bind early = allocation 1000 in
         let r : Asic.Run.t =
           List.find_exn early.runs ~f:(fun r ->
             String.equal r.Asic.Run.run.id ("stream-" ^ profile))
@@ -2571,6 +2639,9 @@ let main () =
              && Asic.Preview.equal l.preview preview
              && Option.equal String.equal l.run_id (Some r.run.id)))
           "Early allocation lost durable launch/run association";
+        let%bind () = In_thread.run (fun () ->
+          Out_channel.write_all allocation_gate ~data:"observed";
+          Core_unix.unlink allocation_gate) in
         let%bind () = Service.completion service in
         handle service root Get
       in

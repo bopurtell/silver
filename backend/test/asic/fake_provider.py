@@ -93,6 +93,9 @@ elif args == ['--version', '--json']:
         metadata['execution_envelope'] = dict(schema_version=1, profile='synthesis-total-tasks-v1',
             total_container_tasks=6, configured_executor_max_workers=6, reduced_usable_executor_concurrency=True)
     emit(metadata)
+elif args == ['chip', 'list', '--json'] and os.path.exists('chip-catalog'):
+    with open('chip-catalog') as src:
+        emit(json.load(src))
 elif args[:2] == ['flow', 'list']:
     if os.path.exists('fail-discovery'):
         sys.exit(1)
@@ -147,7 +150,12 @@ elif args[:1] == ['stages']:
         with open(os.path.join(attempt, 'done'), 'w') as out:
             out.write('terminal records published before failing exit')
         sys.exit(2)
-    time.sleep(0.6 if not os.path.exists('hold') else 30)
+    release = os.path.join(root, 'release-allocation-' + profile)
+    if os.path.exists(release):
+        with open(release) as gate:
+            gate.read()
+    else:
+        time.sleep(0.6 if not os.path.exists('hold') else 30)
     with open(os.path.join(attempt, 'done'), 'w') as out:
         out.write('done')
     if endpoint == 'timing':

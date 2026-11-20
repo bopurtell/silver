@@ -1484,7 +1484,8 @@ let%test_unit "horizontal stages wrap long duplicate labels without changing \
                identity/actions"
   =
   let action : Asic.Selection.t =
-    { flow = "flow"
+    { chip_target = None
+    ; flow = "flow"
     ; profile = "profile"
     ; endpoint = "exact-endpoint"
     ; assignments = [ "X=1" ]
@@ -1539,7 +1540,8 @@ let%test_unit "stage outcomes preserve request and observation distinctions" =
 let%test_unit "ASIC stage projection preserves every explicit status and full action" =
   let run = Fs0_fixture.run_a in
   let action : Asic.Selection.t =
-    { flow = "ordinary"
+    { chip_target = None
+    ; flow = "ordinary"
     ; profile = "default"
     ; endpoint = "route"
     ; assignments = [ "X=1" ]
@@ -1687,6 +1689,8 @@ let%test_unit "process completion is not stage evidence; mismatched and duplicat
   let asic : Asic.Snapshot.t =
     { configured = true
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None

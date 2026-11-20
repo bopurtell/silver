@@ -99,6 +99,9 @@ let assignments (selection : Preparation.Selection.t) =
 ;;
 
 let validate_selection (selection : Preparation.Selection.t) expected =
+  Option.iter selection.chip_target ~f:(fun target ->
+    List.iter [target.chip; target.variant] ~f:(fun id ->
+      require (not (String.is_empty id || String.contains id '\000')) "Invalid chip/variant"));
   List.iter [ selection.flow; selection.profile; selection.endpoint ] ~f:(fun s ->
     require
       (not (String.is_empty s || String.contains s '\000'))

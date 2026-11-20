@@ -12,7 +12,7 @@ let set j key value =
 
 let () =
   let selection : Asic.Selection.t =
-    { flow = "stock"; profile = "exact"; endpoint = "timing"; assignments = [] }
+    { flow = "stock"; profile = "exact"; endpoint = "timing"; assignments = []; chip_target = None }
   in
   let scope = Public.decode (In_channel.read_all "sram_scope.json") in
   let metadata ?(scope = scope) supported =
@@ -37,6 +37,16 @@ let () =
     Public.validate_sram_selection ~metadata selection (plan manifest)
   in
   let reject f = require (Result.is_error (Or_error.try_with f)) "Unsupported macro request admitted" in
+  let synth_metadata = `Assoc ["cli_contract", `Assoc ["capabilities", `Assoc ["sram_synthesis1", `Bool true]]] in
+  let synth_contract = `Assoc ["schema_version", `Int 1; "execution", `String "synthesis_only";
+                               "macros", `List [macro; macro]] in
+  let synth_manifest = `Assoc ["operation", `String "Synthesis"; "macro_contract", synth_contract] in
+  let synth_selection = {selection with endpoint="synthesis"} in
+  admit ~metadata:synth_metadata ~selection:synth_selection synth_manifest;
+  reject (fun () -> admit ~metadata:synth_metadata synth_manifest);
+  reject (fun () -> admit ~selection:synth_selection synth_manifest);
+  reject (fun () -> admit ~metadata:synth_metadata ~selection:synth_selection
+            (set synth_manifest "macro_contract" (set synth_contract "macros" (`List []))));
   List.iter (List.take Public.canonical_stages 6) ~f:(fun endpoint ->
     admit ~selection:{ selection with endpoint } manifest);
   List.iter [ `Null; `Bool false; `String "true" ] ~f:(fun value ->

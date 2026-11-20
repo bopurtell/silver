@@ -153,6 +153,8 @@ type command =
 
 type capture =
   { session : W.Session_id.t
+  ; chip_target : Asic.Chip_target.t option
+  ; chip_epoch : int
   ; revision : int
   ; workspace : W.Workspace_id.t
   }
@@ -962,7 +964,8 @@ let%test_unit "stage cursor uses stable IDs within exact runs and resets stale i
 
 let%test_unit "stage planning uses only advertised selection and never resumes a run" =
   let selection : Asic.Selection.t =
-    { flow = "ordinary-flow"
+    { chip_target = None
+    ; flow = "ordinary-flow"
     ; profile = "profile"
     ; endpoint = "through-placement"
     ; assignments = [ "parameter=value with spaces" ]
@@ -1317,7 +1320,13 @@ let%test_unit "cooperative simulation state is workspace-local and legacy isolat
 let capture t =
   match t.registry, active t with
   | Some s, Some w ->
-    Some { session = s.session_id; revision = s.revision; workspace = w.id }
+    Some
+      { session = s.session_id
+      ; revision = s.revision
+      ; workspace = w.id
+      ; chip_target = Launch_preferences.chip_target (Planned_run.snapshot t.planned_run)
+      ; chip_epoch = Planned_run.chip_epoch t.planned_run
+      }
   | _ -> None
 ;;
 
@@ -1444,7 +1453,12 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
     { view with case_id = Some "case"; older = true; logs = true }
   in
   let selection : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "signoff"; assignments = [] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "signoff"
+    ; assignments = []
+    }
   in
   let planned_run, plan_ticket =
     Planned_run.begin_plan
@@ -2094,6 +2108,8 @@ let current t (c : capture) =
   | None -> false
   | Some now ->
     W.Session_id.equal c.session now.session
+    && Option.equal Asic.Chip_target.equal c.chip_target now.chip_target
+    && c.chip_epoch = now.chip_epoch
     && c.revision = now.revision
     && W.Workspace_id.equal c.workspace now.workspace
 ;;
@@ -2158,11 +2174,9 @@ let asic_launch_commands t ~preview ~view_pending =
         | None -> title, Unavailable_launch
         | Some preview ->
           ( sprintf
-              "%s %s / %s → %s [%s]"
+              "%s %s [%s]"
               title
-              preview.selection.flow
-              preview.selection.profile
-              preview.selection.endpoint
+              (Launch_preferences.label preview.selection)
               preview.plan_identity
             |> Artifact_view.safe
           , Launch_asic (preview, view) )
@@ -2187,7 +2201,9 @@ let legacy_launch_commands t ~preview ~view_pending =
     let unavailable =
       Option.first_some
         t.stage_preparation
-        (if Option.exists t.preparation ~f:(fun s ->
+        (if not (Planned_run.current_selection t.planned_run staged.selection)
+         then Some "Chip/variant changed; plan the current launch target first"
+         else if Option.exists t.preparation ~f:(fun s ->
               Option.exists s.latest ~f:Preparation_view.active)
          then Some "Preparation already active; staging does not submit another producer"
          else None)
@@ -2201,7 +2217,7 @@ let legacy_launch_commands t ~preview ~view_pending =
         command
           ?unavailable
           id
-          (title ^ " [" ^ staged.id ^ "]")
+          (Artifact_view.safe (title ^ " — " ^ Launch_preferences.label staged.selection ^ " [" ^ staged.id ^ "]"))
           "launch staged preparation input plan"
           (Launch_preparation staged.id))
   | None
@@ -2236,14 +2252,17 @@ let launch_commands t ~preview ~view_pending =
              then Some "Another launch-and-view is awaiting allocation"
              else if Option.is_some t.stage_preparation
              then t.stage_preparation
+             else if not (Planned_run.current_selection t.planned_run intent.selection)
+             then Some "Chip/variant changed; plan the current launch target first"
              else if Planned_run.fresh_launchable t.planned_run intent
              then None
              else Some (Planned_run.model t.planned_run).message)
           id
-          (title
-           ^ " — "
-           ^ if intent.elaboration_only then "Elaboration" else intent.selection.endpoint
-          )
+          (Artifact_view.safe
+             (title
+              ^ " — "
+              ^ Launch_preferences.label intent.selection
+              ^ if intent.elaboration_only then " (Elaboration only)" else ""))
           "fresh source build emit workflow"
           (Launch_fresh_intent (intent, view)))
 ;;
@@ -2286,7 +2305,8 @@ let%test_unit "launch catalog captures exact ready preview and explains pending 
                stale states"
   =
   let selection : Asic.Selection.t =
-    { flow = "standard"
+    { chip_target = None
+    ; flow = "standard"
     ; profile = "balanced"
     ; endpoint = "routing"
     ; assignments = [ "CLK=9" ]
@@ -4985,6 +5005,9 @@ let input t event ~commands : t * effect =
                     Launch_preferences.Prompt.selection p.query ~flow ~profile
                     |> Or_error.ok_exn
                   in
+                  let selection =
+                    { selection with chip_target = p.capture.chip_target }
+                  in
                   (match argument with
                    | Preparation_inputs _ -> Select_preparation selection
                    | _ -> Asic (Asic.Operation.Plan selection)))
@@ -6043,7 +6066,12 @@ let%test_unit "planned-run browsing and scheme commands have no producer effect 
    | Activate -> ()
    | _ -> assert false);
   let selection : Asic.Selection.t =
-    { flow = "flow"; profile = "profile"; endpoint = "endpoint"; assignments = [] }
+    { chip_target = None
+    ; flow = "flow"
+    ; profile = "profile"
+    ; endpoint = "endpoint"
+    ; assignments = []
+    }
   in
   let planned_run, ticket = Planned_run.begin_plan host.planned_run selection in
   let pending =
@@ -6502,6 +6530,8 @@ let%test_unit "actual catalog and palette can cancel an allocated owned launch b
     ; resources = None
     ; workloads = None
     ; flows = []
+    ; chips = []
+    ; chip_target = None
     ; catalog_default = None
     ; description_json = None
     ; preview = None

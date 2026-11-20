@@ -49,6 +49,7 @@ let%test_unit "stages preserve every status and new-run action through wire code
                ; profile = "success"
                ; endpoint = "placement"
                ; assignments = [ "CLOCK_PERIOD=10" ]
+               ; chip_target = None
                })
       })
   in

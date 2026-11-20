@@ -104,6 +104,7 @@ let handle
   ~root
   ~project_key
   ~environment
+  ~target_is_current
   ~schedule
   ~wait
   ~get_job
@@ -135,6 +136,10 @@ let handle
   let%map handled =
     Monitor.try_with (fun () ->
       let%bind availability, config = load_config root in
+      let check_target (selection : Selection.t) =
+        if not (target_is_current selection.chip_target)
+        then rpc_error Conflict "Chip/variant selection changed; stage the current target"
+      in
       let validate selection expected_plan_identity =
         match
           Or_error.try_with (fun () ->
@@ -198,6 +203,7 @@ let handle
       match operation with
       | Operation.Get -> return (snapshot availability)
       | Stage { selection; expected_plan_identity } ->
+        check_target selection;
         validate selection expected_plan_identity;
         let config = require_config () in
         t.next_id <- t.next_id + 1;
@@ -261,6 +267,7 @@ let handle
            then rpc_error Conflict "Submission key already used for a different selection";
            return (snapshot ~requested_attempt:a.value.id availability)
          | None ->
+           if Option.is_none launching then check_target selection;
            (match
               List.find project.attempts ~f:(fun a ->
                 (not unique)

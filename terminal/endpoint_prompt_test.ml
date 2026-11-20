@@ -13,7 +13,12 @@ let () =
     Launch_preferences.endpoint_query ~remembered ~asic:(Some snapshot) ~flow ~profile
   in
   let selection : Asic.Selection.t =
-    { flow = "standard"; profile = "balanced"; endpoint = "synthesis"; assignments = [] }
+    { chip_target = None
+    ; flow = "standard"
+    ; profile = "balanced"
+    ; endpoint = "synthesis"
+    ; assignments = []
+    }
   in
   assert (String.equal (query "standard" "balanced") "synthesis");
   assert (

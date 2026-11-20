@@ -24,7 +24,7 @@ module Output = struct
   type t = { stdout : string; exit_code : int }
 end
 
-let run_with_status ?(accept_evidence_failure = false) ?(max_stdout_bytes = 16 * 1024 * 1024)
+let run_with_status ?(optional_command = false) ?(accept_evidence_failure = false) ?(max_stdout_bytes = 16 * 1024 * 1024)
   ?(max_record_bytes = 8 * 1024 * 1024) ?(stop_grace_seconds = 5.) ~seconds ~cancel ~on_process ~on_line invocation =
   if max_stdout_bytes < 1 || max_stdout_bytes > 16 * 1024 * 1024
      || max_record_bytes < 1 || max_record_bytes > 8 * 1024 * 1024
@@ -107,6 +107,8 @@ let run_with_status ?(accept_evidence_failure = false) ?(max_stdout_bytes = 16 *
           let%map status = waited in
           match status with
             | Ok () -> { Output.stdout = Buffer.contents stdout; exit_code = 0 }
+            | Error (`Exit_non_zero code) when optional_command ->
+              { Output.stdout = Buffer.contents stdout; exit_code = code }
             | Error (`Exit_non_zero 1) when accept_evidence_failure ->
               { Output.stdout = Buffer.contents stdout; exit_code = 1 }
           | Error _ ->

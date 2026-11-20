@@ -29,7 +29,7 @@ let%test_unit "captured workload queries retain every fence and ordered input" =
 
 let%test_unit "legacy ASIC snapshots omit the optional workloads field" =
   let snapshot : Asic.Snapshot.t =
-    { configured=false;flows=[];catalog_default=None;description_json=None;preview=None
+    { configured=false;flows=[];catalog_default=None;chips=[];chip_target=None;description_json=None;preview=None
     ; runs=[];operations=[];launches=[];summaries=[];finalizations=[];artifacts=[]
     ; artifact_pages=[];artifact_byte_pages=[];inspections=[];inspection_details=[]
     ; cache_error=None;fresh_intent=None;workflows=[];resources=None;workloads=None } in

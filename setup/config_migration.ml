@@ -66,11 +66,26 @@ let require_absent ~root ~filename =
   filesystem_result (fun () ->
     let legacy = Location.legacy_path ~root ~filename in
     let common = Location.preferred_path ~root ~filename in
-    if No_clobber.exists legacy
-    then Error (No_clobber.existing_error legacy)
-    else if No_clobber.exists common
-    then Error (No_clobber.existing_error common)
-    else Result.map (resolve ~root ~filename) ~f:(fun _ -> ()))
+    let occupied () =
+      if No_clobber.exists legacy
+      then Some legacy
+      else if No_clobber.exists common
+      then Some common
+      else None
+    in
+    let refuse path = Error (No_clobber.existing_error path) in
+    match occupied () with
+    | Some path -> refuse path
+    | None ->
+      (match resolve ~root ~filename with
+       | Ok None -> Ok ()
+       | Ok (Some config) -> refuse config.path
+       | Error error ->
+         (* A concurrent publisher can link the destination and unlink its temporary
+            name during resolution, changing ctime. Occupancy alone forbids init. *)
+         (match occupied () with
+          | Some path -> refuse path
+          | None -> Error error)))
 ;;
 
 let ensure_common_directory ~root =

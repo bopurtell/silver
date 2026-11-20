@@ -2372,6 +2372,7 @@ let simulation t (request : Simulation.Request.t) =
 
 let preparation_internal
   ?(unique = false)
+  ?(captured_target = false)
   ?is_cancelled
   t
   (request : Preparation.Request.t)
@@ -2551,6 +2552,15 @@ let preparation_internal
          ~root:session.root
          ~project_key:session.key
          ~environment:session.environment
+         ~target_is_current:(fun target ->
+           (* Workflow reservations and Launch_staged pin their inputs. For new
+              direct requests, fence the picker after asynchronous config IO. *)
+           captured_target
+           || not (Option.exists
+             (Asic_service.peek_snapshot t.asic_service ~root:session.root ~environment:session.environment)
+             ~f:(fun snapshot ->
+               Option.is_some snapshot.chip_target
+               && not (Option.equal Asic.Chip_target.equal snapshot.chip_target target))))
          ~schedule
          ~import
          ~get_job:(fun id -> Option.map (Hashtbl.find t.jobs id) ~f:(fun e -> e.job))
@@ -2581,6 +2591,7 @@ let asic t request =
        | Some session ->
          preparation_internal
            ~unique
+           ~captured_target:true
            ~is_cancelled:cancelled
            t
            { Preparation.Request.instance_id = t.instance_id

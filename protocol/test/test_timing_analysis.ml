@@ -91,6 +91,7 @@ let%test_unit "supplementary analysis negotiates populated fields for strict old
     { configured = true
     ; flows = []
     ; catalog_default = None
+    ; chips = []; chip_target = None
     ; description_json = None
     ; preview = None
     ; runs = []

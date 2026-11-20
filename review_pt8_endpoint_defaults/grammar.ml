@@ -47,7 +47,7 @@ let () =
   List.iter arguments ~f:(fun argument ->
     List.iter samples ~f:(fun token ->
       let expected : Asic.Selection.t =
-        { flow = "chosen"; profile = "profile"; endpoint = "routing"
+        { flow = "chosen"; profile = "profile"; endpoint = "routing"; chip_target = None
         ; assignments = [ "SYNTH_STRATEGY=DELAY 1"; "LITERAL=" ^ token; "last=unchanged" ] }
       in
       let query = Launch_preferences.endpoint_query ~remembered:(Some expected) ~asic:None

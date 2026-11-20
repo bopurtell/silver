@@ -6,7 +6,8 @@ module C = Stage_launch_commands
 
 let fixture () =
   let selection : Asic.Selection.t =
-    { flow = "selected"
+    { chip_target = None
+    ; flow = "selected"
     ; profile = "balanced"
     ; endpoint = "synthesis"
     ; assignments = [ "X=1" ]
@@ -131,6 +132,151 @@ let full_catalog host snapshot selection =
      @ H.launch_commands host ~preview:snapshot.preview ~view_pending:false)
 ;;
 
+let%test_unit "chip picker, Overview and launch all use the catalog target, never \
+               imported evidence"
+  =
+  let host, _, snapshot, evidence = fixture () in
+  let target : Asic.Chip_target.t = { chip = "tiny"; variant = "mac" } in
+  let other = { target with variant = "fifo" } in
+  let chips : Asic.Chip.t list =
+    [ { id = "tiny"
+      ; label = "Tiny"
+      ; default_variant = "fifo"
+      ; variants = [ { id = "fifo"; label = "FIFO" }; { id = "mac"; label = "MAC" } ]
+      }
+    ]
+  in
+  let s = { snapshot with chip_target = Some target; chips } in
+  let picker = C.chip_commands s in
+  assert (List.length picker = 2);
+  assert (
+    List.exists picker ~f:(fun c ->
+      match c.action with
+      | Asic (Select_chip chosen) -> Asic.Chip_target.equal chosen other
+      | _ -> false));
+  let selection =
+    C.resolve
+      ~asic:(Some s)
+      ~remembered:(Some evidence)
+      ~run:(Some Fs0_fixture.run_a)
+      (Fresh_endpoint "routing")
+    |> Result.ok_or_failwith
+  in
+  assert (Option.equal Asic.Chip_target.equal selection.chip_target (Some target));
+  assert (List.is_empty selection.assignments);
+  let preview = { (Option.value_exn snapshot.preview) with selection } in
+  let completed =
+    { (List.hd_exn snapshot.operations) with
+      key = List.hd_exn (Plain_rpc.keys (Plan selection) snapshot)
+    }
+  in
+  let ready_snapshot = { s with preview = Some preview; operations = [ completed ] } in
+  let ready = Planned_run.receive host.planned_run ~revision:2 ready_snapshot in
+  assert (Planned_run.launchable ready preview);
+  let stale =
+    Planned_run.receive ready ~revision:3 { ready_snapshot with chip_target = Some other }
+  in
+  assert (not (Planned_run.launchable stale preview));
+  assert (Planned_run.equal_status (Planned_run.model stale).status Stale);
+  let intent = { (Fs0_fixture.fresh_intent "captured") with selection } in
+  let s = { s with fresh_intent = Some intent } in
+  let before =
+    { host with
+      planned_run = Planned_run.receive host.planned_run ~revision:2 s
+    ; remembered_selection = Some selection
+    }
+  in
+  let registry = Option.value_exn before.registry in
+  let tile =
+    List.find_exn registry.tiles ~f:(fun t -> String.equal t.kind "planned-run")
+  in
+  let rows =
+    Host_view.planned_rows before tile ~width:64
+    |> List.map ~f:(fun r -> r.Planned_run.text)
+  in
+  List.iter
+    [ "Launch chip: tiny"
+    ; "Variant: mac"
+    ; "Flow: selected"
+    ; "Profile: balanced"
+    ; "Endpoint: routing"
+    ]
+    ~f:(fun text -> assert (List.mem rows text ~equal:String.equal));
+  let capture = H.capture before |> Option.value_exn in
+  let form =
+    { before with
+      palette =
+        Some
+          { capture
+          ; commands = []
+          ; query = "timing"
+          ; index = 0
+          ; argument = Some (H.Plan_endpoint ("selected", "balanced"))
+          }
+    }
+  in
+  (match snd (H.input form Enter ~commands:[]) with
+   | Execute (_, Asic (Plan typed)) ->
+     assert (Option.equal Asic.Chip_target.equal typed.chip_target (Some target))
+   | _ -> assert false);
+  let after =
+    { form with
+      planned_run =
+        Planned_run.receive
+          before.planned_run
+          ~revision:3
+          { s with chip_target = Some other }
+    }
+  in
+  assert (not (H.current after capture));
+  (match snd (H.input after Enter ~commands:[]) with
+   | No_effect -> ()
+   | _ -> assert false);
+  assert (not (Planned_run.fresh_launchable after.planned_run intent));
+  let restored =
+    { after with planned_run = Planned_run.receive after.planned_run ~revision:4 s }
+  in
+  assert (not (H.current restored capture));
+  (match snd (H.input restored Enter ~commands:[]) with
+   | No_effect -> ()
+   | _ -> assert false);
+  let pending, ticket =
+    Planned_run.begin_fresh before.planned_run ~elaboration_only:false selection
+  in
+  let switched =
+    Planned_run.receive
+      pending
+      ~revision:4
+      { s with chip_target = Some other; fresh_intent = None; preview = None }
+  in
+  let late = Planned_run.fresh_receipt switched ticket ~floor:5 (Ok intent) in
+  assert (Option.is_none (Planned_run.fresh_intent late));
+  assert (not (Planned_run.current_ticket late ticket));
+  let run = List.hd_exn snapshot.runs in
+  let stage =
+    { (List.hd_exn run.stages) with
+      action = Some { selection with chip_target = Some other }
+    }
+  in
+  assert (
+    Result.is_error
+      (C.resolve
+         ~asic:(Some s)
+         ~remembered:None
+         ~run:(Some run.run)
+         (Physical_stage stage)));
+  assert (
+    Result.is_ok
+      (C.resolve
+         ~asic:(Some s)
+         ~remembered:None
+         ~run:(Some run.run)
+         (Fresh_endpoint stage.id)));
+  List.iter
+    (H.launch_commands after ~preview:snapshot.preview ~view_pending:false)
+    ~f:(fun c -> assert (Option.is_some c.unavailable))
+;;
+
 let open_palette host commands =
   List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun host c ->
     fst (H.input host (Character c) ~commands))
@@ -147,6 +293,32 @@ let type_query host commands query =
     let palette = Option.value_exn next.palette in
     assert (palette.index = 0);
     next)
+;;
+
+let%test_unit "saved workspace with no Overview tiles can search and select a chip" =
+  let host, _, snapshot, selection = fixture () in
+  let registry = Option.value_exn host.registry in
+  let registry = { registry with tiles = [] } in
+  let host = { (H.receive host registry) with focus = None } in
+  let chip : Asic.Chip.t =
+    { id = "budget"
+    ; label = "Budget"
+    ; default_variant = "two_slot"
+    ; variants =
+        [ { id = "two_slot"; label = "Two SRAM" }
+        ; { id = "three_slot"; label = "Three SRAM" }
+        ]
+    }
+  in
+  let snapshot = { snapshot with chips = [ chip ] } in
+  let catalog =
+    H.contextual host (full_catalog host snapshot selection @ C.chip_commands snapshot)
+  in
+  let typed = type_query (open_palette host catalog) catalog "three_slot" in
+  match snd (H.input typed Enter ~commands:catalog) with
+  | Execute (_, Asic (Select_chip t)) ->
+    assert (String.equal t.chip "budget" && String.equal t.variant "three_slot")
+  | _ -> assert false
 ;;
 
 let%test_unit "incremental action-first launch queries rank actual catalog ahead of \

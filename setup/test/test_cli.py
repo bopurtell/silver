@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 
@@ -176,24 +177,35 @@ class InitializationTests(unittest.TestCase):
 
     def test_concurrent_initialization_has_exactly_one_winner(self):
         before = self.snapshot()
+        workers = 12
+        gate = threading.Barrier(workers, timeout=15)
 
         def run(index):
+            gate.wait()
             return subprocess.run(
                 [BINARY, "--root", str(self.root), "--project-name", f"project-{index}"],
                 capture_output=True, text=True, timeout=15,
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-            results = list(executor.map(run, range(12)))
-        winners = [i for i, result in enumerate(results) if result.returncode == 0]
-        self.assertEqual(len(winners), 1, [(r.returncode, r.stderr) for r in results])
-        actual = (self.root / COMMON_MANIFEST).read_text()
-        self.assertIn(f"(name project-{winners[0]})", actual)
-        for result in results:
-            if result.returncode != 0:
-                self.assertIn("refusing to overwrite", result.stderr)
-        self.assertEqual(self.snapshot(), {**before, str(COMMON_MANIFEST): actual.encode()})
-        self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".workbench"})
+        target = self.root / COMMON_MANIFEST
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            # Exercise both first-time directory creation and publication into an
+            # existing directory. Releasing the workers together increases contention.
+            for _ in range(4):
+                results = list(executor.map(run, range(workers)))
+                winners = [i for i, r in enumerate(results) if r.returncode == 0]
+                self.assertEqual(len(winners), 1, [(r.returncode, r.stderr) for r in results])
+                for i, result in enumerate(results):
+                    if i != winners[0]:
+                        self.assertIn("refusing to overwrite", result.stderr)
+                actual = target.read_bytes()
+                self.assertEqual(self.snapshot(), {**before, str(COMMON_MANIFEST): actual})
+                self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".workbench"})
+                self.assertEqual(list(target.parent.iterdir()), [target])
+                target.unlink()
+                preview = self.invoke("--root", self.root, "--project-name",
+                                      f"project-{winners[0]}", "--dry-run")
+                self.assertEqual(actual, preview.stdout.encode())
 
     def seed_configs(self):
         # Copy bytes, including future/invalid schemas, without changing provider identity.

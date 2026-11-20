@@ -32,7 +32,10 @@ Other explicit targets:
 - **Resources: Select workflow bundle …** — inspect that workflow's exact emitted
   bundle; failed/not-yet-emitted workflows have no successful empty inventory.
 - **Resources: Select execution … / Select finalization …** — retain the selected
-  execution/operation linkage. Unsupported named-stage realization is unavailable;
+  execution/operation linkage. For a completed named stock-SRAM synthesis-only
+  run, the provider checks the module and instance names in the verified
+  checkpoint netlist. A selected flop fallback does not gain an inferred cell
+  count. Unsupported named-stage realization is unavailable;
   aggregate checkpoint counts do not prove per-resource retention.
 - **Resources: Follow tile run binding** — follow the exact workspace selected or
   pinned run. Explicit imported sources remain independent of Main changes.
@@ -46,7 +49,7 @@ inventory. Likewise, implementation selection is not synthesis/physical retentio
 | Key/action | Behavior |
 | --- | --- |
 | `j` / `k`, arrows | Select resource/source rows; scroll in detail |
-| Enter | Open selected resource detail or authorized source bytes |
+| Enter | Open selected resource detail or authorized source bytes. In detail or provenance, toggle raw metadata for the current page. |
 | Esc | Return to the previous inspector view |
 | `/`, Ctrl-U | Filter resources; clear filter |
 | `g` | Geometry, physical component areas and gross-area ratios |
@@ -62,6 +65,23 @@ The palette also exposes inventory, synthesis and final detail sections. Timing
 items are byte-bounded: a page may contain fewer than the requested eight rows.
 Follow the returned next page rather than assuming a fixed offset. All 76 advertised
 sources in the SRAM capture are reachable through the paged catalog.
+
+The first two table columns identify the resource and **why its implementation
+was chosen**. Wider panes also show the implementation, synthesis and final
+observations, then the actual elaboration role. Enter opens the full values
+when a cell is clipped. A budget-exhausted fallback is a selection decision;
+the independently colored resource verdict and stage observations describe
+different evidence. The scope and source lines identify an explicit import or
+an exact run binding. A chip and variant appear when the bound run or workflow
+records them.
+An imported bundle instead shows its verified project name and hardware
+assignments when the provider supplies them. **Launch target** is shown
+separately: importing evidence does not change the design that Overview plans.
+
+Inventory detail summarizes RAM depth, width and contract attributes. Other
+sections label nested observations by field (for example, a path endpoint's
+pin and slew). Enter toggles the original provider metadata without requesting
+another page; `a` opens the separate catalog of retained source files.
 
 Source bytes are addressed by provider-authorized handles and validated hashes,
 not arbitrary client paths. Text is sanitized for display; byte offset/hash remain
