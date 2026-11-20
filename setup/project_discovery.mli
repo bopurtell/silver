@@ -29,6 +29,14 @@ module Discovered : sig
   [@@deriving sexp_of]
 end
 
+(** Like [discover], but reaching the filesystem root without a marker is a successful
+    search. [Missing] carries the canonical start and diagnostic. *)
+val search
+  :  ?start:string
+  -> explicit_flag:string
+  -> unit
+  -> ([ `Found of Discovered.t | `Missing of string * string ], string) Result.t
+
 (** Search upward from [start] (default: the current directory). The walk stops at the
     first match, at [/], or at the first ancestor whose marker cannot be inspected (for
     example a directory without search permission): an unreadable ancestor is reported

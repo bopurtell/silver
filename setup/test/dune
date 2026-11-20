@@ -9,7 +9,8 @@
   core
   core_unix
   core_unix.filename_unix
-  core_unix.sys_unix
+   core_unix.sys_unix
+   hardcaml_workbench_project_integration
   hardcaml_workbench_setup)
  (preprocess
   (pps ppx_jane))

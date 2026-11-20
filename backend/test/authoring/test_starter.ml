@@ -1,0 +1,222 @@
+open! Core
+open Hardcaml_workbench_protocol.Authoring
+module Engine = Hardcaml_workbench_backend.Authoring_service
+module Starter = Hardcaml_workbench_backend.Authoring_starter
+
+let ( / ) = Filename.concat
+
+let descriptor files =
+  {|{"schema_version":1,"provider":"hardcaml_asic","version":"0.1.0","files":[|}
+  ^ String.concat
+      ~sep:","
+      (List.map files ~f:(fun path -> sprintf {|{"path":"%s","contents":"test\n"}|} path))
+  ^ "]}"
+;;
+
+let () =
+  List.iter
+    [ []
+    ; [ "/abs" ]
+    ; [ "../up" ]
+    ; [ "x//y" ]
+    ; [ "." ]
+    ; [ "x/" ]
+    ; [ ".git/config" ]
+    ; [ "a"; "a" ]
+    ; [ "src/file"; "src" ]
+    ; [ "src"; "src/file" ]
+    ; List.init 129 ~f:Int.to_string
+    ]
+    ~f:(fun paths ->
+      assert (
+        Result.is_error (Result.try_with (fun () -> Starter.parse (descriptor paths)))));
+  List.iter
+    [ "{}"
+    ; {|{"schema_version":1,"schema_version":1,"files":[]}|}
+    ; String.substr_replace_all
+        (descriptor [ "ok" ])
+        ~pattern:"schema_version\":1"
+        ~with_:"schema_version\":2"
+    ; String.substr_replace_all
+        (descriptor [ "ok" ])
+        ~pattern:"\"contents\":"
+        ~with_:"\"path\":\"hidden\",\"contents\":"
+    ; String.make 10000 '['
+    ; String.make (Starter.max_output + 1) ' '
+    ]
+    ~f:(fun text ->
+      assert (Result.is_error (Result.try_with (fun () -> Starter.parse text))));
+  let root = Filename_unix.temp_dir "wb-starter" "" |> Filename_unix.realpath in
+  Exn.protect
+    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
+    ~f:(fun () ->
+      let real = Sys.getenv "WB051_TEST_RENDERER" in
+      let exe = root / Starter.program in
+      let install script =
+        Out_channel.write_all exe ~data:("#!/bin/sh\n" ^ script);
+        Core_unix.chmod exe ~perm:0o700
+      in
+      (* This test process is single-domain. Install the controlled executable in a
+         private PATH, exercising production argv/spawning/cleanup. *)
+      (Core_unix.putenv [@alert "-unsafe_multidomain"])
+        ~key:"PATH"
+        ~data:(root ^ ":" ^ Sys.getenv_exn "PATH");
+      let run = Engine.handle (Engine.create ~permitted_roots:[ root ]) in
+      let op ?(name = "my-chip") path : Request.t =
+        Preview
+          { target = { destination = path; project = None; object_id = None }
+          ; recipe = starter_recipe
+          ; name
+          }
+      in
+      let fail k = function
+        | Response.Failed { kind; created_files = []; _ } when Failure.equal_kind k kind
+          -> ()
+        | r -> raise_s [%sexp (r : Response.t)]
+      in
+      let target = root / "project" in
+      Core_unix.mkdir target;
+      let files =
+        [ "dune-project"; "src/chip.ml"; "src/tests/test_chip.ml"; "src/dune" ]
+      in
+      let fixture () =
+        install
+          ("[ \"$#:$1:$2:$3\" = '3:render:--name:my-chip' ] || exit 2\n"
+           ^ "cat <<'END'\n"
+           ^ descriptor files
+           ^ "\nEND\n")
+      in
+      fixture ();
+      List.iter
+        [ "A"; "aB"; "1demo"; ""; String.make 65 'a' ]
+        ~f:(fun name -> fail Invalid_operation (run (op ~name target)));
+      let preview path =
+        match run (op path) with
+        | Previewed p ->
+          assert (String.equal p.provider "hardcaml_asic");
+          assert (String.equal p.version "0.1.0");
+          p
+        | r -> raise_s [%sexp (r : Response.t)]
+      in
+      let apply (p : Preview.t) = run (Apply { preview_id = p.preview_id }) in
+      let verify dest (p : Preview.t) =
+        (match apply p with
+         | Applied { created_files; registration = Not_requested } ->
+           assert (List.equal String.equal created_files p.new_files)
+         | r -> raise_s [%sexp (r : Response.t)]);
+        List.iter p.files ~f:(fun file ->
+          assert (String.equal (In_channel.read_all (dest / file.path)) file.contents))
+      in
+      let frozen = preview target in
+      assert (List.equal String.equal files frozen.new_files);
+      assert (List.is_empty (Sys_unix.ls_dir target));
+      let absent = root / "new" / "nested" in
+      let fresh = preview absent in
+      let stale = preview target in
+      install "echo 'test render error' >&2\nexit 2";
+      fail Provider_failure (run (op absent));
+      assert (not (Sys_unix.file_exists_exn (root / "new")));
+      install "yes X | head -c 300000";
+      fail Provider_failure (run (op absent));
+      install "echo '{}'";
+      fail Provider_failure (run (op absent));
+      Core_unix.unlink exe;
+      verify target frozen;
+      verify absent fresh;
+      fail Stale_preview (apply stale);
+      let existing root =
+        run
+          (Preview
+             { target = { destination = root; project = None; object_id = None }
+             ; recipe = add_to_project_recipe
+             ; name = "my-chip"
+             })
+      in
+      let expect_preview = function
+        | Response.Previewed p -> p
+        | r -> raise_s [%sexp (r : Response.t)]
+      in
+      let dir = root / "existing" in
+      Core_unix.mkdir dir;
+      fail Destination_denied (existing dir);
+      Out_channel.write_all (dir / "dune-project") ~data:"(lang dune 3.17)\n";
+      Core_unix.mkdir (dir / ".workbench");
+      let write rel = Out_channel.write_all (dir / rel) ~data:"preserve\n" in
+      write "source.ml";
+      write ".workbench/other.sexp";
+      let install_existing paths =
+        install
+          ("[ \"$1\" = render-existing ] || exit 2\ncat <<'END'\n"
+           ^ descriptor paths
+           ^ "\nEND\n")
+      in
+      install_existing [ "dune-project" ];
+      fail Provider_failure (existing dir);
+      install_existing
+        [ "asic_my-chip/chip.ml"; "asic_my-chip/project.ml"; "asic_my-chip/dune" ];
+      let p = expect_preview (existing dir) in
+      let config = ".workbench/hardcaml-workbench-asic.sexp" in
+      write config;
+      fail Stale_preview (apply p);
+      assert (not (Sys_unix.file_exists_exn (dir / "asic_my-chip")));
+      fail Destination_denied (existing dir);
+      Core_unix.unlink (dir / config);
+      write "hardcaml-workbench-preparation.sexp";
+      fail Destination_denied (existing dir);
+      Core_unix.unlink (dir / "hardcaml-workbench-preparation.sexp");
+      Core_unix.symlink ~target ~link_name:(dir / "asic_my-chip");
+      fail Destination_denied (existing dir);
+      Core_unix.unlink (dir / "asic_my-chip");
+      write "hardcaml-asic-targets.json";
+      let p = expect_preview (existing dir) in
+      assert (
+        String.is_substring
+          (Option.value_exn p.registration).snippet
+          ~substring:"asic_my-chip/project.exe");
+      (match apply p with
+       | Applied { registration = Skipped { path; _ }; _ } ->
+         assert (String.equal path "hardcaml-asic-targets.json")
+       | r -> raise_s [%sexp (r : Response.t)]);
+      List.iter
+        [ "source.ml"; ".workbench/other.sexp"; "hardcaml-asic-targets.json" ]
+        ~f:(fun path ->
+          assert (String.equal (In_channel.read_all (dir / path)) "preserve\n"));
+      assert (
+        String.equal (In_channel.read_all (dir / "dune-project")) "(lang dune 3.17)\n");
+      fail Destination_denied (existing dir);
+      Core_unix.unlink exe;
+      Option.iter real ~f:(fun renderer ->
+        Core_unix.symlink ~target:renderer ~link_name:exe;
+        let dest = root / "actual" in
+        let p = preview dest in
+        assert (List.mem p.new_files "dune-project" ~equal:String.equal);
+        assert (List.mem p.new_files "chip.ml" ~equal:String.equal);
+        verify dest p;
+        let p = expect_preview (existing dest) in
+        (match apply p with
+         | Applied { registration = Registered path; _ } ->
+           assert (String.equal path "hardcaml-asic-targets.json")
+         | r -> raise_s [%sexp (r : Response.t)]);
+        let module I = Hardcaml_workbench_project_integration in
+        let load filename =
+          (I.Config_location.resolve ~root:dest ~filename ~max_bytes:65536
+           |> Or_error.ok_exn
+           |> Option.value_exn)
+            .contents
+        in
+        let prep =
+          I.Preparation_config.parse_string (load I.Preparation_config.filename)
+          |> Or_error.ok_exn
+        in
+        match
+          I.Asic_config.parse_project (load I.Asic_config.filename) |> Or_error.ok_exn
+        with
+        | `Explicit _ -> assert false
+        | `Discover resolve ->
+          let config = resolve "/bin/provider" in
+          assert (
+            String.equal
+              (I.Preparation_config.source_executable prep ~root:dest)
+              config.project_executable);
+          assert (Sys_unix.file_exists_exn (dest / "asic_my-chip/project.ml"))))
+;;

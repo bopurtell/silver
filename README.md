@@ -59,6 +59,19 @@ you leave. Use `silver --project-root /path/to/project` to select a different
 project. Sessions for the same checkout reuse state under
 `${XDG_STATE_HOME:-$HOME/.local/state}/silver/projects`; only one standalone
 session can own that project's state at a time.
+
+Outside a Dune project, interactive local `silver` opens with a floating project
+setup dialog. Create an ASIC starter in the empty directory, choose a new
+directory beneath it, or open an existing Dune project. Review the files before
+applying. Escape dismisses setup without creating anything or quitting Silver.
+
+Inside an existing, unconfigured Dune project, open the command palette
+(**Space c c**) and choose **Set up project…**. **Add ASIC starter…** adds design
+files to this project and keeps its `dune-project` and existing sources.
+**Import existing ASIC design…** connects an already-built design executable by
+reference. Creating or adding a starter requires `hardcaml-asic-starter` on
+`PATH`; importing a design does not. None of these actions launches EDA.
+
 Standalone command-line submissions (`--plain --action`, `--refresh-integration`
 and `--asic-operation`) wait for the operation; use `--connect` to submit
 work that should outlive the client.

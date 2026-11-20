@@ -63,7 +63,7 @@ let canonical_start start =
          (Error.to_string_hum error))
 ;;
 
-let discover ?start ~explicit_flag () =
+let search ?start ~explicit_flag () =
   let%bind.Result start =
     canonical_start start
     |> Result.map_error ~f:(fun message ->
@@ -95,10 +95,11 @@ let discover ?start ~explicit_flag () =
              explicit_flag)
       | Ok `Regular ->
         Ok
-          { Discovered.start
-          ; root = directory
-          ; enclosing = enclosing_root directory ~levels
-          }
+          (`Found
+            { Discovered.start
+            ; root = directory
+            ; enclosing = enclosing_root directory ~levels
+            })
       | Ok ((`Absent | `Not_regular) as state) ->
         let ignored =
           match state with
@@ -117,19 +118,28 @@ let discover ?start ~explicit_flag () =
                  marker
                  (String.concat ~sep:", " paths)
            in
-           Error
-             (sprintf
-                "no Dune project found: neither %s nor any of its %d ancestor \
-                 directories up to / contains a regular %s file%s. A directory with only \
-                 a dune file, or a VCS root, is not a project root. Run from inside a \
-                 Dune project or pass %s DIR"
-                start
-                levels
-                marker
-                ignored
-                explicit_flag)))
+           Ok
+             (`Missing
+               ( start
+               , sprintf
+                   "no Dune project found: neither %s nor any of its %d ancestor \
+                    directories up to / contains a regular %s file%s. A directory with \
+                    only a dune file, or a VCS root, is not a project root. Run from \
+                    inside a Dune project or pass %s DIR"
+                   start
+                   levels
+                   marker
+                   ignored
+                   explicit_flag ))))
   in
   walk start ~levels:0 ~ignored:[]
+;;
+
+let discover ?start ~explicit_flag () =
+  let%bind.Result result = search ?start ~explicit_flag () in
+  match result with
+  | `Found root -> Ok root
+  | `Missing (_, diagnostic) -> Error diagnostic
 ;;
 
 let describe (discovered : Discovered.t) ~explicit_flag =

@@ -239,14 +239,16 @@ let set_event_sink t sink = t.event_sink <- sink
 
 let check_authoring_project t (operation : Authoring.Request.t) =
   match operation with
-  | Preview { target = { project = Some project; destination; _ }; _ } ->
+  | Preview { target = { project = Some project; destination; _ }; recipe; _ } ->
     (match Hashtbl.find t.projects project with
      | None -> error Not_found "unknown authoring project"
      | Some session ->
        (* The recipe host independently rejects traversal and symlink components. *)
        let root = session.root in
        let prefix = if String.equal root "/" then "/" else root ^ "/" in
-       if String.equal destination root || String.is_prefix destination ~prefix
+        if String.equal destination root
+           || (not (String.equal recipe Authoring.add_to_project_recipe)
+               && String.is_prefix destination ~prefix)
        then Ok ()
        else error Invalid_request "destination is outside the selected project")
   | Preview _ | Apply _ | Cancel _ -> Ok ()

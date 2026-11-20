@@ -1,4 +1,4 @@
-(test
- (name test_authoring)
+(tests
+ (names test_authoring test_starter)
  (libraries core core_unix hardcaml_workbench_backend hardcaml_workbench_protocol)
  (preprocess (pps ppx_jane)))

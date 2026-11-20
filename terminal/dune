@@ -172,7 +172,7 @@
 
 (executable
  (name main)
- (modules main)
+ (modules main startup_entry)
  (public_name silver)
  (package hardcaml_workbench)
  (libraries
@@ -184,6 +184,7 @@
   core
   core_unix.command_unix
   hardcaml_workbench_native_http
+  hardcaml_workbench_backend
   hardcaml_workbench_protocol
   hardcaml_workbench_setup
   notty-community
@@ -192,6 +193,19 @@
   (pps ppx_jane bonsai.ppx_bonsai))
  (lint
   (pps ppx_js_style)))
+
+; PTY drives the actual silver argv[0] launch path with a controlled renderer.
+(rule
+ (alias runtest)
+ (deps test_startup_entry_pty.py ../test/support/__init__.py
+  ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_startup_entry_pty.py} %{exe:main.exe})))
+
+(rule
+ (alias runtest)
+ (deps test_asic_adoption_pty.py ../test/support/__init__.py
+       ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_asic_adoption_pty.py} %{exe:main.exe})))
 
 ; Real native terminal composition with a controlled JSON/VCD producer. Opt-in:
 ; no runtest edge, nested builds, hardware simulator or external fixture inputs.

@@ -61,6 +61,12 @@ type action =
   | Test
   | Cancel of Job_id.t
   | Refresh_integration
+  | Setup_project
+  | Setup_asic
+  | Name_starter
+  | Preview_starter of string
+  | Finish_starter of [ `Apply | `Cancel ] * Authoring.Preview.t
+  | Adopt_asic of string
   | Generate_rtl of Target_id.t * Configuration_id.t
   | Inspect_artifact
   | Inspect_hierarchy
@@ -170,6 +176,11 @@ type argument =
   | Preparation_inputs of string * string
   | Finalization_attempt of Run_ref.t
   | Resource_path of bool
+  | Design_executable
+  | Starter_name
+  | Starter_wait of unit ref
+  | Starter_preview of Authoring.Preview.t
+  | Starter_result of string list
   | Workload_path
   | Workload_bundle of bool * Workloads_view.capture_token
   | Acceptance of Run_ref.t * string * string
@@ -1170,7 +1181,8 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-      | Some { argument = Some (Simulation_selection _); _ } -> t.notice
+      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name); _ } ->
+        t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
            Its current progress/failure must survive those polls until the user clears it
@@ -4610,6 +4622,18 @@ let ranked_matches p =
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
 
+let starter_preview_lines (p : Authoring.Preview.t) =
+  [ "Recipe: " ^ p.operation.recipe
+  ; "Provider: " ^ p.provider ^ " " ^ p.version
+  ; "Name: " ^ p.operation.name
+  ; "Destination: " ^ p.operation.target.destination
+  ; "New files:"
+  ]
+  @ p.new_files
+  @ Option.value_map p.registration ~default:[] ~f:(fun edit ->
+    ("Proposed registration: " ^ edit.path) :: String.split_lines edit.snippet)
+;;
+
 (* Edits start a new search and follow its best result. Arrow/Tab choices remain selected
    until the next edit; an unchanged query does not undo navigation. *)
 let palette_query p query =
@@ -4733,6 +4757,8 @@ let finalization_form t =
     | Some
         ( Finalization_attempt _
         | Resource_path _
+        | Design_executable
+        | Starter_name
         | Workload_path
         | Workload_bundle _
         | Acceptance _
@@ -5115,14 +5141,28 @@ let input t event ~commands : t * effect =
   | _ ->
     (match t.palette with
      | Some p ->
-       (match event with
+       (match p.argument, event with
+        | Some (Starter_preview _), Character 'a' when not (current t p.capture) ->
+          { t with palette = None; notice = "Project changed; request a new preview" }, No_effect
+        | Some (Starter_preview preview), (Character 'a' | Escape) ->
+          let decision = if Poly.equal event Escape then `Cancel else `Apply in
+          { t with palette = None }, Execute (p.capture, Finish_starter (decision, preview))
+        | Some (Starter_preview _ | Starter_result _), (Next | Focus | Previous | Focus_previous) ->
+          let delta = match event with Next | Focus -> 1 | _ -> -1 in
+          { t with palette = Some { p with index = Int.max 0 (p.index + delta) } }, No_effect
+        | Some (Starter_wait _ | Starter_result _), Escape ->
+          { t with palette = None }, No_effect
+        | Some (Starter_result _), Enter -> { t with palette = None }, No_effect
+        | Some (Starter_wait _ | Starter_preview _ | Starter_result _), _ -> t, No_effect
+        | _, _ -> match event with
         | Clear_filter -> { t with palette = Some (palette_query p "") }, No_effect
         | Escape -> { t with palette = None; prefix = 0 }, No_effect
         | Character _
           when match p.argument with
                | Some
                    ( Finalization_attempt _
-                   | Resource_path _
+                    | Resource_path _
+                    | Design_executable | Starter_name | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
@@ -5163,7 +5203,7 @@ let input t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                         | Simulation_selection _ -> true
+                         | Simulation_selection _ | Design_executable | Starter_name -> true
                          | _ -> false))
           then
             ( { t with
@@ -5173,7 +5213,8 @@ let input t event ~commands : t * effect =
           else if match p.argument with
                   | Some
                       ( Finalization_attempt _
-                      | Resource_path _
+                       | Resource_path _
+                       | Design_executable | Starter_name | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
@@ -5187,7 +5228,13 @@ let input t event ~commands : t * effect =
             let operation =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
-                | Resource_path bundle -> Resource_import_path (bundle, p.query)
+                 | Resource_path bundle -> Resource_import_path (bundle, p.query)
+                 | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
+                 | Starter_name -> Preview_starter p.query
+                 | Design_executable ->
+                   if String.is_empty (String.strip p.query)
+                   then failwith "Enter an existing ASIC design executable";
+                   Adopt_asic p.query
                 | Workload_path -> Workload_result (p.query, None)
                 | Workload_bundle (left, generation) ->
                   Workload_input (Workloads_view.Capture (left, p.query, generation))
@@ -5913,6 +5960,45 @@ let%test_unit "launch palette retains captured subset across model refresh and f
    | _ -> assert false);
   assert (List.is_empty (simulation_log_commands tile));
   assert (List.length (simulation_log_commands { tile with kind = "simulation" }) = 1)
+;;
+
+let%test_unit "ASIC design path can be cancelled or submitted literally, never launched" =
+  let host = receive empty (W.initial ~session_id:(W.Session_id.of_string "adoption")) in
+  let capture = Option.value_exn (capture host) in
+  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0;
+                                         argument = Some Design_executable } } in
+  let path = "_build/chip (A)/main.exe" in
+  let host, _ = input host (Text path) ~commands:[] in
+  (match input host Escape ~commands:[] with
+   | { palette = None; _ }, No_effect -> ()
+   | _ -> assert false);
+  match input host Enter ~commands:[] with
+  | { palette = None; _ }, Execute (_, Adopt_asic executable) ->
+    [%test_eq: string] executable path
+  | _ -> assert false
+;;
+
+let%test_unit "bound starter preview requires explicit apply, cancel keeps receipt identity" =
+  let host = receive empty (W.initial ~session_id:(W.Session_id.of_string "setup")) in
+  let capture = Option.value_exn (capture host) in
+  let preview : Authoring.Preview.t =
+    { preview_id = "sealed"
+    ; operation = { recipe = Authoring.add_to_project_recipe; name = "demo"
+                  ; target = { destination = "/project"; project = Some (Project_id.of_string "project"); object_id = None } }
+    ; new_files = [ "asic_demo/project.ml" ]; provider = "fixture"; version = "1"
+    ; files = []; registration = None
+    }
+  in
+  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0;
+                                         argument = Some (Starter_preview preview) } } in
+  (match input host Enter ~commands:[] with
+   | { palette = Some _; _ }, No_effect -> ()
+   | _ -> assert false);
+  List.iter [ Escape, `Cancel; Character 'a', `Apply ] ~f:(fun (key, expected) ->
+    match input host key ~commands:[] with
+    | { palette = None; _ }, Execute (_, Finish_starter (decision, receipt)) ->
+      assert (Poly.equal decision expected && String.equal receipt.preview_id "sealed")
+    | _ -> assert false)
 ;;
 
 let%test_unit "simulation palette paste captures cases without launching or losing \

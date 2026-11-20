@@ -3929,6 +3929,11 @@ let render_palette host dimensions background =
         ^ " — exact absolute directory; Enter reads; no run allocation"
       | Some H.Workload_path ->
         "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
+      | Some H.Design_executable -> "IMPORT EXISTING ASIC DESIGN — existing project executable"
+      | Some H.Starter_name -> "ADD ASIC STARTER — enter starter name"
+      | Some (H.Starter_wait _) -> "ASIC STARTER — waiting for authoring service · Esc dismisses"
+      | Some (H.Starter_preview _) -> "ASIC STARTER PREVIEW · a applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_result _) -> "ASIC STARTER RESULT · Enter/Esc closes · ↑/↓ scroll"
       | Some (H.Workload_bundle (left, _)) ->
         (if left then "CAPTURE A" else "CAPTURE B")
         ^ " — exact absolute verified bundle directory; source digest stays frozen"
@@ -3940,11 +3945,13 @@ let render_palette host dimensions background =
         "FINALIZE AND ACCEPT " ^ run_label run ^ " — Enter submits; Esc closes"
       | Some (H.Simulation_selection _) ->
         "SIMULATION LAUNCH FORM — explicit inputs; Enter accepts each field"
+      | None when List.exists p.commands ~f:(fun c -> String.equal c.id "setup.add") ->
+        "SET UP PROJECT — choose how to configure this project"
       | None -> "COMMAND PALETTE · captured target"
     in
     let query =
       match p.argument with
-      | Some (H.Simulation_selection _ | H.Acceptance _) ->
+      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name) ->
         let input =
           "> "
           ^ p.query
@@ -3965,6 +3972,22 @@ let render_palette host dimensions background =
     in
     let help =
       match p.argument with
+      | Some H.Starter_name -> [ "Enter previews new files in the open project. Esc cancels." ]
+      | Some (H.Starter_preview _ | H.Starter_result _) ->
+        let rows =
+          match p.argument with
+          | Some (H.Starter_preview preview) -> H.starter_preview_lines preview
+          | Some (H.Starter_result rows) -> rows
+          | _ -> assert false
+        in
+        let rows = List.concat_map rows ~f:(wrap_cells ~width) in
+        List.drop rows (Int.min p.index (Int.max 0 (List.length rows - 1)))
+      | Some H.Design_executable ->
+        [ "Path to the built design CLI (absolute or relative to the open project)."
+        ; "Enter writes .workbench/hardcaml-workbench-asic.sexp. Esc cancels."
+        ; "Uses _flow_tools and _flow_results/workbench/asic under the project root."
+        ; "No build or EDA runs. Reopen with a fresh daemon to discover flows."
+        ] |> List.concat_map ~f:(wrap_cells ~width)
       | Some (H.Simulation_selection (_, _, _, form)) ->
         Simulation_view.Form.help form |> List.concat_map ~f:(wrap_cells ~width)
       | Some (H.Acceptance _) ->
@@ -3976,7 +3999,9 @@ let render_palette host dimensions background =
       | _ -> []
     in
     let prompt =
-      if List.is_empty query
+      if (match p.argument with Some (H.Starter_wait _ | H.Starter_preview _ | H.Starter_result _) -> true | _ -> false)
+      then []
+      else if List.is_empty query
       then
         [ Palette_view.query
             ~attrs:(Role.attrs appearance Surface)
@@ -4028,6 +4053,8 @@ let render_palette host dimensions background =
     let footer =
       if not (String.is_empty host.notice)
       then host.notice
+      else if (match p.argument with Some (H.Starter_wait _ | H.Starter_preview _ | H.Starter_result _) -> true | _ -> false)
+      then heading
       else if Option.is_some p.argument
       then "Enter accepts input · Esc return · Ctrl-BS/Ctrl-W word · Ctrl-C exits"
       else

@@ -1,6 +1,7 @@
 (library
  (name hardcaml_workbench_setup)
  (modules
+  asic_adoption
   config_migration
   initialization
   no_clobber

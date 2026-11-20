@@ -93,6 +93,8 @@ type waveform_runtime =
 
 type session =
   { requested_endpoint : string option
+  ; local_project_files : bool
+  ; mutable adopted_root : string option
   ; project_root : string option
   ; environment_selection : V1.Environment_selection.t
   ; environment_label : string
@@ -287,6 +289,7 @@ let load_state ~endpoint ~project_root ~environment_selection ~diagnostics =
 ;;
 
 let create_session
+  ~local_project_files
   ~endpoint
   ~project_root
   ~environment_selection
@@ -303,6 +306,8 @@ let create_session
   Result.map loaded ~f:(fun (client, hello, opened, snapshot) ->
     let session =
       { requested_endpoint = endpoint
+      ; local_project_files
+      ; adopted_root = None
       ; project_root
       ; environment_selection
       ; environment_label
@@ -389,6 +394,16 @@ let project_jobs session =
         Project_id.equal job.project opened.project.id)
   in
   List.sort jobs ~compare:(fun a b -> Timestamp.compare b.created_at a.created_at)
+;;
+
+let adopted_here session =
+  Option.exists session.opened ~f:(fun opened ->
+    Option.exists session.adopted_root ~f:(fun root ->
+      String.equal root (Project_root.to_absolute_path opened.project.root)))
+;;
+
+let adoption_complete =
+  "ASIC design configured. Reopen with a fresh daemon to discover flows."
 ;;
 
 let current_project session =
@@ -4116,15 +4131,22 @@ let host_data session : Host_view.data =
       Presentation.empty_log_notice ~job_state ~fetch:state.fetch |> Option.to_list)
   in
   let run_lines = Host_view.run_lines session.asic in
+  let setup_hint =
+    if session.local_project_files
+    then "Space c c → Set up project…"
+    else "Configure the project provider on the daemon host."
+  in
   let asic_lines =
     match session.asic with
-    | None -> [ "ASIC provider not loaded — palette: Discover ASIC" ]
+    | _ when adopted_here session
+             && not (Option.exists session.asic ~f:(fun asic -> asic.configured)) ->
+      [ adoption_complete ]
+    | None -> [ "ASIC provider not loaded — Discover ASIC, or " ^ setup_hint ]
     | Some asic ->
       [ (if asic.configured
          then "Project-owned ASIC flows (Space c c: discover / describe / plan / launch)"
           else
-            "No ASIC provider configured; generic Dune views still work. Configure the \
-             project provider, then use a fresh daemon session.")
+             "No ASIC provider configured. " ^ setup_hint)
       ]
       @ List.map asic.operations ~f:(fun op ->
         sprintf
@@ -4512,6 +4534,8 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
 let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
   let session =
     { requested_endpoint = Some fixture.endpoint
+    ; local_project_files = false
+    ; adopted_root = None
     ; project_root = Some (Project_root.to_absolute_path fixture.opened.project.root)
     ; environment_selection = fixture.opened.environment.selection
     ; environment_label = fixture.environment_label
@@ -4685,7 +4709,19 @@ let waveform_context session =
 ;;
 
 let host_catalog_base session =
-  Host.catalog
+  (if session.local_project_files
+      && Option.is_some session.opened
+      && not (adopted_here session)
+      && not (Option.exists session.asic ~f:(fun asic -> asic.configured))
+   then
+     [ Host.command
+         "project.setup"
+         "Set up project…"
+         "add ASIC starter import existing chip design executable configure provider"
+         Setup_project
+     ]
+   else [])
+  @ Host.catalog
     session.host
     ~project:(current_project session)
     ~jobs:(project_jobs session)
@@ -6313,6 +6349,114 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           | Ok payload ->
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
+    | (Setup_project | Name_starter | Preview_starter _ | Finish_starter _
+      | Setup_asic | Adopt_asic _) as action ->
+      let module Adoption = Hardcaml_workbench_setup.Asic_adoption in
+      (match session.local_project_files, session.opened with
+       | true, Some opened ->
+         let root = Project_root.to_absolute_path opened.project.root in
+         let form ?(commands = []) ?(query = "") ?(notice = "") argument =
+           session.host
+           <- { session.host with
+                notice
+              ; palette =
+                  Some
+                    { capture = captured; commands; query; index = 0; argument }
+              }
+         in
+         let instance_id = session.hello.instance_id in
+         let call operation =
+           request session.diagnostics_file (fun () ->
+             Http.Client.authoring captured_client { instance_id; operation })
+         in
+         (match action with
+          | Setup_project ->
+            form None ~commands:
+              [ Host.command "setup.add" "Add ASIC starter…" "preview new files" Name_starter
+              ; Host.command "setup.import" "Import existing ASIC design…" "register executable by reference" Setup_asic
+              ];
+            Effect.Ignore
+          | Name_starter ->
+            form (Some Starter_name);
+            Effect.Ignore
+          | Preview_starter name ->
+            let token = ref () in
+            async (fun () ->
+              form (Some (Starter_wait token));
+              let%bind response =
+                call (Preview
+                  { recipe = Authoring.add_to_project_recipe
+                  ; name
+                  ; target = { destination = root; project = Some opened.project.id; object_id = None }
+                  })
+              in
+              let waiting =
+                Host.current session.host captured
+                && (match session.host.palette with
+                    | Some { argument = Some (Starter_wait active); _ } -> phys_equal active token
+                    | _ -> false)
+              in
+              match response with
+              | Ok (Previewed preview) when not waiting ->
+                call (Cancel { preview_id = preview.preview_id }) >>| ignore
+              | _ when not waiting -> return ()
+              | Ok (Previewed preview) -> form (Some (Starter_preview preview)); return ()
+              | response ->
+                let notice = match response with
+                  | Error message | Ok (Failed { message; _ }) -> message
+                  | _ -> "Unexpected preview response"
+                in
+                form (Some Starter_name) ~query:name ~notice;
+                return ())
+          | Finish_starter (decision, preview) ->
+            async (fun () ->
+              let preview_id = preview.preview_id in
+              let token = ref () in
+              form (Some (Starter_wait token));
+              let%map response =
+                call (match decision with `Apply -> Apply { preview_id } | `Cancel -> Cancel { preview_id })
+              in
+              let rows = match response with
+                | Ok (Applied { created_files; registration }) ->
+                  session.adopted_root <- Some root;
+                  [ "ASIC starter added."; "Created files:" ] @ created_files
+                  @ (match registration with
+                     | Not_requested -> []
+                     | Registered path -> [ "Registered: " ^ path ]
+                     | Skipped { path; reason } ->
+                       [ "Skipped registration: " ^ path; reason ]
+                       @ Option.value_map preview.registration ~default:[] ~f:(fun edit ->
+                         String.split_lines edit.snippet))
+                  @ [ "Build the starter executable, then reopen to discover flows." ]
+                | Ok Cancelled -> [ "Preview cancelled. No files created." ]
+                | Ok (Failed f) ->
+                  [ Sexp.to_string (Authoring.Failure.sexp_of_kind f.kind) ^ ": " ^ f.message ]
+                  @ List.map f.created_files ~f:(fun path -> "Already created: " ^ path)
+                | Error message -> [ message ]
+                | _ -> [ "Unexpected authoring response" ]
+              in
+              match session.host.palette with
+              | Some { argument = Some (Starter_wait active); _ }
+                when phys_equal token active && Host.current session.host captured ->
+                form (Some (Starter_result rows))
+              | _ -> ())
+          | Setup_asic ->
+            (match Adoption.check ~root with
+             | Ok () -> form (Some Design_executable)
+             | Error notice -> session.host <- { session.host with notice });
+            Effect.Ignore
+          | Adopt_asic executable ->
+            (match Adoption.adopt ~root ~executable with
+             | Error notice -> form (Some Design_executable) ~query:executable ~notice
+             | Ok () ->
+               session.adopted_root <- Some root;
+               session.host <- { session.host with notice = adoption_complete });
+            Effect.Ignore
+          | _ -> assert false)
+       | _ ->
+         session.host
+         <- { session.host with notice = "Open the project in local Silver to set up the project." };
+         Effect.Ignore)
     | Generate_rtl (target, configuration) ->
       (* The captured IDs are revalidated against discovery, never replaced by the
          currently highlighted target or a first-flow fallback. *)
@@ -8421,7 +8565,7 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
      | _ -> Effect.Ignore)
 ;;
 
-let tui session ~no_mouse ~exit ~dimensions graph =
+let tui session ~no_mouse ~exit ~dimensions (local_ graph) =
   let open Bonsai_term in
   let open Bonsai.Let_syntax in
   (* Session navigation is currently mutable. Give those mutations a reactive invalidation
@@ -8431,7 +8575,7 @@ let tui session ~no_mouse ~exit ~dimensions graph =
   let write_to_tty = Expert.Write_to_tty.write_string_to_tty graph in
   let invalidate update = update (fun revision -> revision + 1) in
   let poll =
-    Bonsai.map update_revision ~f:(fun update ->
+    Bonsai.map2 session update_revision ~f:(fun session update ->
       Effect.bind
         (Effect.of_deferred_thunk (fun () -> refresh session))
         ~f:(fun () -> invalidate update))
@@ -8444,10 +8588,10 @@ let tui session ~no_mouse ~exit ~dimensions graph =
     graph;
   let display =
     Bonsai.map3
-      dimensions
+      (Bonsai.both session dimensions)
       (Bonsai.Clock.approx_now ~tick_every:(Time_ns.Span.of_ms 100.) graph)
       revision
-      ~f:(fun (dimensions : Dimensions.t) now revision ->
+      ~f:(fun (session, (dimensions : Dimensions.t)) now revision ->
         let animate =
           (not (Appearance.Icons.equal session.host.appearance.icons None_))
           && Option.is_some session.host.registry
@@ -8475,10 +8619,10 @@ let tui session ~no_mouse ~exit ~dimensions graph =
   in
   let view =
     let%arr dimensions, _, now, _revision = display
-    and indicator_frames in
+    and indicator_frames and session in
     render ~now ?indicator_frames session dimensions
   in
-  let handle_keyboard (event : Event.t) =
+  let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
     else if match event with
@@ -8582,7 +8726,7 @@ let tui session ~no_mouse ~exit ~dimensions graph =
            Effect.of_deferred_thunk (fun () -> reconnect session)
          | _ -> Effect.Ignore))
   in
-  let publish ~update ~write previous effect =
+  let publish session ~update ~write previous effect =
     let active, focus, selections = Host.navigation_input_changes previous session.host in
     if active || Option.is_some focus
     then session.navigation_revision <- session.navigation_revision + 1;
@@ -8612,14 +8756,14 @@ let tui session ~no_mouse ~exit ~dimensions graph =
       ]
   in
   let handler =
-    Bonsai.map2 update_revision write_to_tty ~f:(fun update write event ->
+    Bonsai.map3 session update_revision write_to_tty ~f:(fun session update write event ->
       let previous = session.host in
-      let publish = publish ~update ~write previous in
+      let publish = publish session ~update ~write previous in
       match event with
       | Event.Mouse { kind = (Left | Scroll _) as kind; mods; position = { x; y } }
         when not no_mouse -> publish (handle_pointer session ~exit ~kind ~mods ~x ~y)
       | Mouse _ -> Effect.Ignore
-      | _ -> publish (handle_keyboard event))
+      | _ -> publish (handle_keyboard session event))
   in
   ~view, ~handler
 ;;
@@ -8982,7 +9126,25 @@ let parse_action = function
   | Some _ -> Or_error.error_string "--action must be build, test, or generate-rtl"
 ;;
 
+let initialize_open_workspace
+  session
+  ~workspace_config
+  ~artifact_viewer
+  ~artifact_binary_viewer
+  =
+  session.workspace_config <- workspace_config;
+  session.artifact_viewer <- artifact_viewer;
+  session.artifact_binary_viewer <- artifact_binary_viewer;
+  reconcile_selection session;
+  if Option.is_some workspace_config
+  then (
+    let%bind () = workspace_request session Get in
+    initialize_host_layout session)
+  else return ()
+;;
+
 let run_legacy
+  ~local_project_files
   ~endpoint
   ~workspace_config
   ~project_root
@@ -9045,6 +9207,7 @@ let run_legacy
     else (
       let%bind created =
         create_session
+          ~local_project_files
           ~endpoint
           ~project_root
           ~environment_selection
@@ -9054,16 +9217,8 @@ let run_legacy
       match created with
       | Error message -> return (Or_error.error_string message)
       | Ok session ->
-        session.workspace_config <- workspace_config;
-        session.artifact_viewer <- artifact_viewer;
-        session.artifact_binary_viewer <- artifact_binary_viewer;
-        reconcile_selection session;
         let%bind () =
-          if Option.is_some workspace_config
-          then (
-            let%bind () = workspace_request session Get in
-            initialize_host_layout session)
-          else return ()
+          initialize_open_workspace session ~workspace_config ~artifact_viewer ~artifact_binary_viewer
         in
         if plain || not (Core_unix.isatty Core_unix.stdout)
         then (
@@ -9088,7 +9243,7 @@ let run_legacy
               Bonsai_term.start_with_exit
                 ~dispose:true
                 ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-                (tui session ~no_mouse)
+                 (tui (Bonsai.return session) ~no_mouse)
             in
             let%map () = session.preference_saves in
             result)
@@ -9190,6 +9345,7 @@ let run_plain_workspace session operation =
 ;;
 
 let run
+  ~local_project_files
   ~endpoint
   ~workspace_config
   ~project_root
@@ -9235,6 +9391,7 @@ let run
     then fail "--wait-timeout-seconds requires an ASIC operation and --wait"
     else
       run_legacy
+        ~local_project_files
         ~endpoint
         ~workspace_config
         ~project_root
@@ -9301,6 +9458,7 @@ let run
         in
         let%bind created =
           create_session
+            ~local_project_files
             ~endpoint
             ~project_root
             ~environment_selection
@@ -9342,13 +9500,104 @@ let start_endpoint ~standalone ~endpoint ~project_root ~state_dir =
   | _ -> return (Ok endpoint)
 ;;
 
+(* The project chooser and the bound host share one terminal driver. Activating the bound
+   branch starts its polling clock only after the local service is ready. *)
+let unbound_workspace
+  ~start
+  ~no_mouse
+  ~environment
+  ~state_dir
+  ~diagnostics_file
+  ~workspace_config
+  ~artifact_viewer
+  ~artifact_binary_viewer
+  =
+  let diagnostics_file =
+    Option.first_some diagnostics_file (Sys.getenv "HARDCAML_WORKBENCH_DIAGNOSTICS")
+  in
+  let opened = ref None in
+  let bind root =
+    match parse_environment environment with
+    | Error error -> return (Error error)
+    | Ok (environment_selection, environment_label) ->
+      let project_root = Some root in
+      let%bind.Deferred.Or_error endpoint =
+        start_endpoint ~standalone:true ~endpoint:None ~project_root ~state_dir
+      in
+      let%bind created =
+        create_session
+          ~local_project_files:true
+          ~endpoint
+          ~project_root
+          ~environment_selection
+          ~environment_label
+          ~diagnostics_file
+      in
+      (match created with
+       | Error msg -> return (Or_error.error_string msg)
+       | Ok session ->
+         let%map () =
+           initialize_open_workspace
+             session
+             ~workspace_config
+             ~artifact_viewer
+             ~artifact_binary_viewer
+         in
+         opened := Some session;
+         Ok session)
+  in
+  let app ~exit ~dimensions (local_ graph) =
+    let open Bonsai.Let_syntax in
+    let session, set_session = Bonsai.state None graph in
+    let result =
+      match%sub session with
+      | Some session ->
+        let ~view, ~handler = tui session ~no_mouse ~exit ~dimensions graph in
+        let%arr view and handler in
+        ~view, ~handler
+      | None ->
+        let on_open =
+          let%arr set_session in
+          fun root ->
+            let open Bonsai_term in
+            Effect.bind
+              (Effect.of_deferred_thunk (fun () ->
+                 Deferred.map
+                   (Monitor.try_with_or_error (fun () -> bind root))
+                   ~f:Or_error.join))
+              ~f:(function
+                | Error e -> Effect.return (Error e)
+                | Ok s -> Effect.map (set_session (Some s)) ~f:(fun () -> Ok ()))
+        in
+        let ~view, ~handler =
+          Startup_entry.component ~start ~exit ~on_open ~dimensions graph
+        in
+        let%arr view and handler in
+        ~view, ~handler
+    in
+    ( ~view:(Bonsai.map result ~f:(fun (~view, ~handler:_) -> view))
+    , ~handler:(Bonsai.map result ~f:(fun (~view:_, ~handler) -> handler)) )
+  in
+  let%bind result =
+    Monitor.try_with_or_error (fun () ->
+      Bonsai_term.start_with_exit
+        ~dispose:true
+        ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+        app)
+  in
+  let%map () =
+    Option.value_map !opened ~default:(return ()) ~f:(fun s -> s.preference_saves)
+  in
+  Or_error.join result
+;;
+
 let command =
   let program = Filename.basename (Sys.get_argv ()).(0) in
   let local_by_default = String.equal program "silver" in
   Command.async_or_error
     ~summary:
       (if local_by_default
-       then "Run Silver in the nearest Dune project, or attach to a Silver daemon"
+        then "Open the nearest Dune project, choose a project interactively, or attach to a Silver daemon"
        else "Connect to Silver")
     (let%map_open.Command endpoint =
         flag
@@ -9560,17 +9809,25 @@ let command =
        capture_baseline_frames ~directory;
        return (Ok ())
      | None, None, None ->
-       (match
-          Hardcaml_workbench_setup.Project_discovery.resolve
-            ~explicit:project_root
-            ~discover:
-              (discover_project
-               || (standalone && Option.is_none endpoint && Option.is_none project_root))
-            ~explicit_flag:"--project-root"
-            ~discover_flag:"--discover-project"
+        fun () ->
+        let local = standalone && Option.is_none endpoint in
+        let interactive =
+          local && not plain && not api && not wait && not refresh_integration
+          && List.for_all
+               [ action; target; configuration; artifact; hierarchy; asic_operation
+               ; workspace_operation ]
+               ~f:Option.is_none
+          && Option.is_none wait_timeout_seconds
+          && Core_unix.isatty Core_unix.stdin && Core_unix.isatty Core_unix.stdout
+        in
+        (match%bind
+           In_thread.run (fun () ->
+             Startup_entry.resolve
+               ~interactive
+               ~explicit:project_root
+               ~discover:(discover_project || (local && Option.is_none project_root)))
         with
         | Error message ->
-          fun () ->
             if api
             then
               printf
@@ -9579,12 +9836,15 @@ let command =
                    (Workspace.Response.sexp_of_t
                       (Error (V1.Error.create Invalid_request message))));
             return (Or_error.error_string message)
-        | Ok (project_root, note) ->
+         | Ok (`Unbound start) ->
+           timing_prefetch_neighbors := timing_neighbors;
+           timing_preload_override := timing_preload;
+           unbound_workspace ~start ~no_mouse ~environment ~state_dir:standalone_state_dir
+             ~diagnostics_file ~workspace_config ~artifact_viewer ~artifact_binary_viewer
+         | Ok (`Open (project_root, note)) ->
           timing_prefetch_neighbors := timing_neighbors;
           timing_preload_override := timing_preload;
           if not api then Option.iter note ~f:(eprintf "%s: %s\n%!" program);
-          fun () ->
-            let local = standalone && Option.is_none endpoint in
             let wait =
               wait
               || (local
@@ -9608,9 +9868,10 @@ let command =
                       (Workspace.Response.sexp_of_t
                          (Error (V1.Error.create Internal_failure (error_message error)))));
                return (Error error)
-             | Ok endpoint ->
-               run
-                 ~endpoint
+              | Ok endpoint ->
+                run
+                  ~local_project_files:local
+                  ~endpoint
                  ~workspace_config
                  ~project_root
                  ~environment

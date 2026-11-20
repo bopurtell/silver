@@ -86,6 +86,19 @@ hardcaml-workbench --connect http://127.0.0.1:18080 \
 
 ## Initialize an existing project
 
+Open the Dune project locally with `silver`. Press **Space c c** and choose
+**Set up project…**. To start a design, choose **Add ASIC starter…**, name it,
+and review the proposed files before applying. To connect a design that already
+exists, choose **Import existing ASIC design…** and enter the path to its already-built
+design CLI (absolute or relative to the project root). **Esc** cancels; **Enter**
+writes `.workbench/hardcaml-workbench-asic.sexp`. Neither opening the form nor
+saving it builds or runs the design. Existing ASIC configuration is never replaced;
+no generic manifest is required. The configuration uses the selected environment's
+provider, `<root>/_flow_tools`, and `<root>/_flow_results/workbench/asic`. Reopen in
+a fresh daemon session, then choose **Discover ASIC flows and runs** when ready.
+
+For generic build/test aliases or a hardware manifest driver, use the separate initializer:
+
 ```sh
 _build/default/setup/main.exe --root /absolute/path/to/project --dry-run
 _build/default/setup/main.exe --root /absolute/path/to/project

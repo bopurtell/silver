@@ -12,7 +12,7 @@ The product test: starting in an empty directory with the tools installed, creat
 
 ## Current behavior: what “open a project” means
 
-- **Project discovery:** `silver` searches the current directory and then its ancestors for the nearest regular `dune-project` file. A `dune` file defines local build rules; it is not a project-root marker. Neither `.git` nor a Silver config is the marker. Outside a Dune project, discovery currently reports an error rather than opening a blank workbench. See [`setup/project_discovery.ml`](../setup/project_discovery.ml).
+- **Project discovery:** `silver` searches the current directory and then its ancestors for the nearest regular `dune-project` file. A `dune` file defines local build rules; it is not a project-root marker. Neither `.git` nor a Silver config is the marker. If none is found, interactive local startup opens project setup in an unbound workspace. See [`setup/project_discovery.ml`](../setup/project_discovery.ml).
 - **Inspection:** Silver opens the Dune project and inspects it on the service host. Generic Dune use does not require an ASIC declaration. Optional integration configuration tells Silver about additional capabilities; it does not create the project. [Config resolution](../project_integration/config_location.ml) prefers `.workbench/` and supports legacy root locations. The example launcher's `.dev/workbench-main` is session state, not design source.
 - **Multiple chips, one exposed executable:** `hardcaml_asic_example` has distinct declarations for [FIFO](../../hardcaml_asic_example/asics/fifo_demo/project/project.ml), [program memory](../../hardcaml_asic_example/asics/program_memory/project/program_memory.ml), and [SRAM budget](../../hardcaml_asic_example/asics/sram_budget/sram_budget.ml). Each calls `Hardcaml_asic.Project.create`. The [example's Silver ASIC config](../../hardcaml_asic_example/.workbench/hardcaml-workbench-asic.sexp) has one `project_executable`, pointing at the FIFO CLI. Opening the Dune project does **not** currently present a picker for those three chips.
 
@@ -38,7 +38,7 @@ In the UI, use **Project: `hardcaml_asic_example` · Chip target: `fifo_demo`**.
 | Starting point or intent | Proposed interaction |
 | --- | --- |
 | Empty directory | Offer **Create project here…** and **Open existing project…**. Default to the current directory; offer a small Hardcaml simulation or ASIC starter. |
-| Existing Dune project | Open immediately. Offer **Set up ASIC design…** where appropriate, pointing to an existing design or starting from a working example. No second project initialization. |
+| Existing Dune project | Open immediately. **Set up project…** offers **Import existing ASIC design…** (register an executable by reference) or **Add ASIC starter…** (create design sources). No second project initialization. |
 | New reusable block | **New IP Library…** creates a new directory with a small Dune library stanza, an empty or example `.ml` module, and a test stub. |
 | Another module in a library | **New Module…** creates the module in the chosen library. From that library's own menu the destination is already known. Avoid “Add file to project” and a duplicate Silver file inventory. |
 | New independently runnable chip | **New Chip Target…** scaffolds the declaration, build/CLI wiring, and integration needed to expose it. This is where repeated copy-and-edit plumbing is worth automating. |

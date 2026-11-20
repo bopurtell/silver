@@ -3,7 +3,7 @@ id: WB-051
 title: Provider-owned new-project creation
 category: project
 feature_sets: [FS3]
-status: needs-design
+status: delivered
 kind: feature
 priority: P3
 severity: n/a
@@ -56,10 +56,10 @@ Related: none; configuration migration is not needed to use today's supported fi
 21 points cover one descriptor/generator boundary, one starter and safe handoff.
 Exclude authoring every provider's recipes, package installation and template catalogs.
 
-## Assumptions and decisions needed
-Default: local explicitly selected templates and publication to a new or existing empty directory.
-TBD: first provider, descriptor transport and rollback contract for generator failure.
-Template source remains provider-owned; workspace layout templates stay distinct.
+## Delivery
+The first provider is `hardcaml_asic`. Its `hardcaml-asic-starter render --name NAME` command returns versioned JSON with relative paths and file contents; rendering does not write the destination. Silver validates and freezes that output at preview. Apply publishes the reviewed bytes without overwriting files. If a write fails partway through, the service reports retained output for inspection.
+
+`scripts/test-real-project-starter.py` exercises the real provider through a Silver daemon: cancel in an empty directory, create there, open without submitting a job, then explicitly run the generated project's Dune tests.
 
 ## References
 - [Existing initializer](../../../setup/initialization.ml)

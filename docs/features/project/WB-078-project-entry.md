@@ -3,7 +3,7 @@ id: WB-078
 title: Empty-directory entry and existing-project adoption
 category: project
 feature_sets: [FS3]
-status: needs-design
+status: delivered
 kind: feature
 priority: P2
 severity: n/a
@@ -27,15 +27,18 @@ Let `silver` be the first command in an empty directory and remain useful in an 
 Discovery chooses the nearest regular `dune-project`. With no enclosing project it reports an error. Existing Dune projects can already open without ASIC integration.
 
 ## Scope
-For interactive local startup without a project, offer **Create project here…** and **Open existing project…**. Default to the starting directory; preview the selected starter and explicitly open the resulting root. In an existing project offer **Set up ASIC design…** rather than requiring a second initialization.
+For interactive local startup without a project, open an unbound Silver workspace with a dismissible project setup dialog. Default to the starting directory; preview the selected starter and explicitly open the resulting root. In an existing generic Dune project offer **Set up project…**, with separate actions to add starter files or import an existing executable by reference.
 
 ## Out of scope
 Template protocol/contents (WB-051), new chip generation (WB-082), changing noninteractive command discovery.
 
 ## Acceptance criteria
-- [ ] Cancel from an empty directory without writing anything. Create there without forcing a nested directory, or choose an existing project instead.
-- [ ] From a nested source directory the nearest existing project still opens immediately. A discovery permission error is not treated as an empty directory.
-- [ ] In an existing Dune project, point setup at an existing ASIC design without replacing source. Creation/opening alone never starts EDA.
+- [x] Cancel from an empty directory without writing anything. Create there without forcing a nested directory, or choose an existing project instead.
+- [x] From a nested source directory the nearest existing project still opens immediately. A discovery permission error is not treated as an empty directory.
+- [x] In an existing Dune project, point setup at an existing ASIC design without replacing source. Creation/opening alone never starts EDA.
+
+## Verification
+`terminal/test_startup_entry_pty.py` exercises the launcher and dashboard handoff. `terminal/test_asic_adoption_pty.py` exercises **Set up project…** in the local palette, including starter preview/cancel/apply, collision handling, invalid import correction and registering an executable while preserving existing sources.
 
 ## Dependencies
 [WB-085](WB-085-authoring-service.md) supplies daemon-side preview/apply before a project is open.

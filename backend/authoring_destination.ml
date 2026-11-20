@@ -94,23 +94,83 @@ type snapshot =
   { ancestor : int * int
   ; destination_ctime : Time_ns.t option
   ; missing : string list
+  ; marker : (int * int) option
+  ; common : (int * int) option
+  ; catalog_exists : bool
   }
 [@@deriving equal, sexp_of]
 
-let visit (root : root) parts f =
+module Integration = Hardcaml_workbench_project_integration
+
+let catalog = "hardcaml-asic-targets.json"
+let catalog_exists s = s.catalog_exists
+let design_dir name = "asic_" ^ name
+
+let existing_project dir name =
+  let stat dir name = inspect (snd (child dir name)) in
+  let absent dir name =
+    if Option.is_some (stat dir name) then changed ("Conflict: " ^ fst (child dir name))
+  in
+  let regular name =
+    match stat dir name with
+    | None -> None
+    | Some s when Poly.equal s.st_kind S_REG -> Some (id s)
+    | Some _ -> invalid ("Expected regular file: " ^ name)
+  in
+  let marker = regular "dune-project" in
+  if Option.is_none marker then invalid "Expected existing dune-project at destination";
+  absent dir (design_dir name);
+  let configs =
+    [ Integration.Asic_config.filename; Integration.Preparation_config.filename ]
+  in
+  List.iter configs ~f:(absent dir);
+  let common =
+    match stat dir ".workbench" with
+    | None -> None
+    | Some s when Poly.equal s.st_kind S_DIR ->
+      let path, via = child dir ".workbench" in
+      with_dir ~path ~via ~identity:(id s) (fun d _ -> List.iter configs ~f:(absent d));
+      Some (id s)
+    | Some _ -> invalid "Expected plain directory: .workbench"
+  in
+  marker, common, Option.is_some (regular catalog)
+;;
+
+let visit ?existing (root : root) parts f =
   let rec walk dir dh parts =
     match parts with
     | [] ->
-      require_empty dh;
+      let marker, common, catalog_exists =
+        match existing with
+        | None ->
+          require_empty dh;
+          None, None, false
+        | Some name -> existing_project dir name
+      in
       let stat = Core_unix.Ns_precision.fstat (Core_unix.dirfd dh) in
       f
         dir
-        { ancestor = dir.identity; destination_ctime = Some stat.st_ctime; missing = [] }
+        { ancestor = dir.identity
+        ; destination_ctime = Some stat.st_ctime
+        ; missing = []
+        ; marker
+        ; common
+        ; catalog_exists
+        }
     | name :: rest ->
       let path, via = child dir name in
       (match inspect via with
        | None ->
-         f dir { ancestor = dir.identity; destination_ctime = None; missing = parts }
+         if Option.is_some existing then invalid "Existing Dune project root not found";
+         f
+           dir
+           { ancestor = dir.identity
+           ; destination_ctime = None
+           ; missing = parts
+           ; marker = None
+           ; common = None
+           ; catalog_exists = false
+           }
        | Some s when Poly.equal s.st_kind S_DIR ->
          with_dir ~path ~via ~identity:(id s) (fun d h -> walk d h rest)
        | Some _ -> invalid "Destination component is not a plain directory")
@@ -119,7 +179,7 @@ let visit (root : root) parts f =
     walk d h parts)
 ;;
 
-let rec mkdir_missing dir missing f =
+let rec mkdir_missing ~on_mkdir dir missing f =
   match missing with
   | [] ->
     check_location dir;
@@ -128,14 +188,15 @@ let rec mkdir_missing dir missing f =
     check_location dir;
     let path, via = child dir name in
     Core_unix.mkdir via ~perm:0o755;
+    on_mkdir path;
     let s = Core_unix.lstat via in
     if not (Poly.equal s.st_kind S_DIR) then changed "Created directory changed";
     with_dir ~path ~via ~identity:(id s) (fun d h ->
       require_empty h;
-      mkdir_missing d rest f)
+      mkdir_missing ~on_mkdir d rest f)
 ;;
 
-let materialize dir snapshot f = mkdir_missing dir snapshot.missing f
+let materialize ~on_mkdir dir snapshot f = mkdir_missing ~on_mkdir dir snapshot.missing f
 
 let write dir ~name ~contents ~on_create =
   if String.is_empty name
@@ -167,4 +228,33 @@ let write dir ~name ~contents ~on_create =
           loop (pos + n))
       in
       loop 0)
+;;
+
+(* A group opens each freshly created directory once. Never adopt a directory supplied by
+   a racing writer, even when several planned files share it. *)
+let publish dir snapshot files ~on_mkdir ~on_create =
+  let rec group dir common entries =
+    let children = String.Table.create () in
+    List.iter
+      entries
+      ~f:(fun (parts, (file : Hardcaml_workbench_protocol.Authoring.File.t)) ->
+        match parts with
+        | [ name ] ->
+          write dir ~name ~contents:file.contents ~on_create:(fun () ->
+            on_create file.path)
+        | name :: rest -> Hashtbl.add_multi children ~key:name ~data:(rest, file)
+        | [] -> assert false);
+    Hashtbl.iteri children ~f:(fun ~key:name ~data ->
+      let descend child = group child None (List.rev data) in
+      match common with
+      | Some identity when String.equal name ".workbench" ->
+        let path, via = child dir name in
+        with_dir ~path ~via ~identity (fun d _ -> descend d)
+      | _ -> mkdir_missing ~on_mkdir dir [ name ] descend)
+  in
+  group
+    dir
+    snapshot.common
+    (List.map files ~f:(fun (f : Hardcaml_workbench_protocol.Authoring.File.t) ->
+       String.split f.path ~on:'/', f))
 ;;

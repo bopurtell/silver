@@ -1,7 +1,7 @@
-(** The host interprets all destinations. Clients select a recipe and supply its
-    input; they never submit source text or filesystem edit instructions. Preview
-    IDs are one-use and scoped to a running service. File and registration paths in
-    replies are relative to the preview destination. *)
+(** The host interprets all destinations. Clients select a recipe and supply its input;
+    they never submit source text or filesystem edit instructions. Preview IDs are one-use
+    and scoped to a running service. File and registration paths in replies are relative
+    to the preview destination. *)
 open! Core
 
 let capability = "authoring"
@@ -41,11 +41,25 @@ module Registration = struct
   [@@deriving bin_io, compare, equal, sexp]
 end
 
+module File = struct
+  type t =
+    { path : string
+    ; contents : string
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+let starter_recipe = "hardcaml-asic-starter-v1"
+let add_to_project_recipe = "hardcaml-asic-add-to-project-v1"
+
 module Preview = struct
   type t =
     { preview_id : string
     ; operation : Operation.t
     ; new_files : string list
+    ; provider : string [@sexp.default ""]
+    ; version : string [@sexp.default ""]
+    ; files : File.t list [@sexp.default []]
     ; registration : Registration.t option
     }
   [@@deriving bin_io, compare, equal, sexp]
