@@ -3,7 +3,7 @@ id: WB-080
 title: Provider chip-target catalog and CLI selection
 category: project
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P1
 severity: n/a
@@ -23,7 +23,7 @@ related: [WB-081, WB-082]
 ## Request
 List and address several independently buildable chips in one Dune project, even with Silver closed.
 
-## Current baseline
+## Baseline before this ticket
 The example declares FIFO, program-memory and SRAM-budget targets separately. `Hardcaml_asic.Project.create` declares one target, not the enclosing project. Silver's ASIC integration names one executable.
 
 ## Scope

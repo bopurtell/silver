@@ -3,7 +3,7 @@ id: WB-078
 title: Empty-directory entry and existing-project adoption
 category: project
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a
@@ -23,7 +23,7 @@ related: [WB-010, WB-039, WB-050, WB-082]
 ## Request
 Let `silver` be the first command in an empty directory and remain useful in an existing, unconfigured Dune project.
 
-## Current baseline
+## Baseline before this ticket
 Discovery chooses the nearest regular `dune-project`. With no enclosing project it reports an error. Existing Dune projects can already open without ASIC integration.
 
 ## Scope
@@ -38,11 +38,13 @@ Template protocol/contents (WB-051), new chip generation (WB-082), changing noni
 - [x] In an existing Dune project, point setup at an existing ASIC design without replacing source. Creation/opening alone never starts EDA.
 
 ## Verification
+On the fresh-project preview, **Enter** applies and opens the result. **Esc** cancels without writing and leaves the unbound workspace open; **p** reopens setup. In a bound project, **Add ASIC starter…** creates design files; **Import existing ASIC design…** references an already-built executable. Both paths were exercised with the installed `silver`.
+
 `terminal/test_startup_entry_pty.py` exercises the launcher and dashboard handoff. `terminal/test_asic_adoption_pty.py` exercises **Set up project…** in the local palette, including starter preview/cancel/apply, collision handling, invalid import correction and registering an executable while preserving existing sources.
 
 ## Dependencies
 [WB-085](WB-085-authoring-service.md) supplies daemon-side preview/apply before a project is open.
-[WB-051](WB-051-new-project-creation.md) supplies the generator and preview/open handoff. Existing-design setup uses the existing integration path; offer a generated chip alternative when [WB-082](WB-082-chip-target-starter.md) lands.
+[WB-051](WB-051-new-project-creation.md) supplies the generator and preview/open handoff. Adding a first starter to a generic project is covered here. Adding a second independently buildable chip to an already configured project remains [WB-082](WB-082-chip-target-starter.md).
 
 ## Estimate rationale
 8 points for startup without a bound project, destination choice, and the adoption UI, excluding generation.

@@ -186,11 +186,12 @@ persistent local presentation choices. The 2026-10-17 integration preserves pres
 identity in templates, initializes defaults atomically, restores sparse preferences
 without poll replay, and supports successful driverless manifest reload. See
 [guide and verification](fs3_adoption.md).
-Multi-monitor acceptance and configuration-location migration remain later work.
+Configuration-location migration subsequently shipped in WB-049. Multi-monitor
+acceptance is separate.
 
 Multiple attached windows, shared/independent contexts across them, preset/layout
-comfort, responsiveness and existing-project initialization. Full project creation
-is a later F07 slice after configuration/templates are proven. Saved single-window
+comfort, responsiveness and existing-project initialization. The F07 project-creation
+slice is now closed (WB-051/078). Saved single-window
 layouts already belong to FS0; FS3 expands their use rather than delaying them.
 Adopt reviewed F12 appearance/layout presets here as available, preserving the
 separation of functional workspace definitions, geometry and styling choices.

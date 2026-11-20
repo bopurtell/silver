@@ -63,7 +63,8 @@ session can own that project's state at a time.
 Outside a Dune project, interactive local `silver` opens with a floating project
 setup dialog. Create an ASIC starter in the empty directory, choose a new
 directory beneath it, or open an existing Dune project. Review the files before
-applying. Escape dismisses setup without creating anything or quitting Silver.
+pressing **Enter** to apply and open the project. **Esc** dismisses setup without
+creating anything or quitting Silver; **p** reopens it.
 
 Inside an existing, unconfigured Dune project, open the command palette
 (**Space c c**) and choose **Set up project…**. **Add ASIC starter…** adds design

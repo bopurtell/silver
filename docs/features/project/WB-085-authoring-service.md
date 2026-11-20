@@ -3,7 +3,7 @@ id: WB-085
 title: Frontend-independent authoring calls
 category: project
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P1
 severity: n/a
@@ -23,7 +23,7 @@ related: [WB-051, WB-079, WB-082, WB-083]
 ## Request
 Make previewing and applying a source change operations on the service host. A menu, palette command or management workspace should not have to know how to write a Dune file.
 
-## Current baseline
+## Baseline before this ticket
 Silver can host its service locally or connect to a daemon. Source recipes belong to providers; the existing ASIC path addresses a project that already exists.
 
 ## Scope
@@ -44,13 +44,13 @@ Designing provider template contents or owning their rollback semantics (WB-051)
 Preview IDs are single-use, including on failed apply. The service retains the most recent 128 outstanding previews. Run `dune runtest -j 2 backend/test/authoring daemon/test protocol/test` for backend, transport and host-mode checks.
 
 ## Dependencies
-None for the service contract. Integrate the provider descriptor from [WB-051](WB-051-new-project-creation.md) for full-project creation; authoring tickets own their operation-specific adapters.
+None for the service contract. [WB-051](WB-051-new-project-creation.md) and [WB-078](WB-078-project-entry.md) now use it for project creation and first-starter adoption. Other authoring tickets own their operation-specific adapters.
 
 ## Estimate rationale
 13 points for the protocol, unbound-destination path and local/connected service tests; excludes recipes and UI.
 
 ## Agreed behavior
-- Destinations refer to the service host, even before a Dune project is open. Support a new directory or creation directly in an existing empty directory; refuse an existing nonempty directory. Opening an existing project is a different operation.
+- Destinations refer to the service host, even before a Dune project is open. New-project creation supports a new or existing empty directory and refuses a nonempty one. Adding a starter to an existing Dune project is a separate operation.
 - Preview describes the destination, files and any proposed registration change. Apply refers to that preview by ID. A conflicting change after preview requires a fresh preview, not an overwrite. Cancel writes no source.
 - Report stale preview separately from provider failure. Identify created files and the registration outcome so a client knows what happened before offering a retry.
 - Exercise this boundary with a controlled recipe first. The provider that supplies the first production starter and its contents are WB-051 decisions.

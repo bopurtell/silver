@@ -3,7 +3,7 @@ id: WB-051
 title: Provider-owned new-project creation
 category: project
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P3
 severity: n/a
@@ -24,7 +24,7 @@ related: []
 Original size: **Unspecified**. Create a new project using provider-owned templates,
 then open the result in Workbench.
 
-## Current baseline
+## Baseline before this ticket
 The delivered initializer configures an existing Dune project and refuses replacement.
 Workspace starter templates describe layouts, not source trees or project recipes.
 The setup area spec assigns recipe content to the project/provider rather than

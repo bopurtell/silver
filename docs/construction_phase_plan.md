@@ -1069,8 +1069,9 @@ Final native receipt: `/tmp/opencode/default-layout-restore-t4rz4qvv/result.json
   and project/environment/session identity checks.
 - [x] Actual private-daemon HTTP template lifecycle and restart restoration, plus
   real PTY appearance change/restart acceptance (`scripts/test-fs3-adoption.py`).
-- [ ] Explicit configuration-directory migration/precedence, upward discovery and
-  new-project creation; TUI template discovery/selection comfort.
+- [x] Configuration-directory migration/precedence (WB-049), upward discovery
+  (WB-050), and provider-backed project creation and in-app setup (WB-051/078).
+- [ ] TUI workspace template discovery/selection comfort.
 - [ ] High-volume log/event responsiveness and help/discoverability measurements.
 - [ ] Reviewed appearance presets, SSH/tmux controls and glyph fallback validation.
 - [ ] Final adopted-scope checks and deliberate provider-version adoption.

@@ -12,8 +12,8 @@ appearance remain. See [the recovery guide](default_layout_restore.md).
 
 Integrated with current `oxcaml`, 2026-10-17. This slice delivers an existing-project
 initializer, portable workspace templates and persistent client presentation choices.
-Multi-monitor UX, configuration-location migration and new-project creation remain
-later scope.
+Configuration-location migration (WB-049) and new-project creation (WB-051/078)
+shipped after that slice. Multi-monitor UX is separate.
 
 The [post-merge integration plan and evidence](fs3_integration_plan.md) supersede
 the original worktree verification. Templates retain preset composition, bootstrap
