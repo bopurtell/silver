@@ -233,7 +233,7 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 
 ## Project adoption and design scope
 
-**2026-11-20 closeout:** [WB-051](project/WB-051-new-project-creation.md) (provider starter), [WB-078](project/WB-078-project-entry.md) (in-app create, add and import), [WB-080](project/WB-080-chip-catalog.md) (provider target catalog) and [WB-085](project/WB-085-authoring-service.md) (preview/apply service) are **closed**. Each ticket records its automated acceptance evidence. The next project-structuring ticket is [WB-079](project/WB-079-ip-and-module-starters.md), for reusable IP libraries and modules.
+**2026-11-20 closeout:** [WB-051](project/WB-051-new-project-creation.md) (provider starter), [WB-078](project/WB-078-project-entry.md) (in-app create, add and import), [WB-080](project/WB-080-chip-catalog.md) (provider target catalog) and [WB-085](project/WB-085-authoring-service.md) (preview/apply service) are **closed**. [WB-079](project/WB-079-ip-and-module-starters.md) is **closed, owner-verified**: reusable IP library and module creation through Silver and `silver-author`. Each ticket records its automated acceptance evidence.
 
 | Ticket | Feature | Sets | Priority | Points | Confidence |
 | --- | --- | --- | --- | --- | --- |

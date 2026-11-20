@@ -207,6 +207,17 @@
        ../test/support/screen.py ../test/support/terminal.py)
  (action (run python3 -B %{dep:test_asic_adoption_pty.py} %{exe:main.exe})))
 
+; Pass a renderer path to the same PTY driver for installed-provider coverage.
+(rule
+ (alias test-ip-authoring-pty)
+ (deps test_ip_authoring_pty.py ip_starter_fixture.py ../test/support/__init__.py
+       ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_ip_authoring_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-ip-authoring-pty)))
+
 ; Real native terminal composition with a controlled JSON/VCD producer. Opt-in:
 ; no runtest edge, nested builds, hardware simulator or external fixture inputs.
 (rule

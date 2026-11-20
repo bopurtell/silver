@@ -1,0 +1,14 @@
+(executable
+ (name main)
+ (public_name silver-author)
+ (package hardcaml_workbench)
+ (libraries async core core_unix.command_unix hardcaml_workbench_backend
+  hardcaml_workbench_native_http hardcaml_workbench_protocol hardcaml_workbench_setup)
+ (preprocess (pps ppx_jane)))
+
+(rule
+ (alias runtest)
+ (deps test_cli.py ../terminal/ip_starter_fixture.py)
+ (action
+  (run python3 -B %{dep:test_cli.py} %{exe:main.exe} %{exe:../daemon/main.exe}
+   %{dep:../terminal/ip_starter_fixture.py})))

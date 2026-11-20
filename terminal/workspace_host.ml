@@ -54,6 +54,19 @@ type testing_launch =
   ; inputs : testing_inputs
   }
 
+type starter =
+  | Asic_starter
+  | Empty_ip
+  | Sample_ip
+  | Module_in of string
+
+let starter_recipe = function
+  | Asic_starter -> Authoring.add_to_project_recipe
+  | Empty_ip -> Authoring.ip_empty_recipe
+  | Sample_ip -> Authoring.ip_sample_recipe
+  | Module_in _ -> Authoring.module_recipe
+;;
+
 type action =
   | Registry of W.Mutation.t
   | Switch of W.Workspace_id.t
@@ -63,8 +76,11 @@ type action =
   | Refresh_integration
   | Setup_project
   | Setup_asic
-  | Name_starter
-  | Preview_starter of string
+  | Choose_ip_template
+  | Choose_module_directory
+  | Library_actions of string
+  | Name_starter of starter
+  | Preview_starter of starter * string
   | Finish_starter of [ `Apply | `Cancel ] * Authoring.Preview.t
   | Adopt_asic of string
   | Generate_rtl of Target_id.t * Configuration_id.t
@@ -177,7 +193,8 @@ type argument =
   | Finalization_attempt of Run_ref.t
   | Resource_path of bool
   | Design_executable
-  | Starter_name
+  | Starter_name of starter
+  | Module_directory
   | Starter_wait of unit ref
   | Starter_preview of Authoring.Preview.t
   | Starter_result of string list
@@ -1181,7 +1198,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name); _ } ->
+      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name _ | Module_directory); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -4610,14 +4627,24 @@ let testing_dispatch t key ~commands =
 ;;
 
 let ranked_matches p =
-  Palette_search.rank
-    ~query:p.query
-    (List.map p.commands ~f:(fun c ->
-       ( c
-       , [ { Palette_search.text = c.title; weight = 100 }
-         ; { text = c.aliases; weight = 85 }
-         ; { text = c.id; weight = 75 }
-         ] )))
+  let ranked =
+    Palette_search.rank
+      ~query:p.query
+      (List.map p.commands ~f:(fun c ->
+         ( c
+         , [ { Palette_search.text = c.title; weight = 100 }
+           ; { text = c.aliases; weight = 85 }
+           ; { text = c.id; weight = 75 }
+           ] )))
+  in
+  match String.lowercase (String.strip p.query) with
+  | "new ip" | "new module" as intent ->
+    let id = if String.equal intent "new ip" then "project.new-ip" else "project.new-module" in
+    let exact, others =
+      List.partition_tf ranked ~f:(fun r -> String.equal r.Palette_search.item.id id)
+    in
+    exact @ others
+  | _ -> ranked
 ;;
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
@@ -4627,11 +4654,18 @@ let starter_preview_lines (p : Authoring.Preview.t) =
   ; "Provider: " ^ p.provider ^ " " ^ p.version
   ; "Name: " ^ p.operation.name
   ; "Destination: " ^ p.operation.target.destination
-  ; "New files:"
   ]
+  @ Option.value_map p.operation.target.object_id ~default:[] ~f:(fun dir ->
+    [ "Library: " ^ dir ])
+  @ [ "New files:" ]
   @ p.new_files
   @ Option.value_map p.registration ~default:[] ~f:(fun edit ->
-    ("Proposed registration: " ^ edit.path) :: String.split_lines edit.snippet)
+    let label =
+      if String.equal p.operation.recipe Authoring.module_recipe
+      then "Manual Dune edit: "
+      else "Proposed registration: "
+    in
+    (label ^ edit.path) :: String.split_lines edit.snippet)
 ;;
 
 (* Edits start a new search and follow its best result. Arrow/Tab choices remain selected
@@ -4758,7 +4792,8 @@ let finalization_form t =
         ( Finalization_attempt _
         | Resource_path _
         | Design_executable
-        | Starter_name
+        | Starter_name _
+        | Module_directory
         | Workload_path
         | Workload_bundle _
         | Acceptance _
@@ -5142,9 +5177,12 @@ let input t event ~commands : t * effect =
     (match t.palette with
      | Some p ->
        (match p.argument, event with
-        | Some (Starter_preview _), Character 'a' when not (current t p.capture) ->
+         | Some (Starter_preview preview), Enter
+           when String.equal preview.operation.recipe Authoring.add_to_project_recipe ->
+           t, No_effect
+         | Some (Starter_preview _), (Character 'a' | Enter) when not (current t p.capture) ->
           { t with palette = None; notice = "Project changed; request a new preview" }, No_effect
-        | Some (Starter_preview preview), (Character 'a' | Escape) ->
+         | Some (Starter_preview preview), (Character 'a' | Enter | Escape) ->
           let decision = if Poly.equal event Escape then `Cancel else `Apply in
           { t with palette = None }, Execute (p.capture, Finish_starter (decision, preview))
         | Some (Starter_preview _ | Starter_result _), (Next | Focus | Previous | Focus_previous) ->
@@ -5162,7 +5200,7 @@ let input t event ~commands : t * effect =
                | Some
                    ( Finalization_attempt _
                     | Resource_path _
-                    | Design_executable | Starter_name | Starter_wait _ | Starter_preview _ | Starter_result _
+                    | Design_executable | Starter_name _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
@@ -5203,7 +5241,7 @@ let input t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                         | Simulation_selection _ | Design_executable | Starter_name -> true
+                          | Simulation_selection _ | Design_executable | Starter_name _ | Module_directory -> true
                          | _ -> false))
           then
             ( { t with
@@ -5214,7 +5252,7 @@ let input t event ~commands : t * effect =
                   | Some
                       ( Finalization_attempt _
                        | Resource_path _
-                       | Design_executable | Starter_name | Starter_wait _ | Starter_preview _ | Starter_result _
+                        | Design_executable | Starter_name _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
@@ -5230,7 +5268,11 @@ let input t event ~commands : t * effect =
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
                  | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
-                 | Starter_name -> Preview_starter p.query
+                  | Starter_name starter -> Preview_starter (starter, p.query)
+                  | Module_directory ->
+                    if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
+                    then failwith "Enter a project-relative library directory";
+                    Name_starter (Module_in p.query)
                  | Design_executable ->
                    if String.is_empty (String.strip p.query)
                    then failwith "Enter an existing ASIC design executable";

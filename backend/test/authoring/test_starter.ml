@@ -184,6 +184,100 @@ let () =
       assert (
         String.equal (In_channel.read_all (dir / "dune-project")) "(lang dune 3.17)\n");
       fail Destination_denied (existing dir);
+      let add recipe ?object_id ?(name = "counter") () =
+        run
+          (Preview
+             { target = { destination = dir; project = None; object_id }; recipe; name })
+      in
+      let render argv paths =
+        install
+          ("[ \"$*\" = '"
+           ^ argv
+           ^ "' ] || exit 2\ncat <<'END'\n"
+           ^ descriptor paths
+           ^ "\nEND\n")
+      in
+      let cancel p =
+        (match run (Cancel { preview_id = p.Preview.preview_id }) with
+         | Cancelled -> ()
+         | r -> raise_s [%sexp (r : Response.t)]);
+        fail Stale_preview (apply p)
+      in
+      let applied = function
+        | Response.Applied _ -> ()
+        | r -> raise_s [%sexp (r : Response.t)]
+      in
+      List.iter
+        [ ip_empty_recipe, "empty"; ip_sample_recipe, "sample" ]
+        ~f:(fun (recipe, template) ->
+          let name = template in
+          let base = "ip/" ^ name in
+          render
+            ("render-ip --name " ^ name ^ " --template " ^ template)
+            [ base ^ "/dune"; base ^ "/block.ml" ];
+          let op () = add recipe ~name () in
+          fail Invalid_operation (add recipe ~name:"bad-name" ());
+          fail Invalid_operation (add recipe ~object_id:"ip" ());
+          let p = expect_preview (op ()) in
+          cancel p;
+          assert (not (Sys_unix.file_exists_exn (dir / base)));
+          let p = expect_preview (op ()) in
+          let new_parent = not (Sys_unix.file_exists_exn (dir / "ip")) in
+          if new_parent then Core_unix.mkdir (dir / "ip");
+          Core_unix.mkdir (dir / base);
+          fail Stale_preview (apply p);
+          assert (List.is_empty (Sys_unix.ls_dir (dir / base)));
+          Core_unix.rmdir (dir / base);
+          if new_parent then Core_unix.rmdir (dir / "ip");
+          applied (apply (expect_preview (op ())));
+          fail Destination_denied (op ()));
+      let lib = "ip/sample" in
+      let module_op ?(object_id = lib) () = add module_recipe ~object_id () in
+      fail Invalid_operation (add module_recipe ());
+      List.iter
+        [ ""
+        ; "../out"
+        ; "ip/../sample"
+        ; "/lib"
+        ; ".git"
+        ; "ip//sample"
+        ; "ip/sample/"
+        ; "ip/./sample"
+        ]
+        ~f:(fun object_id -> fail Destination_denied (module_op ~object_id ()));
+      Core_unix.symlink ~target:(dir / lib) ~link_name:(dir / "lib-link");
+      fail Destination_denied (module_op ~object_id:"lib-link" ());
+      let dune = dir / lib / "dune" in
+      let custom = "(library (name ip_sample) (modules Block))\n" in
+      render "render-module --name counter" [ "counter.ml" ];
+      Out_channel.write_all dune ~data:"(executable (name app))";
+      fail Destination_denied (module_op ());
+      Out_channel.write_all dune ~data:custom;
+      let p = expect_preview (module_op ()) in
+      assert (List.equal String.equal p.new_files [ lib ^ "/counter.ml" ]);
+      let guidance = Option.value_exn p.registration in
+      assert (String.equal guidance.path (lib ^ "/dune"));
+      assert (String.is_substring guidance.snippet ~substring:"Counter");
+      Out_channel.write_all dune ~data:(custom ^ "; changed\n");
+      fail Stale_preview (apply p);
+      assert (not (Sys_unix.file_exists_exn (dir / lib / "counter.ml")));
+      let p = expect_preview (module_op ()) in
+      write (lib ^ "/counter.ml");
+      fail Stale_preview (apply p);
+      fail Destination_denied (module_op ());
+      Core_unix.unlink (dir / lib / "counter.ml");
+      cancel (expect_preview (module_op ()));
+      (match apply (expect_preview (module_op ())) with
+       | Applied { registration = Skipped _; _ } -> ()
+       | r -> raise_s [%sexp (r : Response.t)]);
+      assert (String.equal (In_channel.read_all dune) (custom ^ "; changed\n"));
+      Out_channel.write_all (dir / "dune") ~data:"(library (name root))\n";
+      render "render-module --name counter" [ "wrong.ml" ];
+      fail Provider_failure (module_op ~object_id:"." ());
+      render "render-module --name counter" [ "counter.ml" ];
+      let p = expect_preview (module_op ~object_id:"." ()) in
+      assert (Option.is_none p.registration);
+      applied (apply p);
       Core_unix.unlink exe;
       Option.iter real ~f:(fun renderer ->
         Core_unix.symlink ~target:renderer ~link_name:exe;
@@ -192,6 +286,22 @@ let () =
         assert (List.mem p.new_files "dune-project" ~equal:String.equal);
         assert (List.mem p.new_files "chip.ml" ~equal:String.equal);
         verify dest p;
+        let incremental recipe object_id name =
+          expect_preview
+            (run
+               (Preview
+                  { target = { destination = dest; project = None; object_id }
+                  ; recipe
+                  ; name
+                  }))
+        in
+        List.iter
+          [ ip_empty_recipe, "blank"; ip_sample_recipe, "sample" ]
+          ~f:(fun (recipe, name) ->
+            applied (apply (incremental recipe None name));
+            let library = "ip/" ^ name in
+            applied (apply (incremental module_recipe (Some library) "extra"));
+            assert (Sys_unix.file_exists_exn (dest / library / "extra.ml")));
         let p = expect_preview (existing dest) in
         (match apply p with
          | Applied { registration = Registered path; _ } ->

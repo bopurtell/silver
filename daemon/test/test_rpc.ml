@@ -600,16 +600,16 @@ let run ~build_jobs () =
              })
       in
       let opened = decode_exn V1.Open_project.Response.t_of_sexp opened_body |> ok in
-      let authoring_operation project destination : Authoring.Request.t =
+      let authoring_operation ~recipe project destination : Authoring.Request.t =
         Preview
           { target = { destination; project = Some project; object_id = Some "example" }
-          ; recipe = "controlled-v1"
+          ; recipe
           ; name = "example"
           }
       in
-      let preview project destination =
+      let preview ?(recipe = "controlled-v1") project destination =
         Service.authoring service
-          { instance_id; operation = authoring_operation project destination }
+          { instance_id; operation = authoring_operation ~recipe project destination }
       in
       let%bind unknown = preview (Project_id.of_string "unknown") project_root in
       require
@@ -619,6 +619,16 @@ let run ~build_jobs () =
       require
         (match mismatch with Error { kind = Invalid_request; _ } -> true | _ -> false)
         "authoring allowed a destination outside the selected project";
+      let%bind () =
+        Deferred.List.iter
+          [ Authoring.ip_empty_recipe; Authoring.ip_sample_recipe; Authoring.module_recipe ]
+          ~how:`Sequential
+          ~f:(fun recipe ->
+            let%map r = preview ~recipe opened.project.id (Filename.concat project_root "sub") in
+            require
+              (match r with Error { kind = Invalid_request; _ } -> true | _ -> false)
+              "authoring accepted a subdirectory in place of the bound project root")
+      in
       let%bind unconfigured = preview opened.project.id (Filename.concat project_root "new") in
       require
         (match unconfigured with

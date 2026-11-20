@@ -102,7 +102,9 @@ def exercise_add(client, base, real_renderer=None):
                 assert not (root / "asic_demo").exists() and not (root / ".workbench").exists()
                 os.write(term.master, b"\r")
             elif decision == "conflict":
-                term.capture("stale-preview", ["Stale_preview", "asic_demo"])
+                # The absolute collision path can wrap inside a directory name.
+                # Check its contents below rather than matching a screen line.
+                term.capture("stale-preview", ["Stale_preview"])
                 assert rival.read_text() == "owned by another author\n"
                 assert not (root / ".workbench").exists()
                 rival.unlink()

@@ -3930,10 +3930,19 @@ let render_palette host dimensions background =
       | Some H.Workload_path ->
         "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
       | Some H.Design_executable -> "IMPORT EXISTING ASIC DESIGN — existing project executable"
-      | Some H.Starter_name -> "ADD ASIC STARTER — enter starter name"
-      | Some (H.Starter_wait _) -> "ASIC STARTER — waiting for authoring service · Esc dismisses"
-      | Some (H.Starter_preview _) -> "ASIC STARTER PREVIEW · a applies · Esc cancels · ↑/↓ scroll"
-      | Some (H.Starter_result _) -> "ASIC STARTER RESULT · Enter/Esc closes · ↑/↓ scroll"
+      | Some (H.Starter_name Asic_starter) -> "ADD ASIC STARTER — enter starter name"
+      | Some (H.Starter_name (Empty_ip | Sample_ip)) -> "NEW IP LIBRARY — enter library name"
+      | Some H.Module_directory -> "NEW MODULE — enter project-relative library directory"
+      | Some (H.Starter_name (Module_in _)) -> "NEW MODULE — enter module name"
+      | Some (H.Starter_wait _) -> "Waiting for authoring service · Esc dismisses"
+      | Some (H.Starter_preview p) ->
+        (if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.add_to_project_recipe
+         then "ASIC STARTER PREVIEW · a applies"
+         else if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.module_recipe
+         then "NEW MODULE PREVIEW · Enter applies"
+         else "NEW IP LIBRARY PREVIEW · Enter applies")
+        ^ " · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_result _) -> "AUTHORING RESULT · Enter/Esc closes · ↑/↓ scroll"
       | Some (H.Workload_bundle (left, _)) ->
         (if left then "CAPTURE A" else "CAPTURE B")
         ^ " — exact absolute verified bundle directory; source digest stays frozen"
@@ -3945,13 +3954,17 @@ let render_palette host dimensions background =
         "FINALIZE AND ACCEPT " ^ run_label run ^ " — Enter submits; Esc closes"
       | Some (H.Simulation_selection _) ->
         "SIMULATION LAUNCH FORM — explicit inputs; Enter accepts each field"
+      | None when List.exists p.commands ~f:(fun c -> String.equal c.id "ip.empty") ->
+        "NEW IP LIBRARY — choose template"
+      | None when List.exists p.commands ~f:(fun c -> String.equal c.id "library.new-module") ->
+        "SELECTED LIBRARY — choose action"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "setup.add") ->
         "SET UP PROJECT — choose how to configure this project"
       | None -> "COMMAND PALETTE · captured target"
     in
     let query =
       match p.argument with
-      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name) ->
+      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name _ | H.Module_directory) ->
         let input =
           "> "
           ^ p.query
@@ -3972,7 +3985,14 @@ let render_palette host dimensions background =
     in
     let help =
       match p.argument with
-      | Some H.Starter_name -> [ "Enter previews new files in the open project. Esc cancels." ]
+      | Some (H.Starter_name starter) ->
+        (match starter with
+         | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
+         | Sample_ip -> [ "Template: sample behavior" ]
+         | Empty_ip -> [ "Template: empty" ]
+         | Asic_starter -> [])
+        @ [ "Enter previews new files in the open project. Esc cancels." ]
+      | Some H.Module_directory -> [ "Enter the directory containing the library's dune file." ]
       | Some (H.Starter_preview _ | H.Starter_result _) ->
         let rows =
           match p.argument with

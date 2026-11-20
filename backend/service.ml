@@ -247,7 +247,7 @@ let check_authoring_project t (operation : Authoring.Request.t) =
        let root = session.root in
        let prefix = if String.equal root "/" then "/" else root ^ "/" in
         if String.equal destination root
-           || (not (String.equal recipe Authoring.add_to_project_recipe)
+           || (not (Authoring.targets_project_root recipe)
                && String.is_prefix destination ~prefix)
        then Ok ()
        else error Invalid_request "destination is outside the selected project")

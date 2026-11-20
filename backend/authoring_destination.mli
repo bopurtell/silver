@@ -9,7 +9,22 @@ type snapshot [@@deriving equal, sexp_of]
 
 val root : string -> root
 val select : root list -> string -> root * string list
-val visit : ?existing:string -> root -> string list -> (dir -> snapshot -> 'a) -> 'a
+
+type addition =
+  | Ip of string
+  | Module of string list * string
+
+val module_directory : string -> string list
+val manual_modules : snapshot -> bool
+
+val visit
+  :  ?existing:string
+  -> ?addition:addition
+  -> root
+  -> string list
+  -> (dir -> snapshot -> 'a)
+  -> 'a
+
 val catalog : string
 val design_dir : string -> string
 val catalog_exists : snapshot -> bool

@@ -51,6 +51,16 @@ end
 
 let starter_recipe = "hardcaml-asic-starter-v1"
 let add_to_project_recipe = "hardcaml-asic-add-to-project-v1"
+let ip_empty_recipe = "hardcaml-ip-empty-v1"
+let ip_sample_recipe = "hardcaml-ip-sample-v1"
+let module_recipe = "hardcaml-module-v1"
+
+let targets_project_root recipe =
+  List.mem
+    [ add_to_project_recipe; ip_empty_recipe; ip_sample_recipe; module_recipe ]
+    recipe
+    ~equal:String.equal
+;;
 
 module Preview = struct
   type t =

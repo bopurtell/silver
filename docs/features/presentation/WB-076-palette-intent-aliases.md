@@ -38,7 +38,7 @@ Global command reweighting, learning preferences or changing the underlying flow
 - [ ] `synth rows` can still find discovery. Exercise actual dispatch after inserting a competing search match, not just sorted labels.
 
 ## Dependencies
-None. [WB-079](../project/WB-079-ip-and-module-starters.md) adds `new ip` when its wizard exists; the launch fix can ship first.
+None. [WB-079](../project/WB-079-ip-and-module-starters.md) delivered the `new ip` alias and wizard. The launch aliases in this ticket are independent.
 
 ## Estimate rationale
 3 points: a small ordering change plus targeted dispatch coverage using existing launch commands.

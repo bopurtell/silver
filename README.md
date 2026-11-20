@@ -73,6 +73,23 @@ files to this project and keeps its `dune-project` and existing sources.
 reference. Creating or adding a starter requires `hardcaml-asic-starter` on
 `PATH`; importing a design does not. None of these actions launches EDA.
 
+**Reusable IP:** In an open project, type **`new ip`** in the palette and press
+**Enter**. Choose an empty or sample library, name it, and review the paths
+under `ip/<name>/`. **Enter** creates the files; **Esc** cancels. Use **New
+Module…** to add an `.ml` file to a library. Without a selected library, enter
+its directory relative to the project root. If the library lists modules
+explicitly, the preview explains the Dune edit to make yourself.
+
+The installed `silver-author` uses the same service locally (or with
+`--endpoint URL --root /project/on/host`). From inside a Dune project:
+
+```sh
+silver-author new-ip accum --template sample          # preview only
+silver-author new-ip accum --template sample --apply
+silver-author new-module helper --library ip/accum --apply
+dune runtest ip/accum
+```
+
 Standalone command-line submissions (`--plain --action`, `--refresh-integration`
 and `--asic-operation`) wait for the operation; use `--connect` to submit
 work that should outlive the client.

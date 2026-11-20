@@ -4709,6 +4709,28 @@ let waveform_context session =
 ;;
 
 let host_catalog_base session =
+  (match session.opened with
+   | None -> []
+   | Some opened ->
+     [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
+     ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
+     ]
+     @ List.filter_map opened.workspace.items ~f:(fun item ->
+       if not (String.equal item.kind "library")
+       then None
+       else Option.map item.source_path ~f:(fun path ->
+         let dir =
+           match String.split path ~on:'/' with
+           | "_build" :: context :: rest
+             when List.mem opened.workspace.contexts context ~equal:String.equal ->
+             if List.is_empty rest then "." else String.concat rest ~sep:"/"
+           | _ -> path
+         in
+         let label = String.concat item.names ~sep:", " in
+         Host.command ("project.library." ^ label ^ ":" ^ dir)
+           (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
+           "select library actions" (Library_actions dir))))
+  @
   (if session.local_project_files
       && Option.is_some session.opened
       && not (adopted_here session)
@@ -6349,11 +6371,14 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           | Ok payload ->
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
-    | (Setup_project | Name_starter | Preview_starter _ | Finish_starter _
+    | (Setup_project | Choose_ip_template | Choose_module_directory | Library_actions _
+      | Name_starter _ | Preview_starter _ | Finish_starter _
       | Setup_asic | Adopt_asic _) as action ->
       let module Adoption = Hardcaml_workbench_setup.Asic_adoption in
       (match session.local_project_files, session.opened with
-       | true, Some opened ->
+       | local, Some opened when local || (match action with
+           | Setup_project | Setup_asic | Adopt_asic _ -> false
+           | _ -> true) ->
          let root = Project_root.to_absolute_path opened.project.root in
          let form ?(commands = []) ?(query = "") ?(notice = "") argument =
            session.host
@@ -6372,22 +6397,37 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          (match action with
           | Setup_project ->
             form None ~commands:
-              [ Host.command "setup.add" "Add ASIC starter…" "preview new files" Name_starter
+               [ Host.command "setup.add" "Add ASIC starter…" "preview new files" (Name_starter Asic_starter)
               ; Host.command "setup.import" "Import existing ASIC design…" "register executable by reference" Setup_asic
               ];
             Effect.Ignore
-          | Name_starter ->
-            form (Some Starter_name);
+           | Choose_ip_template ->
+             form None ~commands:
+               [ Host.command "ip.empty" "Empty template" "minimal" (Name_starter Empty_ip)
+               ; Host.command "ip.sample" "Sample behavior template" "example" (Name_starter Sample_ip)
+               ];
+             Effect.Ignore
+           | Library_actions dir ->
+             form None ~commands:
+               [ Host.command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
+                   "new module" (Name_starter (Module_in dir)) ];
+             Effect.Ignore
+           | Choose_module_directory ->
+             form (Some Module_directory);
+             Effect.Ignore
+           | Name_starter starter ->
+             form (Some (Starter_name starter));
             Effect.Ignore
-          | Preview_starter name ->
+           | Preview_starter (starter, name) ->
             let token = ref () in
             async (fun () ->
               form (Some (Starter_wait token));
               let%bind response =
                 call (Preview
-                  { recipe = Authoring.add_to_project_recipe
+                   { recipe = Host.starter_recipe starter
                   ; name
-                  ; target = { destination = root; project = Some opened.project.id; object_id = None }
+                   ; target = { destination = root; project = Some opened.project.id
+                              ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
                   })
               in
               let waiting =
@@ -6406,7 +6446,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                   | Error message | Ok (Failed { message; _ }) -> message
                   | _ -> "Unexpected preview response"
                 in
-                form (Some Starter_name) ~query:name ~notice;
+                form (Some (Starter_name starter)) ~query:name ~notice;
                 return ())
           | Finish_starter (decision, preview) ->
             async (fun () ->
@@ -6418,16 +6458,25 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               in
               let rows = match response with
                 | Ok (Applied { created_files; registration }) ->
-                  session.adopted_root <- Some root;
-                  [ "ASIC starter added."; "Created files:" ] @ created_files
+                  let recipe = preview.operation.recipe in
+                  let asic = String.equal recipe Authoring.add_to_project_recipe in
+                  let for_module = String.equal recipe Authoring.module_recipe in
+                  if asic then session.adopted_root <- Some root;
+                  [ (if asic then "ASIC starter added."
+                     else if for_module then "Module created."
+                     else "IP library created.")
+                  ; "Created files:"
+                  ]
+                  @ created_files
                   @ (match registration with
                      | Not_requested -> []
                      | Registered path -> [ "Registered: " ^ path ]
                      | Skipped { path; reason } ->
-                       [ "Skipped registration: " ^ path; reason ]
+                       [ (if for_module then "Manual Dune edit: " else "Skipped registration: ") ^ path
+                       ; reason ]
                        @ Option.value_map preview.registration ~default:[] ~f:(fun edit ->
                          String.split_lines edit.snippet))
-                  @ [ "Build the starter executable, then reopen to discover flows." ]
+                  @ (if asic then [ "Build the starter executable, then reopen to discover flows." ] else [])
                 | Ok Cancelled -> [ "Preview cancelled. No files created." ]
                 | Ok (Failed f) ->
                   [ Sexp.to_string (Authoring.Failure.sexp_of_kind f.kind) ^ ": " ^ f.message ]

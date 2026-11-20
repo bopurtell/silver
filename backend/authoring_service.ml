@@ -31,6 +31,20 @@ let existing_name (op : Operation.t) =
   Option.some_if (String.equal op.recipe add_to_project_recipe) op.name
 ;;
 
+let addition (op : Operation.t) =
+  if String.equal op.recipe module_recipe
+  then (
+    match op.target.object_id with
+    | Some dir -> Some (D.Module (D.module_directory dir, op.name))
+    | None -> reject Invalid_operation "Select a project-relative Dune library directory")
+  else if List.mem [ ip_empty_recipe; ip_sample_recipe ] op.recipe ~equal:String.equal
+  then (
+    if Option.is_some op.target.object_id
+    then reject Invalid_operation "IP requires a project root";
+    Some (D.Ip op.name))
+  else None
+;;
+
 let integrate (op : Operation.t) snapshot files =
   let module I = Hardcaml_workbench_project_integration in
   let prefix = D.design_dir op.name ^ "/" in
@@ -93,7 +107,12 @@ let integrate (op : Operation.t) snapshot files =
 let preview t (op : Operation.t) =
   let controlled = String.equal controlled_recipe op.recipe in
   let existing = existing_name op in
-  if not (controlled || String.equal starter_recipe op.recipe || Option.is_some existing)
+  let addition = addition op in
+  if not
+       (controlled
+        || String.equal starter_recipe op.recipe
+        || Option.is_some existing
+        || Option.is_some addition)
   then reject Invalid_operation "Unknown authoring recipe";
   if String.is_empty op.name
      || String.length op.name > 64
@@ -107,13 +126,22 @@ let preview t (op : Operation.t) =
      && ((not (Char.is_lowercase op.name.[0]))
          || String.exists op.name ~f:Char.is_uppercase)
   then reject Invalid_operation "Starter names must match [a-z][a-z0-9_-]{0,63}";
+  if Option.is_some addition && String.contains op.name '-'
+  then reject Invalid_operation "IP and module names must match [a-z][a-z0-9_]{0,63}";
   if Option.is_some existing && Option.is_some op.target.object_id
   then reject Invalid_operation "Adding a starter requires a project root, not an object";
   if String.equal starter_recipe op.recipe
      && (Option.is_some op.target.project || Option.is_some op.target.object_id)
   then reject Invalid_operation "A new project requires an unbound destination";
   let root, components = D.select t.roots op.target.destination in
-  let snapshot = D.visit ?existing root components (fun _ snapshot -> snapshot) in
+  let snapshot =
+    D.visit ?existing ?addition root components (fun _ snapshot -> snapshot)
+  in
+  let manual =
+    match addition with
+    | Some (Module _) -> D.manual_modules snapshot
+    | _ -> false
+  in
   let provider, version, files, registration =
     if controlled
     then (
@@ -124,12 +152,45 @@ let preview t (op : Operation.t) =
       , Some { Registration.path = "catalog.txt"; snippet = path ^ "\n" } ))
     else (
       try
+        let command, arguments =
+          match addition with
+          | Some (Ip _) ->
+            ( "render-ip"
+            , [ "--template"
+              ; (if String.equal op.recipe ip_empty_recipe then "empty" else "sample")
+              ] )
+          | Some (Module _) -> "render-module", []
+          | None -> (if Option.is_some existing then "render-existing" else "render"), []
+        in
         let provider, version, files =
-          Authoring_starter.parse
-            (Authoring_starter.render ~existing:(Option.is_some existing) op.name)
+          Authoring_starter.parse (Authoring_starter.render ~command ~arguments op.name)
         in
         let files, registration =
-          if Option.is_some existing then integrate op snapshot files else files, None
+          match addition with
+          | Some (Ip name) ->
+            let prefix = "ip/" ^ name ^ "/" in
+            if not
+                 (List.for_all files ~f:(fun f -> String.is_prefix f.File.path ~prefix)
+                  && List.exists files ~f:(fun f ->
+                    String.equal f.File.path (prefix ^ "dune")))
+            then failwith "Unexpected IP renderer paths";
+            files, None
+          | Some (Module (parts, name)) ->
+            let local file = String.concat ~sep:"/" (parts @ [ file ]) in
+            (match files with
+             | [ file ] when String.equal file.path (name ^ ".ml") ->
+               ( [ { file with path = local file.path } ]
+               , Option.some_if
+                   manual
+                   { Registration.path = local "dune"
+                   ; snippet =
+                       "Review the library's (modules ...) list and include "
+                       ^ String.capitalize name
+                       ^ " manually."
+                   } )
+             | _ -> failwith "Unexpected module renderer paths")
+          | None ->
+            if Option.is_some existing then integrate op snapshot files else files, None
         in
         provider, version, files, registration
       with
@@ -196,6 +257,7 @@ let handle_locked t request =
       let p = take t preview_id in
       D.visit
         ?existing:(existing_name p.preview.operation)
+        ?addition:(addition p.preview.operation)
         p.root
         p.components
         (fun dir snapshot ->

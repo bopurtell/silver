@@ -8,7 +8,7 @@ let invalid reason = failwith ("Invalid starter descriptor: " ^ reason)
 
 (* Run on the blocking authoring worker. Drain both pipes with a single deadline
    (including child exit after EOF); always close the pipes and reap the child. *)
-let render ?(existing = false) name =
+let render ?(command = "render") ?(arguments = []) name =
   let with_fd fd f = Exn.protect ~f:(fun () -> f fd) ~finally:(fun () -> U.close fd) in
   let pipe f =
     let r, w = U.pipe ~cloexec:true () in
@@ -35,11 +35,7 @@ let render ?(existing = false) name =
               (fun stdin ->
                 U.create_process
                   program
-                  [| program
-                   ; (if existing then "render-existing" else "render")
-                   ; "--name"
-                   ; name
-                  |]
+                  (Array.of_list ([ program; command; "--name"; name ] @ arguments))
                   stdin
                   out_w
                   err_w))
