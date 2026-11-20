@@ -59,12 +59,14 @@ type starter =
   | Empty_ip
   | Sample_ip
   | Module_in of string
+  | Chip of Authoring.Chip_source.t * bool
 
 let starter_recipe = function
   | Asic_starter -> Authoring.add_to_project_recipe
   | Empty_ip -> Authoring.ip_empty_recipe
   | Sample_ip -> Authoring.ip_sample_recipe
   | Module_in _ -> Authoring.module_recipe
+  | Chip _ -> Authoring.chip_recipe
 ;;
 
 type action =
@@ -78,6 +80,12 @@ type action =
   | Setup_asic
   | Choose_ip_template
   | Choose_module_directory
+  | Choose_chip_source
+  | Choose_chip_library
+  | Enter_chip_directory
+  | Map_chip of string
+  | Toggle_chip of Authoring.Preview.t * Authoring.Chip_source.t * bool
+  | Select_created_chip of string
   | Library_actions of string
   | Name_starter of starter
   | Preview_starter of starter * string
@@ -108,7 +116,7 @@ type action =
   | Quick_prepare_stage of Asic.Stage.t * Run_ref.t
   | Quick_prepare_endpoint of string * Run_ref.t
   | Launch_stage_and_view of Stage_action.intent * Run_ref.t option * Asic.Selection.t
-  | Quick_launch_selected of Overview_tiles.checklist_item * Run_ref.t
+  | Quick_launch_selected of Overview_tiles.checklist_item * Run_ref.t option * Asic.Selection.t
   | Launch_elaboration_bundle of Preparation.Selection.t
   | Set_quick_launch_view of bool
   | Edit_preparation of string * string
@@ -195,9 +203,11 @@ type argument =
   | Design_executable
   | Starter_name of starter
   | Module_directory
+  | Chip_directory
+  | Chip_mapping of string
   | Starter_wait of unit ref
-  | Starter_preview of Authoring.Preview.t
-  | Starter_result of string list
+  | Starter_preview of Authoring.Preview.t * starter
+  | Starter_result of string list * string option
   | Workload_path
   | Workload_bundle of bool * Workloads_view.capture_token
   | Acceptance of Run_ref.t * string * string
@@ -898,9 +908,9 @@ let stage_cursor local ~run ~(stages : Asic.Stage.t list) =
   Option.first_some selected (List.hd stages)
 ;;
 
-let checklist_cursor local ~run ~items =
+let checklist_cursor_for local ~run ~items =
   let selected =
-    if Option.equal Run_ref.equal local.stage_run (Some run)
+    if Option.equal Run_ref.equal local.stage_run run
     then
       Option.bind local.cursor ~f:(fun id ->
         List.find items ~f:(fun item ->
@@ -910,10 +920,11 @@ let checklist_cursor local ~run ~items =
   Option.first_some selected (List.hd items)
 ;;
 
+let checklist_cursor local ~run ~items = checklist_cursor_for local ~run:(Some run) ~items
+
 let reconcile_checklist local ~run ~items =
   let cursor =
-    Option.bind run ~f:(fun run ->
-      Option.map (checklist_cursor local ~run ~items) ~f:Overview_tiles.checklist_id)
+    Option.map (checklist_cursor_for local ~run ~items) ~f:Overview_tiles.checklist_id
   in
   if Option.equal Run_ref.equal local.stage_run run
      && Option.equal String.equal local.cursor cursor
@@ -921,10 +932,10 @@ let reconcile_checklist local ~run ~items =
   else { local with cursor; stage_run = run; scroll = 0; utility_detail = false }
 ;;
 
-let browse_checklist t id ~run ~items ~delta =
+let browse_checklist_for t id ~run ~items ~delta =
   let l = local t id in
   let pos =
-    Option.bind (checklist_cursor l ~run ~items) ~f:(fun selected ->
+    Option.bind (checklist_cursor_for l ~run ~items) ~f:(fun selected ->
       List.findi items ~f:(fun _ item ->
         String.equal
           (Overview_tiles.checklist_id item)
@@ -936,7 +947,11 @@ let browse_checklist t id ~run ~items ~delta =
     List.nth items (Int.max 0 (Int.min (List.length items - 1) (pos + delta)))
     |> Option.map ~f:Overview_tiles.checklist_id
   in
-  set_local t id { l with cursor; stage_run = Some run; scroll = 0 }
+  set_local t id { l with cursor; stage_run = run; scroll = 0 }
+;;
+
+let browse_checklist t id ~run ~items ~delta =
+  browse_checklist_for t id ~run:(Some run) ~items ~delta
 ;;
 
 let reconcile_stages local ~run ~stages =
@@ -1198,7 +1213,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name _ | Module_directory); _ } ->
+      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -4649,7 +4664,18 @@ let ranked_matches p =
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
 
-let starter_preview_lines (p : Authoring.Preview.t) =
+let chip_assumptions (source : Authoring.Chip_source.t) =
+  [ "Harness: Tiny Tapeout 6×4 · Technology: IHP SG13CMOS5L" ]
+  @ (match source with
+     | Example -> [ "Example: 8-bit register · clk: 20 ns · synchronous active-low rst_n" ]
+     | Ip { library_directory; mapping } ->
+       [ "Library: " ^ library_directory ^ " · Mapping: " ^ mapping
+       ; "ui_in[7:0] → Block.create → uo_out[7:0]; combinational"
+       ; "Harness clk constraint: 20 ns; IP clk/rst_n unused. uio_out/oe tied low."
+       ])
+;;
+
+let starter_preview_lines ?source (p : Authoring.Preview.t) =
   [ "Recipe: " ^ p.operation.recipe
   ; "Provider: " ^ p.provider ^ " " ^ p.version
   ; "Name: " ^ p.operation.name
@@ -4657,12 +4683,18 @@ let starter_preview_lines (p : Authoring.Preview.t) =
   ]
   @ Option.value_map p.operation.target.object_id ~default:[] ~f:(fun dir ->
     [ "Library: " ^ dir ])
+  @ Option.value_map source ~default:[] ~f:chip_assumptions
+  @ (if String.equal p.operation.recipe Authoring.chip_recipe
+     then [ if Option.is_some p.registration then "Catalog registration: on"
+            else "Catalog registration: declined (build directly; absent from picker)" ]
+     else [])
   @ [ "New files:" ]
   @ p.new_files
   @ Option.value_map p.registration ~default:[] ~f:(fun edit ->
     let label =
       if String.equal p.operation.recipe Authoring.module_recipe
       then "Manual Dune edit: "
+      else if edit.manual then "Manual catalog entry (paste into): "
       else "Proposed registration: "
     in
     (label ^ edit.path) :: String.split_lines edit.snippet)
@@ -4793,7 +4825,7 @@ let finalization_form t =
         | Resource_path _
         | Design_executable
         | Starter_name _
-        | Module_directory
+        | Chip_directory | Chip_mapping _ | Module_directory
         | Workload_path
         | Workload_bundle _
         | Acceptance _
@@ -5177,12 +5209,16 @@ let input t event ~commands : t * effect =
     (match t.palette with
      | Some p ->
        (match p.argument, event with
-         | Some (Starter_preview preview), Enter
-           when String.equal preview.operation.recipe Authoring.add_to_project_recipe ->
-           t, No_effect
+          | Some (Starter_preview (_, Asic_starter)), Enter ->
+            t, No_effect
+          | Some (Starter_preview (preview, Chip (source, register))), Character 'r'
+            when current t p.capture ->
+            { t with palette = None }, Execute (p.capture, Toggle_chip (preview, source, not register))
+          | Some (Starter_result (_, Some name)), Character 's' when current t p.capture ->
+            { t with palette = None }, Execute (p.capture, Select_created_chip name)
          | Some (Starter_preview _), (Character 'a' | Enter) when not (current t p.capture) ->
           { t with palette = None; notice = "Project changed; request a new preview" }, No_effect
-         | Some (Starter_preview preview), (Character 'a' | Enter | Escape) ->
+         | Some (Starter_preview (preview, _)), (Character 'a' | Enter | Escape) ->
           let decision = if Poly.equal event Escape then `Cancel else `Apply in
           { t with palette = None }, Execute (p.capture, Finish_starter (decision, preview))
         | Some (Starter_preview _ | Starter_result _), (Next | Focus | Previous | Focus_previous) ->
@@ -5200,7 +5236,7 @@ let input t event ~commands : t * effect =
                | Some
                    ( Finalization_attempt _
                     | Resource_path _
-                    | Design_executable | Starter_name _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                    | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
@@ -5241,7 +5277,7 @@ let input t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                          | Simulation_selection _ | Design_executable | Starter_name _ | Module_directory -> true
+                          | Simulation_selection _ | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
                          | _ -> false))
           then
             ( { t with
@@ -5252,7 +5288,7 @@ let input t event ~commands : t * effect =
                   | Some
                       ( Finalization_attempt _
                        | Resource_path _
-                        | Design_executable | Starter_name _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                        | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
@@ -5269,6 +5305,14 @@ let input t event ~commands : t * effect =
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
                  | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
+                  | Chip_directory ->
+                    if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
+                    then failwith "Enter a project-relative library directory";
+                    Map_chip p.query
+                  | Chip_mapping directory ->
+                    if not (String.equal p.query "ui_in:uo_out:comb8")
+                    then failwith "Enter the supported mapping explicitly: ui_in:uo_out:comb8";
+                    Name_starter (Chip (Ip { library_directory = directory; mapping = p.query }, true))
                   | Module_directory ->
                     if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
                     then failwith "Enter a project-relative library directory";
@@ -6032,7 +6076,7 @@ let%test_unit "bound starter preview requires explicit apply, cancel keeps recei
     }
   in
   let host = { host with palette = Some { capture; commands = []; query = ""; index = 0;
-                                         argument = Some (Starter_preview preview) } } in
+                                         argument = Some (Starter_preview (preview, Asic_starter)) } } in
   (match input host Enter ~commands:[] with
    | { palette = Some _; _ }, No_effect -> ()
    | _ -> assert false);

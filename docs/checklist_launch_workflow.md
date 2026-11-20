@@ -37,8 +37,9 @@ rows could only report status. [Implementation plan](checklist_launch_workflow_p
 ## Use the restored workflow
 
 1. Focus **stage checklist** and select Routing (or another stage) using j/k.
-2. Press **r**. If discovery is absent after restart, this explicit action discovers
-   current capabilities, resolves the captured stage and prepares a normal plan.
+2. Press **r** to stage for review, or **Shift+R** to stage **and launch**
+   without first using **Plan ASIC**. Opening a configured ASIC project normally
+   discovers its targets and flow catalog automatically.
 3. Wait for **ready** in planned-run. Check the resolved flow/profile/endpoint.
 4. Open/reopen **Space c c** and choose **Launch** or **Launch and view in captured
    context**. In the lowercase-r workflow, only this step starts execution.
@@ -53,19 +54,21 @@ silently absent. An already-open palette retains captured commands; reopen it af
 the plan becomes ready to get the new exact launch action. Disabled commands never
 carry a fabricated Preview or dispatch an execution.
 
-If no run/stage rows are selected yet, the ordinary explicit Plan palette forms
-remain available after Discover. This change does not manufacture an observed stage
-row for a project with no selected execution.
+If no run is selected, the checklist shows the flow's declared fresh endpoints
+as **available to launch**. These rows are launch choices, not evidence that a
+stage has already run. Pick one and press **R**.
 
 ## How the selection is resolved
 
-An explicit provider `Stage.action` remains authoritative, preserving synthetic
-behavior. Otherwise the resolver uses normalized current project capabilities:
+An explicit provider `Stage.action` is evidence for its own target, not a
+template to carry across chips. For a different launch target, use its current
+project capabilities:
 
 - Recognized fresh physical recipe and complete-prefix endpoint semantics.
 - The exact declared stage endpoint list; no guessed alias or directory name.
-- Captured remembered launch inputs first, then the captured observed run selection
-  when available, then the provider's actual declared catalog default pair.
+- Use applicable launch settings for the selected chip/variant. When switching
+  chips, never borrow the previous chip's profile or parameter assignments;
+  use the new target's declared catalog default if no settings apply.
 - Replace only the endpoint with the selected stage; preserve explicit assignments.
 - A stale explicit flow/profile is an error, not permission to silently choose a
   different default. Choose supported Plan inputs and retry in that case.
@@ -87,9 +90,10 @@ action. Changed context, workspace roundtrip, newer intent or failed discovery
 cannot retarget the captured request or enable the old plan accidentally.
 
 Catalog refresh clears stale mappings and publishes validated flows/default together.
-There is no provider JSON parsing in tiles. Normal rendering, palette opening and
-passive polling do not auto-discover or run tools; discovery is part of the explicit
-r action. The existing Plan/Run contracts, exact Preview comparison, submission
+There is no provider JSON parsing in tiles. Project opening starts discovery;
+normal rendering and opening the palette do not start a run. Use **Discover
+ASIC flows and runs** to refresh explicitly after changing the catalog. The
+existing Plan/Run contracts, exact Preview comparison, submission
 idempotency and launch ledger remain authoritative.
 
 ## Upgrade the running demo

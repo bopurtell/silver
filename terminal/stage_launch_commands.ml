@@ -33,15 +33,19 @@ let selected_checklist host ~asic =
       W.resolve_tile registry tile.W.Tile.id
       |> Result.map_error ~f:(fun error -> error.V1.Error.message)
     in
-    let%bind run =
-      Option.value_map
-        reference.run
-        ~default:(Error "Checklist has no current run selection")
-        ~f:Result.return
-    in
-    H.checklist_cursor (H.local host tile.id) ~run ~items:(O.checklist_items ~asic ~run)
-    |> Option.value_map ~default:(Error "Checklist has no selected stage") ~f:(fun item ->
-      Ok (item, run))
+    let run = reference.run in
+    let items = O.selectable_checklist ~asic ~remembered:host.remembered_selection ~run in
+    H.checklist_cursor_for (H.local host tile.id) ~run ~items
+    |> Option.value_map
+         ~default:
+           (Error
+              (Option.value
+                 (Result.error
+                    (Stage_action.checklist_inputs
+                       ~snapshot:asic
+                       ~remembered:host.remembered_selection))
+                 ~default:"No fresh endpoints advertised for the selected flow"))
+         ~f:(fun item -> Ok (item, run))
   in
   match candidates with
   | [] -> Error "No stage checklist in the active workspace"
@@ -50,45 +54,92 @@ let selected_checklist host ~asic =
     if List.for_all rest ~f:(fun tile ->
          match resolve tile with
          | Ok (other, other_run) ->
-           Run_ref.equal run other_run
+           Option.equal Run_ref.equal run other_run
            && String.equal (O.checklist_id item) (O.checklist_id other)
          | Error _ -> false)
     then Ok (item, run)
     else Error "Multiple checklist selections; focus the intended stage checklist"
 ;;
 
+let fresh_selection ~asic ~remembered (item : O.checklist_item) =
+  match item with
+  | Catalog_endpoint endpoint ->
+    Stage_action.checklist_fresh ~snapshot:asic ~remembered endpoint
+  | Physical_stage stage ->
+    Stage_action.checklist_fresh ~snapshot:asic ~remembered stage.id
+  | Timing_analysis _ -> Stage_action.checklist_fresh ~snapshot:asic ~remembered "timing"
+  | Elaboration_preparation ->
+    Result.bind
+      (Stage_action.checklist_inputs ~snapshot:asic ~remembered)
+      ~f:(fun (s, flow) ->
+        let endpoint =
+          if List.mem flow.fresh_stage_endpoints s.endpoint ~equal:String.equal
+          then Some s.endpoint
+          else Launch_preferences.default_endpoint flow
+        in
+        Option.value_map
+          endpoint
+          ~default:(Error "No fresh endpoints advertised for Elaboration")
+          ~f:(fun endpoint -> Ok { s with endpoint }))
+;;
+
+let manual_action ~asic ~remembered (item, run) =
+  match item, run with
+  | O.Catalog_endpoint _, _ ->
+    Result.map (fresh_selection ~asic ~remembered item) ~f:(fun s -> H.Asic (Plan s))
+  | Elaboration_preparation, _ -> Ok H.Prepare_project
+  | Physical_stage stage, Some run -> Ok (H.Prepare_stage (stage, run))
+  | Timing_analysis _, Some run -> Ok (H.Prepare_endpoint ("timing", run))
+  | _, None -> Error "No run selected for historical stage"
+;;
+
+let quick_action host ~asic ~remembered (item, run) =
+  let open Result.Let_syntax in
+  let%bind selection = fresh_selection ~asic ~remembered item in
+  let%map () =
+    match item with
+    | Elaboration_preparation ->
+      Preparation_view.stage
+        ~snapshot:host.H.preparation
+        ~selection:(Ok selection)
+        ~expected_plan_identity:None
+      |> Result.map ~f:ignore
+    | _ -> Ok ()
+  in
+  H.Quick_launch_selected (item, run, selection)
+;;
+
 let selected_commands host ~asic =
   let target = selected_checklist host ~asic in
-  let actions =
+  let actions quick =
     Result.bind target ~f:(fun (item, run) ->
-      let plan =
-        match item with
-        | O.Elaboration_preparation -> H.Prepare_project
-        | Physical_stage stage -> Prepare_stage (stage, run)
-        | Timing_analysis _ -> Prepare_endpoint ("timing", run)
-      in
-      let eligibility =
-        match item, Launch_preferences.chip_target asic with
-        | Timing_analysis _, Some _ ->
-          Stage_action.validate_evidence
-            ~snapshot:asic
-            ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
-        | Physical_stage stage, Some _ ->
-          Stage_action.resolve
-            ~stage
-            ~remembered:host.H.remembered_selection
-            ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
-            ~snapshot:asic
-          |> Result.map ~f:ignore
-        | _ -> Ok ()
-      in
-      Result.map eligibility ~f:(fun () -> plan, H.Quick_launch_selected (item, run)))
+      if quick
+      then quick_action host ~asic ~remembered:host.H.remembered_selection (item, run)
+      else (
+        let eligibility =
+          match item, run, Launch_preferences.chip_target asic with
+          | Timing_analysis _, Some run, Some _ ->
+            Stage_action.validate_evidence
+              ~snapshot:asic
+              ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
+          | Physical_stage stage, Some run, Some _ ->
+            Stage_action.resolve
+              ~stage
+              ~remembered:host.H.remembered_selection
+              ~observed:(O.execution ~asic ~run |> Option.bind ~f:(fun r -> r.selection))
+              ~snapshot:asic
+            |> Result.map ~f:ignore
+          | _ -> Ok ()
+        in
+        Result.bind eligibility ~f:(fun () ->
+          manual_action ~asic ~remembered:host.remembered_selection (item, run))))
   in
   List.map
     [ "stage.quick-selected", "Quick launch selected stage", true
     ; "stage.plan-selected", "Plan selected checklist stage for manual launch", false
     ]
     ~f:(fun (id, title, quick) ->
+      let actions = actions quick in
       H.command
         ?unavailable:(Result.error actions)
         id
@@ -99,9 +150,7 @@ let selected_commands host ~asic =
                 ~default:""
                 ~f:(fun t -> " — " ^ Launch_preferences.chip_label (Some t))))
         (if quick then "quick launch selected checklist stage" else "stage input plan")
-        (Result.map actions ~f:(fun (plan, launch) -> if quick then launch else plan)
-         |> Result.ok
-         |> Option.value ~default:H.Unavailable_launch))
+        (actions |> Result.ok |> Option.value ~default:H.Unavailable_launch))
 ;;
 
 let workspace_run host =
@@ -118,7 +167,7 @@ let validate_selected host ~asic ~item ~run =
         Option.equal Asic.Selection.equal before.action after.action
       | _ -> true
     in
-    if Run_ref.equal run current_run
+    if Option.equal Run_ref.equal run current_run
        && String.equal (O.checklist_id item) (O.checklist_id current)
        && same_action
     then Ok ()

@@ -57,6 +57,13 @@ let create ?(build = Adapter.build) ?(emit = Adapter.emit) () =
 
 exception Rpc_error of V1.Error.t
 
+let catalog_target_compatible t ~project_key target =
+  match Option.bind (Hashtbl.find t.projects project_key) ~f:(fun p -> p.staged) with
+  | Some stage when Option.is_none stage.launch_key ->
+    Option.equal Asic.Chip_target.equal stage.receipt.selection.chip_target (Some target)
+  | _ -> true
+;;
+
 let rpc_error kind message = raise (Rpc_error (V1.Error.create kind message))
 
 let load_config root =
@@ -69,7 +76,7 @@ let load_config root =
           ~max_bytes:Hardcaml_workbench_project_integration.Config_location.max_config_bytes
         |> Or_error.ok_exn
         |> Option.map ~f:(fun file ->
-          Config.parse_string file.contents |> Or_error.ok_exn)))
+          Config.parse_string ~root file.contents |> Or_error.ok_exn)))
   in
   match result with
   | Ok None -> Availability.Unavailable Not_configured, None

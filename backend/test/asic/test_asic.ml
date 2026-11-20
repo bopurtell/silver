@@ -2314,7 +2314,50 @@ let chip_fixture root state_dir =
     {"id":"budget","label":"Budget","default_variant":"two","variants":[{"id":"two","label":"Two"}]}]}|} in
   Monitor.protect ~finally:(fun () -> Core_unix.unlink path; Service.shutdown service) (fun () ->
     Out_channel.write_all path ~data:fixture;
-    let%bind snap = settled service root Discover in
+    let repairable = Service.create ~state_dir:(state_dir ^ "-repair-config") in
+    let config = Filename.concat root Config.filename in
+    let valid = In_channel.read_all config in
+    let%bind () = Monitor.protect
+      ~finally:(fun () ->
+        Out_channel.write_all config ~data:valid;
+        Service.shutdown repairable)
+      (fun () ->
+        Out_channel.write_all config ~data:"invalid";
+        let%bind failure = Service.handle repairable ~root ~environment Get in
+        require (Result.is_error failure) "Unreadable config not reported";
+        Out_channel.write_all config ~data:valid;
+        let%bind cached = Service.handle repairable ~root ~environment Ensure_discovered in
+        require (Result.is_error cached) "Automatic open retried failed project load";
+        let%map recovered = settled repairable root Discover in
+        require (not (List.is_empty recovered.flows)) "Manual refresh did not retry config")
+    in
+    let pre_staged = Service.create ~state_dir:(state_dir ^ "-stage-before-open") in
+    let%bind () =
+      Monitor.protect ~finally:(fun () -> Service.shutdown pre_staged) (fun () ->
+        let%bind staged = handle pre_staged root
+          (Stage_fresh { selection = selection "balanced"; elaboration_only = true;
+                         expected_plan_identity = None }) in
+        let%map opened = settled pre_staged root Ensure_discovered in
+        require (Option.is_some staged.fresh_intent
+                 && Option.equal Asic.Fresh.Intent.equal staged.fresh_intent opened.fresh_intent
+                 && Option.is_none opened.chip_target
+                 && List.exists opened.operations ~f:(fun op ->
+                   String.equal op.key "discover" && String.equal op.state "failed"))
+          "Automatic catalog default superseded explicit input staged by another client")
+    in
+    let chip_queries () =
+      let path = Filename.concat root "calls" in
+      if Sys_unix.file_exists_exn path then
+        In_channel.read_lines path
+        |> List.count ~f:(fun line -> String.equal line "[\"chip\", \"list\", \"--json\"]")
+      else 0
+    in
+    let queries_before = chip_queries () in
+    let%bind _ = Deferred.both (handle service root Ensure_discovered)
+                   (handle service root Ensure_discovered) in
+    let%bind snap = settled service root Ensure_discovered in
+    require (chip_queries () = queries_before + 1)
+      "Concurrent native opens ran more than one chip query";
     require (List.length snap.chips = 2 && Option.equal Asic.Chip_target.equal snap.chip_target (Some first))
       "Catalog default not resolved";
     let%bind snap = settled service root (Select_chip fast) in
@@ -2334,6 +2377,13 @@ let chip_fixture root state_dir =
     let%bind staged = handle service root
       (Stage_fresh {selection=selected; elaboration_only=true; expected_plan_identity=None}) in
     let intent = Option.value_exn staged.fresh_intent in
+    let calls_before = In_channel.read_all (Filename.concat root "calls") in
+    let%bind reopened = settled service root Ensure_discovered in
+    require (Option.equal Asic.Fresh.Intent.equal reopened.fresh_intent staged.fresh_intent
+             && Option.equal Asic.Preview.equal reopened.preview staged.preview
+             && Option.equal Asic.Chip_target.equal reopened.chip_target (Some fast)
+             && String.equal calls_before (In_channel.read_all (Filename.concat root "calls")))
+      "Reconnecting client disturbed staged input or queried provider";
     let%bind changed = settled service root (Select_chip (target "budget" "two")) in
     require (Option.is_none changed.preview && Option.is_none changed.fresh_intent
              && not (List.is_empty changed.flows) && Option.is_some changed.catalog_default
@@ -2361,10 +2411,17 @@ let chip_fixture root state_dir =
                && not (List.is_empty discovered.flows))
         "Rediscovery replaced valid saved target with project default") in
     Out_channel.write_all path ~data:{|{"schema_version":2}|};
-    let%map malformed = settled service root Discover in
+    let%bind malformed = settled service root Discover in
     require (List.exists malformed.operations ~f:(fun op ->
       String.equal op.key "discover" && String.equal op.state "failed"))
-      "Malformed catalog silently downgraded to legacy")
+      "Malformed catalog silently downgraded to legacy";
+    let before = chip_queries () in
+    Out_channel.write_all path ~data:fixture;
+    let%bind _ = settled service root Ensure_discovered in
+    require (chip_queries () = before) "Reopen retried a failed catalog";
+    let%map refreshed = settled service root Discover in
+    require (not (List.is_empty refreshed.flows) && chip_queries () = before + 1)
+      "Explicit refresh could not recover a failed catalog")
 ;;
 
 let main () =

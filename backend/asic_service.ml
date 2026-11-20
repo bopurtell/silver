@@ -174,6 +174,7 @@ type project =
   ; tasks : task String.Table.t
   ; reservations : reservation String.Table.t
   ; mutable flows : Asic.Flow.t list
+  ; mutable catalog_attempted : bool
   ; mutable chips : Asic.Chip.t list
   ; mutable chip_target : Asic.Chip_target.t option
   ; mutable preferred_target : Asic.Chip_target.t option
@@ -343,7 +344,7 @@ let load_config_file ~root ~filename parse =
 let load_project t ~root ~environment =
   let%bind config =
     In_thread.run (fun () ->
-      load_config_file ~root ~filename:Config.filename Config.parse_project)
+      load_config_file ~root ~filename:Config.filename (Config.parse_project ~root))
   in
   let%bind config =
     match config with
@@ -417,6 +418,7 @@ let load_project t ~root ~environment =
     ; tasks = String.Table.create ()
     ; reservations = String.Table.create ()
     ; flows = []
+    ; catalog_attempted = false
     ; chips = []
     ; chip_target = None
     ; preferred_target = None
@@ -611,7 +613,7 @@ let project_executable p =
   | None ->
     In_thread.run (fun () ->
       let module C = Hardcaml_workbench_project_integration.Preparation_config in
-      let c = load_config_file ~root:p.root ~filename:C.filename C.parse_string
+      let c = load_config_file ~root:p.root ~filename:C.filename (C.parse_string ~root:p.root)
         |> Option.value_exn ~message:"No project executable configured" in
       C.source_executable c ~root:p.root)
 ;;
@@ -2409,11 +2411,11 @@ let fresh_scope ?(physical = true) p =
       load_config_file
         ~root:p.root
         ~filename:Preparation_config.filename
-        Preparation_config.parse_string
+        (Preparation_config.parse_string ~root:p.root)
       |> Option.value_exn ~message:"Preparation configuration is missing"
     in
     let current =
-      load_config_file ~root:p.root ~filename:Config.filename Config.parse_project
+      load_config_file ~root:p.root ~filename:Config.filename (Config.parse_project ~root:p.root)
       |> Option.map ~f:(function
         | `Explicit config -> config
         | `Discover resolve -> resolve (config p).provider_executable)
@@ -2553,7 +2555,7 @@ let check_resource_lineage p target response =
   | Coarse_run _ | Bundle _ -> ()
 ;;
 
-let rec handle_operation ?prepared_input t p operation =
+let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _ -> true) t p operation =
   let analysis, operation =
     match operation with
     | Asic.Operation.Inspect_analysis { run; target; refresh } ->
@@ -3058,7 +3060,8 @@ let rec handle_operation ?prepared_input t p operation =
           (Hashtbl.find p.tasks (observation_key run))
           ~f:(fun observer -> Ivar.fill_if_empty observer.cancel ()));
     Deferred.unit
-  | (Discover | Select_chip _) as discovery ->
+  | Ensure_discovered when p.catalog_attempted -> Deferred.unit
+  | (Discover | Ensure_discovered | Select_chip _) as discovery ->
     (* Retire the previous mapping immediately, including on refresh failure. The
        invocation and publication belong to this immutable captured project config. *)
     let active = Option.exists (Hashtbl.find p.tasks "discover") ~f:(fun task ->
@@ -3070,8 +3073,19 @@ let rec handle_operation ?prepared_input t p operation =
          "Chip discovery in progress; retry selection";
        set_target (Some target)
      | _ -> ());
-    p.flows <- [];
-    p.catalog_default <- None;
+    p.catalog_attempted <- true;
+    let check_automatic_target target =
+      if Asic.Operation.equal discovery Ensure_discovered
+         && not (Option.equal Asic.Chip_target.equal (Some target) p.chip_target)
+      then
+        Public.require
+          (Option.is_none p.desired_plan && p.fresh_generation = 0
+           && preparation_target_compatible target)
+          "Catalog target changed while staging; refresh ASIC discovery explicitly"
+    in
+    if not active then (
+      p.flows <- [];
+      p.catalog_default <- None);
     enqueue ~key:"discover" ~kind:"discover" (fun cancel ->
       let%bind executable = project_executable p in
       let invoke args = Adapter.invocation ~root:p.root ~environment:p.environment executable args in
@@ -3090,6 +3104,7 @@ let rec handle_operation ?prepared_input t p operation =
             let chips, default = Public.chip_catalog (Public.decode output.stdout) in
             let target = Option.filter (Option.first_some p.chip_target p.preferred_target) ~f:(Public.has_target chips)
               |> Option.value ~default in
+            check_automatic_target target;
             p.chips <- chips;
             set_target (Some target))
       in
@@ -3901,7 +3916,7 @@ and execute_fresh t p id task =
   persist t p
 ;;
 
-let handle t ~root ~environment operation : Asic.Response.t Deferred.t =
+let handle ?preparation_target_compatible t ~root ~environment operation : Asic.Response.t Deferred.t =
   Monitor.try_with (fun () ->
     Public.require (not t.closing) "ASIC service shutting down";
     Public.require (Filename.is_absolute root) "ASIC project root must be absolute";
@@ -3915,6 +3930,12 @@ let handle t ~root ~environment operation : Asic.Response.t Deferred.t =
     Public.require
       (Hashtbl.mem t.projects key || Hashtbl.length t.projects < 32)
       "ASIC project working-set budget exhausted (32)";
+    (* A missing provider or invalid configuration can fail before a project/task
+       exists. Retain that failure for polling clients; only explicit refresh
+       reopens it. An in-flight retry is shared by subsequent requests. *)
+    (match operation, Option.bind (Hashtbl.find t.projects key) ~f:Deferred.peek with
+     | Asic.Operation.Discover, Some (Error _) -> Hashtbl.remove t.projects key
+     | _ -> ());
     let loaded =
       Hashtbl.find_or_add t.projects key ~default:(fun () ->
         Monitor.try_with (fun () -> load_project t ~root ~environment))
@@ -3925,7 +3946,7 @@ let handle t ~root ~environment operation : Asic.Response.t Deferred.t =
       | Ok p -> p
       | Error exn -> raise exn
     in
-    let%map () = handle_operation t p operation in
+    let%map () = handle_operation ?preparation_target_compatible t p operation in
     snapshot p)
   >>| function
   | Ok snapshot -> Ok snapshot

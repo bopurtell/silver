@@ -197,7 +197,7 @@
 ; PTY drives the actual silver argv[0] launch path with a controlled renderer.
 (rule
  (alias runtest)
- (deps test_startup_entry_pty.py ../test/support/__init__.py
+ (deps test_startup_entry_pty.py ip_starter_fixture.py ../test/support/__init__.py
   ../test/support/screen.py ../test/support/terminal.py)
  (action (run python3 -B %{dep:test_startup_entry_pty.py} %{exe:main.exe})))
 
@@ -206,6 +206,18 @@
  (deps test_asic_adoption_pty.py ../test/support/__init__.py
        ../test/support/screen.py ../test/support/terminal.py)
  (action (run python3 -B %{dep:test_asic_adoption_pty.py} %{exe:main.exe})))
+
+(rule
+ (alias test-checklist-defaults-pty)
+ (deps test_checklist_defaults_pty.py ../test/support/__init__.py
+       ../test/support/screen.py ../test/support/terminal.py
+       ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
+       ../scripts/fixtures/unified_fresh_prefix.py)
+ (action (run python3 -B %{dep:test_checklist_defaults_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-checklist-defaults-pty)))
 
 ; Pass a renderer path to the same PTY driver for installed-provider coverage.
 (rule

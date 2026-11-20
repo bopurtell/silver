@@ -952,8 +952,6 @@ let run_staging_fixture () =
        let%bind invalid_config = launch second_stage.id "invalid-config" in
        conflict invalid_config "Invalid current configuration silently launched";
        write_config ();
-       let%bind staged = stage () >>| ok in
-       let staged = Option.value_exn staged.staged in
        (* Source-only project: discovery reads its existing executable. Changing
           the picker fences new requests but cannot retarget an existing receipt. *)
        Core_unix.unlink (Filename.concat root "hardcaml-workbench-asic.sexp");
@@ -972,6 +970,13 @@ esac
          let%bind () = Hardcaml_workbench_backend.Asic_service.completion service.asic_service in
          Service.asic service { instance_id; project; operation = Get } >>| ok
        in
+       let%bind _ = stage ~selected:{ selection with chip_target = None } () >>| ok in
+       let%bind guarded = asic Ensure_discovered in
+       require (Option.is_none guarded.chip_target && List.exists guarded.operations ~f:(fun op ->
+         String.equal op.key "discover" && String.equal op.state "failed"))
+         "Automatic default superseded an incompatible source-only stage";
+       let%bind staged = stage () >>| ok in
+       let staged = Option.value_exn staged.staged in
        let%bind discovered = asic Discover in
        require (not discovered.configured
                 && Option.equal Asic.Chip_target.equal discovered.chip_target selection.chip_target)

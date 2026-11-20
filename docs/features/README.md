@@ -233,6 +233,8 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 
 ## Project adoption and design scope
 
+[WB-082](project/WB-082-chip-target-starter.md) is **delivered**: the first and additional chip targets share a recipe, with explicit IP mapping and optional catalog registration. The ticket links the real-daemon, native terminal and migrated example checks.
+
 **2026-11-20 closeout:** [WB-051](project/WB-051-new-project-creation.md) (provider starter), [WB-078](project/WB-078-project-entry.md) (in-app create, add and import), [WB-080](project/WB-080-chip-catalog.md) (provider target catalog) and [WB-085](project/WB-085-authoring-service.md) (preview/apply service) are **closed**. [WB-079](project/WB-079-ip-and-module-starters.md) is **closed, owner-verified**: reusable IP library and module creation through Silver and `silver-author`. Each ticket records its automated acceptance evidence.
 
 | Ticket | Feature | Sets | Priority | Points | Confidence |
@@ -251,7 +253,7 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 | [WB-079](project/WB-079-ip-and-module-starters.md) | New IP library and module starters | FS3 | P2 | 8 | medium |
 | [WB-080](project/WB-080-chip-catalog.md) | Provider chip-target catalog and CLI selection | FS3 | P1 | 21 | low |
 | [WB-081](project/WB-081-chip-target-selection.md) | Chip-target selection in Silver | FS0, FS3 | P2 | 13 | medium |
-| [WB-082](project/WB-082-chip-target-starter.md) | New chip target inside an existing project | FS3 | P2 | 13 | medium |
+| [WB-082](project/WB-082-chip-target-starter.md) | First or additional chip target from IP or a template | FS3 | P2 | 21 | medium |
 | [WB-083](project/WB-083-flow-authoring.md) | Flow-owned profiles and explicit authoring commands | FS0, FS3 | P2 | 13 | medium |
 | [WB-084](project/WB-084-authoring-acceptance.md) | Empty-directory to reproducible synthesis acceptance | FS0, FS3 | P2 | 5 | medium |
 | [WB-085](project/WB-085-authoring-service.md) | Frontend-independent daemon authoring calls | FS3 | P1 | 13 | medium |

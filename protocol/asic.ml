@@ -1,5 +1,7 @@
 open! Core
 
+let automatic_discovery_capability = "asic-ensure-discovered-v1"
+
 module Chip_target = struct
   type t = { chip : string; variant : string }
   [@@deriving bin_io, compare, equal, sexp]
@@ -529,6 +531,9 @@ module Operation = struct
         ; source_digest : string
         ; row_id : string
         }
+    (** Native open: at most one catalog attempt per loaded project/environment.
+        Explicit [Discover] can always retry. *)
+    | Ensure_discovered
   [@@deriving bin_io, compare, equal, sexp]
 end
 

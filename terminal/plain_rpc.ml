@@ -16,6 +16,9 @@ let keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
   match operation with
   | Get -> List.filter snapshot.operations ~f:active |> List.map ~f:(fun op -> op.key)
   | Discover | Select_chip _ -> [ "discover" ]
+  | Ensure_discovered ->
+    List.filter_map snapshot.operations ~f:(fun op ->
+      Option.some_if (String.equal op.key "discover") op.key)
   | Resources operation -> [ Asic_resources.Operation.key operation ]
   | Workloads operation -> [ Asic_workloads.Operation.key operation ]
   | Describe flow -> [ Asic.Chip_target.describe_key snapshot.chip_target flow ]

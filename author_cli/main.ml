@@ -9,7 +9,10 @@ module Discovery = Hardcaml_workbench_setup.Project_discovery
 let flags =
   let open Command.Let_syntax in
   let%map_open root =
-    flag "--root" (optional string) ~doc:"DIR Project root (default: nearest Dune project)"
+    flag
+      "--root"
+      (optional string)
+      ~doc:"DIR Project root (default: nearest Dune project)"
   and endpoint =
     flag
       "--endpoint"
@@ -21,7 +24,7 @@ let flags =
   root, endpoint, apply
 ;;
 
-let connect root = function
+let connect ~bound root = function
   | None ->
     let root =
       match root with
@@ -31,7 +34,19 @@ let connect root = function
     in
     let root = Result.ok_or_failwith root in
     let service = Service.create ~permitted_roots:[ root ] in
-    return (root, fun req -> In_thread.run (fun () -> Service.handle service req))
+    let project, identity =
+      if bound
+      then (
+        let stat = Core_unix.stat root in
+        Some (Project_id.of_string "silver-author-local"), Some (stat.st_dev, stat.st_ino))
+      else None, None
+    in
+    return
+      ( root
+      , project
+      , fun req ->
+          In_thread.run (fun () -> Service.handle ?project_identity:identity service req)
+      )
   | Some endpoint ->
     let root =
       match root with
@@ -39,8 +54,22 @@ let connect root = function
       | _ -> failwith "--endpoint requires --root /absolute/path/on/service/host"
     in
     let client = Client.create endpoint in
-    let%map hello = Client.hello client >>| Or_error.ok_exn in
+    let%bind hello = Client.hello client >>| Or_error.ok_exn in
+    let%map root, project =
+      if not bound
+      then return (root, None)
+      else (
+        match%map
+          Client.open_project
+            client
+            { instance_id = hello.instance_id; root; environment = Inherit_daemon }
+          >>| Or_error.ok_exn
+        with
+        | Ok p -> Project_root.to_absolute_path p.project.root, Some p.project.id
+        | Error e -> raise_s [%sexp (e : V1.Error.t)])
+    in
     ( root
+    , project
     , fun operation ->
         (match%map
            Client.authoring client { instance_id = hello.instance_id; operation }
@@ -55,19 +84,18 @@ let unexpected = function
   | r -> raise_s [%sexp "Unexpected authoring reply", (r : A.Response.t)]
 ;;
 
-let run (root, endpoint, apply) ~recipe ~name ~library =
-  let%bind destination, call = connect root endpoint in
-  let operation =
-    { A.Operation.recipe
-    ; name
-    ; target = { destination; project = None; object_id = library }
-    }
-  in
-  match%bind call (Preview operation) with
+let publish ~bound (root, endpoint, apply) ~request =
+  let%bind destination, project, call = connect ~bound root endpoint in
+  match%bind call (request destination project) with
   | Previewed p ->
     printf "Project: %s\nProvider: %s %s\n" destination p.provider p.version;
     List.iter p.new_files ~f:(printf "  %s\n");
-    Option.iter p.registration ~f:(fun edit -> printf "%s: %s\n" edit.path edit.snippet);
+    Option.iter p.registration ~f:(fun edit ->
+      printf
+        "%s: %s\n%s\n"
+        (if edit.manual then "Manual registration" else "Registration")
+        edit.path
+        edit.snippet);
     let preview_id = p.preview_id in
     (match%map call (if apply then Apply { preview_id } else Cancel { preview_id }) with
      | Cancelled -> printf "Preview only; no files created.\n"
@@ -79,6 +107,44 @@ let run (root, endpoint, apply) ~recipe ~name ~library =
         | Not_requested -> ())
      | r -> unexpected r)
   | r -> unexpected r
+;;
+
+let run flags ~recipe ~name ~library =
+  publish ~bound:false flags ~request:(fun destination project ->
+    Preview { recipe; name; target = { destination; project; object_id = library } })
+;;
+
+let new_chip =
+  Command.async
+    ~summary:"Add an independently buildable chip target to a Dune project"
+    (let open Command.Let_syntax in
+     let%map_open flags
+     and library =
+       flag "--from-ip" (optional string) ~doc:"DIR Use this project-relative IP library"
+     and mapping =
+       flag
+         "--mapping"
+         (optional string)
+         ~doc:
+           "MAP Explicit IP wiring: ui_in:uo_out:comb8 (8-bit combinational, no \
+            clock/reset)"
+     and no_register =
+       flag "--no-register" no_arg ~doc:" Leave the project catalog untouched"
+     and name = anon ("CHIP_TARGET" %: string) in
+     fun () ->
+       let source : A.Chip_source.t =
+         match library, mapping with
+         | None, None -> Example
+         | Some library_directory, Some mapping -> Ip { library_directory; mapping }
+         | _ -> failwith "--from-ip and --mapping must be supplied together"
+       in
+       publish ~bound:true flags ~request:(fun destination project ->
+         Preview_chip
+           { target = { destination; project; object_id = None }
+           ; name
+           ; source
+           ; register = not no_register
+           }))
 ;;
 
 let new_ip =
@@ -119,6 +185,6 @@ let new_module =
 let () =
   Command.group
     ~summary:"Preview or apply Silver project authoring operations"
-    [ "new-ip", new_ip; "new-module", new_module ]
+    [ "new-chip", new_chip; "new-ip", new_ip; "new-module", new_module ]
   |> Command_unix.run
 ;;

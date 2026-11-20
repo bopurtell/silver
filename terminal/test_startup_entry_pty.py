@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -26,17 +27,15 @@ def exercise(client, base, real_renderer=None):
     # The external provider is deterministic; Silver itself performs all
     # validation, file creation and project opening via the production paths.
     renderer = tools / "hardcaml-asic-starter"
-    files = [{"path": "dune-project", "contents": "(lang dune 3.10)\n(name demo)\n"}]
-    descriptor = dict(schema_version=1, provider="hardcaml_asic", version="0.1.0", files=files)
     if real_renderer:
         renderer.symlink_to(real_renderer)
-        descriptor = json.loads(subprocess.check_output(
-            [renderer, "render", "--name", "demo"], cwd=start))
-        files = descriptor["files"]
     else:
-        renderer.write_text("#!/bin/sh\n[ \"$*\" = 'render --name demo' ] || exit 2\n"
-                            + "cat <<'JSON'\n" + json.dumps(descriptor) + "\nJSON\n")
+        fixture = Path(__file__).resolve().with_name("ip_starter_fixture.py")
+        renderer.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -B "
+                            f"{shlex.quote(str(fixture))} \"$@\"\n")
         renderer.chmod(0o755)
+    descriptor = json.loads(subprocess.check_output([renderer, "render", "--name", "demo"]))
+    files = descriptor["files"]
     eda = base / "eda-invoked"
     for name in ("yosys", "openroad", "librelane", "verilator", "iverilog"):
         tool = tools / name
@@ -88,8 +87,9 @@ def exercise(client, base, real_renderer=None):
         form(term, destination)
         term.capture("preview", ["Create preview", "Recipe: hardcaml-asic-starter-v1",
                                  f"Provider: {descriptor['provider']} {descriptor['version']}",
-                                 "Name: demo", f"Destination: {root / destination}",
-                                 "Enter: Apply and open", "New files:", *(f["path"] for f in files)])
+                                 "Name: demo", "Destination: ", (root / destination).name,
+                                 "First registered chip target (default): demo",
+                                 "Enter: Apply and open", "New files:", "asic_demo/project.ml"])
 
     def dashboard(term, name):
         term.capture("opened", ["Overview", "Project: " + name], absent=[unbound])
@@ -205,7 +205,7 @@ def exercise(client, base, real_renderer=None):
         send(term, "o")
         term.capture("open", ["Existing project directory"])
         send(term, ".\r")
-        term.capture("open-error", ["must directly contain a regular dune-project"])
+        term.capture("open-error", ["must directly contain"])
         dismiss(term, "must directly contain")
         send(term, "p")
         menu(term)
@@ -230,13 +230,42 @@ def exercise(client, base, real_renderer=None):
                 assert not list(target.iterdir())
             send(term, "\r")
             dashboard(term, "demo")
+            if destination == "new":
+                # Keep A's hand edit and its default while appending B in this same session.
+                first = target / "asic_demo/chip.ml"
+                first.write_bytes(first.read_bytes() + b"\n(* user-owned edit *)\n")
+                original = first.read_bytes()
+                term.palette("New Chip Target")
+                term.capture("source", ["From IP library", "From example/template"])
+                send(term, "example\r")
+                term.capture("chip-name", ["enter target name", "20 ns", "Tiny Tapeout"])
+                send(term, "second\r")
+                term.capture("chip-preview", ["registration: on", "Enter applies", "r toggles"])
+                assert not (target / "asic_second").exists()
+                send(term, "\r")
+                term.capture("chip-added", ["Chip target created", "Registered:", "Select new chip target"])
+                assert first.read_bytes() == original
+                if real_renderer:
+                    build_env = {k: v for k, v in env.items()
+                                 if k != "INSIDE_DUNE" and not k.startswith("DUNE_")}
+                    subprocess.run(["dune", "build", "asic_demo/project.exe", "asic_second/project.exe"],
+                                   check=True, cwd=target, env=build_env, timeout=180)
+                    send(term, "s")
+                    term.capture("selected", ["Selected launch target: second / default"], timeout=45)
+                send(term, "\r")
+                dashboard(term, "demo")
         for file in files:
-            assert (target / file["path"]).read_text() == file["contents"]
+            suffix = "\n(* user-owned edit *)\n" if destination == "new" and file["path"] == "asic_demo/chip.ml" else ""
+            assert (target / file["path"]).read_text() == file["contents"] + suffix
+        catalog = json.loads((target / "hardcaml-asic-targets.json").read_text())
+        assert catalog["default_target"] == "demo"
+        assert [entry["id"] for entry in catalog["targets"]] == (
+            ["demo", "second"] if destination == "new" else ["demo"])
     assert not eda.exists(), eda.read_text() if eda.exists() else ""
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory(prefix="silver-entry-", dir="/tmp") as tmp:
+    with tempfile.TemporaryDirectory(prefix="silver-entry-") as tmp:
         exercise(Path(sys.argv[1]).resolve(), Path(tmp),
                  Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else None)
     print("Silver launcher entry, discovery, preview/cancel/apply and project handoff passed.")

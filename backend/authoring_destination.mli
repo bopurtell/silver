@@ -20,6 +20,8 @@ val manual_modules : snapshot -> bool
 val visit
   :  ?existing:string
   -> ?addition:addition
+  -> ?library:string list
+  -> ?configs_required:bool
   -> root
   -> string list
   -> (dir -> snapshot -> 'a)
@@ -27,7 +29,11 @@ val visit
 
 val catalog : string
 val design_dir : string -> string
-val catalog_exists : snapshot -> bool
+val catalog_text : snapshot -> string option
+val configs_absent : snapshot -> bool
+val matches_project : snapshot -> int * int -> bool
+val library_text : snapshot -> string list
+val publish_catalog : dir -> snapshot -> string -> on_create:(string -> unit) -> unit
 val materialize : on_mkdir:(string -> unit) -> dir -> snapshot -> (dir -> 'a) -> 'a
 
 (** Publish a plan whose destination-relative paths were validated during preview. Only

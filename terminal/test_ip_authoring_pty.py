@@ -39,6 +39,14 @@ def send(term, text):
     os.write(term.master, text.encode())
 
 
+def scroll_to(term, expected):
+    for _ in range(60):
+        if expected.casefold() in term.drain(.08).casefold():
+            return
+        send(term, "\x1b[B")
+    term.capture("missing-scroll-line", [expected])
+
+
 def ip_preview(term, name, sample=False):
     term.palette("new ip")
     term.capture("ip-template", ["New IP Library", "empty", "sample"])
@@ -118,6 +126,73 @@ def exercise_dialogs(launch, root, renderer, original):
         send(term, "pipeline\r")
         term.capture("occupied-module", ["enter module name", "Conflict:", "ip/counter/pipeline.ml"])
         assert snapshot(root) == edited
+
+    with launch() as term:
+        # A library visible in Dune is not necessarily a chip-compatible IP.
+        term.palette("New Chip Target")
+        term.capture("chip-source-options", ["From example/template", "From IP library"])
+        send(term, "From IP\r")
+        term.capture("chip-libraries", ["ip_vacant", "ip_counter"])
+        send(term, "ip_vacant\r")
+        term.capture("unsupported-mapping", ["ip/vacant", "explicit pin mapping"])
+        send(term, "ui_in:uo_out:comb8\r")
+        term.capture("unsupported-name", ["enter target name"])
+        send(term, "unwired\r")
+        term.capture("unsupported-ip", ["enter target name", "Expected regular file"],
+                     absent=["CHIP TARGET PREVIEW"])
+        assert not (root / "asic_unwired").exists()
+        send(term, "\x1b")
+        term.capture("dismiss-unsupported", ["Overview"], absent=["enter target name"])
+
+        term.palette("Library: ip_counter")
+        term.capture("library-chip-action", ["New Chip Target"])
+        send(term, "New Chip Target\r")
+        term.capture("chip-mapping", ["ip/counter", "ui_in:uo_out:comb8", "no clock/reset"])
+        send(term, "\r")
+        term.capture("missing-mapping", ["Enter the supported mapping explicitly"])
+        send(term, "ui_in:uo_out:comb8\r")
+        term.capture("mapped-name", ["enter target name", "Library: ip/counter"])
+        send(term, "wrapped\r")
+        term.capture("mapped-preview", ["Chip Target Preview", "registration: on", "combinational"])
+        send(term, "r")
+        term.capture("declined-preview", ["registration: declined", "absent from picker"])
+        assert snapshot(root) == edited
+        send(term, "\r")
+        term.capture("created-unregistered", ["Chip target created", "Catalog registration declined"],
+                     absent=["Select new chip target"])
+        assert not (root / "hardcaml-asic-targets.json").exists()
+        assert (root / "asic_wrapped/project.ml").is_file()
+        assert all((root / path).read_bytes() == contents for path, contents in edited.items())
+
+        # A custom catalog remains owner-managed. The receipt must show the
+        # exact manual entry and destination rather than offering selection.
+        send(term, "\r")
+        custom = root / "hardcaml-asic-targets.json"
+        custom.write_text('{"custom":"untouched"}\n')
+        term.palette("New Chip Target")
+        send(term, "example\r")
+        term.capture("example-name", ["enter target name"])
+        send(term, "customchip\r")
+        term.capture("example-preview", ["registration: on", "Enter applies"])
+        scroll_to(term, "Manual catalog entry")
+        scroll_to(term, "asic_customchip/project.exe")
+        send(term, "\r")
+        term.capture("manual-result", ["Chip target created"], absent=["Select new chip target"])
+        assert custom.read_text() == '{"custom":"untouched"}\n'
+
+        send(term, "\r")
+        custom.write_text(json.dumps(dict(schema_version=1, default_target="customchip",
+                                          targets=[dict(id="customchip", executable="asic_customchip/project.exe")])))
+        term.palette("New Chip Target")
+        send(term, "example\r")
+        term.capture("racing-name", ["enter target name"])
+        send(term, "late\r")
+        term.capture("racing-catalog-preview", ["registration: on"])
+        custom.write_text(custom.read_text() + "\n")
+        newer = snapshot(root)
+        send(term, "\r")
+        term.capture("stale-catalog", ["Stale_preview"])
+        assert snapshot(root) == newer
 
 
 def exercise(client, real_renderer, base):

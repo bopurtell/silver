@@ -40,7 +40,7 @@ let contents = function
   | Closed -> assert false
   | Menu ->
     ( "Local project"
-    , [ "[c] Create project here"; "[o] Open existing project" ]
+    , [ "[c] New Project… (Create project here)"; "[o] Open existing project" ]
     , "Esc dismiss" )
   | Name s -> "Project name", [ s ^ "▏" ], "Enter continue   Esc dismiss"
   | Destination (name, s) ->
@@ -50,7 +50,8 @@ let contents = function
   | Existing s -> "Existing project directory", [ s ^ "▏" ], "Enter open   Esc dismiss"
   | Review p ->
     ( "Create preview"
-    , Host.starter_preview_lines p
+    , ("First registered chip target (default): " ^ p.operation.name)
+      :: Host.starter_preview_lines ~source:Example p
     , "Enter: Apply and open   ↑↓ scroll   Esc cancel" )
   | Failure rows -> "Project error", rows, "↑↓ scroll   Enter retry   Esc dismiss"
   | Busy label -> "Local project", [ label ], "Please wait"

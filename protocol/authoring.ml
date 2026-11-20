@@ -25,11 +25,32 @@ module Operation = struct
   [@@deriving bin_io, compare, equal, sexp]
 end
 
+module Chip_source = struct
+  type t =
+    | Example
+    | Ip of
+        { library_directory : string
+        ; mapping : string
+        }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+module Chip_request = struct
+  type t =
+    { target : Target.t
+    ; name : string
+    ; source : Chip_source.t
+    ; register : bool
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
 module Request = struct
   type t =
     | Preview of Operation.t
     | Apply of { preview_id : string }
     | Cancel of { preview_id : string }
+    | Preview_chip of Chip_request.t
   [@@deriving bin_io, compare, equal, sexp]
 end
 
@@ -37,6 +58,7 @@ module Registration = struct
   type t =
     { path : string
     ; snippet : string
+    ; manual : bool [@sexp.default false]
     }
   [@@deriving bin_io, compare, equal, sexp]
 end
@@ -50,6 +72,7 @@ module File = struct
 end
 
 let starter_recipe = "hardcaml-asic-starter-v1"
+let chip_recipe = "hardcaml-asic-chip-target-v1"
 let add_to_project_recipe = "hardcaml-asic-add-to-project-v1"
 let ip_empty_recipe = "hardcaml-ip-empty-v1"
 let ip_sample_recipe = "hardcaml-ip-sample-v1"
@@ -57,7 +80,12 @@ let module_recipe = "hardcaml-module-v1"
 
 let targets_project_root recipe =
   List.mem
-    [ add_to_project_recipe; ip_empty_recipe; ip_sample_recipe; module_recipe ]
+    [ chip_recipe
+    ; add_to_project_recipe
+    ; ip_empty_recipe
+    ; ip_sample_recipe
+    ; module_recipe
+    ]
     recipe
     ~equal:String.equal
 ;;

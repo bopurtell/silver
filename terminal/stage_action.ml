@@ -86,6 +86,43 @@ let resolve ~stage ~remembered ~observed ~snapshot =
   resolve_intent ~intent:(Physical_stage stage) ~remembered ~observed ~snapshot
 ;;
 
+let checklist_inputs ~snapshot ~remembered =
+  let open Result.Let_syntax in
+  let%bind catalog = required snapshot ~none:"Discover ASIC capabilities first" in
+  let remembered =
+    Launch_preferences.for_target snapshot remembered
+    |> Option.filter ~f:(fun s -> Launch_preferences.available s catalog.flows)
+  in
+  let%bind selection =
+    match remembered, catalog.catalog_default with
+    | Some s, _ -> Ok s
+    | None, Some pair ->
+      Ok
+        { Asic.Selection.chip_target = catalog.chip_target
+        ; flow = pair.flow
+        ; profile = pair.profile
+        ; endpoint = ""
+        ; assignments = []
+        }
+    | None, None ->
+      Error "No declared catalog default; choose explicit flow/profile inputs"
+  in
+  let%bind flow =
+    List.find catalog.flows ~f:(fun f -> String.equal f.id selection.flow)
+    |> required ~none:("Selected flow unavailable: " ^ selection.flow)
+  in
+  if List.mem flow.profiles selection.profile ~equal:String.equal
+  then Ok (selection, flow)
+  else Error ("Selected profile unavailable: " ^ selection.flow ^ "/" ^ selection.profile)
+;;
+
+let checklist_fresh ~snapshot ~remembered endpoint =
+  Result.bind (checklist_inputs ~snapshot ~remembered) ~f:(fun (s, flow) ->
+    if List.mem flow.fresh_stage_endpoints endpoint ~equal:String.equal
+    then Ok { s with endpoint }
+    else Error ("Unsupported fresh endpoint: " ^ flow.id ^ "/" ^ endpoint))
+;;
+
 let%test_unit "fresh stage resolution captures exact inputs and rejects stale choices" =
   let stage : Asic.Stage.t =
     { id = "routing"

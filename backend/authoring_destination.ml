@@ -96,7 +96,9 @@ type snapshot =
   ; missing : string list
   ; marker : (int * int) option
   ; common : (int * int) option
-  ; catalog_exists : bool
+  ; catalog_state : ((int * int) * Time_ns.t * string) option
+  ; configs_absent : bool
+  ; library_inputs : ((int * int) * Time_ns.t * string) list
   ; directories : (string * (int * int)) list
   ; dune : ((int * int) * Time_ns.t * string) option
   }
@@ -105,10 +107,55 @@ type snapshot =
 module Integration = Hardcaml_workbench_project_integration
 
 let catalog = "hardcaml-asic-targets.json"
-let catalog_exists s = s.catalog_exists
+let catalog_text s = Option.map s.catalog_state ~f:(fun (_, _, text) -> text)
+let configs_absent s = s.configs_absent
+let matches_project s identity = List.is_empty s.missing && Poly.equal s.ancestor identity
 let design_dir name = "asic_" ^ name
 
-let existing_project dir name =
+(* Open only bounded regular files beneath the pinned directory and bind the bytes (not
+   just the pathname or size) to the authoring receipt. *)
+let read_regular ?(limit = 262144) ?(opaque_if_large = false) dir name =
+  let path, via = child dir name in
+  let expected =
+    match inspect via with
+    | Some s when Poly.equal s.st_kind S_REG -> id s
+    | _ -> invalid ("Expected regular file: " ^ path)
+  in
+  let fd = Core_unix.openfile via ~mode:[ O_RDONLY; O_NONBLOCK; O_CLOEXEC ] in
+  Exn.protect
+    ~finally:(fun () -> Core_unix.close fd)
+    ~f:(fun () ->
+      let stat = Core_unix.fstat fd in
+      if not
+           (Poly.equal expected (id stat)
+            && Poly.equal stat.st_kind S_REG
+            && (opaque_if_large || Int64.(stat.st_size <= of_int limit))
+            && String.equal
+                 path
+                 (Core_unix.readlink
+                    ("/proc/self/fd/" ^ Int.to_string (Core_unix.File_descr.to_int fd))))
+      then invalid ("File moved or exceeds authoring limit: " ^ path);
+      let ctime () = (Core_unix.Ns_precision.fstat fd).st_ctime in
+      let before = ctime () in
+      (* An oversized catalog is opaque/manual. Still bind the identity and ctime so apply
+         cannot turn it into an automatic registration. *)
+      let size =
+        if Int64.(stat.st_size > of_int limit) then 0 else Int64.to_int_exn stat.st_size
+      in
+      let buf = Bytes.create size in
+      let rec loop pos =
+        if pos < Bytes.length buf
+        then (
+          let n = Core_unix.read fd ~buf ~pos ~len:(Bytes.length buf - pos) in
+          if n = 0 then changed ("File changed: " ^ path);
+          loop (pos + n))
+      in
+      loop 0;
+      if not (Time_ns.equal before (ctime ())) then changed ("File changed: " ^ path);
+      expected, before, Bytes.to_string buf)
+;;
+
+let existing_project dir name ~configs_required =
   let stat dir name = inspect (snd (child dir name)) in
   let absent dir name =
     if Option.is_some (stat dir name) then changed ("Conflict: " ^ fst (child dir name))
@@ -125,17 +172,29 @@ let existing_project dir name =
   let configs =
     [ Integration.Asic_config.filename; Integration.Preparation_config.filename ]
   in
-  List.iter configs ~f:(absent dir);
+  let configs_absent = ref true in
+  let check_configs dir =
+    List.iter configs ~f:(fun name ->
+      if Option.is_some (stat dir name)
+      then (
+        configs_absent := false;
+        if configs_required then absent dir name))
+  in
+  check_configs dir;
   let common =
     match stat dir ".workbench" with
     | None -> None
     | Some s when Poly.equal s.st_kind S_DIR ->
       let path, via = child dir ".workbench" in
-      with_dir ~path ~via ~identity:(id s) (fun d _ -> List.iter configs ~f:(absent d));
+      with_dir ~path ~via ~identity:(id s) (fun d _ -> check_configs d);
       Some (id s)
     | Some _ -> invalid "Expected plain directory: .workbench"
   in
-  marker, common, Option.is_some (regular catalog)
+  ( marker
+  , common
+  , Option.map (regular catalog) ~f:(fun _ ->
+      read_regular ~opaque_if_large:true dir catalog)
+  , !configs_absent )
 ;;
 
 type addition =
@@ -196,37 +255,7 @@ let addition_project dir addition =
     | Module (parts, name) ->
       walk dir [] [] parts (fun d dirs ->
         absent d (name ^ ".ml");
-        let identity = regular d "dune" in
-        let path, via = child d "dune" in
-        let fd = Core_unix.openfile via ~mode:[ O_RDONLY; O_CLOEXEC; O_NONBLOCK ] in
-        Exn.protect
-          ~finally:(fun () -> Core_unix.close fd)
-          ~f:(fun () ->
-            let stat = Core_unix.fstat fd in
-            if not
-                 (Poly.equal identity (id stat)
-                  && Poly.equal stat.st_kind S_REG
-                  && Int64.(stat.st_size <= 65536L)
-                  && String.equal
-                       path
-                       (Core_unix.readlink
-                          ("/proc/self/fd/"
-                           ^ Int.to_string (Core_unix.File_descr.to_int fd))))
-            then invalid "Library dune file changed or exceeds size limit";
-            let ctime () = (Core_unix.Ns_precision.fstat fd).st_ctime in
-            let before = ctime () in
-            let buf = Bytes.create (Int64.to_int_exn stat.st_size) in
-            let rec read pos =
-              if pos < Bytes.length buf
-              then (
-                let n = Core_unix.read fd ~buf ~pos ~len:(Bytes.length buf - pos) in
-                if n = 0 then changed "Library dune file changed";
-                read (pos + n))
-            in
-            read 0;
-            if not (Time_ns.equal before (ctime ()))
-            then changed "Library dune file changed";
-            dirs, Some (identity, before, Bytes.to_string buf)))
+        dirs, Some (read_regular ~limit:65536 d "dune"))
   in
   Some marker, directories, dune
 ;;
@@ -254,21 +283,43 @@ let manual_modules snapshot =
   | _ -> invalid "Expected exactly one explicit library in selected dune file"
 ;;
 
-let visit ?existing ?addition (root : root) parts f =
+let library_inputs dir parts =
+  let rec walk dir = function
+    | [] ->
+      List.map [ "dune"; "chip-interface.json"; "block.ml" ] ~f:(read_regular dir)
+      @
+        (match inspect (snd (child dir "block.mli")) with
+        | Some _ -> [ read_regular dir "block.mli" ]
+        | None -> [])
+    | part :: rest ->
+      let path, via = child dir part in
+      (match inspect via with
+       | Some s when Poly.equal s.st_kind S_DIR ->
+         with_dir ~path ~via ~identity:(id s) (fun dir _ -> walk dir rest)
+       | _ -> invalid ("Expected library directory: " ^ path))
+  in
+  walk dir parts
+;;
+
+let library_text s = List.map s.library_inputs ~f:(fun (_, _, text) -> text)
+
+let visit ?existing ?addition ?library ?(configs_required = true) (root : root) parts f =
   let rec walk dir dh parts =
     match parts with
     | [] ->
-      let marker, common, catalog_exists, directories, dune =
+      let marker, common, catalog_state, configs_absent, directories, dune =
         match addition, existing with
         | Some addition, _ ->
           let marker, directories, dune = addition_project dir addition in
-          marker, None, false, directories, dune
+          marker, None, None, false, directories, dune
         | None, None ->
           require_empty dh;
-          None, None, false, [], None
+          None, None, None, true, [], None
         | None, Some name ->
-          let marker, common, catalog = existing_project dir name in
-          marker, common, catalog, [], None
+          let marker, common, catalog, configs_absent =
+            existing_project dir name ~configs_required
+          in
+          marker, common, catalog, configs_absent, [], None
       in
       let stat = Core_unix.Ns_precision.fstat (Core_unix.dirfd dh) in
       f
@@ -278,7 +329,9 @@ let visit ?existing ?addition (root : root) parts f =
         ; missing = []
         ; marker
         ; common
-        ; catalog_exists
+        ; catalog_state
+        ; configs_absent
+        ; library_inputs = Option.value_map library ~default:[] ~f:(library_inputs dir)
         ; directories
         ; dune
         }
@@ -295,7 +348,9 @@ let visit ?existing ?addition (root : root) parts f =
            ; missing = parts
            ; marker = None
            ; common = None
-           ; catalog_exists = false
+           ; catalog_state = None
+           ; configs_absent = true
+           ; library_inputs = []
            ; directories = []
            ; dune = None
            }
@@ -356,6 +411,69 @@ let write dir ~name ~contents ~on_create =
           loop (pos + n))
       in
       loop 0)
+;;
+
+let publish_catalog dir snapshot contents ~on_create =
+  match snapshot.catalog_state with
+  | None -> write dir ~name:catalog ~contents ~on_create:(fun () -> on_create catalog)
+  | Some expected ->
+    let scratch =
+      ".silver-"
+      ^ Cryptokit.transform_string
+          (Cryptokit.Hexa.encode ())
+          (Cryptokit.Random.string Cryptokit.Random.secure_rng 16)
+    in
+    let path, via = child dir scratch in
+    let _, dst = child dir catalog in
+    Core_unix.mkdir via ~perm:0o700;
+    let retain = ref false in
+    Exn.protect
+      ~finally:(fun () -> if not !retain then Core_unix.rmdir via)
+      ~f:(fun () ->
+        with_dir
+          ~path
+          ~via
+          ~identity:(id (Core_unix.lstat via))
+          (fun temp _ ->
+            let _, replacement = child temp "new"
+            and _, previous = child temp "previous" in
+            let made = ref false in
+            Exn.protect
+              ~finally:(fun () -> if !made then Core_unix.unlink replacement)
+              ~f:(fun () ->
+                write temp ~name:"new" ~contents ~on_create:(fun () -> made := true);
+                check_location dir;
+                if not (Poly.equal expected (read_regular dir catalog))
+                then changed "Catalog changed since preview";
+                (* Capture the actual old entry before installing ours without
+                   replacement. A rename over [dst] after a byte comparison would lose an
+                   editor's concurrent atomic save in the check-to-rename window. *)
+                Core_unix.rename ~src:dst ~dst:previous;
+                (try
+                   let identity, _, bytes = read_regular temp "previous" in
+                   let expected_identity, _, expected_bytes = expected in
+                   if not
+                        (Poly.equal identity expected_identity
+                         && String.equal bytes expected_bytes)
+                   then changed "Catalog replaced during publication";
+                   Core_unix.chmod
+                     replacement
+                     ~perm:((Core_unix.stat previous).st_perm land 0o777);
+                   Core_unix.link ~target:replacement ~link_name:dst ()
+                 with
+                 | exn ->
+                   (try
+                      Core_unix.link ~target:previous ~link_name:dst ();
+                      Core_unix.unlink previous
+                    with
+                    | _ ->
+                      retain := true;
+                      changed
+                        ("Concurrent catalog edit retained; prior catalog preserved at "
+                         ^ path
+                         ^ "/previous"));
+                   raise exn);
+                Core_unix.unlink previous)))
 ;;
 
 (* A group opens each freshly created directory once. Never adopt a directory supplied by

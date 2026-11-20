@@ -138,6 +138,7 @@ type session =
   ; mutable registry_busy : bool
   ; mutable asic : Asic.Snapshot.t option
   ; mutable asic_request_id : int
+  ; mutable catalog_open_checked : bool
   ; mutable resource_navigation_intent : unit ref
   ; mutable preparation_request_id : int
   ; mutable asic_applied_id : int
@@ -347,6 +348,7 @@ let create_session
       ; registry_busy = false
       ; asic = None
       ; asic_request_id = 0
+      ; catalog_open_checked = false
       ; resource_navigation_intent = ref ()
       ; preparation_request_id = 0
       ; asic_applied_id = 0
@@ -1250,8 +1252,8 @@ let reconcile_synthesis session =
           |> Option.bind ~f:(fun reference -> reference.run)
         in
         let stages =
-          Option.value_map run ~default:[] ~f:(fun run ->
-            Terminal_presentation.Overview_tiles.checklist_items ~asic:session.asic ~run)
+          Terminal_presentation.Overview_tiles.selectable_checklist ~asic:session.asic
+            ~remembered:session.remembered_selection ~run
         in
         session.host
         <- Host.set_local
@@ -2367,6 +2369,24 @@ let preparation_request
 
 let hydrate_retained ?(reschedule = false) session =
   let client = session.client in
+  let discover_on_open () =
+    (* Only native hydration opts in. Get stays passive for API consumers and
+       the existing snapshot lane delivers completion without a new poller. *)
+    if phys_equal client session.client
+       && not session.catalog_open_checked
+       && List.mem session.hello.capabilities Asic.automatic_discovery_capability
+            ~equal:String.equal
+    then (
+      let configured =
+        Option.exists session.asic ~f:(fun s -> s.configured)
+        || Option.exists session.host.preparation ~f:(fun s ->
+          Preparation.Availability.equal s.availability Available)
+      in
+      if configured || (Option.is_some session.asic && Option.is_some session.host.preparation)
+      then session.catalog_open_checked <- true;
+      if configured then asic_request session Ensure_discovered else return ())
+    else return ()
+  in
   Terminal_presentation.Retained_hydration.Coordinator.request
     session.hydration
     ~reschedule
@@ -2382,11 +2402,15 @@ let hydrate_retained ?(reschedule = false) session =
           [ Terminal_presentation.Retained_hydration.run
               session.retained_reads
               ~key:"preparation"
-              (fun () -> preparation_request session Get)
+              (fun () ->
+                 let%bind () = preparation_request session Get in
+                 discover_on_open ())
           ; Terminal_presentation.Retained_hydration.run
               session.retained_reads
               ~key:"asic"
-              (fun () -> asic_request session Get)
+              (fun () ->
+                 let%bind () = asic_request session Get in
+                 discover_on_open ())
           ; (let%bind () = load_preferences session in
              let%bind () = load_presentation_preferences session in
              let%bind () = load_waveform_display_preferences session in
@@ -2875,6 +2899,7 @@ and reconnect session =
            (Option.map opened ~f:(fun opened -> opened.project.id)))
     in
     session.client <- client;
+    session.catalog_open_checked <- false;
     session.hello <- hello;
     session.opened <- opened;
     session.snapshot <- snapshot;
@@ -4575,6 +4600,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; registry_busy = false
     ; asic = None
     ; asic_request_id = 0
+    ; catalog_open_checked = false
     ; resource_navigation_intent = ref ()
     ; preparation_request_id = 0
     ; asic_applied_id = 0
@@ -4708,14 +4734,9 @@ let waveform_context session =
       rt.view, fun view -> rt.view <- view)
 ;;
 
-let host_catalog_base session =
-  (match session.opened with
-   | None -> []
-   | Some opened ->
-     [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
-     ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
-     ]
-     @ List.filter_map opened.workspace.items ~f:(fun item ->
+let library_commands session ~f =
+  Option.value_map session.opened ~default:[] ~f:(fun opened ->
+    List.filter_map opened.workspace.items ~f:(fun item ->
        if not (String.equal item.kind "library")
        then None
        else Option.map item.source_path ~f:(fun path ->
@@ -4727,9 +4748,21 @@ let host_catalog_base session =
            | _ -> path
          in
          let label = String.concat item.names ~sep:", " in
-         Host.command ("project.library." ^ label ^ ":" ^ dir)
-           (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
-           "select library actions" (Library_actions dir))))
+         f label dir)))
+;;
+
+let host_catalog_base session =
+  (match session.opened with
+   | None -> []
+   | Some _ ->
+     [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
+     ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
+     ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
+     ]
+     @ library_commands session ~f:(fun label dir ->
+       Host.command ("project.library." ^ label ^ ":" ^ dir)
+         (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
+         "select library actions" (Library_actions dir)))
   @
   (if session.local_project_files
       && Option.is_some session.opened
@@ -5903,6 +5936,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       asic_request session (Launch_fresh { key; intent_id = intent.id }))
   in
   let stage_fresh
+    ~remember
     ~expected_plan_identity
     ~current
     ~selection
@@ -5945,7 +5979,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       in
       let%bind () = if current () then asic_request session Get else return () in
       if not (current ())
-      then return ()
+      then (
+        if generation = session.host.stage_generation
+        then session.host <- { session.host with stage_preparation = None;
+          notice = "Fresh input request superseded: selection or context changed" };
+        return ())
       else (
         session.host <- { session.host with stage_preparation = None };
         match !staged with
@@ -5957,7 +5995,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           let%bind () =
             if quick then launch_fresh ~current ~target ~view intent else return ()
           in
-          if current () then save_preferences session selection else return ()
+          if remember && current () then save_preferences session selection else return ()
         | _ ->
           session.host
           <- { session.host with
@@ -5993,27 +6031,25 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          session.host <- { session.host with notice };
          Effect.Ignore
        | Ok () -> execute_host ~validate session captured Host.Quick_prepare_project ~exit)
-    | Host.Quick_launch_selected (item, run) ->
+    | Host.Quick_launch_selected (item, run, selection) ->
+      let module Commands = Terminal_presentation.Stage_launch_commands in
       let validate () =
         Result.bind (validate ()) ~f:(fun () ->
-          Terminal_presentation.Stage_launch_commands.validate_selected
-            session.host
-            ~asic:session.asic
-            ~item
-            ~run)
+          Result.bind (Commands.validate_selected session.host ~asic:session.asic ~item ~run)
+            ~f:(fun () -> Result.bind
+              (Commands.fresh_selection ~asic:session.asic ~remembered:session.remembered_selection item)
+              ~f:(fun s -> if Asic.Selection.equal s selection then Ok ()
+                else Error "Checklist launch inputs changed; select the stage again")))
       in
       (match validate () with
        | Error notice ->
          session.host <- { session.host with notice };
          Effect.Ignore
        | Ok () ->
-         let action =
-           match item with
-           | Elaboration_preparation -> Host.Quick_prepare_project
-           | Physical_stage stage -> Quick_prepare_stage (stage, run)
-           | Timing_analysis _ -> Quick_prepare_endpoint ("timing", run)
-         in
-         execute_host ~validate session captured action ~exit)
+         let elaboration_only = match item with Elaboration_preparation -> true | _ -> false in
+         async (stage_fresh ~remember:false ~expected_plan_identity:None ~selection ~elaboration_only
+           ~current:(fun () -> Host.current session.host captured && Result.is_ok (validate ()))
+           ~quick:true ~view:(not elaboration_only && session.host.quick_launch_view)))
     | Host.Simulation (tile, operation) ->
       (match operation with
        | Observe id ->
@@ -6372,7 +6408,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
     | (Setup_project | Choose_ip_template | Choose_module_directory | Library_actions _
-      | Name_starter _ | Preview_starter _ | Finish_starter _
+      | Choose_chip_source | Choose_chip_library | Enter_chip_directory | Map_chip _
+      | Toggle_chip _ | Select_created_chip _ | Name_starter _ | Preview_starter _ | Finish_starter _
       | Setup_asic | Adopt_asic _) as action ->
       let module Adoption = Hardcaml_workbench_setup.Asic_adoption in
       (match session.local_project_files, session.opened with
@@ -6407,28 +6444,54 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; Host.command "ip.sample" "Sample behavior template" "example" (Name_starter Sample_ip)
                ];
              Effect.Ignore
-           | Library_actions dir ->
+          | Library_actions dir ->
              form None ~commands:
                [ Host.command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
-                   "new module" (Name_starter (Module_in dir)) ];
+                   "new module" (Name_starter (Module_in dir))
+               ; Host.command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
+                   "from IP library" (Map_chip dir) ];
              Effect.Ignore
+           | Choose_chip_source ->
+             form None ~commands:
+               [ Host.command "chip.ip" "From IP library…" "wrap library" Choose_chip_library
+               ; Host.command "chip.example" "From example/template…" "minimal working example"
+                   (Name_starter (Chip (Example, true))) ];
+             Effect.Ignore
+           | Choose_chip_library ->
+             form None ~commands:
+               (library_commands session ~f:(fun label dir ->
+                  Host.command ("chip.library." ^ label ^ ":" ^ dir)
+                    (Artifact_view.safe (label ^ " · " ^ dir)) "use library" (Map_chip dir))
+                @ [ Host.command "chip.directory" "Enter library directory…" "project relative" Enter_chip_directory ]);
+             Effect.Ignore
+           | Enter_chip_directory -> form (Some Chip_directory); Effect.Ignore
+           | Map_chip dir -> form (Some (Chip_mapping dir)); Effect.Ignore
            | Choose_module_directory ->
              form (Some Module_directory);
              Effect.Ignore
            | Name_starter starter ->
              form (Some (Starter_name starter));
             Effect.Ignore
-           | Preview_starter (starter, name) ->
+          | (Preview_starter _ | Toggle_chip _) ->
+            let starter, name, old_id = match action with
+              | Preview_starter (starter, name) -> starter, name, None
+              | Toggle_chip (p, source, register) -> Chip (source, register), p.operation.name, Some p.preview_id
+              | _ -> assert false
+            in
             let token = ref () in
             async (fun () ->
               form (Some (Starter_wait token));
-              let%bind response =
-                call (Preview
-                   { recipe = Host.starter_recipe starter
-                  ; name
-                   ; target = { destination = root; project = Some opened.project.id
-                              ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
-                  })
+              let target : Authoring.Target.t =
+                { destination = root; project = Some opened.project.id
+                ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
+              in
+              let%bind () = match old_id with
+                | Some preview_id -> call (Cancel { preview_id }) >>| ignore
+                | None -> return ()
+              in
+              let%bind response = call (match starter with
+                | Chip (source, register) -> Preview_chip { target; name; source; register }
+                | _ -> Preview { recipe = Host.starter_recipe starter; name; target })
               in
               let waiting =
                 Host.current session.host captured
@@ -6440,7 +6503,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               | Ok (Previewed preview) when not waiting ->
                 call (Cancel { preview_id = preview.preview_id }) >>| ignore
               | _ when not waiting -> return ()
-              | Ok (Previewed preview) -> form (Some (Starter_preview preview)); return ()
+              | Ok (Previewed preview) -> form (Some (Starter_preview (preview, starter))); return ()
               | response ->
                 let notice = match response with
                   | Error message | Ok (Failed { message; _ }) -> message
@@ -6463,13 +6526,19 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                   let for_module = String.equal recipe Authoring.module_recipe in
                   if asic then session.adopted_root <- Some root;
                   [ (if asic then "ASIC starter added."
+                     else if String.equal recipe Authoring.chip_recipe then "Chip target created."
                      else if for_module then "Module created."
                      else "IP library created.")
                   ; "Created files:"
                   ]
                   @ created_files
                   @ (match registration with
+                     | Not_requested when String.equal recipe Authoring.chip_recipe ->
+                       [ "Catalog registration declined; build the target directly." ]
                      | Not_requested -> []
+                     | Registered path when String.equal recipe Authoring.chip_recipe ->
+                       [ "Registered: " ^ path
+                       ; "Build the chip executable for launch. Discover ASIC flows refreshes the picker." ]
                      | Registered path -> [ "Registered: " ^ path ]
                      | Skipped { path; reason } ->
                        [ (if for_module then "Manual Dune edit: " else "Skipped registration: ") ^ path
@@ -6487,8 +6556,64 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               match session.host.palette with
               | Some { argument = Some (Starter_wait active); _ }
                 when phys_equal token active && Host.current session.host captured ->
-                form (Some (Starter_result rows))
+                let selectable = match response with
+                  | Ok (Applied { registration = Registered _; _ })
+                    when String.equal preview.operation.recipe Authoring.chip_recipe ->
+                    Some preview.operation.name
+                  | _ -> None
+                in
+                form (Some (Starter_result (rows, selectable)))
               | _ -> ())
+          | Select_created_chip name ->
+            async (fun () ->
+              (* Discovery retains the active chip. Only a second explicit selection
+                 changes it, using the variant actually advertised by the catalog. *)
+              let token = ref () in
+              form (Some (Starter_wait token));
+              let current () = phys_equal captured_client session.client &&
+                V1.Daemon_instance_id.equal instance_id session.hello.instance_id &&
+                Option.exists (current_project session) ~f:(fun p -> Project_id.equal p.id opened.project.id) &&
+                (* Discover can populate the previously unknown default chip. The
+                   result dialog's token, workspace and project still bind this choice. *)
+                Option.exists (Host.capture session.host) ~f:(fun now ->
+                  Workspace.Session_id.equal captured.session now.session &&
+                  Workspace.Workspace_id.equal captured.workspace now.workspace &&
+                  captured.revision = now.revision) &&
+                (match session.host.palette with
+                 | Some { argument = Some (Starter_wait active); _ } -> phys_equal token active
+                 | _ -> false)
+              in
+              let rec select remaining =
+                if not (current ()) then return ()
+                else if remaining > 0 && Option.exists session.asic ~f:(fun s ->
+                  List.exists s.operations ~f:(fun op ->
+                    String.equal op.kind "discover" && Plain_rpc.active op))
+                then (
+                  let%bind () = Clock.after (Time_float.Span.of_ms 100.) in
+                  if not (current ()) then return () else
+                    let%bind () = asic_request session Get in
+                    select (remaining - 1))
+                else match Option.bind session.asic ~f:(fun s ->
+                  List.find s.chips ~f:(fun chip -> String.equal chip.id name)) with
+                | Some chip ->
+                  let target : Asic.Chip_target.t = { chip = name; variant = chip.default_variant } in
+                  asic_request session (Select_chip target) ~fresh_receipt:(fun response ->
+                    if current () then (
+                      let message = match response with
+                        | Ok snapshot when Option.equal Asic.Chip_target.equal snapshot.chip_target (Some target) ->
+                          "Selected launch target: " ^ name ^ " / " ^ target.variant
+                        | Ok _ -> "Launch target was not selected: " ^ name
+                        | Error message -> message
+                      in
+                      form (Some (Starter_result ([message], None)))))
+                | None ->
+                  form (Some (Starter_result
+                    ([ "Chip target is registered but not available for launch: " ^ name
+                     ; "Build the target, then refresh ASIC discovery and use Select launch target." ], None)));
+                  return ()
+              in
+              let%bind () = asic_request session Discover in
+              select 300)
           | Setup_asic ->
             (match Adoption.check ~root with
              | Ok () -> form (Some Design_executable)
@@ -6934,6 +7059,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          in
          async
            (stage_fresh
+              ~remember:true
               ~expected_plan_identity:None
               ~current
               ~selection:(Result.ok_or_failwith selection)
@@ -7191,6 +7317,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               (* Source execution and physical chaining belong to the daemon. This
                  terminal phase captures only the authorized current input recipe. *)
               stage_fresh
+                ~remember:true
                 ~expected_plan_identity:None
                 ~current:(fun () ->
                   Host.current session.host captured
@@ -7217,6 +7344,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Asic (Plan selection) ->
       async
         (stage_fresh
+           ~remember:true
            ~expected_plan_identity:None
            ~current:(fun () ->
              Host.current session.host captured && Result.is_ok (validate ()))
@@ -7406,6 +7534,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       else
         async
           (stage_fresh
+             ~remember:true
              ~expected_plan_identity:(Some preview.plan_identity)
              ~current:(fun () ->
                Host.current session.host captured && Result.is_ok (validate ()))
@@ -7592,13 +7721,14 @@ let browse_host session delta =
      Option.iter session.host.registry ~f:(fun registry ->
        Workspace.resolve_tile registry tile.id
        |> Result.ok
-       |> Option.bind ~f:(fun reference -> reference.run)
-       |> Option.iter ~f:(fun run ->
+       |> Option.iter ~f:(fun reference ->
+         let run = reference.run in
          let stages =
-           Terminal_presentation.Overview_tiles.checklist_items ~asic:session.asic ~run
+           Terminal_presentation.Overview_tiles.selectable_checklist ~asic:session.asic
+             ~remembered:session.remembered_selection ~run
          in
          session.host
-         <- Host.browse_checklist session.host tile.id ~run ~items:stages ~delta))
+         <- Host.browse_checklist_for session.host tile.id ~run ~items:stages ~delta))
    | _ -> scroll_host session delta);
   change_synthesis session (fun tile local ->
     let synthesis =
@@ -7724,7 +7854,7 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
                         ~run)
                  |> Option.exists ~f:(function
                    | Timing_analysis _ -> true
-                   | Elaboration_preparation -> false
+                   | Catalog_endpoint _ | Elaboration_preparation -> false
                    | Physical_stage stage -> String.equal stage.id "timing")))) ->
     (match Host.focused host, captured with
      | Some tile, Some capture ->
@@ -7914,46 +8044,19 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
      | Some (Character (('r' | 'R') as key))
        when Option.exists (Host.focused session.host) ~f:(fun tile ->
               String.equal tile.kind "stage-checklist") ->
-       let quick = Char.equal key 'R' in
-       let selected =
-         Option.bind (Host.focused session.host) ~f:(fun tile ->
-           Option.bind session.host.registry ~f:(fun registry ->
-             Workspace.resolve_tile registry tile.id
-             |> Result.ok
-             |> Option.bind ~f:(fun reference -> reference.run)
-             |> Option.bind ~f:(fun run ->
-               let stages =
-                 Terminal_presentation.Overview_tiles.checklist_items
-                   ~asic:session.asic
-                   ~run
-               in
-               Host.checklist_cursor (Host.local session.host tile.id) ~run ~items:stages
-               |> Option.map ~f:(fun stage -> stage, run))))
+       let module Commands = Terminal_presentation.Stage_launch_commands in
+       let asic = session.asic and remembered = session.remembered_selection in
+       let action =
+         Result.bind (Commands.selected_checklist session.host ~asic) ~f:(fun (item, run) ->
+           if Char.equal key 'R'
+           then Commands.quick_action session.host ~asic ~remembered (item, run)
+           else Commands.manual_action ~asic ~remembered (item, run))
        in
-       (match selected, captured with
-        | Some (item, run), Some capture when quick ->
-          Some (execute_host session capture (Quick_launch_selected (item, run)) ~exit)
-        | Some (Elaboration_preparation, _), Some capture ->
-          Some (execute_host session capture Prepare_project ~exit)
-        | Some (Physical_stage stage, run), Some capture ->
-          session.host
-          <- { session.host with
-               notice =
-                 "Preparing NEW run; when preview ready: Space c c → Launch / Launch and \
-                  view"
-             };
-          Some (execute_host session capture (Prepare_stage (stage, run)) ~exit)
-        | Some (Timing_analysis _, run), Some capture ->
-          Some (execute_host session capture (Prepare_endpoint ("timing", run)) ~exit)
-        | None, _ ->
-          session.host
-          <- { session.host with notice = "No explicit stage observation selected" };
-          Some Effect.Ignore
-        | Some _, None ->
-          session.host
-          <- { session.host with
-               notice = "Stage action unavailable: workspace not loaded"
-             };
+       (match captured, action with
+        | Some capture, Ok action -> Some (execute_host session capture action ~exit)
+        | _, result ->
+          session.host <- { session.host with notice = Option.value (Result.error result)
+            ~default:"Stage action unavailable: workspace not loaded" };
           Some Effect.Ignore)
      | Some Escape ->
        Option.iter (Host.focused session.host) ~f:(fun tile ->

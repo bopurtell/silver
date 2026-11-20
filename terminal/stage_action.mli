@@ -9,6 +9,19 @@ type intent =
 val endpoint : intent -> string
 val advertised_selection : intent -> Asic.Selection.t option
 
+(** Current target catalog and applicable terminal settings only. The endpoint in the
+    returned selection is a preference, not authorization to launch any stage. *)
+val checklist_inputs
+  :  snapshot:Asic.Snapshot.t option
+  -> remembered:Asic.Selection.t option
+  -> (Asic.Selection.t * Asic.Flow.t, string) Result.t
+
+val checklist_fresh
+  :  snapshot:Asic.Snapshot.t option
+  -> remembered:Asic.Selection.t option
+  -> string
+  -> (Asic.Selection.t, string) Result.t
+
 val validate_evidence
   :  snapshot:Asic.Snapshot.t option
   -> observed:Asic.Selection.t option
@@ -21,7 +34,7 @@ val resolve_intent
   -> snapshot:Asic.Snapshot.t option
   -> (Asic.Selection.t, string) Result.t
 
-(** A checklist action must match the current chip. Named fresh endpoints use that chip's
+(** An observed stage action must match the current chip. Named fresh endpoints use that chip's
     launch inputs, never a historical chip's recipe. Legacy single-chip projects may use
     observed inputs when no explicit inputs were selected. *)
 val resolve

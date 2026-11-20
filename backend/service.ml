@@ -36,6 +36,7 @@ type hierarchy_entry = { hierarchy : Hierarchy.t }
 type project_session =
   { key : string
   ; root : string
+  ; root_identity : int * int
   ; dune_name : string
   ; environment : V1.Environment_selection.t
   ; mutable project : Project.t
@@ -239,6 +240,13 @@ let set_event_sink t sink = t.event_sink <- sink
 
 let check_authoring_project t (operation : Authoring.Request.t) =
   match operation with
+  | Preview_chip { target = { project = None; _ }; _ } ->
+    error Invalid_request "A new chip target requires an open project"
+  | Preview_chip { target = { project = Some project; destination; _ }; _ } ->
+    (match Hashtbl.find t.projects project with
+     | None -> error Not_found "unknown authoring project"
+     | Some session when String.equal session.root destination -> Ok ()
+     | Some _ -> error Invalid_request "Chip destination must be the open project root")
   | Preview { target = { project = Some project; destination; _ }; recipe; _ } ->
     (match Hashtbl.find t.projects project with
      | None -> error Not_found "unknown authoring project"
@@ -258,9 +266,15 @@ let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
   match Result.bind (check_instance t instance_id) ~f:(fun () -> check_authoring_project t operation) with
   | Error _ as e -> return e
   | Ok () ->
+    let project_identity =
+      match operation with
+      | Preview_chip { target = { project = Some project; _ }; _ } ->
+        Some (Hashtbl.find_exn t.projects project).root_identity
+      | _ -> None
+    in
     Throttle.enqueue t.authoring_queue (fun () ->
       if t.shutting_down then return (error Conflict "daemon is shutting down")
-      else In_thread.run (fun () -> Ok (Authoring_service.handle t.authoring_service operation)))
+       else In_thread.run (fun () -> Ok (Authoring_service.handle ?project_identity t.authoring_service operation)))
 ;;
 
 let emit t event =
@@ -520,7 +534,8 @@ let canonical_project_root root =
       (match (Core_unix.stat dune_project).st_kind with
        | S_REG -> ()
        | _ -> failwith "dune-project is not a regular file");
-      root))
+      let stat = Core_unix.stat root in
+      root, (stat.st_dev, stat.st_ino)))
   >>| Result.map_error ~f:(fun exn -> Exn.to_string exn)
 ;;
 
@@ -583,9 +598,11 @@ let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Op
     let%bind canonical = canonical_project_root root in
     (match canonical with
      | Error message -> return (error Invalid_request message)
-     | Ok root ->
+     | Ok (root, root_identity) ->
        let key = root ^ "\000" ^ environment_key environment in
        (match Hashtbl.find t.projects_by_key key with
+        | Some session when not (Poly.equal session.root_identity root_identity) ->
+          return (error Conflict "Open project directory was replaced; restart the session")
         | Some session ->
           return
             (Ok
@@ -658,6 +675,7 @@ let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Op
                 let session =
                   { key
                   ; root
+                  ; root_identity
                   ; dune_name
                   ; environment
                   ; project
@@ -2172,6 +2190,8 @@ let asic_without_preparation t (request : Asic.Request.t) =
       | None -> return (error Not_found "Unknown project")
       | Some session ->
         Asic_service.handle
+          ~preparation_target_compatible:
+            (Preparation_service.catalog_target_compatible t.preparation_service ~project_key:session.key)
           t.asic_service
           ~root:session.root
           ~environment:session.environment

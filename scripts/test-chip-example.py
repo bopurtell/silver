@@ -35,6 +35,8 @@ def main():
     launch = parser.add_mutually_exclusive_group()
     launch.add_argument("--prepare", action="store_true", help="also test Silver's fresh rebuild and emission into the configured preparation store")
     launch.add_argument("--synthesize", action="store_true", help="launch actual two-slot synthesis using the configured project tools")
+    launch.add_argument("--check-registered", metavar="ID",
+                        help="select an authored chip through the Overview picker and verify its synthesis plan; no launch")
     args = parser.parse_args()
     args.outer_timeout = 60
     example, provider = args.example.resolve(), args.provider.absolute()
@@ -53,13 +55,20 @@ def main():
             def rpc(action):
                 return session.rpc("asic", action, wait=True)
 
-            catalog = rpc("Discover")
+            term = Terminal(session)
+            term.capture("startup", ["Overview"])
+            # Open the picker on a fresh session without issuing a Discover RPC.
+            deadline = time.monotonic() + args.outer_timeout
+            catalog = rpc("Get")
+            while not fs.field(catalog, "flows"):
+                if time.monotonic() >= deadline:
+                    raise AssertionError(("startup did not discover ASIC flows", catalog))
+                time.sleep(.1)
+                catalog = rpc("Get")
             chips = {fs.field(c, "id"): c for c in fs.field(catalog, "chips")}
             assert {"fifo_demo", "program_memory", "sram_budget"} <= chips.keys(), chips
             fifo = fs.field(catalog, "chip_target")[0]
             assert fs.field(fifo, "chip") == "fifo_demo"
-            term = Terminal(session)
-            term.capture("startup", ["Overview"])
 
             def plan(target):
                 selection = [["flow", "standard"], ["profile", "balanced"], ["endpoint", "synthesis"],
@@ -69,8 +78,9 @@ def main():
                 return json.loads(fs.field(preview, "plan_json"))
 
             assert plan(fifo)["project_name"] == "controlled_fifo_specimen"
-            budget_chip = chips["sram_budget"]
-            target = [["chip", "sram_budget"], ["variant", fs.field(budget_chip, "default_variant")]]
+            chip_id = args.check_registered or "sram_budget"
+            assert chip_id in chips, ("missing chip in Silver discovery", chip_id, list(chips))
+            target = [["chip", chip_id], ["variant", fs.field(chips[chip_id], "default_variant")]]
             overview_screen = term.capture("launch-control", ["Launch chip:", "fifo_demo"])
             for y, line in enumerate(overview_screen.splitlines(), 1):
                 if "Launch chip:" in line:
@@ -80,13 +90,25 @@ def main():
                 raise AssertionError("No visible Overview launch chip control")
             click = f"\x1b[<0;{x};{y}"
             os.write(term.master, (click + "M" + click + "m").encode())
-            term.capture("overview-target-picker", ["sram_budget", "two_slot"])
-            os.write(term.master, ("sram_budget " + dict(target)["variant"]).encode())
+            term.capture("overview-target-picker", [chip_id, dict(target)["variant"]])
+            os.write(term.master, (chip_id + " " + dict(target)["variant"]).encode())
             term.drain(.15)
             os.write(term.master, b"\r")
             term.drain(.5)
             selected = rpc("Get")
             assert dict(fs.field(selected, "chip_target")[0]) == dict(target)
+            if args.check_registered:
+                entry, = [row for row in json.loads((example / "hardcaml-asic-targets.json").read_text())["targets"]
+                          if row["id"] == chip_id]
+                direct = json.loads(subprocess.check_output([
+                    example / "_build/default" / entry["executable"], "flow", "plan",
+                    "--flow", "standard", "--profile", "balanced", "--endpoint", "synthesis",
+                    "--source-root", str(example), "--json"], cwd=example, env=session.env))
+                actual = plan(target)
+                assert actual["plan_identity"] == direct["plan_identity"], (actual, direct)
+                print(f"PASS: Overview selected {chip_id}/{dict(target)['variant']}; "
+                      "Silver's synthesis preview matches the directly invoked chip. No launch.")
+                return
             def overview(chip, variant):
                 screen = term.capture(chip + "-overview", [chip + "/" + variant, "Launch target", "Launch chip", "Endpoint"])
                 starts = []

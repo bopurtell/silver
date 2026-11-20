@@ -29,6 +29,11 @@ let validate t =
 
 let source_executable t ~root = Filename.concat root ("_build/default/" ^ t.build_target)
 
-let parse_string text =
-  Or_error.try_with (fun () -> t_of_sexp (Sexp.of_string text) |> validate)
+let parse_string ?root text =
+  Or_error.try_with (fun () ->
+    let t = t_of_sexp (Sexp.of_string text) in
+    match root with
+    | Some root when Manifest.valid_components t.results_root ->
+      validate { t with results_root = Filename.concat root t.results_root }
+    | _ -> validate t)
 ;;

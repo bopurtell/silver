@@ -28,10 +28,12 @@ val create_with_detail_cache
   -> unit
   -> t
 
-(** Parent validates instance/project before calling. Provider work is scheduled;
-    subsequent [Get] snapshots expose completion. Client detach never cancels work. *)
+(** Parent validates instance/project before calling. Automatic discovery checks
+    [preparation_target_compatible] before publishing a changed chip target.
+    Provider work is scheduled; [Get] observes it. Client detach never cancels work. *)
 val handle
-  :  t
+  :  ?preparation_target_compatible:(Asic.Chip_target.t -> bool)
+  -> t
   -> root:string
   -> environment:V1.Environment_selection.t
   -> Asic.Operation.t

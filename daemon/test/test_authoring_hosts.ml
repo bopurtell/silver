@@ -63,6 +63,171 @@ let exercise ~endpoint ~root ~outside =
   | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
 ;;
 
+(* This path exercises the separately installed provider. Run with WB082_REAL_STARTER=1
+   and the matching hardcaml-asic-starter on PATH. *)
+let chip_integration ~endpoint ~parent =
+  let root = Filename.concat parent "chips" in
+  let client = Client.create endpoint in
+  let%bind hello = Client.hello client >>| Or_error.ok_exn in
+  let call operation =
+    Client.authoring client { instance_id = hello.instance_id; operation }
+    >>| Or_error.ok_exn
+  in
+  let preview op =
+    match%map call op with
+    | Ok (Previewed p) -> p
+    | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+  in
+  let apply op =
+    let%bind p = preview op in
+    match%map call (Apply { preview_id = p.preview_id }) with
+    | Ok (Applied { registration; _ }) -> registration
+    | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+  in
+  let target =
+    { Authoring.Target.destination = root; project = None; object_id = None }
+  in
+  let%bind first =
+    apply (Preview { target; name = "first"; recipe = Authoring.starter_recipe })
+  in
+  assert (
+    Authoring.Registration_result.equal first (Registered "hardcaml-asic-targets.json"));
+  let%bind opened =
+    Client.open_project
+      client
+      { instance_id = hello.instance_id; root; environment = Inherit_daemon }
+    >>| Or_error.ok_exn
+  in
+  let project =
+    match opened with
+    | Ok o -> o.project.id
+    | Error e -> raise_s [%sexp (e : V1.Error.t)]
+  in
+  let target = { target with project = Some project } in
+  let dune args =
+    Process.run ~working_dir:root ~prog:"dune" ~args () >>| Or_error.ok_exn >>| ignore
+  in
+  let asic operation =
+    Client.asic client { instance_id = hello.instance_id; project; operation }
+    >>| Or_error.ok_exn
+    >>| function
+    | Ok state -> state
+    | Error e -> raise_s [%sexp (e : V1.Error.t)]
+  in
+  let%bind () = dune [ "build"; "--root"; "."; "asic_first/project.exe" ] in
+  let%bind _ = asic Discover in
+  let rec active attempts =
+    let%bind state = asic Get in
+    match state.chip_target with
+    | Some target -> return target
+    | None when attempts > 0 ->
+      let%bind () = Clock.after (Time_float.Span.of_ms 50.) in
+      active (attempts - 1)
+    | None -> raise_s [%sexp (state : Asic.Snapshot.t)]
+  in
+  let%bind first_active = active 200 in
+  assert (String.equal first_active.chip "first");
+  let chip ?(target = target) ?(register = true) name source =
+    Authoring.Request.Preview_chip { target; name; source; register }
+  in
+  let%bind wrong =
+    call (chip ~target:{ target with destination = parent } "escape" Example)
+  in
+  assert (Result.is_error wrong);
+  let read p = In_channel.read_all (Filename.concat root p) in
+  let edit path data = Out_channel.write_all (Filename.concat root path) ~data in
+  let original = read "asic_first/chip.ml" ^ "\n(* hand edited *)\n" in
+  edit "asic_first/chip.ml" original;
+  let%bind _ = apply (chip "second" Example) in
+  let%bind _ =
+    apply (Preview { target; name = "counter"; recipe = Authoring.ip_sample_recipe })
+  in
+  let ip_files =
+    [ "block.ml"; "chip-interface.json"; "dune"; "test/dune"; "test/test_block.ml" ]
+  in
+  let ip_bytes () = List.map ip_files ~f:(fun p -> read ("ip/counter/" ^ p)) in
+  let before = ip_bytes () in
+  let ip mapping =
+    Authoring.Chip_source.Ip { library_directory = "ip/counter"; mapping }
+  in
+  let%bind unsupported = call (chip "broken" (ip "")) in
+  assert (
+    match unsupported with
+    | Ok (Failed _) -> true
+    | _ -> false);
+  let supported = chip "wrapped" (ip "ui_in:uo_out:comb8") in
+  let%bind receipt = preview supported in
+  edit "ip/counter/block.ml" "let create (_ : string) = 42\n";
+  let%bind stale = call (Apply { preview_id = receipt.preview_id }) in
+  assert (
+    match stale with
+    | Ok (Failed { kind = Stale_preview; created_files = []; _ }) -> true
+    | _ -> false);
+  let%bind wrong_type = call supported in
+  assert (
+    match wrong_type with
+    | Ok (Failed _) -> true
+    | _ -> false);
+  assert (not (Sys_unix.file_exists_exn (Filename.concat root "asic_wrapped")));
+  edit "ip/counter/block.ml" (List.hd_exn before);
+  let%bind _ = apply (chip "wrapped" (ip "ui_in:uo_out:comb8")) in
+  let%bind unlisted = apply (chip ~register:false "direct" Example) in
+  assert (Authoring.Registration_result.equal unlisted Not_requested);
+  assert (String.equal original (read "asic_first/chip.ml"));
+  let%bind state = asic Get in
+  assert (Option.equal Asic.Chip_target.equal state.chip_target (Some first_active));
+  assert (List.equal String.equal before (ip_bytes ()));
+  let json = Yojson.Basic.from_string (read "hardcaml-asic-targets.json") in
+  let open Yojson.Basic.Util in
+  assert (String.equal (member "default_target" json |> to_string) "first");
+  assert (
+    List.equal
+      String.equal
+      (member "targets" json
+       |> to_list
+       |> List.map ~f:(fun e -> member "id" e |> to_string))
+      [ "first"; "second"; "wrapped" ]);
+  let%bind () =
+    dune
+      [ "build"
+      ; "--root"
+      ; "."
+      ; "asic_first/project.exe"
+      ; "asic_second/project.exe"
+      ; "asic_wrapped/project.exe"
+      ; "asic_direct/project.exe"
+      ]
+  in
+  let%bind () = dune [ "runtest"; "--root"; "." ] in
+  let%bind _ = asic Discover in
+  let rec refreshed attempts =
+    let%bind s = asic Get in
+    if List.length s.chips = 3
+    then (
+      assert (Option.equal Asic.Chip_target.equal s.chip_target (Some first_active));
+      assert (
+        List.equal
+          String.equal
+          (List.map s.chips ~f:(fun c -> c.id))
+          [ "first"; "second"; "wrapped" ]);
+      return ())
+    else if attempts = 0
+    then raise_s [%sexp (s : Asic.Snapshot.t)]
+    else (
+      let%bind () = Clock.after (Time_float.Span.of_ms 50.) in
+      refreshed (attempts - 1))
+  in
+  let%bind () = refreshed 200 in
+  Core_unix.rename ~src:root ~dst:(root ^ "-moved");
+  Core_unix.mkdir root;
+  edit "dune-project" "(lang dune 3.17)\n";
+  let%map replaced = call (chip "other_project" Example) in
+  assert (
+    match replaced with
+    | Ok (Failed { kind = Destination_denied; _ }) -> true
+    | _ -> false)
+;;
+
 let run daemon () =
   let dir = Filename_unix.temp_dir "silver-authoring-hosts-" "" in
   let path = Filename.concat dir in
@@ -97,7 +262,10 @@ let run daemon () =
             let endpoint =
               String.chop_prefix_exn line ~prefix:"silver-daemon listening on "
             in
-            exercise ~endpoint ~root:connected ~outside:root))
+            let%bind () = exercise ~endpoint ~root:connected ~outside:root in
+            if Option.is_some (Sys.getenv "WB082_REAL_STARTER")
+            then chip_integration ~endpoint ~parent:connected
+            else return ()))
 ;;
 
 let () =

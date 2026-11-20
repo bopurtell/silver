@@ -1,12 +1,21 @@
 # Choose the ASIC launch target
 
-Open the command palette (`Space c c`) and run **Discover ASIC flows and runs**.
-For a project with a chip catalog, search **Select launch target**, or type a
+When you open a configured ASIC project, Silver discovers the launch targets
+and the selected target's flows. This does not launch synthesis. In the command
+palette (`Space c c`), search **Select launch target**, or type a
 chip or variant name. Each row selects one exact chip/variant pair. Selection
 loads its flows; it does not build anything or switch the run you are inspecting.
 In **Overview → Planned Run**, click **Launch chip** or **Variant**, or focus the
 tile and press **`t`**, to open just the target choices. Type to filter, use the
 arrow keys and Enter to choose, or Esc to cancel.
+
+After registering another chip, build its target executable and run **Discover
+ASIC flows and runs** again. A **Library: …** palette result comes from Dune;
+it opens library actions, not the launch picker. The launch row is **Select
+launch target: `<catalog ID> / <variant>`**. If `hardcaml-asic-targets list`
+contains the chip but the launch row is missing, compare the configured project
+executable's `chip list --json` output from the project root. This is the
+discovery response Silver actually uses.
 
 In Overview, **Session** summarizes the launch chip and variant on one line.
 **Planned Run** shows the same target and the flow, profile, and endpoint in
@@ -14,8 +23,13 @@ aligned rows. The run selector and physical-stage results are evidence from the
 selected execution, which may belong to a different chip. Selecting that run
 does not pick the next launch target.
 The picker is available even in saved workspaces without a Planned Run pane.
-If checklist evidence identifies a different chip, its stage action is blocked;
-use **Plan ASIC** or a named **Launch … and view** action for the current chip.
+For a fresh synthesis run, select **synthesis** in **Stage checklist** and
+press **Shift+R**. Silver uses the current launch chip/variant and its flow
+settings, falling back to that target's declared default flow and profile. It
+does not reuse a different chip's plan, even if the checklist still displays
+that chip's run. Lowercase **r** stages the new plan for review instead.
+
+For explicit flow/profile or parameter choices:
 
 1. Search **Plan ASIC** and choose a flow/profile for the displayed chip/variant.
    Enter an endpoint, optionally followed by `name=value` arguments, and press
@@ -23,8 +37,8 @@ use **Plan ASIC** or a named **Launch … and view** action for the current chip
 2. Reopen the palette and choose **Launch planned run without view** to keep
    inspecting the current run, or **Launch and view planned run** to follow the
    new allocation. Check the target in the action title before pressing Enter.
-3. After switching chips or variants, stage a new plan. A previously captured
-   plan or open input prompt cannot launch against the new chip.
+3. After switching chips or variants, **Launch planned run** still requires a
+   matching plan. Use **Shift+R** on a checklist stage to start a fresh one.
 
 If a variant advertises no named flows, its launch inputs show as unavailable.
 Select a variant that offers the flow you need. Projects without a chip catalog

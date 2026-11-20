@@ -90,6 +90,29 @@ silver-author new-module helper --library ip/accum --apply
 dune runtest ip/accum
 ```
 
+**Chip targets:** A Silver project has one Dune root. Each chip target in it
+owns its wrapper, ASIC declaration and executable. Use **New Chip Target…** to
+add one from the provider example or wrap an existing supported IP library.
+Registering an additional target makes it discoverable without changing the
+catalog default. Press **r** at the preview to toggle registration, then
+**Enter** to create. Leave registration off to build the target directly
+instead. After registration, **s** explicitly selects the new launch target;
+build `asic_<name>/project.exe` first if the executable is not yet available.
+
+```sh
+silver-author new-chip chip_b                     # preview the example target
+silver-author new-chip chip_b --apply
+silver-author new-chip inverted --from-ip ip/accum \
+  --mapping ui_in:uo_out:comb8 --no-register --apply
+```
+
+The IP command maps the eight `ui_in` pins through the sample library's
+combinational `Block.create` to the eight `uo_out` pins. It does not connect a
+clock or reset. The IP library and its tests stay in their original directory.
+This first mapping requires the updated sample starter's `chip-interface.json`
+and a matching `Block.create` type. A library created before that declaration
+was introduced is not automatically treated as compatible.
+
 Standalone command-line submissions (`--plain --action`, `--refresh-integration`
 and `--asic-operation`) wait for the operation; use `--connect` to submit
 work that should outlive the client.
@@ -277,9 +300,11 @@ silver --connect http://127.0.0.1:8080 --project-root /absolute/path/to/project 
 
 ### Open the current real ASIC example demo
 
-For a project with several ASIC designs, use **Space c c → Discover ASIC flows
-and runs**, then **Select launch target**. Overview shows the exact chip and
-variant to plan; importing a bundle in Resources leaves that target alone.
+When you open a configured ASIC project, Silver discovers its targets and
+flows. Choose **Overview → Planned Run → Launch chip**, then highlight
+**synthesis** in the **stage checklist** and press **Shift+R** to run it for
+that chip. You don't need to stage a plan first. **Space c c → Discover ASIC
+flows and runs** remains available to refresh a changed catalog.
 See [choosing a chip and staging its flow](docs/launch-target.md).
 
 The **Resources inspector** is now available through **Space c c → Inspect

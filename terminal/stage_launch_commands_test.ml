@@ -111,6 +111,41 @@ let fixture () =
   host, checklist, snapshot, selection
 ;;
 
+let%test_unit "R takes only the endpoint from historical evidence and stages current inputs" =
+  let host, _, snapshot, old = fixture () in
+  let old_chip = Some { Asic.Chip_target.chip = "chip"; variant = "old" }
+  and chip_target = Some { Asic.Chip_target.chip = "chip"; variant = "new" } in
+  let old = { old with chip_target = old_chip } in
+  let catalog = { (List.hd_exn snapshot.flows) with
+    id = "current"; profiles = ["area"; "delay"]; default_profile = "delay" } in
+  let snapshot = { snapshot with chip_target; flows = [catalog];
+    catalog_default = Some { flow = "current"; profile = "delay" };
+    runs = List.map snapshot.runs ~f:(fun run ->
+      { run with selection = Some old; stages = List.map run.stages ~f:(fun s ->
+          { s with action = Some { old with endpoint = s.id } }) }) } in
+  let action snapshot remembered_selection =
+    let commands = C.selected_commands {host with remembered_selection} ~asic:(Some snapshot) in
+    List.hd_exn commands
+  in
+  let fresh = { Asic.Selection.flow = "current"; profile = "delay"; endpoint = "routing";
+                         chip_target; assignments = [] } in
+  let expect remembered expected =
+    match (action snapshot remembered).action with
+    | Quick_launch_selected (Physical_stage _, Some _, selection) ->
+      assert (Asic.Selection.equal selection expected)
+    | _ -> assert false
+  in
+  expect None fresh;
+  expect (Some old) fresh;
+  expect (Some {old with chip_target}) fresh;
+  let custom = {fresh with profile = "area"; assignments = ["W=12"]} in
+  expect (Some {custom with endpoint = "synthesis"}) custom;
+  assert (String.is_substring
+    (Option.value_exn (action {snapshot with flows = [{catalog with fresh_stage_endpoints = []}]} None).unavailable)
+    ~substring:"Unsupported fresh endpoint");
+  assert (Option.is_some (action {snapshot with catalog_default = None} None).unavailable)
+;;
+
 let full_catalog host snapshot selection =
   (* Include actual settings, aliases, project/tile/workspace actions, and the same launch
      families assembled by main, with competing settings deliberately placed first. *)
@@ -440,9 +475,10 @@ let%test_unit "selected shortcut captures checklist from another tile and reject
   let shortcut = List.hd_exn (C.selected_commands unfocused ~asic) in
   assert (Option.is_none shortcut.unavailable);
   (match shortcut.action with
-   | Quick_launch_selected (item, run) ->
+   | Quick_launch_selected (item, run, inputs) ->
      assert (String.equal (Overview_tiles.checklist_id item) "routing");
-     assert (Run_ref.equal run Fs0_fixture.run_a);
+     assert (Option.equal Run_ref.equal run (Some Fs0_fixture.run_a));
+     assert (List.is_empty inputs.assignments);
      assert (Result.is_ok (C.validate_selected unfocused ~asic ~item ~run));
      let changed =
        H.set_local
@@ -492,10 +528,10 @@ let%test_unit "selected shortcut captures checklist from another tile and reject
         contexts = List.map registry.contexts ~f:(fun c -> { c with selected_run = None })
       }
   in
-  assert (
-    String.is_substring
-      (Option.value_exn (List.hd_exn (C.selected_commands no_run ~asic)).unavailable)
-      ~substring:"no current run")
+  match (List.hd_exn (C.selected_commands no_run ~asic)).action with
+  | Quick_launch_selected (Catalog_endpoint "synthesis", None, s) ->
+    assert (String.equal s.endpoint "synthesis")
+  | _ -> assert false
 ;;
 
 let%test_unit "named shortcuts capture fresh inputs, force view independently of \
@@ -693,7 +729,7 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
   in
   let intent = Stage_action.Physical_stage stage in
   let resolved =
-    C.resolve ~asic:(Some snapshot) ~remembered:(Some selection) ~run:(Some run) intent
+    C.resolve ~asic:(Some snapshot) ~remembered:(Some selection) ~run intent
     |> Result.ok_or_failwith
   in
   let captured = H.capture host |> Option.value_exn in
@@ -708,7 +744,7 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
         C.validate_named
           ~asic:(Some !current_snapshot)
           ~remembered:(Some selection)
-          ~run:(Some run)
+          ~run
           ~intent
           ~selection:resolved)
   in
@@ -758,7 +794,7 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
       (C.validate_named
          ~asic:(Some action_snapshot)
          ~remembered:(Some selection)
-         ~run:(Some run)
+         ~run
          ~intent:(Physical_stage advertised)
          ~selection:resolved));
   let withdrawn =
@@ -779,7 +815,7 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
       (C.validate_named
          ~asic:(Some withdrawn)
          ~remembered:(Some selection)
-         ~run:(Some run)
+         ~run
          ~intent:(Physical_stage advertised)
          ~selection:resolved));
   let preparation = Overview_tiles.Elaboration_preparation in

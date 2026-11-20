@@ -257,11 +257,13 @@ let workflow_endpoint_rows (w : Asic.Fresh.Workflow.t) =
 (** Supplementary observations are deliberately not [Asic.Stage.t]: they have no launch
     endpoint and must never enter physical stage action inference. *)
 type checklist_item =
+  | Catalog_endpoint of string
   | Physical_stage of Asic.Stage.t
   | Timing_analysis of Asic.Summary.t option
   | Elaboration_preparation
 
 let checklist_id = function
+  | Catalog_endpoint endpoint -> "catalog:" ^ endpoint
   | Elaboration_preparation -> "preparation:elaboration"
   | Physical_stage s -> s.Asic.Stage.id
   | Timing_analysis _ -> "analysis:post-pnr-sta"
@@ -336,6 +338,21 @@ let checklist_items ~asic ~run =
        in
        Physical_stage s)
    else insert stages)
+;;
+
+let selectable_checklist ~asic ~remembered ~run =
+  match run with
+  | Some run -> checklist_items ~asic ~run
+  | None ->
+    Stage_action.checklist_inputs ~snapshot:asic ~remembered
+    |> Result.ok
+    |> Option.value_map ~default:[] ~f:(fun (_, flow) ->
+      List.map flow.Asic.Flow.fresh_stage_endpoints ~f:(fun e -> Catalog_endpoint e))
+;;
+
+let catalog_row ~selected endpoint =
+  row ~active:selected ~role:Muted ~cursor_id:(checklist_id (Catalog_endpoint endpoint))
+    (String.capitalize endpoint) "available to launch"
 ;;
 
 let goal_label : Asic.Timing_analysis.Goal.t -> string = function
@@ -462,6 +479,7 @@ let analysis_row ?(decimal_places = 3) ~run ~selected summary =
 ;;
 
 let checklist_row ?now ~run ~selected = function
+  | Catalog_endpoint endpoint -> catalog_row ~selected endpoint
   | Elaboration_preparation ->
     row
       ~status:Status.Unknown

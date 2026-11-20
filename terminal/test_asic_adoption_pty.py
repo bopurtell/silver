@@ -70,9 +70,9 @@ def exercise_add(client, base, real_renderer=None):
     if real_renderer:
         renderer.symlink_to(real_renderer)
         files = json.loads(subprocess.check_output(
-            [renderer, "render-existing", "--name", "demo"]))["files"]
+            [renderer, "render-target", "--name", "demo"]))["files"]
     else:
-        renderer.write_text("#!/bin/sh\n[ \"$*\" = 'render-existing --name demo' ] || exit 2\n"
+        renderer.write_text("#!/bin/sh\ncase \"$*\" in 'render-target --name demo'|'render-existing --name demo') ;; *) exit 2;; esac\n"
                             + "cat <<'JSON'\n" + json.dumps(dict(
                                 schema_version=1, provider="hardcaml_asic", version="1",
                                 files=files)) + "\nJSON\n")
@@ -88,7 +88,12 @@ def exercise_add(client, base, real_renderer=None):
             term.capture("starter-name", ["enter starter name"])
             os.write(term.master, b"demo\r")
             term.capture("preview", ["ASIC STARTER PREVIEW", "hardcaml-asic-add-to-project-v1",
-                                     "asic_demo/project.ml", "Proposed registration"])
+                                     "asic_demo/project.ml"])
+            for _ in range(45):
+                if "Manual catalog entry" in term.drain(.08):
+                    break
+                os.write(term.master, b"\x1b[B")
+            term.capture("manual-entry", ["Manual catalog entry", "hardcaml-asic-targets.json"])
             assert not (root / "asic_demo").exists()
             assert not (root / ".workbench").exists()
             if decision == "conflict":
@@ -115,7 +120,7 @@ def exercise_add(client, base, real_renderer=None):
         for file in files:
             assert (root / file["path"]).read_text() == file["contents"]
         config = root / ".workbench/hardcaml-workbench-asic.sexp"
-        assert str(root / "_build/default/asic_demo/project.exe") in config.read_text()
+        assert "_build/default/asic_demo/project.exe" in config.read_text()
         assert catalog.read_text() == '{"custom":"preserve"}\n'
         assert marker.read_text() == "(lang dune 3.10)\n(name original)\n"
         assert owned.read_text() == "let original = true\n"

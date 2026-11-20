@@ -2,7 +2,7 @@
  (name test_authoring_hosts)
  (modules test_authoring_hosts)
  (action (run %{test} %{exe:../main.exe}))
- (libraries async core core_unix.command_unix hardcaml_workbench_backend hardcaml_workbench_protocol
+ (libraries async core yojson core_unix.command_unix hardcaml_workbench_backend hardcaml_workbench_protocol
   hardcaml_workbench_native_http server_host)
  (preprocess (pps ppx_jane)))
 

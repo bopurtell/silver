@@ -76,14 +76,24 @@ let () =
       in
       let target = root / "project" in
       Core_unix.mkdir target;
+      let rendered =
+        [ "dune-project"
+        ; "asic_my-chip/chip.ml"
+        ; "asic_my-chip/project.ml"
+        ; "asic_my-chip/dune"
+        ]
+      in
       let files =
-        [ "dune-project"; "src/chip.ml"; "src/tests/test_chip.ml"; "src/dune" ]
+        rendered
+        @ [ ".workbench/hardcaml-workbench-asic.sexp"
+          ; ".workbench/hardcaml-workbench-preparation.sexp"
+          ]
       in
       let fixture () =
         install
           ("[ \"$#:$1:$2:$3\" = '3:render:--name:my-chip' ] || exit 2\n"
            ^ "cat <<'END'\n"
-           ^ descriptor files
+           ^ descriptor rendered
            ^ "\nEND\n")
       in
       fixture ();
@@ -101,8 +111,8 @@ let () =
       let apply (p : Preview.t) = run (Apply { preview_id = p.preview_id }) in
       let verify dest (p : Preview.t) =
         (match apply p with
-         | Applied { created_files; registration = Not_requested } ->
-           assert (List.equal String.equal created_files p.new_files)
+         | Applied { created_files; registration = Registered path } ->
+           assert (List.equal String.equal created_files (p.new_files @ [ path ]))
          | r -> raise_s [%sexp (r : Response.t)]);
         List.iter p.files ~f:(fun file ->
           assert (String.equal (In_channel.read_all (dest / file.path)) file.contents))
@@ -146,7 +156,7 @@ let () =
       write ".workbench/other.sexp";
       let install_existing paths =
         install
-          ("[ \"$1\" = render-existing ] || exit 2\ncat <<'END'\n"
+          ("[ \"$1\" = render-target ] || exit 2\ncat <<'END'\n"
            ^ descriptor paths
            ^ "\nEND\n")
       in
@@ -207,6 +217,61 @@ let () =
         | Response.Applied _ -> ()
         | r -> raise_s [%sexp (r : Response.t)]
       in
+      let chip ?(source = Chip_source.Example) ?(register = true) name =
+        run
+          (Preview_chip
+             { source
+             ; register
+             ; name
+             ; target =
+                 { destination = dir
+                 ; object_id = None
+                 ; project =
+                     Some (Hardcaml_workbench_protocol.Project_id.of_string "open")
+                 }
+             })
+      in
+      let paths name =
+        List.map [ "chip.ml"; "project.ml"; "dune" ] ~f:(fun file ->
+          "asic_" ^ name ^ "/" ^ file)
+      in
+      let catalog = dir / "hardcaml-asic-targets.json" in
+      let initial =
+        {|{"schema_version":1,"default_target":"first","targets":[{"id":"first","executable":"first/project.exe"}]}|}
+      in
+      Out_channel.write_all catalog ~data:initial;
+      render "render-target --name first" (paths "first");
+      fail Destination_denied (chip "first");
+      fail Destination_denied (chip ~register:false "first");
+      render "render-target --name second" (paths "second");
+      let p = expect_preview (chip "second") in
+      assert (not (Option.value_exn p.registration).manual);
+      Out_channel.write_all catalog ~data:(initial ^ "\n");
+      fail Stale_preview (apply p);
+      assert (not (Sys_unix.file_exists_exn (dir / "asic_second")));
+      assert (String.equal (In_channel.read_all catalog) (initial ^ "\n"));
+      applied (apply (expect_preview (chip "second")));
+      let now = In_channel.read_all catalog in
+      assert (String.is_substring now ~substring:{|"default_target": "first"|});
+      assert (String.is_substring now ~substring:{|"id": "second"|});
+      fail Destination_denied (chip "second");
+      render "render-target --name direct" (paths "direct");
+      let p = expect_preview (chip ~register:false "direct") in
+      assert (Option.is_none p.registration);
+      applied (apply p);
+      assert (String.equal now (In_channel.read_all catalog));
+      let custom =
+        String.substr_replace_first
+          now
+          ~pattern:"\"targets\""
+          ~with_:"\"owner\":true,\"targets\""
+      in
+      Out_channel.write_all catalog ~data:custom;
+      render "render-target --name third" (paths "third");
+      let p = expect_preview (chip "third") in
+      assert (Option.value_exn p.registration).manual;
+      applied (apply p);
+      assert (String.equal custom (In_channel.read_all catalog));
       List.iter
         [ ip_empty_recipe, "empty"; ip_sample_recipe, "sample" ]
         ~f:(fun (recipe, template) ->
@@ -284,7 +349,7 @@ let () =
         let dest = root / "actual" in
         let p = preview dest in
         assert (List.mem p.new_files "dune-project" ~equal:String.equal);
-        assert (List.mem p.new_files "chip.ml" ~equal:String.equal);
+        assert (List.mem p.new_files "asic_my-chip/chip.ml" ~equal:String.equal);
         verify dest p;
         let incremental recipe object_id name =
           expect_preview
@@ -302,12 +367,29 @@ let () =
             let library = "ip/" ^ name in
             applied (apply (incremental module_recipe (Some library) "extra"));
             assert (Sys_unix.file_exists_exn (dest / library / "extra.ml")));
-        let p = expect_preview (existing dest) in
+        let p =
+          expect_preview
+            (run
+               (Preview_chip
+                  { target =
+                      { destination = dest
+                      ; project =
+                          Some (Hardcaml_workbench_protocol.Project_id.of_string "p")
+                      ; object_id = None
+                      }
+                  ; name = "chip_b"
+                  ; source = Example
+                  ; register = true
+                  }))
+        in
         (match apply p with
          | Applied { registration = Registered path; _ } ->
            assert (String.equal path "hardcaml-asic-targets.json")
-         | r -> raise_s [%sexp (r : Response.t)]);
-        let module I = Hardcaml_workbench_project_integration in
+          | r -> raise_s [%sexp (r : Response.t)]);
+         let module I = Hardcaml_workbench_project_integration in
+         let moved = root / "relocated-checkout" in
+         Core_unix.rename ~src:dest ~dst:moved;
+         let dest = moved in
         let load filename =
           (I.Config_location.resolve ~root:dest ~filename ~max_bytes:65536
            |> Or_error.ok_exn
@@ -315,11 +397,14 @@ let () =
             .contents
         in
         let prep =
-          I.Preparation_config.parse_string (load I.Preparation_config.filename)
+          I.Preparation_config.parse_string
+            ~root:dest
+            (load I.Preparation_config.filename)
           |> Or_error.ok_exn
         in
         match
-          I.Asic_config.parse_project (load I.Asic_config.filename) |> Or_error.ok_exn
+          I.Asic_config.parse_project ~root:dest (load I.Asic_config.filename)
+          |> Or_error.ok_exn
         with
         | `Explicit _ -> assert false
         | `Discover resolve ->

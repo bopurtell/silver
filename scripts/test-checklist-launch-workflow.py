@@ -112,10 +112,16 @@ def catalog_config(mode):
 def catalog_case(args, mode, check):
     f = None
     try:
-        f, _ = shared.setup(args, mode, check, configure=catalog_config(mode), cold=True)
+        held = mode == 'changed-context'
+        f, _ = shared.setup(args, mode, check, configure=catalog_config(mode), cold=True,
+                            before_attach=(lambda f: f.mode('discovery', 'hold')) if held else None)
         t = f.terminal
+        if held:
+            wait(lambda: f.events('discovery-held'), 'automatic discovery held')
+        else:
+            wait(lambda: field(f.snapshot(), 'flows'), 'automatic catalog on open')
         cold = f.snapshot()
-        check(not field(cold, 'flows') and not field(cold, 'preview') and not field(cold, 'fresh_intent'), mode + ': restarted catalog and input intent are cold')
+        check(not field(cold, 'preview') and not field(cold, 'fresh_intent'), mode + ': automatic discovery never stages inputs')
         check(not field(field(cold, 'runs')[0], 'selection'), mode + ': registered history supplies no implicit launch selection')
         before = len(f.events('pinned-call'))
         t.open_palette('Launch planned run without view')
@@ -123,8 +129,6 @@ def catalog_case(args, mode, check):
         t.key(b'\r'); t.key(b'\x1b')
         check(len(f.events('pinned-call')) == before and not field(f.snapshot(), 'workflows'), mode + ': passive palette and disabled Enter never discover or launch')
         position(f, 5)  # Elaboration, synthesis, floorplan, placement, CTS, routing.
-        if mode == 'changed-context':
-            f.mode('discovery', 'hold')
         t.key(b'r')
         if mode == 'changed-context':
             wait(lambda: f.events('discovery-held'), 'catalog discovery held')

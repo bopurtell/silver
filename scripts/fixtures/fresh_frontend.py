@@ -19,7 +19,7 @@ c = api.c
 field, sexp, wait = api.field, api.sexp, api.wait
 
 
-def setup(args, label, check, preparation=True, configure=None, cold=False):
+def setup(args, label, check, preparation=True, configure=None, cold=False, before_attach=None):
     f = api.Fixture(args, label, check)
     if not preparation:
         (f.root / 'hardcaml-workbench-preparation.sexp').unlink()
@@ -56,6 +56,8 @@ def setup(args, label, check, preparation=True, configure=None, cold=False):
         if cold:
             f.stop()
             f.start()
+        if before_attach:
+            before_attach(f)
         client = f.base / 'inherited-client'
         client.write_text('#!' + sys.executable + '\nimport os,sys\na=sys.argv[1:]\n'
                           'a[a.index("--environment")+1]="inherited"\nos.execv(' + repr(str(args.client)) +

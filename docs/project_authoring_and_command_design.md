@@ -14,7 +14,7 @@ The product test: starting in an empty directory with the tools installed, creat
 
 - **Project discovery:** `silver` searches the current directory and then its ancestors for the nearest regular `dune-project` file. A `dune` file defines local build rules; it is not a project-root marker. Neither `.git` nor a Silver config is the marker. If none is found, interactive local startup opens project setup in an unbound workspace. See [`setup/project_discovery.ml`](../setup/project_discovery.ml).
 - **Inspection:** Silver opens the Dune project and inspects it on the service host. Generic Dune use does not require an ASIC declaration. Optional integration configuration tells Silver about additional capabilities; it does not create the project. [Config resolution](../project_integration/config_location.ml) prefers `.workbench/` and supports legacy root locations. The example launcher's `.dev/workbench-main` is session state, not design source.
-- **Multiple chips, one exposed executable:** `hardcaml_asic_example` has distinct declarations for [FIFO](../../hardcaml_asic_example/asics/fifo_demo/project/project.ml), [program memory](../../hardcaml_asic_example/asics/program_memory/project/program_memory.ml), and [SRAM budget](../../hardcaml_asic_example/asics/sram_budget/sram_budget.ml). Each calls `Hardcaml_asic.Project.create`. The [example's Silver ASIC config](../../hardcaml_asic_example/.workbench/hardcaml-workbench-asic.sexp) has one `project_executable`, pointing at the FIFO CLI. Opening the Dune project does **not** currently present a picker for those three chips.
+- **Multiple chips, one project:** `hardcaml_asic_example` has distinct declarations for [FIFO](../../hardcaml_asic_example/asics/fifo_demo/project/fifo_chip.ml), [program memory](../../hardcaml_asic_example/asics/program_memory/project/program_memory.ml), and [SRAM budget](../../hardcaml_asic_example/asics/sram_budget/sram_budget.ml). The project catalog registers FIFO and program memory with their own `cli/chip.exe` entry points. The FIFO CLI also exposes its chip/variant discovery interface to Silver's [launch-target picker](launch-target.md).
 
 ## Vocabulary and ownership
 
@@ -31,7 +31,7 @@ For example, the [FIFO IP](../../hardcaml_asic_example/ip/controlled_fifo/rtl/) 
 
 **Proposed multi-chip model:** keep one hardware declaration per chip. A project-level **chip-target catalog** should list targets and how to reach them. The Dune project supplies the entries; `hardcaml_asic` defines a listing/selection interface usable from the CLI; Silver consumes it. The catalog should not restate pinouts, clocks, or IP inventories. Removing a catalog entry should remove a chip from the picker without preventing its independent CLI build. No overarching `Silver.Project.create` is needed.
 
-In the UI, use **Project: `hardcaml_asic_example` · Chip target: `fifo_demo`**. A possible library follow-up is `Hardcaml_asic.Chip_target.create` as the preferred spelling, with `Project` retained as a compatibility alias for the same module/type. Do not repurpose the old name to mean a collection of chips; `Chip_catalog` would be a distinct concept. The UI vocabulary need not wait for an API rename.
+In the UI, use **Project: `hardcaml_asic_example` · Chip target: `fifo_demo`**. Use `Hardcaml_asic.Chip_target.create` for a declaration; `Project.create` is its compatibility spelling. `Chip_catalog` represents the collection, not an individual chip.
 
 ## Creating things: templates that become yours
 
@@ -49,7 +49,7 @@ Creating and connecting are different operations. For example, a newly created f
 
 ## Where to find a flow
 
-**Today, in the FIFO example:** `project.ml` supplies the base LibreLane hardening flow. [`flow_catalog.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_catalog.ml) constructs the named `standard` methodology and registers profiles from [`flow_profiles.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_profiles.ml), including `balanced` and `synth_delay`. The [chip CLI](../../hardcaml_asic_example/asics/fifo_demo/cli/project.ml) exposes that catalog. No magic `flow.ml` filename is scanned.
+**Today, in the FIFO example:** `fifo_chip.ml` supplies the base LibreLane hardening flow. [`flow_catalog.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_catalog.ml) constructs the named `standard` methodology and registers profiles from [`flow_profiles.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_profiles.ml), including `balanced` and `synth_delay`. The [chip CLI](../../hardcaml_asic_example/asics/fifo_demo/cli/chip.ml) exposes that catalog. No magic `flow.ml` filename is scanned.
 
 **Preferred organization:** someone asking “where is flow 2 defined?” should be able to open one obvious module. Let each named flow supply one complete catalog entry: methodology, supported endpoints and parameters, available profiles, and default profile. The chip's flow catalog collects those entries and chooses a default. For example:
 

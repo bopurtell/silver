@@ -739,10 +739,6 @@ let checklist_intent_selection host data run intent =
     ~snapshot:data.asic
 ;;
 
-let checklist_selection host data run stage =
-  checklist_intent_selection host data run (Physical_stage stage)
-;;
-
 let checklist_preview host data tile =
   Option.bind host.H.registry ~f:(fun registry ->
     W.resolve_tile registry tile.W.Tile.id
@@ -754,13 +750,14 @@ let checklist_preview host data tile =
         (H.checklist_cursor (H.local host tile.id) ~run ~items)
         ~f:(fun item ->
           match item with
-          | Overview_tiles.Elaboration_preparation -> None
+          | Catalog_endpoint _ | Overview_tiles.Elaboration_preparation -> None
           | _ ->
             let intent =
               match item with
               | Overview_tiles.Elaboration_preparation ->
                 Stage_action.Fresh_endpoint "__preparation_never_launch"
               | Overview_tiles.Timing_analysis _ -> Stage_action.Fresh_endpoint "timing"
+              | Catalog_endpoint endpoint -> Stage_action.Fresh_endpoint endpoint
               | Physical_stage stage -> Stage_action.Physical_stage stage
             in
             (match
@@ -817,7 +814,7 @@ let checklist_hints host data tile =
       ]
     else (
       match checklist_preview host data tile with
-      | None -> [ "r prepare NEW run"; "j/k browse | Enter inspect" ]
+      | None -> [ "R launch NEW run | r stage"; "j/k browse | Enter inspect" ]
       | Some preview ->
         [ "Space c c: Launch"
         ; "or Launch and view"
@@ -909,12 +906,11 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
     | "stage-checklist" ->
       let local = H.local host tile.id in
       let observed =
-        Option.value_map selected_run ~default:[] ~f:(fun run ->
-          Overview_tiles.checklist_items ~asic:data.asic ~run)
+        Overview_tiles.selectable_checklist ~asic:data.asic ~remembered:host.remembered_selection
+          ~run:selected_run
       in
       let selected =
-        Option.bind selected_run ~f:(fun run ->
-          H.checklist_cursor local ~run ~items:observed)
+        H.checklist_cursor_for local ~run:selected_run ~items:observed
       in
       let stages =
         match selected_run, observed with
@@ -954,6 +950,19 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             | _ -> row
             in
             { row with cursor_id = Some (Overview_tiles.checklist_id item) })
+        | None, (_ :: _ as items) ->
+          let catalog_rows =
+            List.filter_map items ~f:(function
+              | Overview_tiles.Catalog_endpoint endpoint as item ->
+                Some (Overview_tiles.catalog_row ~selected:(Option.exists selected ~f:(fun s ->
+                  String.equal (Overview_tiles.checklist_id s) (Overview_tiles.checklist_id item))) endpoint)
+              | _ -> None)
+          in
+          (match Planned_run.workflow host.planned_run with
+           | None -> []
+           | Some w -> Overview_tiles.elaboration_row ~now ~selected:false (Some w)
+                       :: Overview_tiles.workflow_endpoint_rows w)
+          @ catalog_rows
         | _ ->
           Overview_tiles.elaboration_row
             ~now
@@ -999,15 +1008,18 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
                   run if current catalog supports it"
                | _ -> "Esc overview; r prepares a NEW run through advertised endpoint")
           ]
-          @ (match selected_run, selected with
-             | Some run, Some (Physical_stage stage) ->
-               [ (match checklist_selection host data run stage with
+          @ (match selected with
+             | Some item ->
+               [ (match Stage_launch_commands.fresh_selection ~asic:data.asic
+                          ~remembered:host.remembered_selection item with
                   | Error reason -> Overview_tiles.row ~role:Warning "New run" reason
                   | Ok selection ->
                     Overview_tiles.row
                       ~role:Muted
                       "New run inputs"
-                      (selection.flow
+                      (Launch_preferences.chip_label selection.chip_target
+                       ^ " · "
+                       ^ selection.flow
                        ^ "/"
                        ^ selection.profile
                        ^ " → "
@@ -2275,7 +2287,7 @@ let mixed_checklist host data tile =
   Option.exists (tile_run host tile) ~f:(fun run ->
     List.exists (Overview_tiles.checklist_items ~asic:data.asic ~run) ~f:(function
       | Timing_analysis _ | Elaboration_preparation -> true
-      | Physical_stage _ -> false))
+      | Catalog_endpoint _ | Physical_stage _ -> false))
 ;;
 
 let stage_strip_model ?now host tile ~run ~width stages =
@@ -3931,17 +3943,24 @@ let render_palette host dimensions background =
         "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
       | Some H.Design_executable -> "IMPORT EXISTING ASIC DESIGN — existing project executable"
       | Some (H.Starter_name Asic_starter) -> "ADD ASIC STARTER — enter starter name"
+      | Some (H.Starter_name (Chip _)) -> "NEW CHIP TARGET — enter target name"
+      | Some H.Chip_directory -> "FROM IP LIBRARY — enter project-relative library directory"
+      | Some (H.Chip_mapping _) -> "FROM IP LIBRARY — enter explicit pin mapping"
       | Some (H.Starter_name (Empty_ip | Sample_ip)) -> "NEW IP LIBRARY — enter library name"
       | Some H.Module_directory -> "NEW MODULE — enter project-relative library directory"
       | Some (H.Starter_name (Module_in _)) -> "NEW MODULE — enter module name"
       | Some (H.Starter_wait _) -> "Waiting for authoring service · Esc dismisses"
-      | Some (H.Starter_preview p) ->
+      | Some (H.Starter_preview (_, Chip _)) ->
+        "CHIP TARGET PREVIEW · r toggles registration · Enter applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_preview (p, _)) ->
         (if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.add_to_project_recipe
          then "ASIC STARTER PREVIEW · a applies"
          else if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.module_recipe
          then "NEW MODULE PREVIEW · Enter applies"
          else "NEW IP LIBRARY PREVIEW · Enter applies")
         ^ " · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_result (_, Some _)) ->
+        "s: Select new chip target · Enter/Esc closes · ↑/↓ scroll"
       | Some (H.Starter_result _) -> "AUTHORING RESULT · Enter/Esc closes · ↑/↓ scroll"
       | Some (H.Workload_bundle (left, _)) ->
         (if left then "CAPTURE A" else "CAPTURE B")
@@ -3956,6 +3975,10 @@ let render_palette host dimensions background =
         "SIMULATION LAUNCH FORM — explicit inputs; Enter accepts each field"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "ip.empty") ->
         "NEW IP LIBRARY — choose template"
+      | None when List.exists p.commands ~f:(fun c -> String.equal c.id "chip.example") ->
+        "NEW CHIP TARGET — choose source"
+      | None when List.exists p.commands ~f:(fun c -> String.equal c.id "chip.directory") ->
+        "FROM IP LIBRARY — choose a library"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "library.new-module") ->
         "SELECTED LIBRARY — choose action"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "setup.add") ->
@@ -3964,7 +3987,7 @@ let render_palette host dimensions background =
     in
     let query =
       match p.argument with
-      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name _ | H.Module_directory) ->
+      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
         let input =
           "> "
           ^ p.query
@@ -3989,15 +4012,24 @@ let render_palette host dimensions background =
         (match starter with
          | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
          | Sample_ip -> [ "Template: sample behavior" ]
-         | Empty_ip -> [ "Template: empty" ]
+          | Empty_ip -> [ "Template: empty" ]
+          | Chip (source, _) -> H.chip_assumptions source
          | Asic_starter -> [])
         @ [ "Enter previews new files in the open project. Esc cancels." ]
       | Some H.Module_directory -> [ "Enter the directory containing the library's dune file." ]
+      | Some H.Chip_directory -> [ "Enter the directory containing the library's dune file." ]
+      | Some (H.Chip_mapping dir) ->
+        [ "Library: " ^ Artifact_view.safe dir
+        ; "Supported mapping: ui_in:uo_out:comb8"
+        ; "Connect ui_in[7:0] to Block.create and drive uo_out[7:0]."
+        ; "Combinational; no clock/reset. Bidirectional outputs and enables tied low."
+        ]
       | Some (H.Starter_preview _ | H.Starter_result _) ->
         let rows =
           match p.argument with
-          | Some (H.Starter_preview preview) -> H.starter_preview_lines preview
-          | Some (H.Starter_result rows) -> rows
+          | Some (H.Starter_preview (preview, Chip (source, _))) -> H.starter_preview_lines ~source preview
+          | Some (H.Starter_preview (preview, _)) -> H.starter_preview_lines preview
+          | Some (H.Starter_result (rows, _)) -> rows
           | _ -> assert false
         in
         let rows = List.concat_map rows ~f:(wrap_cells ~width) in
