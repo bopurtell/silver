@@ -2,7 +2,7 @@ open! Core
 module Project_discovery = Hardcaml_workbench_setup.Project_discovery
 module Simulation_setup = Hardcaml_workbench_setup.Simulation_setup
 
-let program = "hardcaml-workbench-simulation-setup"
+let program = "silver-simulation-setup"
 
 let report_error message =
   eprintf "%s: %s\n%!" program message;
@@ -156,7 +156,7 @@ let check_command =
 
 let command =
   Command.group
-    ~summary:"Set up FS2 simulation provider integration for an existing Dune project"
+    ~summary:"Set up Silver's FS2 simulation provider for an existing Dune project"
     ~readme:(fun () ->
       "init writes the provider configuration (preview first, never overwrites);\n\
        check runs provider discovery once and reports the catalog. Neither launches\n\

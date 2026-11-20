@@ -17,14 +17,16 @@ from .screen import terminal_screen
 
 
 class Terminal:
-    def __init__(self, session):
+    def __init__(self, session, *, argv=None, cwd=None):
         self.session = session
         self.data = bytearray()
         self.master, slave = pty.openpty()
         try:
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
             self.process = subprocess.Popen(
+                argv if argv is not None else
                 [str(session.args.client), '--connect', session.url, '--project-root', str(session.root)],
+                cwd=cwd,
                 stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
                 env=dict(session.env, TERM='xterm-256color'))
         except BaseException:
@@ -34,7 +36,7 @@ class Terminal:
         finally:
             os.close(slave)
 
-    def drain(self, seconds=.3):
+    def drain(self, seconds=.3, *, allow_exit=False):
         deadline = time.monotonic() + seconds
         while True:
             remaining = deadline - time.monotonic()
@@ -50,7 +52,7 @@ class Terminal:
                 if not data:
                     break
                 self.data.extend(data)
-        if self.process.poll() is not None:
+        if self.process.poll() is not None and not allow_exit:
             raise AssertionError('PTY client exited unexpectedly')
         return terminal_screen(bytes(self.data))
 

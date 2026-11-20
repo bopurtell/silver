@@ -26,8 +26,9 @@ same-session reconnect preserves local investigation while fencing old responses
 scripts/with-switch.sh dune build -j 20
 ```
 
-Installed executable names are `hardcaml-workbench-init` and
-`hardcaml-workbench-workspace`. Examples below use the local build directly.
+The installed commands are `silver-init` and `silver-workspace`. The former
+`hardcaml-workbench-init` and `hardcaml-workbench-workspace` names remain available
+for existing scripts. Examples below use the local build directly.
 
 ## Open a project before configuring hardware
 

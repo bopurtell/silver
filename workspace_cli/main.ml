@@ -309,7 +309,7 @@ let starter =
 let () =
   Command_unix.run
     (Command.group
-       ~summary:"Portable, versioned workspace layouts"
+       ~summary:"Manage portable, versioned Silver workspace layouts"
        [ "list", list
        ; "export", export
        ; "import", import

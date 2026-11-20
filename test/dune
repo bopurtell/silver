@@ -4,6 +4,18 @@
  (name native-smoke)
  (deps (alias ../terminal/test-native-smoke)))
 
+(rule
+ (alias native-standalone)
+ (deps
+  ; Exercise public command names in the package install tree.
+  (sandbox none)
+  integration/standalone.py support/__init__.py support/screen.py support/terminal.py
+  (package hardcaml_workbench))
+ (action
+  (run python3 -B %{dep:integration/standalone.py}
+   ../../install/%{context_name}/bin/silver
+   ../../install/%{context_name}/bin/silver-daemon)))
+
 (alias
  (name contracts)
  (deps

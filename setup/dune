@@ -23,7 +23,7 @@
 (executable
  (name main)
  (modules main)
- (public_name hardcaml-workbench-init)
+ (public_name silver-init)
  (package hardcaml_workbench)
  (libraries core core_unix.command_unix hardcaml_workbench_setup)
  (preprocess
@@ -34,10 +34,17 @@
 (executable
  (name simulation_main)
  (modules simulation_main)
- (public_name hardcaml-workbench-simulation-setup)
+ (public_name silver-simulation-setup)
  (package hardcaml_workbench)
  (libraries core core_unix.command_unix hardcaml_workbench_setup)
  (preprocess
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
+
+(install
+ (package hardcaml_workbench)
+ (section bin)
+ (files
+  (main.exe as hardcaml-workbench-init)
+  (simulation_main.exe as hardcaml-workbench-simulation-setup)))

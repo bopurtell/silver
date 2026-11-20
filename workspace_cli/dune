@@ -1,6 +1,6 @@
 (executable
  (name main)
- (public_name hardcaml-workbench-workspace)
+ (public_name silver-workspace)
  (package hardcaml_workbench)
  (libraries
   async
@@ -13,3 +13,8 @@
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
+
+(install
+ (package hardcaml_workbench)
+ (section bin)
+ (files (main.exe as hardcaml-workbench-workspace)))

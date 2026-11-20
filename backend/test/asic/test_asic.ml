@@ -2277,6 +2277,31 @@ let sram_workflow_fixtures root state_dir =
         require (count = 0) "Restart retried rejected macro workflow"))
 ;;
 
+let provider_discovery_fixture root =
+  let module D = Hardcaml_workbench_backend.Asic_provider_discovery in
+  let provider = Filename.concat root "hardcaml_asic" in
+  let bad = Filename.concat root "hardcaml-asic-flow" in
+  let%bind () = In_thread.run (fun () ->
+    let write program version =
+      Out_channel.write_all program ~data:(sprintf
+        "#!/bin/sh\n[ \"$#:$1:$2\" = 2:--version:--json ] || exit 1\n\
+         echo '{\"cli_contract\":{\"version\":%d,\"capabilities\":{\"namedflow1\":true}}}'\n"
+        version);
+      Core_unix.chmod program ~perm:0o700
+    in
+    write bad 3;
+    write provider 4)
+  in
+  let path = ":.:" ^ root in
+  let%bind selected = D.find ~path ~override:None () in
+  require (String.equal selected provider) "Compatible alias behind incompatible CLI missed";
+  let%bind error = Monitor.try_with (fun () -> D.find ~path ~override:(Some bad) ()) in
+  require (Result.is_error error) "Explicit incompatible pin silently fell back to PATH";
+  let%bind selected = D.find ~path:"" ~override:(Some provider) () in
+  require (String.equal selected provider) "Version-specific absolute override was ignored";
+  return ()
+;;
+
 let main () =
   let%bind () = evidence_file_fixtures () in
   declared_clock_fixtures ();
@@ -2330,6 +2355,7 @@ let main () =
              config.results_root);
       root, state_dir)
   in
+  let%bind () = provider_discovery_fixture root in
   let%bind () = stage_service_fixtures root state_dir in
   let%bind () = execution_envelope_fixtures root state_dir in
   let%bind () = sram_workflow_fixtures root state_dir in

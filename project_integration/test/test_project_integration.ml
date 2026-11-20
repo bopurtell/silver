@@ -4,6 +4,24 @@ open Hardcaml_workbench_project_integration
 
 let manifest body = Manifest.parse_string body
 
+let%test_unit "ASIC discovery applies only to a missing provider field" =
+  let parse provider =
+    Asic_config.parse_project (sprintf
+      "((schema_version 1)(project_executable /project)%s(results_root /results)\
+       (toolchain /tools)(python ())(support_tools ())(pdk_root ())(stage_timeout_seconds ()))"
+      provider)
+  in
+  (match Or_error.ok_exn (parse "") with
+   | `Discover resolve -> [%test_eq: string] (resolve "/found").provider_executable "/found"
+   | `Explicit _ -> failwith "Expected discovery");
+  (match Or_error.ok_exn (parse "(provider_executable /pinned)") with
+   | `Explicit config -> [%test_eq: string] config.provider_executable "/pinned"
+   | `Discover _ -> failwith "Lost project pin");
+  List.iter [ "(provider_executable relative)"; "(provider_executable)";
+              "(provider_executable /first)(provider_executable /second)" ]
+    ~f:(fun field -> assert (Result.is_error (parse field)))
+;;
+
 let%test_unit "versioned manifest serialization round-trips quoted values and defaults" =
   List.iter
     [ { Manifest.project_name = "a project \"name\"; with (sexps)\nand a newline"

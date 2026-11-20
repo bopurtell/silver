@@ -338,7 +338,15 @@ let load_config_file ~root ~filename parse =
 let load_project t ~root ~environment =
   let%bind config =
     In_thread.run (fun () ->
-      load_config_file ~root ~filename:Config.filename Config.parse_string)
+      load_config_file ~root ~filename:Config.filename Config.parse_project)
+  in
+  let%bind config =
+    match config with
+    | None -> return None
+    | Some (`Explicit config) -> return (Some config)
+    | Some (`Discover resolve) ->
+      let%map path = Asic_provider_discovery.discover ~environment () in
+      Some (resolve path)
   in
   let%bind () =
     In_thread.run (fun () ->
@@ -2382,7 +2390,10 @@ let fresh_scope ?(physical = true) p =
       |> Option.value_exn ~message:"Preparation configuration is missing"
     in
     let current =
-      load_config_file ~root:p.root ~filename:Config.filename Config.parse_string
+      load_config_file ~root:p.root ~filename:Config.filename Config.parse_project
+      |> Option.map ~f:(function
+        | `Explicit config -> config
+        | `Discover resolve -> resolve (config p).provider_executable)
     in
     Public.require
       (Option.equal Config.equal current p.config)

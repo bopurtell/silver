@@ -122,6 +122,7 @@ type t =
   ; mutable next_job_id : int
   ; mutable next_artifact_id : int
   ; mutable shutting_down : bool
+  ; opening_commands : (unit Ivar.t * unit Ivar.t) Bag.t
   ; kill_after : Time_float.Span.t
   ; action_invocation :
       (root:string
@@ -216,6 +217,7 @@ let create
     ; next_job_id = 0
     ; next_artifact_id = 0
     ; shutting_down = false
+    ; opening_commands = Bag.create ()
     ; kill_after
     ; action_invocation
     ; driver_invocation
@@ -258,24 +260,86 @@ let snapshot t ({ instance_id } : V1.Snapshot.Request.t) =
       }
 ;;
 
-let command_output invocation =
+let spawn_command ?prog_search_path ?setpgid invocation =
   let args = List.tl invocation.Adapter.Invocation.argv |> Option.value ~default:[] in
   let argv0 = List.hd invocation.argv in
-  let%bind process =
-    Process.create ?argv0 ~working_dir:invocation.cwd ~prog:invocation.executable ~args ()
-  in
+  Process.create
+    ?prog_search_path
+    ?setpgid
+    ?argv0
+    ~working_dir:invocation.cwd
+    ~prog:invocation.executable
+    ~args
+    ()
+;;
+
+let output_result (output : Process.Output.t) =
+  match output.exit_status with
+  | Ok () -> Ok output.stdout
+  | Error _ ->
+    Error
+      (sprintf
+         "%s\n%s"
+         (Unix.Exit_or_signal.to_string_hum output.exit_status)
+         (String.prefix output.stderr 4096))
+;;
+
+let command_output invocation =
+  let%bind process = spawn_command invocation in
   match process with
   | Error error -> return (Error (Error.to_string_hum error))
-  | Ok process ->
-    let%map output = Process.collect_output_and_wait process in
-    (match output.exit_status with
-     | Ok () -> Ok output.stdout
-     | Error _ ->
-       Error
-         (sprintf
-            "%s\n%s"
-            (Unix.Exit_or_signal.to_string_hum output.exit_status)
-            (String.prefix output.stderr 4096)))
+  | Ok process -> Process.collect_output_and_wait process >>| output_result
+;;
+
+let opening_command_output ?prog_search_path t invocation =
+  let cancelled = Error "daemon is shutting down" in
+  if t.shutting_down
+  then return cancelled
+  else (
+    (* Register before spawn yields, so shutdown includes launches still in flight. *)
+    let stop = Ivar.create () and finished = Ivar.create () in
+    let entry = Bag.add t.opening_commands (stop, finished) in
+    Monitor.protect
+      ~finally:(fun () ->
+        Bag.remove t.opening_commands entry;
+        Ivar.fill_exn finished ();
+        Deferred.unit)
+      (fun () ->
+        match%bind
+          spawn_command ?prog_search_path ~setpgid:Core_unix.Pgid.new_process_group invocation
+        with
+        | Error error -> return (Error (Error.to_string_hum error))
+        | Ok process ->
+          (* Don't reap the group leader while a subprocess might still hold a pipe.
+             Its unreaped PID reserves the group ID until we can safely signal it. *)
+          let waited = lazy (Process.wait process) in
+          let stdout = Process.stdout process and stderr = Process.stderr process in
+          Monitor.protect
+            ~finally:(fun () ->
+              if not (Lazy.is_val waited && Deferred.is_determined (Lazy.force waited))
+              then Signal_unix.send_i Signal.kill (`Group (Process.pid process));
+              Deferred.all_unit
+                [ Reader.close stdout
+                ; Reader.close stderr
+                ; Writer.close (Process.stdin process)
+                ; Deferred.ignore_m (Lazy.force waited)
+                ])
+            (fun () ->
+              let collect =
+                let%bind stdout = Reader.contents stdout
+                and stderr = Reader.contents stderr
+                and () = Writer.close (Process.stdin process) in
+                (* Cancellation owns the group from here; don't reap before its kill. *)
+                if Ivar.is_full stop
+                then return cancelled
+                else (
+                  let%map exit_status = Lazy.force waited in
+                  output_result { stdout; stderr; exit_status })
+              in
+              Deferred.choose
+                [ Deferred.choice (Ivar.read stop) (fun () -> cancelled)
+                ; Deferred.choice collect Fn.id
+                ])))
 ;;
 
 let hash_project_tree root =
@@ -475,7 +539,7 @@ let mint_project_id t =
        t.next_project_id)
 ;;
 
-let open_project t ({ instance_id; root; environment } : V1.Open_project.Request.t) =
+let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Open_project.Request.t) =
   match check_instance t instance_id with
   | Error _ as error -> return error
   | Ok () when t.shutting_down -> return (error Conflict "daemon is shutting down")
@@ -494,14 +558,18 @@ let open_project t ({ instance_id; root; environment } : V1.Open_project.Request
                ; workspace = session.workspace
                })
         | None ->
-          let%bind probe = command_output (Adapter.probe_invocation ~root environment) in
+          let%bind probe =
+            opening_command_output ?prog_search_path t (Adapter.probe_invocation ~root environment)
+          in
           (match probe |> Result.bind ~f:Adapter.parse_probe_output with
+           | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
            | Error message -> return (error Unsupported_operation message)
            | Ok dune_version ->
              let%bind inspection =
-               command_output (Adapter.inspect_invocation ~root environment)
+               opening_command_output ?prog_search_path t (Adapter.inspect_invocation ~root environment)
              in
              (match inspection |> Result.bind ~f:Adapter.parse_workspace with
+              | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
               | Error message -> return (error Internal_failure message)
               | Ok workspace ->
                 let%bind dune_name = project_name root in
@@ -2524,12 +2592,20 @@ let asic t request =
 
 let shutdown t =
   t.shutting_down <- true;
+  let opening_finished =
+    Bag.to_list t.opening_commands
+    |> List.map ~f:(fun (stop, finished) ->
+      Ivar.fill_if_empty stop ();
+      Ivar.read finished)
+    |> Deferred.all_unit
+  in
   Preparation_service.stop t.preparation_service;
   let%bind () = Asic_service.shutdown t.asic_service in
   let%bind () =
     Hashtbl.data t.jobs |> Deferred.List.iter ~how:`Parallel ~f:(cancel_entry t)
   in
   let%bind () = Preparation_service.completion t.preparation_service in
+  let%bind () = opening_finished in
   Monitor.try_with (fun () ->
     In_thread.run (fun () ->
       remove_tree_sync t.log_dir;

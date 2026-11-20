@@ -1,3 +1,8 @@
+(install
+ (package hardcaml_workbench)
+ (section bin)
+ (files (main.exe as hardcaml-workbench)))
+
 (library
  (name terminal_presentation)
  (modules
@@ -167,9 +172,10 @@
 (executable
  (name main)
  (modules main)
- (public_name hardcaml-workbench)
+ (public_name silver)
  (package hardcaml_workbench)
  (libraries
+  server_host
   async
   bonsai
   bonsai_term

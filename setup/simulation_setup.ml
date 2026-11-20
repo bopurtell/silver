@@ -228,7 +228,7 @@ module Outcome = struct
     | Not_configured { path } ->
       sprintf
         "Simulation is not configured: %s does not exist.\n\
-         Create it with: hardcaml-workbench-simulation-setup init --root %s \
+         Create it with: silver-simulation-setup init --root %s \
          --provider-executable /ABSOLUTE/PATH [--provider-arg ARG ...]\n"
         path
         (shell_word (Filename.dirname path))

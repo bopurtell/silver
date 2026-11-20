@@ -1,7 +1,6 @@
 open! Core
 
-(** Independent opt-in config, leaving the generic manifest contract intact. All paths are
-    explicit and retained verbatim (including symlink-parent/.. traversal). *)
+(** Resolved opt-in config. Paths are retained verbatim, including symlink-parent/.. . *)
 type t =
   { schema_version : int
   ; project_executable : string
@@ -32,4 +31,21 @@ let validate t =
 
 let parse_string text =
   Or_error.try_with (fun () -> t_of_sexp (Sexp.of_string text) |> validate)
+;;
+
+(* Only an absent field opts in to discovery; malformed or duplicate fields
+   still go through the normal record decoder. *)
+let parse_project text =
+  Or_error.try_with (fun () ->
+    match Sexp.of_string text with
+    | List fields
+      when not (List.exists fields ~f:(function
+        | Sexp.List (Atom "provider_executable" :: _) -> true
+        | _ -> false)) ->
+      let resolve path =
+        Sexp.List (Sexp.List [ Atom "provider_executable"; Atom path ] :: fields)
+        |> t_of_sexp |> validate
+      in
+      `Discover resolve
+    | sexp -> `Explicit (t_of_sexp sexp |> validate))
 ;;

@@ -12,11 +12,9 @@
  (lint
   (pps ppx_js_style)))
 
-(executable
- (name main)
- (modules main)
- (public_name hardcaml-workbench-daemon)
- (package hardcaml_workbench)
+(library
+ (name server_host)
+ (modules server_host)
  (libraries
   async
   cohttp-async
@@ -31,3 +29,16 @@
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
+
+(executable
+ (name main)
+ (modules main)
+ (public_name silver-daemon)
+ (package hardcaml_workbench)
+ (libraries core async core_unix.command_unix server_host)
+ (preprocess (pps ppx_jane)))
+
+(install
+ (package hardcaml_workbench)
+ (section bin)
+ (files (main.exe as hardcaml-workbench-daemon)))

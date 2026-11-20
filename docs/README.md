@@ -1,6 +1,6 @@
-# Workbench documentation
+# Silver documentation
 
-Workbench is a project control and inspection application: operate independent
+Silver is a project control and inspection application: operate independent
 Hardcaml projects, observe execution, and inspect identified hardware evidence.
 Project/provider commands remain useful without the application.
 
@@ -8,6 +8,7 @@ Project/provider commands remain useful without the application.
 
 | Document | What it answers |
 | --- | --- |
+| [Install and open Silver](../README.md#install-and-open-silver) | Install once, open a local project, or attach to a persistent server |
 | [Session checkpoint](session_checkpoint.md) | New-session pickup: ASIC PT.0–PT.8, delivered integration, developer acceptance closeout and deferred test-refactor boundaries |
 | [Refactored developer workflow closeout](developer_workflow_refactored_closeout.md) | Actual synthesis/collection, report/check inspection and same-store restart; exact capture, resource limits and independently reviewed evidence |
 | [Migration/refactor guides](migration_guides/README.md) | Actionable continuation plans, including the next Workbench test-organization steps |

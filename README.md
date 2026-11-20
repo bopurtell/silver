@@ -8,6 +8,82 @@ remain supported under their existing names.
 
 A development workbench for inspecting, running, measuring, and debugging Hardcaml designs.
 
+## Install and open Silver
+
+Install [hardcaml_asic](../hardcaml_asic/README.md#install-the-provider) first.
+Then, from the **Silver checkout**, install once for your user:
+
+```sh
+./install.sh
+```
+
+`./install.sh --without-asic` installs Silver for generic Dune/simulation use.
+`./install.sh --asic-provider /absolute/path/to/hardcaml_asic` checks a
+specific CLI during installation; that check does not pin every project to
+that executable.
+
+This builds the native app and installs its commands under `~/.local/bin`; no
+`sudo` is needed. If that directory isn't on your `PATH`, add
+`export PATH="$HOME/.local/bin:$PATH"` to your shell configuration.
+`command -v silver` shows which installation your shell will launch.
+This is a **source installer**: it expects an opam switch with Silver's native
+build dependencies installed (this workspace uses `5.2.0+ox`). Run the installer
+again after updating the checkout to replace your installed commands.
+
+**Which dependencies belong where?** Silver builds against Hardcaml and its UI
+and server libraries. It calls `hardcaml_asic` as a separate executable for
+ASIC operations. A hardware project that imports `Hardcaml_asic`, on the other
+hand, needs that package's compiled libraries in its build environment. Updating
+the ASIC provider does not by itself require rebuilding Silver. Provisioning
+the PDK and physical-flow tools is a separate step needed to run those flows.
+
+For an ASIC-enabled project, its configured absolute `provider_executable`
+pins the CLI. If that field is omitted, Silver selects a compatible CLI on
+the service host’s `PATH`; `SILVER_ASIC_PROVIDER=/absolute/path/to/hardcaml_asic`
+can select an experimental installation for those unpinned projects. Discovery
+checks the advertised CLI contract, not just the filename or package version.
+A project still declares its own project executable, toolchain and results
+directory. Running a remote daemon uses **its** tools, not the client machine's.
+
+Then switch to the project you want to inspect:
+
+```sh
+cd /path/to/your/dune/project
+silver
+```
+
+From anywhere inside a Dune project, run **`silver`** in a terminal. It opens
+the nearest project and hosts its loopback service inside the app process. `q`
+closes both; use a persistent daemon instead for work that must continue after
+you leave. Use `silver --project-root /path/to/project` to select a different
+project. Sessions for the same checkout reuse state under
+`${XDG_STATE_HOME:-$HOME/.local/state}/silver/projects`; only one standalone
+session can own that project's state at a time.
+Standalone command-line submissions (`--plain --action`, `--refresh-integration`
+and `--asic-operation`) wait for the operation; use `--connect` to submit
+work that should outlive the client.
+
+For a persistent session, run `silver-daemon --port 8080`, then
+`silver --connect http://127.0.0.1:8080 --project-root /path/on/server`.
+Quitting this client leaves the daemon running. For a remote machine, forward
+the port with SSH (`ssh -N -L 8080:127.0.0.1:8080 HOST`) and use that same
+local URL.
+
+**Packaging:** `silver` and `silver-daemon` install together. The installer
+uses Dune (the OCaml build tool) internally. Local mode needs no separately
+running server or web package. Native build dependencies (including the sibling
+`hardcaml_workbench_provider` package) are declared in `dune-project`.
+Opening a project probes `dune` and inspects the workspace on the service host,
+even when you're only browsing. Start Silver in the project's normal Dune/OCaml
+environment. Hardware simulation and ASIC flows additionally need the providers
+and tools selected by that project.
+
+These are native builds for the host platform. On the current Linux x86-64
+build the terminal executable links to glibc, libm, zlib and GMP; distributing
+a binary for another platform needs a build and install check on that target.
+Run `./scripts/with-switch.sh dune build -j4 @test-native-standalone` to check
+the installed entry points, project discovery, state reuse and quit behavior.
+
 **Picking up in a new session?** Read the [cross-repository checkpoint](docs/session_checkpoint.md)
 for PT.0–PT.8 status, paused acceptance and preservation constraints. Refactor
 continuations are grouped under [migration guides](docs/migration_guides/README.md).
@@ -18,7 +94,8 @@ and opt-in native/real-provider acceptance are distinct from hardware verificati
 launched inside the application's Testing workspace.
 
 **Everyday example development:** use the [checkout-backed main launcher](../hardcaml_asic_example/docs/workbench_main.md):
-`scripts/workbench_main.py daemon` and `client` from the example checkout. It opens
+`python3 -B scripts/silver.py open` from the prepared checkout, or
+`daemon` and `client` in separate terminals. It opens
 the actual editable repository, uses persistent `.dev/workbench-main` state and
 `_flow_results/workbench` results, and exposes FIFO/PT.8 suites and normal physical
 endpoints. The older [captured development session](docs/development_session.md)
@@ -123,7 +200,7 @@ divide the pool (for example 6/6/6 with 2 reserved). Parent verification may use
 only after other builds stop. Always pass an explicit job limit. This supersedes
 the earlier conservative two-job guidance in historical acceptance records.
 
-Use `scripts/with-switch.sh` for Workbench commands. It selects the existing
+Use `scripts/with-switch.sh` for Silver development commands. It selects the existing
 `5.2.0+ox` opam switch by default; `OPAM_SWITCH=my-switch` overrides it. The wrapper
 does not create a switch or install dependencies. Inspect dependency requirements:
 
@@ -135,26 +212,23 @@ Review the actions before installing; omit `--show-actions` to apply them. Forma
 and lint tooling also need `ocamlformat` and `ppx_js_style`. Generated opam metadata
 comes from `dune-project`. The native package is separate from optional web tooling.
 
-Build and launch the current client against an independent project:
+After installing this checkout with `./install.sh`, launch against an independent project:
 
 ```sh
-./scripts/with-switch.sh dune build -j20 terminal/main.exe daemon/main.exe
-HARDCAML_WORKBENCH_DAEMON="$PWD/_build/default/daemon/main.exe" \
-  ./scripts/with-switch.sh dune exec -j20 hardcaml-workbench -- \
-  --project-root /absolute/path/to/project --environment opam:PROJECT_SWITCH
+silver --project-root /absolute/path/to/project --environment opam:PROJECT_SWITCH
 ```
 
 From anywhere inside a project, `--discover-project` replaces `--project-root` and
 opens the nearest ancestor containing a regular `dune-project` (the selected root is
 reported; an explicit `--project-root` never searches upward). Simulation provider
 configuration can be generated and checked (discovery only, no tests run) with
-`hardcaml-workbench-simulation-setup init|check`; see
+`silver-simulation-setup init|check`; see
 [WB-039](docs/features/project/WB-039-simulation-setup.md).
 
 Use the project's actual switch. `--environment inherited` means the daemon's
 startup environment, not necessarily the current client's shell. Add `--plain`
 for noninteractive use. The current `b`/`t` controls submit build/test; `q` exits
-the client while the daemon stays alive.
+the app. In an attached session the separate daemon stays alive.
 
 The palette (**Space c c**) also offers **Appearance: A - Instrument**, **B - Structured**,
 **C - Minimal**, **D - Studio**, and **E - Structured studio**, plus separate color,
@@ -164,10 +238,9 @@ contexts and pins; see the [preset guide](docs/appearance_presets.md).
 Separate foreground startup is:
 
 ```sh
-./scripts/with-switch.sh dune exec -j20 hardcaml-workbench-daemon -- --port 8080
+silver-daemon --port 8080
 # In another terminal:
-./scripts/with-switch.sh dune exec -j20 hardcaml-workbench -- \
-  --connect http://127.0.0.1:8080 --project-root /absolute/path/to/project \
+silver --connect http://127.0.0.1:8080 --project-root /absolute/path/to/project \
   --environment opam:PROJECT_SWITCH
 ```
 

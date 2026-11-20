@@ -27,6 +27,10 @@
  (deps (alias test/native-smoke)))
 
 (alias
+ (name test-native-standalone)
+ (deps (alias test/native-standalone)))
+
+(alias
  (name test-support)
  (deps (alias test/support)))
 

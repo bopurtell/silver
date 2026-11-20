@@ -9080,9 +9080,7 @@ let run_plain_asic session operation ~wait ~timeout_seconds =
     | `Result result -> result
     | `Timeout ->
       let message =
-        sprintf
-          "ASIC operation wait timed out after %g seconds; daemon work was not cancelled"
-          timeout_seconds
+        sprintf "ASIC operation wait timed out after %g seconds" timeout_seconds
       in
       let response =
         Option.value_map
@@ -9249,24 +9247,46 @@ let run
             | Some message -> Or_error.error_string message))))
 ;;
 
+let start_endpoint ~standalone ~endpoint ~project_root ~state_dir =
+  match standalone, endpoint, project_root with
+  | true, None, Some project_root ->
+    Monitor.try_with_or_error (fun () ->
+      let%map url = Server_host.start_standalone ~project_root ~state_dir in
+      Some url)
+  | _ when Option.is_some state_dir ->
+    return (Or_error.error_string "--standalone-state-dir requires standalone local mode")
+  | _ -> return (Ok endpoint)
+;;
+
 let command =
+  let program = Filename.basename (Sys.get_argv ()).(0) in
+  let local_by_default = String.equal program "silver" in
   Command.async_or_error
-    ~summary:"Connect to Silver"
+    ~summary:
+      (if local_by_default
+       then "Run Silver in the nearest Dune project, or attach to a Silver daemon"
+       else "Connect to Silver")
     (let%map_open.Command endpoint =
         flag
           "--connect"
           (optional string)
           ~doc:
-            "URL attach to a loopback HTTP daemon without automatic startup (remote: \
-             SSH port forward); omitted: connect/start local daemon"
+            "URL attach to a running silver-daemon via loopback HTTP (remote: \
+             SSH port forward)"
+     and standalone =
+       flag "--standalone" no_arg
+         ~doc:" host the local service for this invocation; --connect attaches instead"
+     and standalone_state_dir =
+       flag "--standalone-state-dir" (optional string)
+         ~doc:"DIR use this absolute persistent directory for the embedded service"
      and project_root =
         flag
           "--project-root"
           (optional string)
           ~doc:
             "ROOT open a directory containing dune-project; explicit path is resolved \
-             on the daemon host (remote: use an absolute path); omit to connect without \
-             opening a project"
+             on the daemon host (remote: use an absolute path); standalone mode \
+             defaults to the nearest enclosing Dune project"
      and workspace_config =
        flag
          "--workspace-config"
@@ -9430,6 +9450,7 @@ let command =
          (optional string)
          ~doc:"DIR capture experimental A-E skins over identical synthetic fixtures"
      in
+     let standalone = standalone || local_by_default in
      match capture_appearance, capture_fs0, capture_baseline with
      | (Some _, _, _ | _, Some _, _ | _, _, Some _) when api ->
        fun () ->
@@ -9458,7 +9479,9 @@ let command =
        (match
           Hardcaml_workbench_setup.Project_discovery.resolve
             ~explicit:project_root
-            ~discover:discover_project
+            ~discover:
+              (discover_project
+               || (standalone && Option.is_none endpoint && Option.is_none project_root))
             ~explicit_flag:"--project-root"
             ~discover_flag:"--discover-project"
         with
@@ -9475,28 +9498,55 @@ let command =
         | Ok (project_root, note) ->
           timing_prefetch_neighbors := timing_neighbors;
           timing_preload_override := timing_preload;
-          if not api then Option.iter note ~f:(eprintf "hardcaml-workbench: %s\n%!");
-          run
-            ~endpoint
-            ~workspace_config
-            ~project_root
-            ~environment
-            ~plain
-            ~no_mouse
-            ~api
-            ~asic_operation
-            ~workspace_operation
-            ~wait_timeout_seconds
-            ~action
-            ~target
-            ~configuration
-            ~artifact
-            ~hierarchy
-            ~refresh_integration
-            ~wait
-            ~diagnostics_file
-            ~artifact_viewer
-            ~artifact_binary_viewer))
+          if not api then Option.iter note ~f:(eprintf "%s: %s\n%!" program);
+          fun () ->
+            let local = standalone && Option.is_none endpoint in
+            let wait =
+              wait
+              || (local
+                  && (Option.is_some action
+                      || refresh_integration
+                      || Option.is_some asic_operation))
+            in
+            (match%bind
+               start_endpoint
+                 ~standalone
+                 ~endpoint
+                 ~project_root
+                 ~state_dir:standalone_state_dir
+             with
+             | Error error ->
+               if api
+               then
+                 printf
+                   "%s\n%!"
+                   (Sexp.to_string_mach
+                      (Workspace.Response.sexp_of_t
+                         (Error (V1.Error.create Internal_failure (error_message error)))));
+               return (Error error)
+             | Ok endpoint ->
+               run
+                 ~endpoint
+                 ~workspace_config
+                 ~project_root
+                 ~environment
+                 ~plain
+                 ~no_mouse
+                 ~api
+                 ~asic_operation
+                 ~workspace_operation
+                 ~wait_timeout_seconds
+                 ~action
+                 ~target
+                 ~configuration
+                 ~artifact
+                 ~hierarchy
+                 ~refresh_integration
+                 ~wait
+                 ~diagnostics_file
+                 ~artifact_viewer
+                 ~artifact_binary_viewer
+                 ())))
 ;;
 
 let () = Command_unix.run command

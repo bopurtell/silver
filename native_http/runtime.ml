@@ -120,9 +120,13 @@ let daemon_path () =
   match Sys.getenv "HARDCAML_WORKBENCH_DAEMON" with
   | Some path -> path
   | None ->
-    Filename.concat
-      (Filename.dirname (Filename_unix.realpath Sys_unix.executable_name))
-      "hardcaml-workbench-daemon"
+    let sibling =
+      Filename.concat (Filename.dirname (Filename_unix.realpath Sys_unix.executable_name))
+    in
+    let canonical = sibling "silver-daemon" in
+    if Sys_unix.file_exists_exn canonical
+    then canonical
+    else sibling "hardcaml-workbench-daemon"
 ;;
 
 let spawn paths =

@@ -380,6 +380,51 @@ let rec wait_pid_dead pid =
     wait_pid_dead pid)
 ;;
 
+let test_open_shutdown ~inspect ~root ~log_dir =
+  let%bind created = Service.create ~instance_id ~log_dir () in
+  let service = Or_error.ok_exn created in
+  let bin = Filename.concat root "bin" in
+  Core_unix.mkdir bin;
+  let dune = Filename.concat bin "dune" in
+  Out_channel.write_all dune
+    ~data:
+      ("#!/bin/sh\n"
+       ^ (if inspect then "if [ \"$1\" = --version ]; then echo 3.22.0; exit 0; fi\n" else "")
+       ^ "echo $$ > leader.pid\ntrap '' TERM\nsleep 15 &\necho $! > child.pid\n"
+       ^ (if inspect then "exit 0\n" else "wait\n"));
+  Core_unix.chmod dune ~perm:0o700;
+  Monitor.protect
+    ~finally:(fun () -> Service.shutdown service)
+    (fun () ->
+      let opened =
+        Service.open_project
+          ~prog_search_path:[ bin ]
+          service
+          { instance_id; root; environment = Inherit_daemon }
+      in
+      let read_pid name =
+        In_channel.read_all (Filename.concat root name) |> String.strip |> Int.of_string
+      in
+      let rec ready () =
+        match Or_error.try_with (fun () -> read_pid "child.pid") with
+        | Ok pid -> return pid
+        | Error _ ->
+          let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+          ready ()
+      in
+      let%bind child = with_deadline "opening subprocess did not start" (ready ()) in
+      let leader = read_pid "leader.pid" in
+      let%bind () = with_deadline "shutdown blocked on project opening" (Service.shutdown service) in
+      let%bind result = with_deadline "project open did not return" opened in
+      require_error_kind result Conflict "project opening was not cancelled";
+      require
+        (match Signal_unix.send Signal.zero (`Pid (Pid.of_int leader)) with
+         | `No_such_process -> true
+         | `Ok -> false)
+        "opening process was not reaped";
+      with_deadline "opening descendant survived shutdown" (wait_pid_dead child))
+;;
+
 let running_child_script =
   "/bin/sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait"
 ;;
@@ -1459,6 +1504,8 @@ let test_driver_discovery ~root ~log_dir =
 let run only () =
   let tests =
     [ "project opening and repeat identity", test_project_opening
+    ; "shutdown during version probe", test_open_shutdown ~inspect:false
+    ; "shutdown during workspace inspection", test_open_shutdown ~inspect:true
     ; "initialize after open", test_initialize_after_open
     ; "live output and event consistency", test_live_output_and_events
     ; "failure modes", test_failure_modes

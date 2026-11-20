@@ -4,7 +4,7 @@ module Project_discovery = Hardcaml_workbench_setup.Project_discovery
 module Config_migration = Hardcaml_workbench_setup.Config_migration
 
 let report_error message =
-  eprintf "hardcaml-workbench-init: %s\n%!" message;
+  eprintf "silver-init: %s\n%!" message;
   exit 1
 ;;
 
@@ -63,7 +63,7 @@ let command =
          | Ok (None, _) ->
            report_error "choose the project root with --root DIR or --discover-project"
          | Ok (Some root, note) ->
-           Option.iter note ~f:(eprintf "hardcaml-workbench-init: %s\n%!");
+           Option.iter note ~f:(eprintf "silver-init: %s\n%!");
            root
        in
        if migrate_configs
