@@ -10,6 +10,9 @@ let command =
        flag "--discovery-dir" (optional string) ~doc:"DIR publish discovery metadata"
      and state_dir =
        flag "--state-dir" (optional string) ~doc:"DIR absolute persistent state directory"
+     and authoring_roots =
+       flag "--authoring-root" (listed string)
+         ~doc:"DIR permit authoring in this absolute host directory (repeatable; default none)"
      and inspection_detail_cache_entries =
        flag
          "--inspection-detail-cache-entries"
@@ -28,6 +31,7 @@ let command =
            ~port
            ~discovery_dir
            ~state_dir
+           ~authoring_roots
            ~inspection_detail_cache_entries
            ~inspection_detail_cache_bytes
            ()

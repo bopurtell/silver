@@ -108,6 +108,21 @@ module Dune_action = struct
   [@@deriving bin_io, compare, equal, sexp]
 end
 
+module Authoring_call = struct
+  module Request = struct
+    type t =
+      { instance_id : Daemon_instance_id.t
+      ; operation : Authoring.Request.t
+      }
+    [@@deriving bin_io, compare, equal, sexp]
+  end
+
+  module Response = struct
+    type t = (Authoring.Response.t, Error.t) Result.t
+    [@@deriving bin_io, compare, equal, sexp]
+  end
+end
+
 module Open_project = struct
   module Request = struct
     type t =

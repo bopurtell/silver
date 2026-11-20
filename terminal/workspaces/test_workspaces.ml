@@ -4,6 +4,25 @@ open Hardcaml_workbench_workspaces
 
 let kinds d = List.map d.Definition.tiles ~f:(fun t -> t.Common.kind)
 
+let%test_unit "Resources list and reader share a row below selectors; legacy list expands" =
+  let spec = Presets.builtins "resources" |> Or_error.ok_exn in
+  let d = Definition.of_spec spec in
+  let layout kinds =
+    match Layout.compute d ~width:120 ~height:40 ~kinds with
+    | Compact -> assert false
+    | Grid cells -> List.zip_exn kinds cells
+  in
+  let ks = kinds d in
+  let cell key = List.Assoc.find_exn (layout ks) key ~equal:String.equal in
+  let list = cell "resources" and detail = cell "resource-detail" in
+  assert (list.y = detail.y && list.height = detail.height);
+  assert (list.x + list.width = detail.x && detail.x + detail.width = 120);
+  let selector = cell "run-selector" in
+  assert (selector.y + selector.height = list.y);
+  let legacy = layout (List.filter ks ~f:(Fn.non (String.equal "resource-detail"))) in
+  assert ((List.Assoc.find_exn legacy "resources" ~equal:String.equal).width = 120)
+;;
+
 let%test_unit "Workloads builtin coexists with a retained custom workloads name" =
   let module W = Workspace in
   let template : Workspace_template.t =

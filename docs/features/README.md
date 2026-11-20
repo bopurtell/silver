@@ -211,6 +211,8 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 | [WB-063](presentation/WB-063-testing-workspace.md) | Testing-workspace investigation redesign | FS2, FS5 | P2 | 21 | medium |
 | [WB-073](presentation/WB-073-identifier-compression.md) | Identifier compression with global/workspace/tile toggles | FS5, FS2 | P2 | 8 | medium |
 | [WB-075](presentation/WB-075-execution-job-labels.md) | Human-readable job labels in the execution tile | FS0, FS2, FS5 | P2 | 3 | high |
+| [WB-076](presentation/WB-076-palette-intent-aliases.md) | Predictable palette launch aliases | FS0, FS5 | P1 | 3 | high |
+| [WB-077](presentation/WB-077-project-action-menu.md) | Keyboard-first Project and contextual menus | FS3, FS5 | P2 | 8 | medium |
 
 ## Workspaces, input and configuration
 
@@ -227,6 +229,7 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 | [WB-070](workspaces/WB-070-text-input-word-deletion.md) | Ctrl-Backspace word deletion in palette and inputs | FS5 | P2 | 2 | high |
 | [WB-071](workspaces/WB-071-workspace-order-synthesis.md) | Workspace order, Timing membership, Synthesis workspace | FS3, FS1, FS2 | P2 | 13 | medium |
 | [WB-072](workspaces/WB-072-per-workspace-source-directories.md) | Per-workspace source directories | FS3 | P2 | 13 | medium |
+| [WB-086](workspaces/WB-086-management-surface.md) | Compare a management window with a Project workspace | FS3, FS5 | P2 | 5 | medium |
 
 ## Project adoption and design scope
 
@@ -242,6 +245,14 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 | [WB-050](project/WB-050-upward-discovery.md) | Upward project discovery | FS3 | P2 | 5 | medium |
 | [WB-051](project/WB-051-new-project-creation.md) | Provider-owned new-project creation | FS3 | P3 | 21 | low |
 | [WB-052](project/WB-052-adoption-polish.md) | Adoption/help/SSH/tmux workflow polish | FS3, FS5 | P2 | 8 | medium |
+| [WB-078](project/WB-078-project-entry.md) | Empty-directory entry and existing-project adoption | FS3 | P2 | 8 | medium |
+| [WB-079](project/WB-079-ip-and-module-starters.md) | New IP library and module starters | FS3 | P2 | 8 | medium |
+| [WB-080](project/WB-080-chip-catalog.md) | Provider chip-target catalog and CLI selection | FS3 | P1 | 21 | low |
+| [WB-081](project/WB-081-chip-target-selection.md) | Chip-target selection in Silver | FS0, FS3 | P2 | 13 | medium |
+| [WB-082](project/WB-082-chip-target-starter.md) | New chip target inside an existing project | FS3 | P2 | 13 | medium |
+| [WB-083](project/WB-083-flow-authoring.md) | Flow-owned profiles and explicit authoring commands | FS0, FS3 | P2 | 13 | medium |
+| [WB-084](project/WB-084-authoring-acceptance.md) | Empty-directory to reproducible synthesis acceptance | FS0, FS3 | P2 | 5 | medium |
+| [WB-085](project/WB-085-authoring-service.md) | Frontend-independent daemon authoring calls | FS3 | P1 | 13 | medium |
 
 ## Evidence and hardware investigation
 

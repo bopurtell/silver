@@ -85,7 +85,7 @@ let%test_unit "decision table aligns Unicode cells and keeps verdict, decision a
     ; selected = Some selected
     }
   in
-  List.iter [ 26; 80; 120 ] ~f:(fun width ->
+  List.iter [ 26; 60; 80; 120 ] ~f:(fun width ->
     let page = V.page_with_targets view ~filter:"" ~asic:snapshot ~width ~height:24 in
     let header =
       List.find_map_exn page ~f:(fun (target, row) ->
@@ -112,9 +112,10 @@ let%test_unit "decision table aligns Unicode cells and keeps verdict, decision a
     in
     assert (has_role current "budget" Pending);
     assert (List.exists page ~f:(fun (_, line) -> has_role line "fail" Failed));
-    if width >= 65
+    if width >= 60
     then (
       assert (start header "Synth" = start current "matched");
+      assert (start header "Final" = start current "unavail");
       assert (has_role current "matched" Passed));
     let alternate = V.contents ~width view ~filter:"" ~asic:snapshot in
     assert (
@@ -154,16 +155,161 @@ let%test_unit "contract and nested section metadata are readable; raw toggle per
     |> String.concat ~sep:"\n"
   in
   let inventory = render view in
-  assert (String.is_substring inventory ~substring:"256 words × 16 bits");
+  assert (String.is_substring inventory ~substring:"256 words");
+  assert (String.is_substring inventory ~substring:"16 bits");
   assert (not (String.contains inventory '{'));
   let view = { view with section = "timing" } in
   let timing = render view in
   assert (String.is_substring timing ~substring:"path / data end / pin: A_ADDR[6]");
+  assert (String.is_substring timing ~substring:(sprintf "%-22s0–1 / 1" "Page items:"));
   assert (not (String.contains timing '{'));
   let raw, op = V.input view ~filter:"" ~asic:snapshot Open in
   assert (Option.is_none op && String.is_substring (render raw) ~substring:value);
   let normal, op = V.input raw ~filter:"" ~asic:snapshot Open in
   assert (Option.is_none op && String.equal timing (render normal))
+;;
+
+let%test_unit "list uses spare height for selectable rows and follows the last of 78" =
+  let view, snapshot = imported () in
+  let rows = List.init 78 ~f:(fun i -> row (sprintf "resource-%02d" i)) in
+  let view =
+    { view with index = Some { index with rows }; selected = Some "resource-00" }
+  in
+  let page ?(hints = true) view height =
+    V.list_page_with_targets ~hints view ~filter:"" ~asic:snapshot ~width:90 ~height
+  in
+  let targets page = List.filter_map page ~f:fst in
+  let short = targets (page view 16)
+  and tall = targets (page view 66) in
+  List.iter [ 8; 12; 16; 17 ] ~f:(fun height ->
+    let page =
+      V.list_page_with_targets view ~filter:"resource" ~asic:snapshot ~width:60 ~height
+    in
+    assert (List.length (targets page) >= height / 2);
+    assert (
+      List.exists page ~f:(fun (_, line) ->
+        String.is_prefix (Evidence_style.text line) ~prefix:"Filter: resource")));
+  assert (List.length tall >= 50);
+  assert (List.length (targets (page ~hints:false view 16)) = List.length short + 1);
+  let last, op = V.input view ~filter:"" ~asic:snapshot (Move 77) in
+  assert (Option.is_none op);
+  let filtered_detail =
+    V.detail_page_with_targets
+      last
+      ~filter:"resource-00"
+      ~asic:snapshot
+      ~width:90
+      ~height:20
+    |> List.map ~f:(fun (_, line) -> Evidence_style.text line)
+    |> String.concat
+  in
+  assert (String.is_substring filtered_detail ~substring:"No visible resource selected");
+  assert (not (String.is_substring filtered_detail ~substring:"resource-77"));
+  let page = page last 16 in
+  assert (
+    List.exists page ~f:(function
+      | Some (`Resource "resource-77"), line ->
+        String.is_prefix (Evidence_style.text line) ~prefix:"> "
+      | _ -> false));
+  let text =
+    List.map page ~f:(fun (_, line) -> Evidence_style.text line) |> String.concat
+  in
+  assert (not (String.is_substring text ~substring:"Requirement"));
+  assert (String.is_substring text ~substring:"Enter detail")
+;;
+
+let%test_unit "passive detail groups nested PLL fields without interpreting them as RAM" =
+  let view, snapshot = imported () in
+  let contract =
+    {|{"kind":"PLL","contract":{"width":12,"depth":3,"clock":{"feedback":{"source":"ref_clk"}}}}|}
+  in
+  let view =
+    { view with index = Some { index with rows = [ { (row "program") with contract } ] } }
+  in
+  let rows =
+    V.detail_page_with_targets
+      ~hints:false
+      view
+      ~filter:""
+      ~asic:snapshot
+      ~width:90
+      ~height:70
+    |> List.map ~f:snd
+  in
+  let lines = List.map rows ~f:Evidence_style.text in
+  List.iter
+    [ "Selection results"; "Actual implementation"; "Realization / qualifications" ]
+    ~f:(fun heading ->
+      let i, _ = List.findi_exn lines ~f:(fun _ -> String.equal heading) in
+      let spacer = List.nth_exn rows (i - 1) in
+      assert (String.is_empty (String.strip (Evidence_style.text spacer)));
+      assert (
+        Bonsai_term.View.height (Evidence_style.render ~attrs:(fun _ -> []) [ spacer ])
+        = 1));
+  let text = String.concat ~sep:"\n" lines in
+  List.iter [ "Scope:"; "Detail section:"; "Sections:" ] ~f:(fun substring ->
+    assert (not (String.is_substring text ~substring)));
+  assert (String.is_substring text ~substring:"Sampled timing");
+  assert (not (String.is_substring text ~substring:"Enter: raw metadata"));
+  List.iter
+    [ "Request & requirements"
+    ; "Selection results"
+    ; "Actual implementation"
+    ; "Realization / qualifications"
+    ; "Clock / feedback / source"
+    ; "ref_clk"
+    ]
+    ~f:(fun substring -> assert (String.is_substring text ~substring));
+  assert (not (String.is_substring text ~substring:"bits"));
+  let column field value =
+    List.find_exn lines ~f:(String.is_prefix ~prefix:(field ^ ":"))
+    |> String.substr_index_exn ~pattern:value
+  in
+  assert (column "Depth" "3" = column "Width" "12")
+;;
+
+let%test_unit "linked inventory is equally compact before and after opening; single \
+               inspector retains aligned source and section fields at any scroll"
+  =
+  let view, asic = imported () in
+  let active = { view with mode = Detail } in
+  List.iter [ 32; 92 ] ~f:(fun width ->
+    let linked t =
+      V.detail_page_with_targets ~hints:false t ~filter:"" ~asic ~width ~height:200
+      |> List.map ~f:(fun (_, r) -> Evidence_style.text r)
+    in
+    assert (List.equal String.equal (linked view) (linked active));
+    let single ~section scroll height =
+      V.page_with_targets { active with scroll; section } ~filter:"" ~asic ~width ~height
+      |> List.map ~f:(fun (_, r) -> Evidence_style.text r)
+    in
+    let inventory = single ~section:"inventory" 0 200 in
+    let single = single ~section:"timing" in
+    let full = single 0 200 in
+    List.iter [ "Section catalog"; "Provenance & execution" ] ~f:(fun title ->
+      let i, _ = List.findi_exn full ~f:(fun _ -> String.equal title) in
+      assert (String.is_empty (String.strip (List.nth_exn full (i - 1))));
+      assert (List.equal String.equal (single i 4) (List.take (List.drop full i) 4));
+      assert (not (List.mem inventory title ~equal:String.equal));
+      assert (not (List.mem (linked active) title ~equal:String.equal)));
+    let context =
+      V.page_with_targets
+        { active with mode = Context }
+        ~filter:""
+        ~asic
+        ~width
+        ~height:200
+      |> List.map ~f:(fun (_, r) -> Evidence_style.text r)
+    in
+    assert (List.mem context "Section catalog" ~equal:String.equal);
+    assert (List.mem context "Provider metadata" ~equal:String.equal);
+    List.iter
+      [ "Qualification"; "Binding"; "Source"; "Freshness"; "Scope"; "timing" ]
+      ~f:(fun label ->
+        let line = List.find_exn full ~f:(String.is_prefix ~prefix:(label ^ ":")) in
+        let value = String.drop_prefix line (String.length label + 1) |> String.lstrip in
+        assert (not (String.is_empty value));
+        assert (String.substr_index_exn line ~pattern:value = Int.min 22 (width / 2))))
 ;;
 
 let%test_unit "production tile uses saved source chip rather than current planning chip" =
@@ -515,7 +661,7 @@ let%test_unit "wrong source/digest/detail-row pages never appear; failed verdict
   assert (not (String.is_substring rendered ~substring:"MUST_NOT_APPEAR"));
   List.iter
     [ "CACHED UNVERIFIED"
-    ; "Resource verdict: fail"
+    ; sprintf "%-22sfail" "Resource verdict:"
     ; "Sampled timing"
     ; "not_assessed"
     ; "Actual role"
@@ -637,6 +783,14 @@ let%test_unit "typed inventory availability distinguishes unavailable, unknown, 
     String.is_substring
       (compact empty)
       ~substring:"0 resources (verified empty inventory)");
+  assert (
+    String.is_substring (render empty Table) ~substring:"registered no resource requests");
+  assert (
+    not
+      (String.is_substring
+         (render absent Table)
+         ~substring:"registered no resource requests"));
+  assert (String.is_substring (text V.empty None) ~substring:"Select execution");
   let legacy =
     match R.Index.sexp_of_t empty with
     | Sexp.List fields ->

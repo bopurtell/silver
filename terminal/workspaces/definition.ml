@@ -73,6 +73,21 @@ let of_spec (d : Workspace_config.Definition.t) =
   }
 ;;
 
+(* Keep the chrome, ratios and leaf identities from the stock Resources tree.
+   In a stack each inspector also works as a short, scrollable pane. *)
+let stack_resource_pair t =
+  let rec transform : Common.tree -> Common.tree = function
+    | Weighted_columns
+        [ _, Leaf ({ kind = "resources"; _ } as list)
+        ; _, Leaf ({ kind = "resource-detail"; _ } as detail)
+        ] ->
+      Stack [ Leaf { list with min_height = 6 }; Leaf { detail with min_height = 6 } ]
+    | Stack children -> Stack (List.map children ~f:transform)
+    | other -> other
+  in
+  { t with layout = transform t.layout }
+;;
+
 let rec leaf_min_height tree ~key =
   match tree with
   | Common.Leaf { kind; min_height; _ } ->

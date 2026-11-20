@@ -111,7 +111,7 @@ def main():
         terminal.palette("Inspect resources (open Resources workspace)")
         opened = wait_registry(lambda current: any(field(w, "preset") == ["resources"]
                                for w in field(current, "workspaces")), "explicit Resources creation")
-        terminal.wait("resources-open", ["Resources", "No loaded resource index"])
+        terminal.wait("resources-open", ["Resources", "No visible resource selected"])
         created = [w for w in field(opened, "workspaces") if field(w, "preset") == ["resources"]]
         test.check(len(created) == 1 and len(field(opened, "workspaces")) == len(field(state, "workspaces")) + 1,
                    "Explicit Inspect resources creates exactly one builtin in saved custom session")
@@ -126,14 +126,14 @@ def main():
         exported = c.parse(test.cli("export", [field(created[0], "id")], "export-resources"))
         test.check(exported == template, "Recovered Resources uses exact canonical stock template")
         terminal.palette("Inspect resources (open Resources workspace)")
-        terminal.wait("resources-reopened", ["Resources", "No loaded resource index"])
+        terminal.wait("resources-reopened", ["Resources", "No visible resource selected"])
         test.check(test.workspace() == opened, "Repeated Resources open does not duplicate or reset saved layout")
         terminal.close()
         terminal = None
         test.close()
         test.start()
         terminal = c.Terminal(test, "restarted-with-resources")
-        terminal.wait("ready", ["Resources", "No loaded resource index"])
+        terminal.wait("ready", ["Resources", "No visible resource selected"])
         test.check(test.workspace() == opened, "Resources builtin and all prior saved layout/pins survive daemon/client restart")
         test.quiet()
         test.result["status"] = "passed"

@@ -307,6 +307,7 @@ let run ~build_jobs () =
            ; "asic"
            ; "simulation"
            ; Preparation.capability
+           ; Authoring.capability
            ])
         "hello did not advertise the complete V1 capability set";
       let snapshot = Rpc.snapshot rpc { instance_id } in
@@ -599,6 +600,31 @@ let run ~build_jobs () =
              })
       in
       let opened = decode_exn V1.Open_project.Response.t_of_sexp opened_body |> ok in
+      let authoring_operation project destination : Authoring.Request.t =
+        Preview
+          { target = { destination; project = Some project; object_id = Some "example" }
+          ; recipe = "controlled-v1"
+          ; name = "example"
+          }
+      in
+      let preview project destination =
+        Service.authoring service
+          { instance_id; operation = authoring_operation project destination }
+      in
+      let%bind unknown = preview (Project_id.of_string "unknown") project_root in
+      require
+        (match unknown with Error { kind = Not_found; _ } -> true | _ -> false)
+        "authoring accepted an unknown project";
+      let%bind mismatch = preview opened.project.id (project_root ^ "-other") in
+      require
+        (match mismatch with Error { kind = Invalid_request; _ } -> true | _ -> false)
+        "authoring allowed a destination outside the selected project";
+      let%bind unconfigured = preview opened.project.id (Filename.concat project_root "new") in
+      require
+        (match unconfigured with
+         | Ok (Failed { kind = Destination_denied; _ }) -> true
+         | _ -> false)
+        "opening a project granted authoring without host root configuration";
       let preparation_request : Preparation.Request.t =
         { instance_id; project = opened.project.id; operation = Get }
       in

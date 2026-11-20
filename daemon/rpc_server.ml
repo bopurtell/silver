@@ -48,6 +48,7 @@ let create ~application_version ~instance_id ~service =
             ; "asic"
             ; "simulation"
             ; Preparation.capability
+            ; Authoring.capability
             ]
         }
     ; service
@@ -223,6 +224,13 @@ let handle_post t ~path ~headers ~body =
            boundary_error `Bad_request error.kind "malformed updates request"
          | Ok request ->
            operation_response (updates t request) V1.Updates.Response.sexp_of_t)
+      | Ok body when String.equal path Authoring.rpc_path ->
+        (match decode body V1.Authoring_call.Request.t_of_sexp with
+         | Error error -> boundary_error `Bad_request error.kind "malformed authoring request"
+         | Ok request ->
+           operation_response
+             (Service.authoring t.service request)
+             V1.Authoring_call.Response.sexp_of_t)
       | Ok body when String.equal path "/api/v1/open-project" ->
         (match decode body V1.Open_project.Request.t_of_sexp with
          | Error error ->
@@ -361,6 +369,7 @@ let callback t ~body _peer request =
          | "/api/v1/read-artifact"
          | "/api/v1/read-hierarchy"
          | "/api/v1/workspace"
+         | "/api/v1/authoring"
          | "/api/v1/asic"
          | "/api/v1/simulation"
          | "/api/v1/preparation" ) ) -> handle_post t ~path ~headers ~body

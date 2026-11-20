@@ -190,18 +190,63 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
   let tile =
     List.find_exn registry.tiles ~f:(fun t -> String.equal t.kind "planned-run")
   in
-  let rows =
-    Host_view.planned_rows before tile ~width:64
-    |> List.map ~f:(fun r -> r.Planned_run.text)
+  let press h event = H.input h event ~commands:[] in
+  let focused = { before with focus = Some tile.id } in
+  let keyboard, effect = press focused (Character 't') in
+  assert (Poly.equal effect H.No_effect);
+  let check_picker h =
+    let p = Option.value_exn h.H.palette in
+    assert (List.equal String.equal (List.map p.commands ~f:(fun c -> c.id))
+              (List.map picker ~f:(fun c -> c.id)));
+    assert (Option.equal W.Tile_id.equal h.focus (Some tile.id));
+    let searched, _ = press h (Text "fifo") in
+    match press searched Enter with
+    | closed, Execute (_, Asic (Select_chip selected)) ->
+      assert (Option.is_none closed.palette && Asic.Chip_target.equal selected other)
+    | _ -> assert false
   in
-  List.iter
-    [ "Launch chip: tiny"
-    ; "Variant: mac"
-    ; "Flow: selected"
-    ; "Profile: balanced"
-    ; "Endpoint: routing"
-    ]
-    ~f:(fun text -> assert (List.mem rows text ~equal:String.equal));
+  check_picker keyboard;
+  let _, data, _ = Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition in
+  let click h ~width row =
+    Host_view.select_body_row h data tile ~width ~height:10 ~row
+  in
+  List.iter [ 0; 1 ] ~f:(fun row -> check_picker (click before ~width:64 row));
+  List.iter [ 2; 3 ] ~f:(fun row -> assert (Option.is_none (click before ~width:64 row).palette));
+  let scrolled = H.set_local before tile.id { (H.local before tile.id) with utility_detail = true; scroll = 2 } in
+  check_picker (click scrolled ~width:8 0);
+  let changed =
+    { keyboard with
+      planned_run = Planned_run.receive keyboard.planned_run ~revision:3 { s with chip_target = Some other }
+    }
+  in
+  (match press changed Enter with
+   | closed, No_effect -> assert (Option.is_none closed.palette)
+   | _ -> assert false);
+  assert (Option.is_none (fst (press keyboard Escape)).palette);
+  assert (Option.is_none (fst (press { host with focus = Some tile.id } (Character 't'))).palette);
+  assert (Option.is_none (click host ~width:64 0).palette);
+  assert (Option.is_none (fst (press before (Character 't'))).palette);
+  assert (
+    List.exists (Host_view.planned_rows before tile ~width:64) ~f:(fun r ->
+      String.is_substring r.text ~substring:"t: switch target · click chip/variant"));
+  let fields host width =
+    Host_view.planned_rows host tile ~width
+    |> List.filter_map ~f:(fun r -> Option.some_if (Planned_run.equal_role r.role Fact) r.text)
+    |> Fn.flip List.take 5
+  in
+  assert (
+    List.equal String.equal (fields before 64)
+      [ "Launch chip: tiny"
+      ; "Variant:     mac"
+      ; "Flow:        selected"
+      ; "Profile:     balanced"
+      ; "Endpoint:    routing"
+      ]);
+  List.iter2_exn (fields before 16) [ "tiny"; "mac"; "selecte"; "balance"; "routing" ]
+    ~f:(fun line value ->
+      assert (Host_view.cell_width line <= 16);
+      assert (String.is_suffix line ~suffix:value));
+  assert (not (String.is_prefix (List.hd_exn (fields host 64)) ~prefix:"Launch chip"));
   let capture = H.capture before |> Option.value_exn in
   let form =
     { before with

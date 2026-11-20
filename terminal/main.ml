@@ -651,6 +651,7 @@ let load_presentation_preferences session =
           <- { session.host with
                appearance = Appearance.default
              ; layout_mode = Fit
+             ; resource_orientations = []
              ; chrome = true
              ; main_hints = true
              ; palette_hints = true
@@ -4951,6 +4952,11 @@ let host_catalog_base session =
 let host_catalog session =
   let resource_commands =
     Option.value_map session.asic ~default:[] ~f:(fun asic ->
+      let source_label label (selection : Asic.Selection.t option) =
+        match Option.bind selection ~f:(fun s -> s.chip_target) with
+        | Some target -> label ^ " · " ^ Launch_preferences.chip_label (Some target)
+        | None -> label
+      in
       let select label target =
         Host.command
           ("resources.select."
@@ -4964,7 +4970,8 @@ let host_catalog session =
         select ("source " ^ s.Asic_resources.Source.label ^ " · " ^ s.id) s.target)
       @ List.map asic.workflows ~f:(fun w ->
         let command =
-          select ("workflow bundle " ^ w.Asic.Fresh.Workflow.id) (Workflow_bundle w.id)
+          select (source_label ("workflow bundle " ^ w.Asic.Fresh.Workflow.id) (Some w.intent.selection))
+            (Workflow_bundle w.id)
         in
         if Option.is_some w.prepared
         then command
@@ -4973,7 +4980,7 @@ let host_catalog session =
             unavailable = Some ("Workflow has no emitted bundle: " ^ w.elaboration_status)
           })
       @ List.map asic.runs ~f:(fun r ->
-        select ("execution " ^ r.Asic.Run.run.id) (Run r.run))
+         select (source_label ("execution " ^ r.Asic.Run.run.id) r.selection) (Run r.run))
       @ List.filter_map asic.finalizations ~f:(fun f ->
         Option.map f.Asic.Finalization.attempt ~f:(fun attempt ->
           select ("finalization " ^ attempt) (Finalization { run = f.run; attempt }))))
@@ -5606,6 +5613,8 @@ let resource_tile ?(kind = "resources") session ~current =
   let project = Option.map (current_project session) ~f:(fun p -> p.Project.id) in
   match Host.focused session.host with
   | Some tile when String.equal tile.kind tile_kind -> return (Some tile)
+  | Some tile when String.equal tile_kind "resources" && String.equal tile.kind "resource-detail" ->
+    return (Host.resource_owner session.host tile)
   | _ ->
     (match session.host.registry, Host.active session.host with
      | Some initial, Some active ->
@@ -5716,12 +5725,13 @@ let resource_request session tile operation =
 
 let resource_input session tile input =
   reconcile_synthesis session;
-  let local = Host.local session.host tile.Workspace.Tile.id in
-  let resources, operation =
-    Resources_view.input local.resources ~filter:local.filter ~asic:session.asic input
-  in
-  session.host <- Host.set_local session.host tile.id { local with resources };
-  Option.value_map operation ~default:(return ()) ~f:(resource_request session tile)
+  match Host.route_resource_input session.host tile ~asic:session.asic input with
+  | None ->
+    session.host <- { session.host with notice = "Add a resources tile in this workspace first" };
+    return ()
+  | Some (host, owner, operation) ->
+    session.host <- host;
+    Option.value_map operation ~default:(return ()) ~f:(resource_request session owner)
 ;;
 
 let workload_request session tile operation =
@@ -6195,6 +6205,29 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                       ~notice:(notice ~context:false)
                   | Error e -> notice ("Simulation export: " ^ Error.to_string_hum e)))))
     | Host.Registry mutation -> async (fun () -> mutate_workspace session mutation)
+    | Orient_resources orientation ->
+      async (fun () ->
+        match session.host.registry, Host.active session.host with
+        | Some snapshot, Some ({ preset = Some "resources"; _ } as workspace) ->
+          session.host <- Host.invalidate_layout_intent session.host;
+          let intent = session.host.layout_intent in
+          let rec apply captured = function
+            | _ when (not (phys_equal session.host.layout_intent intent))
+                     || not (Host.current session.host captured) -> return ()
+            | [] ->
+              session.host <- Host.set_resource_orientation session.host workspace.id orientation;
+              save_presentation_preferences session
+            | mutation :: rest ->
+              let next = ref None in
+              let%bind () =
+                mutate_workspace session mutation ~on_snapshot:(fun snapshot ->
+                  if Workspace.Session_id.equal snapshot.session_id captured.session
+                  then next := Some { captured with revision = snapshot.revision })
+              in
+              Option.value_map !next ~default:(return ()) ~f:(fun captured -> apply captured rest)
+          in
+          apply captured (Host.resource_pair_repairs snapshot workspace)
+        | _ -> return ())
     | Restore_default_layout (workspace, definition) ->
       let host, ticket = Host.begin_restore session.host captured in
       let instance_id = session.hello.instance_id in
@@ -6580,8 +6613,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               session.host
               <- { session.host with
                    notice =
-                     "Resources: select a workflow bundle or import exact retained \
-                      evidence (Space c c)"
+                      "Resources: choose Select execution for a run, or Select workflow \
+                       bundle for elaboration (Space c c)"
                  };
               return ()
             | Some target ->
@@ -6617,6 +6650,9 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               session.asic
           in
           session.host <- Host.set_local session.host tile.id { local with resources };
+          if List.exists (Host.tiles session.host) ~f:(fun visible ->
+               Workspace.Tile_id.equal visible.id tile.id)
+          then session.host <- { session.host with focus = Some tile.id };
           (match resources.target with
            | None -> return ()
            | Some target ->
@@ -6658,7 +6694,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           ~exit
     | Resource_input input ->
       (match Host.focused session.host with
-       | Some tile when Resources_view.is_kind tile.kind ->
+       | Some tile when Host.resource_pane tile.kind ->
          async (fun () -> resource_input session tile input)
        | _ -> Effect.Ignore)
     | Prepare_project | Quick_prepare_project ->

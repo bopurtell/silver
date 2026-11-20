@@ -111,6 +111,9 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         sequence += 1
         return t.capture("pty-%03d-%s" % (sequence, label), expected)
 
+    def section(name):
+        return f"{'Detail section:':22}{name}"
+
     def select(case):
         path, tag, _ = targets[case]
         t.palette("Resources: Import emitted bundle" if tag == "Bundle" else "Resources: Import retained resource evidence")
@@ -150,7 +153,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         shot("filter-clear", ["program"])
         check((base / "provider-calls.jsonl").read_bytes() == calls_before, "PTY filter/clear is provider-free")
         t.key(b"g")
-        shot("geometry-loaded", ["Detail section: geometry", "Page items"])
+        shot("geometry-loaded", [section("geometry"), "Page items"])
         scroll_until("geometry", ["28127.104", "40000", "236.8"])
         check(True, "PTY actual macro placement/footprint geometry visible")
         t.key(b"d")
@@ -158,7 +161,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         scroll_until("gross-area", ["902417.2416", "4793.6448"], steps=80)
         check(True, "PTY gross core and component area visible in provider-owned detail")
         t.key(b"t")
-        shot("timing-loaded", ["Detail section: timing", "/ 186"])
+        shot("timing-loaded", [section("timing"), "/ 186"])
         source, index = load_case("augmented")
         sid = field(source, "id")
         raw_paths = g.final(g.load(args.example_root / g.MEASUREMENTS /
@@ -174,7 +177,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
                 if int(field(current, "offset")) <= position < int(field(current, "next_offset")):
                     break
                 t.key(b"n")
-                shot("timing-next", ["Detail section: timing", "Page items"])
+                shot("timing-next", [section("timing"), "Page items"])
                 session.rpc("asic", wait=True)
             else:
                 check(False, "PTY timing page reaches native oracle")
@@ -183,7 +186,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
                          if values["path_type"] == "min" else str(values["data_start"]["slew"])], steps=180)
             check(True, "PTY actual signed slack/slew: " + oracle["path_type"])
         t.key(b"e")
-        shot("electrical-loaded", ["Detail section: electrical", "/ 372"])
+        shot("electrical-loaded", [section("electrical"), "/ 372"])
         scroll_until("electrical", ["not_assessed"])
         check(True, "PTY electrical sampled qualification visible")
         t.key(b"a")
@@ -199,7 +202,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         select("original")
         shot("original-table", ["program"])
         t.key(b"t")
-        shot("original-timing", ["Detail section: timing"])
+        shot("original-timing", [section("timing")])
         scroll_until("original-unavailable", ["unavailable"])
         check(True, "PTY original snapshot timing unavailable")
         select("augmented")

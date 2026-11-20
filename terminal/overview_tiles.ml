@@ -847,6 +847,7 @@ let connection_role connection : Role.t =
 
 let status_rows
   ~string_compression
+  ~launch_target
   ~(snapshot : Workspace.Snapshot.t)
   ~active_workspace
   ~(project : Project.t option)
@@ -897,20 +898,24 @@ let status_rows
            (Option.map project ~f:(fun p -> "Project: " ^ Project_id.to_string p.id)))
       "Project"
       (Option.value_map project ~default:"none open" ~f:(fun p -> p.name))
-  ; linkage
-  ; row
-      ~details:
-        (Option.to_list
-           (Option.map selected_run ~f:(fun run -> "Run: " ^ run_identity run)))
-      "Run"
-      (Option.value_map selected_run ~default:"none selected" ~f:(fun run ->
-         let id = Presentation.identifier ~compress:string_compression run.id in
-         match run.label with
-         | Some label
-           when (not (String.is_empty label)) && not (String.equal label run.id) ->
-           label ^ " · " ^ id
-         | _ -> id))
   ]
+  @ Option.value_map launch_target ~default:[] ~f:(fun target ->
+    let value = Artifact_view.safe (Launch_preferences.chip_label (Some target)) in
+    [ row "Launch target" value ])
+  @ [ linkage
+    ; row
+        ~details:
+          (Option.to_list
+             (Option.map selected_run ~f:(fun run -> "Run: " ^ run_identity run)))
+        "Run"
+        (Option.value_map selected_run ~default:"none selected" ~f:(fun run ->
+           let id = Presentation.identifier ~compress:string_compression run.id in
+           match run.label with
+           | Some label
+             when (not (String.is_empty label)) && not (String.equal label run.id) ->
+             label ^ " · " ^ id
+           | _ -> id))
+    ]
 ;;
 
 let status_indicator : Status.t -> Indicator.t = function
@@ -1874,6 +1879,7 @@ let%test_unit "missing session contexts use unavailable without inventing linkag
       let rows =
         status_rows
           ~string_compression:true
+          ~launch_target:None
           ~snapshot
           ~active_workspace
           ~project:None
@@ -2059,6 +2065,7 @@ let%expect_test "context linkage avoids nested colons and keeps names visible" =
     let rows =
       status_rows
         ~string_compression:true
+        ~launch_target:None
         ~snapshot
         ~active_workspace:(Some overview)
         ~project:None

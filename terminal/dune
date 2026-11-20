@@ -25,6 +25,7 @@
    synthesis_view
    resources_view
     resources_view_test
+    resources_split_test
    workloads_view
    workloads_view_test
   terminal_result_view

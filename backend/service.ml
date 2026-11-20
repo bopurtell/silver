@@ -104,6 +104,8 @@ type t =
   ; artifact_dir : string
   ; output_dir : string
   ; workspace_service : Workspace_service.t
+  ; authoring_service : Authoring_service.t
+  ; authoring_queue : unit Throttle.Sequencer.t
   ; asic_service : Asic_service.t
   ; simulation_service : Simulation_service.t
   ; preparation_service : Preparation_service.t
@@ -155,6 +157,7 @@ let check_instance t instance_id =
 
 let create
   ?state_dir
+  ?(authoring_roots = [])
   ?inspection_detail_cache_entries
   ?inspection_detail_cache_bytes
   ?(kill_after = Time_float.Span.of_sec 2.)
@@ -176,20 +179,27 @@ let create
         ~entries:(Option.value inspection_detail_cache_entries ~default:64)
         ~bytes:(Option.value inspection_detail_cache_bytes ~default:4194304);
       In_thread.run (fun () ->
+        List.iter authoring_roots ~f:(fun root ->
+          if not (Filename.is_absolute root)
+          then failwith "authoring root must be absolute");
+        let authoring_service = Authoring_service.create ~permitted_roots:authoring_roots in
         (match Sys_unix.file_exists log_dir with
          | `Yes ->
            if not (Sys_unix.is_directory_exn log_dir)
            then failwithf "log path is not a directory: %s" log_dir ()
          | `No | `Unknown -> Core_unix.mkdir log_dir ~perm:0o700);
         Core_unix.mkdir artifact_dir ~perm:0o700;
-        Core_unix.mkdir output_dir ~perm:0o700))
+        Core_unix.mkdir output_dir ~perm:0o700;
+        authoring_service))
   in
-  Result.map result ~f:(fun () ->
+  Result.map result ~f:(fun authoring_service ->
     { instance_id
     ; log_dir
     ; artifact_dir
     ; output_dir
     ; workspace_service = Workspace_service.create ~state_dir
+    ; authoring_service
+    ; authoring_queue = Throttle.Sequencer.create ~continue_on_error:true ()
     ; asic_service =
         Asic_service.create_with_detail_cache
           ?inspection_detail_cache_entries
@@ -226,6 +236,30 @@ let create
 ;;
 
 let set_event_sink t sink = t.event_sink <- sink
+
+let check_authoring_project t (operation : Authoring.Request.t) =
+  match operation with
+  | Preview { target = { project = Some project; destination; _ }; _ } ->
+    (match Hashtbl.find t.projects project with
+     | None -> error Not_found "unknown authoring project"
+     | Some session ->
+       (* The recipe host independently rejects traversal and symlink components. *)
+       let root = session.root in
+       let prefix = if String.equal root "/" then "/" else root ^ "/" in
+       if String.equal destination root || String.is_prefix destination ~prefix
+       then Ok ()
+       else error Invalid_request "destination is outside the selected project")
+  | Preview _ | Apply _ | Cancel _ -> Ok ()
+;;
+
+let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
+  match Result.bind (check_instance t instance_id) ~f:(fun () -> check_authoring_project t operation) with
+  | Error _ as e -> return e
+  | Ok () ->
+    Throttle.enqueue t.authoring_queue (fun () ->
+      if t.shutting_down then return (error Conflict "daemon is shutting down")
+      else In_thread.run (fun () -> Ok (Authoring_service.handle t.authoring_service operation)))
+;;
 
 let emit t event =
   t.sequence <- t.sequence + 1;
@@ -2617,6 +2651,7 @@ let shutdown t =
   in
   let%bind () = Preparation_service.completion t.preparation_service in
   let%bind () = opening_finished in
+  let%bind () = Throttle.prior_jobs_done t.authoring_queue in
   Monitor.try_with (fun () ->
     In_thread.run (fun () ->
       remove_tree_sync t.log_dir;

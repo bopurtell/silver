@@ -4,9 +4,13 @@ Open the command palette (`Space c c`) and run **Discover ASIC flows and runs**.
 For a project with a chip catalog, search **Select launch target**, or type a
 chip or variant name. Each row selects one exact chip/variant pair. Selection
 loads its flows; it does not build anything or switch the run you are inspecting.
+In **Overview → Planned Run**, click **Launch chip** or **Variant**, or focus the
+tile and press **`t`**, to open just the target choices. Type to filter, use the
+arrow keys and Enter to choose, or Esc to cancel.
 
-In Overview, **Planned Run** shows the launch chip, variant, flow, profile and
-endpoint. The run selector and physical-stage results are evidence from the
+In Overview, **Session** summarizes the launch chip and variant on one line.
+**Planned Run** shows the same target and the flow, profile, and endpoint in
+aligned rows. The run selector and physical-stage results are evidence from the
 selected execution, which may belong to a different chip. Selecting that run
 does not pick the next launch target.
 The picker is available even in saved workspaces without a Planned Run pane.
@@ -25,6 +29,12 @@ use **Plan ASIC** or a named **Launch … and view** action for the current chip
 If a variant advertises no named flows, its launch inputs show as unavailable.
 Select a variant that offers the flow you need. Projects without a chip catalog
 continue to use their existing project-level flow commands.
+
+**Testing** uses a separate simulation provider. Choosing an ASIC launch
+target does not populate that catalog. To start a new simulation, focus the
+catalog in Testing and use **Simulation: Discover suites explicitly**. An old
+VCD in Waveforms is a retained result and can still be read even when no
+simulation provider is configured.
 
 ### Reproduce the example
 

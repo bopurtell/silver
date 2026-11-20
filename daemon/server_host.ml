@@ -19,6 +19,7 @@ let instance_id () =
 ;;
 
 let start
+  ?(authoring_roots = [])
   ~port
   ~discovery_dir
   ~state_dir
@@ -58,6 +59,7 @@ let start
   let log_dir = Filename_unix.temp_dir "hardcaml-workbench-" "-logs" ~perm:0o700 in
   let%bind service =
     Service.create
+      ~authoring_roots
       ~instance_id
       ~log_dir
       ~state_dir
@@ -131,6 +133,7 @@ let start_standalone ~project_root ~state_dir =
   in
   handle_signals [ Signal.hup; Signal.int; Signal.term ];
   start
+    ~authoring_roots:[ Filename_unix.realpath project_root ]
     ~port:0
     ~discovery_dir:None
     ~state_dir:(Some state_dir)

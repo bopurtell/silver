@@ -877,6 +877,10 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
       Some
         (Overview_tiles.status_rows
            ~string_compression:(H.policy host tile).string_compression
+           ~launch_target:
+             (match (W.workspace registry tile.workspace).preset with
+              | Some "overview" -> Launch_preferences.chip_target data.asic
+              | _ -> None)
            ~snapshot:registry
            ~active_workspace:host.active
            ~project:data.project
@@ -1086,10 +1090,32 @@ let tile_run host tile =
      || String.equal tile.kind "hierarchy"
   then None
   else
-    Option.bind host.H.registry ~f:(fun registry ->
-      W.resolve_tile registry tile.W.Tile.id
-      |> Result.ok
-      |> Option.bind ~f:(fun reference -> reference.run))
+    H.tile_run host tile
+;;
+
+let resource_page host data tile ~width ~height =
+  match H.resource_owner host tile with
+  | None ->
+    [ None, E.plain "Add a resources tile to this workspace to select a resource." ]
+  | Some owner ->
+    let local = H.local host owner.id in
+    let view =
+      Resources_view.reconcile local.resources ~run:(tile_run host owner)
+        ~filter:local.filter data.asic
+    in
+    if String.equal tile.kind "resource-summary"
+    then
+      Resources_view.summary view |> E.page ~width ~height ~offset:0
+      |> List.map ~f:(fun row -> None, row)
+    else (
+      let render =
+        if String.equal tile.kind "resource-detail"
+        then Resources_view.detail_page_with_targets ~hints:(H.policy host tile).hints
+        else if Option.is_some (H.resource_reader host tile)
+        then Resources_view.list_page_with_targets ~hints:(H.policy host tile).hints
+        else Resources_view.page_with_targets
+      in
+      render view ~asic:data.asic ~filter:local.filter ~width ~height)
 ;;
 
 (* Chrome is removed at typed construction locations, before wrapping/paging. Never search
@@ -1602,32 +1628,48 @@ let formatted_plan_history ?indicator_frames host tile ~width =
       , if j = 0 then icon else View.rectangle ~width:(View.width icon) ~height:1 () )))
 ;;
 
-let planned_formatted_rows ?indicator_frames host tile ~width =
-  let rows = formatted_plan_history ?indicator_frames host tile ~width in
+let planned_target_rows host tile ~width =
   let detail = (H.local host tile.W.Tile.id).utility_detail in
   let snapshot = Planned_run.snapshot host.planned_run in
   match Launch_preferences.chip_target snapshot with
-  | None -> rows
+  | None -> []
   | Some target ->
     let selection =
       Preparation_view.selection ~remembered:host.remembered_selection ~asic:snapshot
     in
     let input f = Result.ok selection |> Option.value_map ~default:"unavailable" ~f in
+    (* Reserve at least half a narrow summary for the value; detail wraps full labels. *)
+    let budget = Int.min (cell_width "Launch chip") (Int.max 1 ((width - 2) / 2)) in
     let target_rows =
-      [ "Launch chip: " ^ target.chip
-      ; "Variant: " ^ target.variant
-      ; "Flow: " ^ input (fun s -> s.flow)
-      ; "Profile: " ^ input (fun s -> s.profile)
-      ; "Endpoint: " ^ input (fun s -> s.endpoint)
+      [ true, "Launch chip", target.chip
+      ; true, "Variant", target.variant
+      ; false, "Flow", input (fun s -> s.flow)
+      ; false, "Profile", input (fun s -> s.profile)
+      ; false, "Endpoint", input (fun s -> s.endpoint)
       ]
-      |> List.concat_map ~f:(fun line ->
-        let text = Artifact_view.safe line in
+      |> List.concat_map ~f:(fun (pickable, label, value) ->
+        let label =
+          if detail then label else Overview_tiles.fit_cells ~width:budget label
+        in
+        let padding = String.make (Int.max 0 (budget - cell_width label)) ' ' in
+        let text = label ^ ": " ^ padding ^ Artifact_view.safe value in
         (if detail
          then wrap_cells ~width text
          else [ E.text (E.clip ~width (E.plain text)) ])
-        |> List.map ~f:(fun text -> { Planned_run.role = Fact; text }, View.none))
+        |> List.map ~f:(fun text -> pickable, { Planned_run.role = Fact; text }))
     in
-    target_rows @ rows
+    if H.has_target_picker host tile
+    then (
+      let targets, fields = List.split_while target_rows ~f:fst in
+      let hint = "t: switch target · click chip/variant" in
+      let text = E.text (E.clip ~width (E.plain hint)) in
+      targets @ [ false, { Planned_run.role = Muted; text } ] @ fields)
+    else target_rows
+;;
+
+let planned_formatted_rows ?indicator_frames host tile ~width =
+  List.map (planned_target_rows host tile ~width) ~f:(fun (_, row) -> row, View.none)
+  @ formatted_plan_history ?indicator_frames host tile ~width
 ;;
 
 let planned_view_rows ?indicator_frames host tile ~width =
@@ -2028,22 +2070,8 @@ let rows host data tile ~width ~height =
            ~width
            ~height
          |> List.map ~f:E.text
-       | "resources" | "resource-summary" ->
-         let view =
-           Resources_view.reconcile
-             local.resources
-             ~run:scope
-             ~filter:local.filter
-             data.asic
-         in
-         (if String.equal tile.kind "resource-summary"
-          then
-            Resources_view.summary view
-            |> List.concat_map ~f:(E.wrap ~width)
-            |> Fn.flip List.take height
-          else
-            Resources_view.rows view ~filter:local.filter ~asic:data.asic ~width ~height)
-         |> List.map ~f:E.text
+       | "resources" | "resource-detail" | "resource-summary" ->
+         resource_page host data tile ~width ~height |> List.map ~f:(fun (_, r) -> E.text r)
        | "run-selector" -> run_rows ()
        | kind when P.Waveforms.is_pane kind ->
          (match H.waveform_pin host tile.workspace with
@@ -2142,6 +2170,7 @@ let rows host data tile ~width ~height =
      || Option.is_some local.inspection
      || String.equal tile.kind "synthesis"
      || Resources_view.is_kind tile.kind
+     || String.equal tile.kind "resource-detail"
      || Terminal_result_view.supports tile.kind
      || Option.is_some (Timing_workspace.pane tile.kind)
      || (String.equal tile.kind "logs" && local.follow)
@@ -2386,22 +2415,31 @@ let select_body_row ?(column = 0) host data tile ~width ~height ~row =
      || Option.is_some local.artifacts
      || Option.is_some local.inspection
   then host
+  else if H.has_target_picker host tile
+  then (
+    match List.nth (planned_target_rows host tile ~width) (local.scroll + row) with
+    | Some (true, _) -> H.open_target_picker host tile
+    | _ -> host)
   else if String.equal tile.kind "workloads"
   then (
     match List.nth (Workloads_view.page_with_targets local.workloads ~asic:data.asic ~filter:local.filter ~width ~height) row with
     | Some (Some path, _) when not (Option.equal String.equal local.workloads.selected (Some path)) ->
       H.set_local host tile.id { local with workloads = Workloads_view.browse_result local.workloads (Some path) }
     | _ -> host)
-  else if String.equal tile.kind "resources"
+  else if H.resource_pane tile.kind
   then (
-    let view = Resources_view.reconcile local.resources ~run:(tile_run host tile) ~filter:local.filter data.asic in
-    let page = Resources_view.page_with_targets view ~asic:data.asic ~filter:local.filter ~width ~height in
-    match List.nth page row with
-    | Some (Some (`Resource id), _) when not (Option.equal String.equal view.selected (Some id)) ->
-      H.set_local host tile.id { local with resources = Resources_view.browse_resource view (Some id) }
-    | Some (Some (`Source id), _) when not (Option.equal String.equal view.artifact (Some id)) ->
-      H.set_local host tile.id { local with resources = Resources_view.browse_source view (Some id) }
-    | _ -> host)
+    match H.resource_owner host tile with
+    | None -> host
+    | Some owner ->
+      let local = H.local host owner.id in
+      let view = Resources_view.reconcile local.resources ~run:(tile_run host owner) ~filter:local.filter data.asic in
+      let page = resource_page host data tile ~width ~height in
+      (match List.nth page row with
+       | Some (Some (`Resource id), _) when not (Option.equal String.equal view.selected (Some id)) ->
+         H.set_local host owner.id { local with resources = Resources_view.browse_resource { view with mode = Table } (Some id) }
+       | Some (Some (`Source id), _) when not (Option.equal String.equal view.artifact (Some id)) ->
+         H.set_local host owner.id { local with resources = Resources_view.browse_source view (Some id) }
+       | _ -> host))
   else if String.equal tile.kind "timing-paths"
   then (
     match H.timing host tile with
@@ -2707,6 +2745,7 @@ let tile_view
   let binding =
     if String.equal tile.kind "workloads"
     then "explicit workload evidence"
+    else if String.equal tile.kind "resource-detail" then "linked resource"
     else if Resources_view.is_kind tile.kind && Option.is_some local.resources.explicit
     then "explicit resource source"
     else if Testing_workspace.is_pane tile.kind
@@ -3108,28 +3147,9 @@ let tile_view
         ~width:body_width
         ~height:body_height
       |> E.render ~attrs:(evidence_attrs appearance)
-    else if Resources_view.is_kind tile.kind
+    else if Resources_view.is_kind tile.kind || String.equal tile.kind "resource-detail"
     then (
-      let view =
-        Resources_view.reconcile
-          local.resources
-          ~run:(tile_run host tile)
-          ~filter:local.filter
-          data.asic
-      in
-      let rows =
-        if String.equal tile.kind "resource-summary"
-        then
-          Resources_view.summary view
-          |> E.page ~width:body_width ~height:body_height ~offset:0
-        else
-          Resources_view.rows
-            view
-            ~filter:local.filter
-            ~asic:data.asic
-            ~width:body_width
-            ~height:body_height
-      in
+      let rows = resource_page host data tile ~width:body_width ~height:body_height |> List.map ~f:snd in
       E.render ~attrs:(evidence_attrs appearance) rows)
     else if String.equal tile.kind "planned-run"
     then
@@ -3273,7 +3293,7 @@ let tile_layout host ({ Dimensions.width; height } : Dimensions.t) =
       Option.is_some w.zoomed_tile)
   in
   let definition = Option.bind (H.active host) ~f:(H.render_definition host) in
-  let layout_mode = host.layout_mode in
+  let layout_mode = H.effective_layout_mode host in
   let fit =
     match definition with
     | Some definition ->
@@ -3804,7 +3824,7 @@ let render_workspace
     else if host.editing_filter
     then (
       let filter =
-        Option.value_map host.focus ~default:"" ~f:(fun id -> (H.local host id).filter)
+        Option.value_map (H.filter_owner host) ~default:"" ~f:(fun id -> (H.local host id).filter)
       in
       [ lines
           ~appearance
@@ -4320,6 +4340,25 @@ let%test_unit "WB002 stock Overview stage cards render typed freshness markers" 
                 ~f:(fun (width, height) ->
                   let view = render width height in
                   assert (View.width view = width && View.height view = height))))))
+;;
+
+let%test_unit "Only Overview Session shows the catalog launch target alongside run evidence" =
+  let check definition ~expected =
+    let host, data, find = refinement_fixture definition in
+    let session = find "live-status" in
+    let text target =
+      let asic = Option.map data.asic ~f:(fun s -> { s with chip_target = target }) in
+      tile_view host { data with asic } session ~width:42 ~height:12 |> plain_text
+    in
+    let target : Asic.Chip_target.t = { chip = "tiny"; variant = "mac" } in
+    let rendered = text (Some target) in
+    assert (
+      Bool.equal expected (String.is_substring rendered ~substring:"Launch target: tiny/mac"));
+    assert (not (String.is_substring (text None) ~substring:"Launch target"));
+    if expected then assert (String.is_substring rendered ~substring:"Run:")
+  in
+  check P.Overview.definition ~expected:true;
+  check P.Testing.definition ~expected:false
 ;;
 
 let%test_unit "Session and Runs render effective global workspace and tile compression" =

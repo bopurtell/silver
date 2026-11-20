@@ -36,6 +36,11 @@ type layout_mode =
   | Preferred
 [@@deriving equal, sexp]
 
+type resource_orientation =
+  | Side_by_side
+  | Stacked
+[@@deriving equal, sexp]
+
 type testing_inputs =
   { suite : Simulation.Suite.t
   ; selection : Simulation.Selection.t
@@ -63,6 +68,7 @@ type action =
   | Hierarchy_detail of W.Tile_id.t
   | Discover_asic
   | Open_resources
+  | Orient_resources of resource_orientation
   | Open_workloads
   | Workload_import
   | Workload_result of string * string option
@@ -202,6 +208,7 @@ type t =
   ; workspace_focus : (string * W.Tile_id.t option) list
   ; appearance : Appearance.t
   ; layout_mode : layout_mode
+  ; resource_orientations : (W.Workspace_id.t * resource_orientation) list
   ; layout_intent : unit ref
   ; presentation : T.overrides
   ; workspace_presentation : (string * T.overrides) list
@@ -239,6 +246,7 @@ let empty =
   ; workspace_focus = []
   ; appearance = Appearance.default
   ; layout_mode = Fit
+  ; resource_orientations = []
   ; layout_intent = ref ()
   ; presentation = T.inherit_
   ; workspace_presentation = []
@@ -284,7 +292,25 @@ let default_local =
 ;;
 
 let invalidate_layout_intent t = { t with layout_intent = ref () }
-let set_layout_mode t layout_mode = { (invalidate_layout_intent t) with layout_mode }
+let clear_active_resource_orientation t =
+  match t.active with
+  | None -> t
+  | Some id ->
+    { t with
+      resource_orientations =
+        List.Assoc.remove t.resource_orientations id ~equal:W.Workspace_id.equal
+    }
+;;
+
+let set_layout_mode t layout_mode =
+  let t = invalidate_layout_intent t in
+  let t =
+    match layout_mode with
+    | Preferred -> clear_active_resource_orientation t
+    | Fit -> t
+  in
+  { t with layout_mode }
+;;
 
 let begin_restore t capture =
   let t = invalidate_layout_intent t in
@@ -304,7 +330,9 @@ let finish_restore t ticket ~acknowledged =
   then t, false
   else (
     let t = invalidate_layout_intent t in
-    if acknowledged then { t with layout_mode = Fit }, true else t, false)
+    if acknowledged
+    then { (clear_active_resource_orientation t) with layout_mode = Fit }, true
+    else t, false)
 ;;
 
 let local t id =
@@ -1013,6 +1041,70 @@ let focused t =
     List.find (tiles t) ~f:(fun tile -> W.Tile_id.equal tile.id id))
 ;;
 
+let resource_pane kind = String.equal kind "resources" || String.equal kind "resource-detail"
+
+let workspace_tile t (tile : W.Tile.t) kind =
+  Option.bind t.registry ~f:(fun s ->
+    List.find s.tiles ~f:(fun other ->
+      W.Workspace_id.equal tile.workspace other.workspace && String.equal other.kind kind))
+;;
+
+(* Pair by workspace, including when the owner is hidden or the reader zoomed. Extra
+   lists remain independent legacy inspectors rather than sharing a selection. *)
+let resource_owner t (tile : W.Tile.t) =
+  if String.equal tile.kind "resource-detail"
+  then workspace_tile t tile "resources"
+  else Some tile
+;;
+
+let filter_owner t =
+  match focused t with
+  | Some tile when String.equal tile.kind "resource-detail" ->
+    Option.map (resource_owner t tile) ~f:(fun owner -> owner.id)
+  | _ -> t.focus
+;;
+
+let resource_reader t (tile : W.Tile.t) =
+  Option.bind (workspace_tile t tile "resources") ~f:(fun owner ->
+    if W.Tile_id.equal owner.id tile.id
+    then
+      List.find (tiles t) ~f:(fun other ->
+        W.Workspace_id.equal owner.workspace other.workspace
+        && String.equal other.kind "resource-detail")
+    else None)
+;;
+
+let route_resource_input t tile ~asic input =
+  Option.map (resource_owner t tile) ~f:(fun owner ->
+    let l = local t owner.id in
+    let reader = resource_reader t tile in
+    let from_list = Option.is_some reader in
+    let view, input =
+      match input with
+      | (Resources_view.Move _ | Open) when from_list ->
+        { l.resources with mode = Table }, input
+      | Move delta when String.equal tile.kind "resource-detail"
+                        && Resources_view.equal_mode l.resources.mode Table ->
+        l.resources, Scroll delta
+      | Open when String.equal tile.kind "resource-detail"
+                  && Resources_view.equal_mode l.resources.mode Table ->
+        { l.resources with mode = Detail; section = "inventory" }, Open
+      | _ -> l.resources, input
+    in
+    let resources, operation = Resources_view.input view ~filter:l.filter ~asic input in
+    let t = set_local t owner.id { l with resources } in
+    let focus =
+      match input with
+      | Open | Show_sources | Show_context | Show_compare | Section _ when from_list ->
+        Option.map reader ~f:(fun r -> r.id)
+      | Back | Show_table when Resources_view.equal_mode resources.mode Table
+                              && List.exists (tiles t) ~f:(fun x -> W.Tile_id.equal x.id owner.id) ->
+        Some owner.id
+      | _ -> t.focus
+    in
+    { t with focus }, owner, operation)
+;;
+
 let receive t (s : W.Snapshot.t) =
   match t.registry with
   | Some previous
@@ -1028,6 +1120,7 @@ let receive t (s : W.Snapshot.t) =
         ; locals = []
         ; workspace_focus = []
         ; workspace_presentation = []
+        ; resource_orientations = []
         ; timing = []
         ; timing_restore = []
         ; timing_rejected = []
@@ -1151,6 +1244,9 @@ let receive t (s : W.Snapshot.t) =
       ; timing
       ; workspace_focus
       ; workspace_presentation
+      ; resource_orientations =
+          List.filter t.resource_orientations ~f:(fun (id, _) ->
+            workspace_exists (W.Workspace_id.to_string id))
       ; waveforms =
           List.filter t.waveforms ~f:(fun (id, _) ->
             match t.registry with
@@ -1254,6 +1350,7 @@ let reconnect t ~replacement =
     ; locals = []
     ; workspace_focus = []
     ; workspace_presentation = []
+    ; resource_orientations = []
     ; timing = []
     ; timing_restore = []
     ; timing_rejected = []
@@ -2118,6 +2215,40 @@ let command ?unavailable id title aliases action =
   { id; title; aliases; action; unavailable }
 ;;
 
+let chip_commands (s : Asic.Snapshot.t) =
+  List.concat_map s.chips ~f:(fun chip ->
+    List.map chip.variants ~f:(fun variant ->
+      let target : Asic.Chip_target.t = { chip = chip.id; variant = variant.id } in
+      let selected = Option.equal Asic.Chip_target.equal (Some target) s.chip_target in
+      command
+        ("asic.select-chip." ^ Sexp.to_string_mach (Asic.Chip_target.sexp_of_t target))
+        (Artifact_view.safe
+           ("Select launch target: " ^ chip.id ^ " / " ^ variant.id
+            ^ if selected then " (selected)" else ""))
+        ("pick chip variant " ^ chip.label ^ " " ^ variant.label)
+        (Asic (Select_chip target))))
+;;
+
+let has_target_picker t (tile : W.Tile.t) =
+  String.equal tile.kind "planned-run"
+  && Option.exists t.registry ~f:(fun r ->
+    Option.equal String.equal (W.workspace r tile.workspace).preset (Some "overview"))
+  && Option.exists (Planned_run.snapshot t.planned_run) ~f:(fun s ->
+    Option.is_some s.chip_target
+    && List.exists s.chips ~f:(fun c -> not (List.is_empty c.variants)))
+;;
+
+let open_target_picker t (tile : W.Tile.t) =
+  let t = { t with focus = Some tile.id; prefix = 0 } in
+  match capture t, Planned_run.snapshot t.planned_run with
+  | Some capture, Some s ->
+    { t with
+      palette =
+        Some { capture; commands = chip_commands s; query = ""; index = 0; argument = None }
+    }
+  | _ -> t
+;;
+
 let testing_launch_command t id =
   let action = testing_launch_action t id in
   let unavailable =
@@ -2494,6 +2625,7 @@ let evidence_runs t =
     |> List.filter ~f:(fun tile ->
       (not (project_scoped_kind tile.kind))
       && (not (Resources_view.is_kind tile.kind))
+      && not (String.equal tile.kind "resource-detail")
       && not (String.equal tile.kind "run-selector"))
     |> List.filter_map ~f:(fun tile ->
       W.resolve_tile registry tile.id
@@ -2516,10 +2648,70 @@ let provenance t workspace =
       | _ -> false))
 ;;
 
+(* Old stock snapshots retain their definition and tile IDs. Opt into today's split
+   geometry only after the user explicitly adds the missing reader. Authored custom
+   definitions continue to place additions via their ordinary extras policy. *)
+let added_stock_reader t (p : W.Config_workspace.t) =
+  match p.reference with
+  | Builtin "resources"
+    when not (List.exists p.definition.template.views ~f:(fun v ->
+      String.equal v.kind "resource-detail")) ->
+    Option.bind t.registry ~f:(fun registry ->
+      List.find registry.tiles ~f:(fun tile ->
+        W.Workspace_id.equal tile.workspace p.workspace
+        && String.equal tile.kind "resource-detail"))
+  | _ -> None
+;;
+
 let render_definition t (workspace : W.Arrangement.t) =
-  match provenance t workspace.id with
-  | Some p -> Some (P.Definition.of_spec p.definition)
-  | None -> definition workspace
+  let base =
+    match provenance t workspace.id with
+    | Some p when Option.is_some (added_stock_reader t p) -> definition workspace
+    | Some p -> Some (P.Definition.of_spec p.definition)
+    | None -> definition workspace
+  in
+  let orientation =
+    List.Assoc.find t.resource_orientations workspace.id ~equal:W.Workspace_id.equal
+  in
+  match workspace.preset, orientation with
+  | Some "resources", Some Stacked -> Option.map base ~f:P.Definition.stack_resource_pair
+  | _ -> base
+;;
+
+let effective_layout_mode t =
+  match active t with
+  | Some { id; preset = Some "resources"; _ }
+    when List.Assoc.mem t.resource_orientations id ~equal:W.Workspace_id.equal -> Fit
+  | _ -> t.layout_mode
+;;
+
+let set_resource_orientation t workspace orientation =
+  { (invalidate_layout_intent t) with
+    resource_orientations =
+      List.Assoc.add t.resource_orientations workspace orientation ~equal:W.Workspace_id.equal
+  }
+;;
+
+(* Each step is an ordinary revision-checked registry mutation. Reuse hidden
+   panes and add only a missing kind, leaving pins, extras and geometry intact. *)
+let resource_pair_repairs (registry : W.Snapshot.t) (workspace : W.Arrangement.t) =
+  List.filter_map [ "resources"; "resource-detail" ] ~f:(fun kind ->
+    match
+      List.find registry.tiles ~f:(fun tile ->
+        W.Workspace_id.equal tile.workspace workspace.id && String.equal tile.kind kind)
+    with
+    | None ->
+      Some
+        (W.Mutation.Create_tile
+           { workspace = workspace.id
+           ; kind
+           ; geometry = { x = 0; y = 0; width = 56; height = 28 }
+           })
+    | Some tile when tile.hidden ->
+      Some (Set_tile_hidden { tile = tile.id; hidden = false })
+    | Some _ -> None)
+  @ Option.to_list (Option.map workspace.zoomed_tile ~f:(fun _ ->
+    W.Mutation.Set_zoom { workspace = workspace.id; tile = None }))
 ;;
 
 let configured_tile (p : W.Config_workspace.t) (tile : W.Tile.t) =
@@ -2543,6 +2735,8 @@ let layout_keys t (tiles : W.Tile.t list) =
   List.map tiles ~f:(fun tile ->
     let key =
       match provenance t tile.workspace with
+      | Some p when Option.exists (added_stock_reader t p) ~f:(fun r -> W.Tile_id.equal r.id tile.id) ->
+        Some "resource-detail"
       | Some p -> Option.map (configured_tile p tile) ~f:(fun keyed -> keyed.key)
       | None ->
         (* Legacy builtin instances have no authoring IDs. Adapt their first visible
@@ -2572,7 +2766,7 @@ let layout_keys t (tiles : W.Tile.t list) =
     its indices with rendered geometry. *)
 let navigation_tiles t =
   let eligible = tiles t in
-  match t.layout_mode, active t with
+  match effective_layout_mode t, active t with
   | Fit, Some workspace ->
     (match render_definition t workspace with
      | None -> eligible
@@ -3608,6 +3802,14 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
           Create_blank_workspace
       ]
     @ restore_commands w
+    @ (match w.preset with
+       | Some "resources" ->
+         [ command "resources.layout.side-by-side" "Resources: List and detail side by side"
+             "split horizontal columns orientation layout" (Orient_resources Side_by_side)
+         ; command "resources.layout.stacked" "Resources: Stack list above detail"
+             "split vertical rows orientation layout" (Orient_resources Stacked)
+         ]
+       | _ -> [])
     @ (if String.is_prefix w.name ~prefix:"Timing · captured "
        then
          [ mutation
@@ -3711,6 +3913,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ; "timing"
         ; "synthesis"
         ; "resources"
+        ; "resource-detail"
         ; "workloads"
         ; "resource-summary"
         ; "asic"
@@ -3763,7 +3966,9 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
             (Set_tile_binding { tile = id; binding = Follow })
         ; command
             ?unavailable:
-              (if project_scoped_kind tile.kind || String.equal tile.kind "run-selector"
+              (if String.equal tile.kind "resource-detail"
+               then Some "Pin the linked resources list to choose its run"
+               else if project_scoped_kind tile.kind || String.equal tile.kind "run-selector"
                then Some "This tile does not display run-scoped evidence"
                else if Option.is_none run
                then Some "No selected run to pin"
@@ -3844,7 +4049,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
                ("Workloads: Axis " ^ axis)
                "explicit comparison intent"
                (Workload_input (Axis axis))))
-      @ (if not (String.equal tile.kind "resources")
+      @ (if not (resource_pane tile.kind)
          then []
          else
            [ command
@@ -3992,8 +4197,9 @@ type inspector =
   | Timing_detail of Timing_workspace.pane * Inspection_view.t
 
 let tile_run t (tile : W.Tile.t) =
-  Option.bind t.registry ~f:(fun s ->
-    Result.ok (W.resolve_tile s tile.id) |> Option.bind ~f:(fun r -> r.run))
+  Option.bind (resource_owner t tile) ~f:(fun tile ->
+    Option.bind t.registry ~f:(fun s ->
+      Result.ok (W.resolve_tile s tile.id) |> Option.bind ~f:(fun r -> r.run)))
 ;;
 
 (** The inspector the focused tile currently shows. Explorer/artifact views whose run
@@ -4890,7 +5096,7 @@ let input t event ~commands : t * effect =
       }
     , No_effect )
   | _ when t.editing_filter ->
-    (match event, t.focus with
+    (match event, filter_owner t with
      | (Escape | Enter), _ -> { t with editing_filter = false }, No_effect
      | Clear_filter, Some id -> set_filter t id "", No_effect
      | Character ch, Some id ->
@@ -5031,7 +5237,7 @@ let input t event ~commands : t * effect =
        (match event, t.prefix with
         | Clear_filter, _ ->
           let t =
-            Option.value_map t.focus ~default:t ~f:(fun id ->
+            Option.value_map (filter_owner t) ~default:t ~f:(fun id ->
               let l = local t id in
               set_local t id { l with filter = ""; scroll = 0 })
           in
@@ -5061,7 +5267,7 @@ let input t event ~commands : t * effect =
             | Next | Previous )
           , 0 )
           when Option.exists (focused t) ~f:(fun tile ->
-                 String.equal tile.kind "resources") ->
+                 resource_pane tile.kind) ->
           let action =
             Resource_input
               (match event with
@@ -5156,6 +5362,15 @@ let input t event ~commands : t * effect =
            | None -> t, No_effect
            | Some capture -> t, Execute (capture, Close_inspector))
         | Character '/', _ ->
+          let t =
+            match focused t with
+            | Some tile when String.equal tile.kind "resource-detail" ->
+              (match resource_owner t tile with
+               | Some owner when List.exists (tiles t) ~f:(fun x -> W.Tile_id.equal x.id owner.id) ->
+                 { t with focus = Some owner.id }
+               | _ -> t)
+            | _ -> t
+          in
           ( { t with
               editing_filter = true
             ; prefix = 0
@@ -5223,6 +5438,8 @@ let input t event ~commands : t * effect =
           in
           ( set_local t tile.id { l with cursor; utility_detail = true; scroll = 0 }
           , No_effect )
+        | Character 't', 0 when Option.exists (focused t) ~f:(has_target_picker t) ->
+          open_target_picker t (Option.value_exn (focused t)), No_effect
         | Character 'x', _
           when Option.exists (focused t) ~f:(fun tile ->
                  String.equal tile.kind "planned-run") ->
@@ -5317,6 +5534,47 @@ let input t event ~commands : t * effect =
            | Some capture -> t, Execute (capture, testing_launch_action t tile.id))
         | Enter, _ -> { t with prefix = 0 }, Activate
         | _, _ -> { t with prefix = 0 }, No_effect))
+;;
+
+let%test_unit "resource reader uses only its workspace list, including through zoom" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "linked-resources") in
+  let base = List.hd_exn registry.tiles in
+  let list = { base with kind = "resources"; binding = Pin_run Fs0_fixture.run_a } in
+  let reader = { base with id = W.Tile_id.of_string "reader"; kind = "resource-detail" } in
+  let other =
+    { list with id = W.Tile_id.of_string "other"; workspace = W.Workspace_id.of_string "elsewhere" }
+  in
+  let host = receive empty { registry with tiles = [ other; list; reader ] } in
+  let host = { host with focus = Some list.id } in
+  let route host tile event =
+    let host, owner, operation = route_resource_input host tile ~asic:None event |> Option.value_exn in
+    assert (W.Tile_id.equal owner.id list.id && Option.is_none operation);
+    host
+  in
+  let host = route host list Show_context in
+  assert (Option.equal W.Tile_id.equal host.focus (Some reader.id));
+  let host = route host reader (Move 2) in
+  assert ((local host list.id).resources.scroll = 2 && (local host reader.id).resources.scroll = 0);
+  let host = route host reader Back in
+  assert (Option.equal W.Tile_id.equal host.focus (Some list.id));
+  let zoomed =
+    { registry with
+      tiles = [ other; list; reader ]
+    ; workspaces = List.map registry.workspaces ~f:(fun w -> { w with zoomed_tile = Some reader.id })
+    }
+  in
+  let host = receive host zoomed in
+  let host = route host reader (Move 3) in
+  assert ((local host list.id).resources.scroll = 3);
+  assert (Option.equal Run_ref.equal (tile_run host reader) (Some Fs0_fixture.run_a));
+  let legacy = receive empty { registry with tiles = [ list ] } in
+  assert (Option.is_none (resource_reader legacy list));
+  assert (
+    List.exists (catalog legacy ~project:None ~jobs:[]) ~f:(fun c ->
+      match c.action with
+      | Registry (Create_tile { workspace; kind = "resource-detail"; _ }) ->
+        W.Workspace_id.equal workspace list.workspace
+      | _ -> false))
 ;;
 
 let%test_unit "hierarchy controls are focused, local and yield to palette and prefix" =

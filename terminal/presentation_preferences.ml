@@ -49,6 +49,8 @@ type t =
   ; quick_launch_view : bool option [@sexp.option]
   ; global_compression : bool option [@sexp.option]
   ; workspace_compression : workspace_compression list option [@sexp.option]
+  ; resource_orientations : (W.Workspace_id.t * Host.resource_orientation) list option
+       [@sexp.option]
   ; session : W.Session_id.t option
   ; tile_headers : tile_headers list
   ; tile_appearance : tile_appearance list option [@sexp.option]
@@ -103,6 +105,8 @@ let capture ~project_key (host : Host.t) =
   ; timing_preload = Some host.timing_preload
   ; quick_launch_view = Some host.quick_launch_view
   ; global_compression = host.presentation.string_compression
+  ; resource_orientations =
+      Option.some_if (not (List.is_empty host.resource_orientations)) host.resource_orientations
   ; workspace_compression =
       (let entries =
          Option.value_map host.registry ~default:[] ~f:(fun registry ->
@@ -149,6 +153,10 @@ let decode ~project_key content =
    | _ -> failwith "Terminal tile appearance fields do not match schema");
   let appearance = Option.value stored.tile_appearance ~default:[] in
   let workspaces = Option.value stored.workspace_compression ~default:[] in
+  let orientations = Option.value stored.resource_orientations ~default:[] in
+  if List.length orientations > 128
+     || List.contains_dup (List.map orientations ~f:fst) ~compare:W.Workspace_id.compare
+  then failwith "Invalid workspace resource orientation preferences";
   if stored.schema_version < 6
      && (Option.is_some stored.global_compression
          || Option.is_some stored.workspace_compression)
@@ -164,6 +172,7 @@ let decode ~project_key content =
      && not
           (List.is_empty stored.tile_headers
            && List.is_empty appearance
+           && List.is_empty orientations
            && List.is_empty workspaces)
   then failwith "Tile header preferences require a workspace session";
   let ids = List.map stored.tile_headers ~f:(fun tile -> W.Tile_id.to_string tile.tile) in
@@ -207,6 +216,14 @@ let apply_tiles t (host : Host.t) =
     let same_session =
       Option.equal W.Session_id.equal t.session (Some registry.session_id)
     in
+    let resource_orientations =
+      if not same_session
+      then []
+      else
+        List.filter (Option.value t.resource_orientations ~default:[]) ~f:(fun (id, _) ->
+          List.exists registry.workspaces ~f:(fun w -> W.Workspace_id.equal w.id id))
+    in
+    let host = { host with resource_orientations } in
     let host =
       List.fold registry.workspaces ~init:host ~f:(fun host workspace ->
         let value =

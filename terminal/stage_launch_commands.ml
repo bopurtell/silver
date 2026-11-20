@@ -278,21 +278,4 @@ let commands host ~asic ~remembered =
       else None))
 ;;
 
-let chip_commands (s : Asic.Snapshot.t) =
-  List.concat_map s.chips ~f:(fun chip ->
-    List.map chip.variants ~f:(fun variant ->
-      let target : Asic.Chip_target.t = { chip = chip.id; variant = variant.id } in
-      H.command
-        ("asic.select-chip." ^ Sexp.to_string_mach (Asic.Chip_target.sexp_of_t target))
-        (Artifact_view.safe
-           ("Select launch target: "
-            ^ chip.id
-            ^ " / "
-            ^ variant.id
-            ^
-            if Option.equal Asic.Chip_target.equal (Some target) s.chip_target
-            then " (selected)"
-            else ""))
-        ("pick chip variant " ^ chip.label ^ " " ^ variant.label)
-        (Asic (Select_chip target))))
-;;
+let chip_commands = H.chip_commands

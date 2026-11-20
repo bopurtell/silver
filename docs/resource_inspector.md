@@ -11,6 +11,65 @@ Fresh default sessions include Resources after Timing. Existing saved layouts ar
 preserved: this explicit action creates/opens Resources without resetting other
 workspaces. **Add resource-summary tile** adds the compact Overview entry.
 
+The Resources workspace has a **request list** and a linked **resource detail**
+tile. Browse the list with `j`/`k` or the arrow keys; the detail tile follows
+the highlighted request without requiring Enter. The list remains in place
+while you scroll a long contract or inspect additional evidence in detail.
+In Resources, open **Space c c** and choose how the two tiles share your screen:
+
+* **Resources: List and detail side by side** gives both tiles more height.
+  Use it to browse a long list or read a long contract.
+* **Resources: Stack list above detail** gives the request list the full width
+  for implementation names and synthesis/final columns. Scroll the detail
+  tile to see the rest of the selected request.
+
+Either choice also opens the pair from a saved single-tile built-in Resources
+workspace. Silver remembers the orientation for that workspace. The highlighted
+request stays selected; changing layout does not reload the resource evidence
+or change the run. Custom-authored layouts keep their own layout policy.
+
+These are two presentations of the same Resources module, following the
+[module/tile ownership model](features/modules_and_tiles.md#ownership). The list and reader
+share the workspace's source and selected resource ID. The provider supplies
+the decisions and observations; neither tile independently resolves the request.
+
+Read the detail groups in order:
+
+* **Request and requirements:** the resource kind, fields declared by that
+  kind, and which implementation policy applies. A memory can specify width,
+  depth, ports and read latency. Other resource kinds show their own fields;
+  a RAM layout is not imposed on a different contract.
+* **Selection:** the implementation chosen at elaboration and why.
+* **Actual implementation:** what was elaborated, including the instance names
+  if the provider recorded any.
+* **Realization and qualifications:** what synthesis or the final run verified,
+  and limits on that evidence. Selection alone does not imply a netlist match.
+
+In the ordinary detail view, the verdict and its qualification align with
+**Synthesis** and **Final**. The page counters and section catalog are kept
+out of this view. Press `d` for provenance; Enter in detail shows the raw
+metadata when you need the provider's exact values.
+
+### See the mapping from your own synthesis run
+
+For the three-bank example, select `sram_budget / two_slot` as the launch
+target and launch `standard / balanced` through `synthesis`. In **Resources**:
+
+1. Open the palette (`Space c c`), search **Resources: Select execution**,
+   and choose that run's ID. The tile's **Scope** identifies what it is reading.
+2. Use lowercase **`r`** to refresh that source. It does not pick the latest
+   run or switch away from a previously imported bundle. If you used **Launch
+   and view** and the tile follows Main, the new run is already selected.
+3. Check **Decision** for elaboration and **Synth** for checkpoint evidence.
+   `bank0` and `bank1` should be exact macro mappings and synthesis matches.
+   `bank2` should show a budget-exhausted flop fallback; optimized flops
+   are not individually attributed. Highlight `bank2` to see its contract,
+   requested policy and fallback reason together in the detail tile.
+
+To inspect elaboration without synthesis, choose **Resources: Select workflow
+bundle** instead. A `fifo_demo` synthesis can legitimately have zero rows: its
+ordinary registers do not register SRAM requests.
+
 ### Inspect the actual SRAM evidence
 
 Choose **Resources: Import retained resource evidence**, enter the following exact
@@ -68,8 +127,8 @@ sources in the SRAM capture are reachable through the paged catalog.
 
 The first two table columns identify the resource and **why its implementation
 was chosen**. Wider panes also show the implementation, synthesis and final
-observations, then the actual elaboration role. Enter opens the full values
-when a cell is clipped. A budget-exhausted fallback is a selection decision;
+observations, then the actual elaboration role. The detail tile shows the full
+values when a cell is clipped. A budget-exhausted fallback is a selection decision;
 the independently colored resource verdict and stage observations describe
 different evidence. The scope and source lines identify an explicit import or
 an exact run binding. A chip and variant appear when the bound run or workflow

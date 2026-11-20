@@ -100,6 +100,15 @@ let updates t request =
     request
 ;;
 
+let authoring t request =
+  post
+    t
+    ~path:Authoring.rpc_path
+    ~sexp_of_request:V1.Authoring_call.Request.sexp_of_t
+    ~response_of_sexp:V1.Authoring_call.Response.t_of_sexp
+    request
+;;
+
 let open_project t request =
   post
     t

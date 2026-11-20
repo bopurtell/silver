@@ -104,3 +104,6 @@ original intake and its followups.
 | N10 | Compressed long IDs in simulation-detail; palette toggle globally, per workspace and per tile | [WB-073](presentation/WB-073-identifier-compression.md) |
 | N11 | simulation-catalog: separate and normalize suite/parameter/seed; enterable fields injected as run arguments | [WB-074](verification/WB-074-catalog-run-fields.md) |
 | N12 | Why does the execution tile say `simulation.run` / `simulation.discover`? | [WB-075](presentation/WB-075-execution-job-labels.md) |
+## Project authoring intake supplement — 2026-11-20
+
+The [discussion record](../project_authoring_and_command_design.md) is preserved separately. WB-051 retains provider-owned new-project generation. The [catalog](README.md) adds WB-076–077 (palette and menus), WB-078–079 (first open and IP/module authoring), WB-080–082 (provider catalog, selection and chip creation), WB-083–084 (flow authoring and real synthesis acceptance), WB-085 (daemon authoring calls) and WB-086 (management window versus workspace experiment). See the [dependency map](dependencies.md) for sequencing.

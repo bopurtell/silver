@@ -8,6 +8,7 @@ a verified bundle to the project preparation store. --synthesize additionally
 runs the example's configured synthesis toolchain and retains its execution.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -70,11 +71,24 @@ def main():
             assert plan(fifo)["project_name"] == "controlled_fifo_specimen"
             budget_chip = chips["sram_budget"]
             target = [["chip", "sram_budget"], ["variant", fs.field(budget_chip, "default_variant")]]
-            term.palette("Select launch target: sram_budget / " + dict(target)["variant"])
+            overview_screen = term.capture("launch-control", ["Launch chip:", "fifo_demo"])
+            for y, line in enumerate(overview_screen.splitlines(), 1):
+                if "Launch chip:" in line:
+                    x = line.index("Launch chip:") + 1
+                    break
+            else:
+                raise AssertionError("No visible Overview launch chip control")
+            click = f"\x1b[<0;{x};{y}"
+            os.write(term.master, (click + "M" + click + "m").encode())
+            term.capture("overview-target-picker", ["sram_budget", "two_slot"])
+            os.write(term.master, ("sram_budget " + dict(target)["variant"]).encode())
+            term.drain(.15)
+            os.write(term.master, b"\r")
+            term.drain(.5)
             selected = rpc("Get")
             assert dict(fs.field(selected, "chip_target")[0]) == dict(target)
             def overview(chip, variant):
-                screen = term.capture(chip + "-overview", [chip, variant, "Launch chip", "Endpoint"])
+                screen = term.capture(chip + "-overview", [chip + "/" + variant, "Launch target", "Launch chip", "Endpoint"])
                 starts = []
                 for label, value in [("Launch chip", chip), ("Variant", variant),
                                      ("Flow", "standard"), ("Profile", "balanced"),
@@ -149,19 +163,111 @@ def main():
             os.write(term.master, b"\r")
             ws = session.rpc("workspace")
             tile = next(t for t in fs.field(ws, "tiles") if fs.field(t, "kind") == "resources")
-            session.mutate(ws, '(Set_zoom (workspace %s)(tile (%s)))' % (
-                fs.sexp(fs.field(tile, "workspace")), fs.sexp(fs.field(tile, "id"))))
-            term.capture("resources", ["bank0", "bank1", "bank2", "Inspecting design", dict(target)["variant"]], absent=['"atom":'])
-            for key in (b"j", b"j", b"\r"):
+            detail = next(t for t in fs.field(ws, "tiles") if fs.field(t, "kind") == "resource-detail"
+                          and fs.field(t, "workspace") == fs.field(tile, "workspace"))
+            term.capture("resources", ["bank0", "bank1", "bank2", "Decision"], absent=['"atom":'])
+            for key in (b"j", b"j"):
                 os.write(term.master, key)
                 term.drain(.15)
-            term.capture("fallback-detail", ["Resource: bank2", "256 words", "budget exhausted"],
+            # No Enter or detail read: the metadata pane follows the highlighted row.
+            split = term.capture("fallback-selected", ["Request & requirements", "bank2", "budget exhausted"],
+                                 absent=['"atom":'])
+            assert re.search(r"Resource:\s+bank2\b", split), split
+            def check_layout(label, stacked, selected="bank2"):
+                expected = ["╭ resources ", "╭ resource-detail "]
+                if selected is not None:
+                    expected += ["Request & requirements", selected]
+                screen = term.capture(label, expected)
+                def locate(title):
+                    return next((y, line.index(title)) for y, line in enumerate(screen.splitlines())
+                                if title in line)
+                ly, lx = locate("╭ resources ")
+                dy, dx = locate("╭ resource-detail ")
+                assert ((ly < dy and lx == dx) if stacked else
+                        (ly == dy and lx < dx)), screen
+                if selected is not None:
+                    assert re.search(r"Resource:\s+" + re.escape(selected) + r"\b", screen), screen
+                    assert "> " + selected in screen, screen
+
+            stack_title = "Resources: Stack list above detail"
+            side_title = "Resources: List and detail side by side"
+            # Start the layout change in a full-width, in-place detail view
+            # (the appearance of an existing single-tile Resources workspace).
+            session.mutate(ws, '(Set_tile_hidden (tile %s)(hidden true))' % fs.sexp(fs.field(detail, "id")))
+            session.mutate(session.rpc("workspace"), '(Set_zoom (workspace %s)(tile (%s)))' % (
+                fs.sexp(fs.field(tile, "workspace")), fs.sexp(fs.field(tile, "id"))))
+            term.drain(.2)
+            os.write(term.master, b"\r")
+            full = term.capture("full-width-detail", ["Request & requirements", "bank2", "Resource verdict:"],
+                                absent=["Detail section: inventory", "Section catalog", "Page items:", "Sections: inventory:"])
+            columns = []
+            for field in ["Synthesis", "Final", "Resource verdict", "Qualification"]:
+                m = re.search(re.escape(field) + r": +(\S)", full)
+                assert m, (field, full)
+                columns.append(m.start(1) - full.rfind("\n", 0, m.start(1)) - 1)
+            assert len(set(columns)) == 1, (columns, full)
+            module_before = g.resource_snapshot(fs, rpc("Get"))
+            term.palette(stack_title)
+            check_layout("stacked", True)
+            restored = session.rpc("workspace")
+            readers = [t for t in fs.field(restored, "tiles") if fs.field(t, "kind") == "resource-detail"
+                       and fs.field(t, "workspace") == fs.field(tile, "workspace")]
+            assert len(readers) == 1 and fs.field(readers[0], "id") == fs.field(detail, "id")
+            assert fs.field(readers[0], "hidden") == "false"
+            term.palette(side_title)
+            check_layout("side-by-side", False)
+            assert g.resource_snapshot(fs, rpc("Get")) == module_before, "layout changed Resources evidence"
+            # Zoom the reader for the raw-data check, entering from the list
+            # if focus was restored there.
+            screen = term.drain(.2)
+            if "Resources › resources" in screen:
+                os.write(term.master, b"\r")
+                term.drain(.2)
+            ws = session.rpc("workspace")
+            session.mutate(ws, '(Set_zoom (workspace %s)(tile (%s)))' % (
+                fs.sexp(fs.field(detail, "workspace")), fs.sexp(fs.field(detail, "id"))))
+            term.capture("fallback-detail", ["bank2", "256", "budget exhausted", "Actual implementation"],
                          absent=['"atom":'])
             os.write(term.master, b"\r")
             term.capture("raw", ["RAW METADATA", '"contract"'])
             assert dict(fs.field(rpc("Get"), "chip_target")[0]) == dict(fifo)
+            # A tall inventory must stay navigable past one screen. This fixture
+            # exercises the provider's historical bundle format without building
+            # another chip or borrowing the real example's source identity.
+            big = base / "large-inventory"
+            big.mkdir()
+            fixture = {"project": "scroll_fixture", "top_module": "top", "resources": [
+                {"id": f"ram{i:02}", "request": f"((kind ram) (contract ((width 16) (depth {512+i}))))",
+                 "requirement": "Flops", "policy": "Default",
+                 "selection": "((implementation Flops) (reason Explicit_flops))",
+                 "elaborated_as": "Selected_implementation"} for i in range(64)], "files": []}
+            fixture["identity"] = hashlib.sha256(json.dumps(fixture, separators=(",", ":")).encode()).hexdigest()
+            (big / "manifest.json").write_text(json.dumps(fixture))
+            session.mutate(session.rpc("workspace"), '(Set_zoom (workspace %s)(tile ()))' % fs.sexp(fs.field(tile, "workspace")))
+            term.drain(.3)
+            term.palette("Resources: Import emitted bundle")
+            term.capture("large-import", ["exact absolute directory"])
+            os.write(term.master, os.fsencode(big))
+            term.drain(.1)
+            os.write(term.master, b"\r")
+            large_screen = term.capture("large-first", ["ram00", "512"], absent=["ram63"])
+            # Importing from a focused detail pane can leave focus there. A
+            # click on an actual list row explicitly targets list navigation.
+            y, line = next((n, line) for n, line in enumerate(large_screen.splitlines(), 1)
+                           if "> ram00" in line)
+            click = f"\x1b[<0;{line.index('ram00')+1};{y}"
+            os.write(term.master, (click + "M" + click + "m").encode())
+            term.drain(.2)
+            for _ in range(63):
+                os.write(term.master, b"j")
+            term.capture("large-last", ["ram63", "575"], absent=["ram00"])
+            term.palette(stack_title)
+            check_layout("stacked-long-list", True, "ram63")
+            term.close()
+            term = Terminal(session)
+            check_layout("restored-stacked-orientation", True, None)
             print("PASS: FIFO and two-slot SRAM plans, emitted bundle identity, three SRAM request outcomes,"
-                  " independent resource inspection in native Silver.")
+                  " linked 64-row inventory, side-by-side/stacked layout and restored orientation in native Silver.")
         finally:
             if term:
                 term.close()

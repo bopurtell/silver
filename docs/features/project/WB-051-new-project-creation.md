@@ -33,7 +33,7 @@ Workbench; no universal new-project schema is established by existing setup.
 ## Scope
 - Define a bounded template descriptor and explicit generation operation.
 - Adopt one real provider-owned starter with validated name/destination parameters.
-- Preview generated files and publish to a new destination without clobbering work.
+- Preview generated files and publish to a new destination or directly into a selected empty directory without clobbering work.
 - Offer explicit open/setup handoff after successful generation.
 
 ## Out of scope
@@ -42,7 +42,7 @@ automatic initial commits and automatic hardware execution.
 
 ## Acceptance criteria
 1. The template identifies its provider/version and required inputs before generation.
-2. An existing destination or conflicting file is refused with no partial replacement.
+2. An existing nonempty destination or conflicting file is refused with no partial replacement. An existing empty destination does not require creating a nested directory.
 3. Parameter errors and generator failure leave a clearly reported recoverable state.
 4. The adopted starter opens using documented existing project/setup contracts.
 5. Creating/opening a project does not implicitly build, simulate or run EDA.
@@ -57,7 +57,7 @@ Related: none; configuration migration is not needed to use today's supported fi
 Exclude authoring every provider's recipes, package installation and template catalogs.
 
 ## Assumptions and decisions needed
-Default: local explicitly selected templates and new-directory publication.
+Default: local explicitly selected templates and publication to a new or existing empty directory.
 TBD: first provider, descriptor transport and rollback contract for generator failure.
 Template source remains provider-owned; workspace layout templates stay distinct.
 
