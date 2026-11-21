@@ -41,6 +41,10 @@ terminal cannot fit the normal composition.
 For Overview this restores tabs across the top, Session/Runs/Stage checklist/
 Planned run down the left, and six domain panels down the right.
 
+For Testing this groups Simulation Attempts and Execution on the left, puts Cases
+beside Artifacts, and gives Simulation Logs the width of both investigation
+columns. A Project Tests tile from the older layout becomes a hidden extra.
+
 Extras are **hidden, not deleted**. Their identities, bindings and geometry remain
 available through the existing **Restore … tile** palette commands. Total stored
 tile counts can therefore remain larger than the visible default arrangement.

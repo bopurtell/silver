@@ -23,7 +23,7 @@ The current catalog includes `controlled-fifo` and **Memory workloads**
 The [earlier real-demo setup](real_asic_example_demo.md) remains available as
 historical context for retained FIFO acceptance.
 
-1. Open **Space c c → Create Testing workspace** for a new default arrangement.
+1. Open **Space c c → Switch to Testing**.
 2. Tab to **simulation-catalog**. Silver loads the configured project's suites
    in the background after opening it, even if you start in Overview.
 3. Choose the suite and check the cases you want. With **Simulation Catalog**
@@ -43,26 +43,30 @@ to open the suite picker. With a suite selected in the active Testing workspace,
 `test` opens the launch form for its selected cases. If there is no current
 suite, `test` opens the picker instead.
 
-If you already have a customized Testing workspace, **Apply default layout (add
-missing tiles)** adds the new panes and preserves extras, pins, hidden state and
-geometry. Older `simulation`, run-selector or log tiles may remain as extras. Hide
-unwanted extras explicitly, or create a new Testing arrangement for the clean
-default; the upgrade does not erase them.
+To adopt the stock arrangement in an existing Testing workspace, open **Space c c**
+and choose **Restore default layout: Testing (hide extras)**. This hides extra
+tiles, including an existing Project Tests tile, without deleting them or their
+history. **Apply default layout (add missing tiles)** keeps extras visible.
 
 ## Layout and selection
 
-At ordinary terminal sizes the layout has three columns:
+At ordinary terminal sizes, history is on the left and investigation on the right:
 
 ```text
-session          catalog          selected result / captured inputs
-generic tests    attempts         artifacts
-execution        cases            selected attempt job logs
+history             investigation
+                    ┌────────────────────┬───────────────────┐
+session             │ catalog            │ simulation detail │
+simulation attempts ├────────────────────┼───────────────────┤
+                    │ cases              │ artifacts         │
+execution           ├────────────────────┴───────────────────┤
+                    │ selected attempt's logs                │
+                    └────────────────────────────────────────┘
 ```
 
-The compact utility column and two investigation columns use **2:3:3** width
-weights from `terminal/workspaces/stock.sexp`. Cases and artifacts refer to the selected simulation
-attempt, not the ASIC run selected in Overview. Full IDs and captured provenance
-remain inspectable in Detail.
+Use **Simulation Attempts** to pick a run; Cases, Detail, Artifacts and Logs
+follow that selection. Use **Execution** for the broader job history, including
+suite discovery, simulation runs, and generic project commands. Selecting a job
+there does not change the simulation attempt you are investigating.
 
 - **Simulation Catalog** is for the next run: choose a suite and cases, then
   review the launch form. Browsing the catalog does not retarget Detail.
@@ -71,9 +75,13 @@ remain inspectable in Detail.
   and diagnostics are results from that same attempt. Selecting an artifact adds
   its identity, availability, digest, media type and size. Size uses decimal
   bytes (`1.25 MB` = 1,250,000 bytes); `unknown` means no size was reported.
-- **Project Tests** lists jobs from **Run project tests** (the project's Dune
-  test alias). Look here for the generic test process result; use **Simulation
-  Attempts** for provider-reported case results, seeds and artifacts.
+- **Simulation Cases** lines up case names and results. **Simulation Artifacts**
+  lines up artifact names, their owning case (or `suite`), and availability so
+  you can compare rows down each column.
+- **Project Tests** is an optional filtered view of jobs from **Run project tests**
+  (the project's Dune test alias). Those jobs are already visible in Execution;
+  use **Space c c → Add project-tests tile** if you want a dedicated view, or
+  **Restore project-tests …** if the old tile is hidden.
 
 - The six panes share one **client/workspace-local** investigation and one polling
   stream. A second Testing workspace/client has its own selection.
@@ -216,6 +224,13 @@ Use ordinary Tab/Shift-Tab focus, workspace switching, hide/zoom/layout actions 
 quick inspection. `w` remains the temporary full-area inspection path, while `W`
 leaves a workspace available for continued investigation. Exact identity remains
 inspectable through `i` and pin-scoped palette actions.
+
+Number keys follow keyboard focus. In **Session**, a bound number switches
+workspaces immediately. In **Waves**, type a count followed by a motion:
+`20h` / `20l` move twenty column steps left / right, `20H` / `20L` move twenty
+raw ticks, and `20j` / `20k` move down / up signal rows. Esc cancels an unused
+count; moving focus clears it too. In **Signals**, numbers stay local:
+typing `2` in the list keeps you there, and typing it in `/` enters filter text.
 
 Signals defaults to **Inline** values in aligned name/width/value columns. Choose
 **Waveform: Signal values: Stacked (two rows per signal)** or **Waveform: Signal

@@ -25,8 +25,9 @@ spec = importlib.util.spec_from_file_location('native_testing', HERE / 'test-nat
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 field, require, sexp = native.field, native.require, native.sexp
-PANES = ['simulation-catalog', 'simulation-attempts', 'simulation-cases',
-         'simulation-detail', 'simulation-artifacts', 'simulation-logs']
+from fixtures.testing_layout import (
+    FIT_FOCUS_ORDER, STOCK_KINDS, assert_focus_order, assert_stock_layout, focus_pane,
+)
 
 
 class Terminal(native.Terminal):
@@ -125,16 +126,6 @@ def run(args):
                 terminal.drain(.15)
             time.sleep(.1)
 
-    def focus_pane(name):
-        # The active pane can be restored from local navigation on reconnect.
-        for _ in range(12):
-            rows = terminal.drain(.2).splitlines()
-            footer = rows[-1].rstrip() if rows else ''
-            if footer.endswith(name):
-                return
-            terminal.key(b'\t')
-        raise AssertionError('Could not focus ' + name)
-
     try:
         session.start()
         check(not field(session.api(), 'discovery_job') and not job_ids() and not records(),
@@ -158,8 +149,7 @@ def run(args):
         try:
             bare_client.capture('unconfigured-startup', ['Overview'])
             bare_client.palette('Switch to Testing')
-            for _ in range(4):
-                bare_client.key(b'\t')
+            focus_pane(bare_client, 'simulation-catalog')
             bare_client.palette('Zoom focused tile')
             bare_client.capture('unconfigured-catalog', ['No simulation provider configured'])
         finally:
@@ -176,26 +166,29 @@ def run(args):
         # This suite checks exact provenance; compact rendering has its own WB-073 suite.
         terminal.palette('Strings (global): Show full identifiers')
         terminal.palette('Switch to Testing')
-        terminal.capture('testing-layout-120x40', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
-        terminal.wait_viewport('initial-120x40')
-        check(True, 'initial Testing viewport painted at actual 120 columns and 40 rows')
+        assert_stock_layout(terminal, 'testing-layout-120x40', evidence)
+        check(True, 'stock Testing tracks and spanning Logs painted at 120x40')
         terminal.resize(180, 55)
-        terminal.capture('testing-layout-180x55', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
-        check(True, 'resized Testing viewport painted at actual 180 columns and 55 rows')
+        assert_stock_layout(terminal, 'testing-layout-180x55', evidence)
+        check(True, 'stock Testing tracks and spanning Logs painted at 180x55')
+        assert_focus_order(terminal, FIT_FOCUS_ORDER)
+        check(True, 'Tab and Shift-Tab wrap through the depth-first Fit order')
+        terminal.palette('Layout: Requested tile sizes')
+        assert_focus_order(terminal, STOCK_KINDS)
+        check(True, 'Tab and Shift-Tab wrap through registry order in Preferred')
+        terminal.palette('Layout: Fit tiles to window')
         terminal.resize(120, 40)
-        terminal.capture('testing-layout-return-120x40', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
-        check(True, 'Testing viewport repainted at actual 120 columns and 40 rows after returning')
+        assert_stock_layout(terminal, 'testing-layout-return-120x40', evidence)
+        check(True, 'stock Testing tracks and spanning Logs repaint after resizing back to 120x40')
         check([r['operation'] for r in records()] == ['discover'],
               'render and workspace navigation do not repeat startup discovery or launch tests')
         snapshot = workspace()
         testing = next(w for w in field(snapshot, 'workspaces') if field(w, 'preset') == ['testing'])
         wid = field(testing, 'id')
         tiles = [t for t in field(snapshot, 'tiles') if field(t, 'workspace') == wid]
-        check(all(any(field(t, 'kind') == kind for t in tiles) for kind in PANES), 'all six cooperative panes installed')
-        check(not any(field(t, 'kind') == 'run-selector' for t in tiles), 'project-only Testing has no ASIC selector')
-        # Navigation, Session, generic tests, execution, Catalog.
-        for _ in range(4):
-            terminal.key(b'\t')
+        check(tuple(field(t, 'kind') for t in tiles) == STOCK_KINDS,
+              'stock membership and registry order exclude Project Tests and the ASIC selector')
+        focus_pane(terminal, 'simulation-catalog')
         terminal.palette('Zoom focused tile')
         terminal.capture('catalog-auto-discovered', ['first', 'second', 'Ready for explicit launch'])
         terminal.key(b'x')  # remove first: exact subset is second
@@ -218,20 +211,19 @@ def run(args):
         done = session.done(aid)
         check(field(done, 'outcome') == 'Passed', 'selected subset produces actual normalized fixture result')
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\x1b[Z')  # Execution: labels use the job's captured subset.
+        focus_pane(terminal, 'execution')  # Labels use the job's captured subset.
         terminal.palette('Zoom focused tile')
         terminal.capture('execution-readable-labels', ['sim discover', 'sim run fixture/second'])
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\t')  # Catalog
-        terminal.key(b'\t')  # Attempts shares the just launched attempt.
+        focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
-        terminal.key(b'\t')  # Cases
+        focus_pane(terminal, 'simulation-cases')
         terminal.key(b'j')
-        terminal.key(b'\t')  # Detail
+        focus_pane(terminal, 'simulation-detail')
         terminal.palette('Zoom focused tile')
         terminal.capture('shared-detail', ['second', aid])
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\t')  # Artifacts
+        focus_pane(terminal, 'simulation-artifacts')
         terminal.key(b'j')
         terminal.palette('Zoom focused tile')
         terminal.capture('shared-artifacts', ['second-raw'])
@@ -242,7 +234,7 @@ def run(args):
         check(hashlib.sha256(exported.read_bytes()).hexdigest() == field(artifact, 'sha256')[0],
               'cooperative export retains exact selected artifact bytes and SHA256')
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\t')  # Logs
+        focus_pane(terminal, 'simulation-logs')
         terminal.palette('Zoom focused tile')
         terminal.capture('shared-exact-logs', [aid, field(done, 'job')[:25], 'job-2'])
         terminal.palette('Simulation: Rerun case second (original inputs; current project)')
@@ -263,7 +255,7 @@ def run(args):
         specs = [[field(t, 'kind'), field(t, 'requested_geometry')] for t in tiles]
         mutate(['Apply_preset', ['workspace', field(other, 'id')], ['preset', 'testing'], ['tiles', specs]])
         terminal.palette('Switch to Independent Testing')
-        focus_pane('simulation logs')
+        focus_pane(terminal, 'simulation-logs')
         terminal.palette('Zoom focused tile')
         terminal.capture('independent-workspace', [field(child, 'id'), field(child, 'job')[:25]],
                          absent=[aid])
@@ -291,7 +283,7 @@ def run(args):
               'additive upgrade preserves saved hidden legacy extras, pins and geometry')
         # Revisit Catalog: failed discovery retains rows but disables launch.
         terminal.palette('Switch to Independent Testing')
-        focus_pane('simulation catalog')
+        focus_pane(terminal, 'simulation-catalog')
         terminal.palette('Zoom focused tile')
         before_refresh = job_ids()
         mode('discovery-malformed')
@@ -323,12 +315,12 @@ def run(args):
               'fresh daemon automatically attempts discovery once without replaying retained runs')
         mode('pass')  # Repair alone must not cause observation/navigation to retry.
         terminal.palette('Switch to Testing')
-        focus_pane('simulation logs')
+        focus_pane(terminal, 'simulation-logs')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
         terminal.palette('Zoom focused tile')
         terminal.capture('historical-exact-logs-unavailable', ['Job logs unavailable in this daemon'])
         terminal.palette('Unzoom workspace')
-        focus_pane('simulation catalog')
+        focus_pane(terminal, 'simulation-catalog')
         terminal.palette('Zoom focused tile')
         terminal.capture('cold-discovery-blocked', ['Launch disabled:', 'Discovery failed:'])
         peer = Terminal(session)

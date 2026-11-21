@@ -3,7 +3,7 @@ id: WB-061
 title: Bounded workspace aesthetic refinement
 category: presentation
 feature_sets: [FS5]
-status: partial
+status: closed
 kind: enhancement
 priority: P2
 severity: n/a
@@ -61,16 +61,30 @@ widening and reconnecting. Local before/after captures of the same fixture and
 dimensions: `/tmp/opencode/{wb061-before,wb061-final}/first-client-selected.txt`
 (with `.ansi` alongside for color).
 
+### Owner acceptance — 2026-11-21
+
+The owner reviewed Simulation Detail in the installed client and approved the
+final Testing layout. Attempts and Execution now share the history column, Cases
+sits beside Artifacts, and Logs spans both investigation columns. Project Tests
+remains available as an optional tile. The [Testing workspace test](../../../scripts/test-testing-workspace.py)
+checks the layout at 120×40 and 180×55 and exercises case, artifact and log navigation.
+This completes the agreed visual pass; future layout requests are follow-ups.
+
+**Accepted follow-up:** Simulation Cases aligns case results; Simulation Artifacts
+aligns names, owning cases and availability. Both panes drop padding when it would
+cause an extra wrap. The Testing workspace integration suite passed, and the
+installed client was checked with real FIFO results at 120×40 and 180×55.
+
 ## Out of scope
 An infinite theme redesign, new investigation capabilities, or silently choosing
 a final default. Separate feature tickets retain their own scope and estimates.
 
 ## Acceptance criteria
 - [x] Record the selected workspaces, visual goals and bounded punch list up front.
-- [ ] Show before/after terminal captures with the same content and dimensions.
-- [ ] Narrow-size recovery, semantic statuses and keyboard discoverability remain sound.
-- [ ] Record owner review outcome and explicitly defer any newly requested iteration.
-- [ ] Appearance-only changes preserve identities, contexts and provider behavior.
+- [x] Show before/after terminal captures with the same content and dimensions.
+- [x] Narrow-size recovery, semantic statuses and keyboard discoverability remain sound.
+- [x] Record owner review outcome and explicitly defer any newly requested iteration.
+- [x] Appearance-only changes preserve identities, contexts and provider behavior.
 - [x] Compare the same attempt and artifact at normal and narrow widths. Labels,
   values and statuses remain distinguishable; grouped values align where space
   permits. Verify zero, unknown and scaled sizes (1,250,000 bytes → `1.25 MB`).

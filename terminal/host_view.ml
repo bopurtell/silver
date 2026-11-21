@@ -1659,10 +1659,17 @@ let indicator_role : Indicator.t -> Role.t = function
   | Info -> Muted
 ;;
 
-let detail_field_gutter appearance ~width =
-  (* Align fields with and without icons; leave the text room on very narrow panes. *)
+let simulation_icon_gutter appearance ~width =
+  (* The icon and its separator are painted outside the model text. On panes too
+     narrow to fit both, give the cells to text rather than to the icon. *)
   let icon_width = View.width (indicator_view appearance Muted Seed) in
   if width > icon_width then icon_width else 0
+;;
+
+let simulation_columns_gutter appearance pane ~width =
+  match (pane : Testing_workspace.pane) with
+  | Cases | Artifacts -> Some (simulation_icon_gutter appearance ~width)
+  | _ -> None
 ;;
 
 let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width ?width host data tile
@@ -1670,11 +1677,16 @@ let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width ?width host
   match Testing_workspace.pane tile.W.Tile.kind with
   | Some pane ->
     let width =
-      match pane with
-      | Detail ->
-        Option.map width ~f:(fun width ->
-          width - detail_field_gutter host.H.appearance ~width)
-      | _ -> width
+      Option.map width ~f:(fun width ->
+        let gutter =
+          match pane with
+          | Detail -> simulation_icon_gutter host.H.appearance ~width
+          | _ ->
+            Option.value
+              (simulation_columns_gutter host.H.appearance pane ~width)
+              ~default:0
+        in
+        width - gutter)
     in
     (match pane with
      | Catalog ->
@@ -1706,12 +1718,13 @@ let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width ?width host
 let annotated_physical_rows
   ?indicator_frames
   ?(detail_fields = false)
+  ?columns_gutter
   host
   ~width
   annotations
   =
   let field_gutter =
-    if detail_fields then detail_field_gutter host.H.appearance ~width else 0
+    if detail_fields then simulation_icon_gutter host.H.appearance ~width else 0
   in
   annotations
   |> List.concat_map
@@ -1745,10 +1758,12 @@ let annotated_physical_rows
              ~default:View.none
              ~f:(indicator_view ?indicator_frames host.H.appearance indicator_role)
          in
-         let icon =
-           if detail_fields && Option.is_some value_start
-           then box ~width:field_gutter ~height:1 icon
-           else icon
+          let icon =
+            match columns_gutter, target with
+            | Some gutter, Some (Case _ | Artifact _) -> box ~width:gutter ~height:1 icon
+            | _ when detail_fields && Option.is_some value_start ->
+              box ~width:field_gutter ~height:1 icon
+            | _ -> icon
          in
          let used = ref 0 in
          wrap_cells ~width:(width - View.width icon) text
@@ -1808,10 +1823,10 @@ let annotated_view_rows ?indicator_frames host ~width annotations =
 ;;
 
 let simulation_physical_rows ?indicator_frames ?now host data tile ~width =
-  let detail_fields =
-    match Testing_workspace.pane tile.W.Tile.kind with
-    | Some Detail -> true
-    | _ -> false
+  let pane = Testing_workspace.pane tile.W.Tile.kind in
+  let detail_fields = Option.exists pane ~f:(function Detail -> true | _ -> false) in
+  let columns_gutter =
+    Option.bind pane ~f:(simulation_columns_gutter host.H.appearance ~width)
   in
   simulation_annotations
     ?now
@@ -1822,7 +1837,7 @@ let simulation_physical_rows ?indicator_frames ?now host data tile ~width =
     tile
   |> List.filter ~f:(fun row ->
     (not row.Simulation_view.hint) || (H.policy host tile).hints)
-  |> annotated_physical_rows ?indicator_frames ~detail_fields host ~width
+  |> annotated_physical_rows ?indicator_frames ~detail_fields ?columns_gutter host ~width
 ;;
 
 let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~width =
@@ -4531,9 +4546,8 @@ let plain_text view =
   Buffer.contents buffer
 ;;
 
-let refinement_fixture (definition : P.Definition.t) =
+let refinement_fixture_with initialize =
   let initial = W.initial ~session_id:(W.Session_id.of_string "refinement-render") in
-  let workspace = List.hd_exn initial.workspaces in
   let apply registry mutation =
     W.apply
       registry
@@ -4541,7 +4555,8 @@ let refinement_fixture (definition : P.Definition.t) =
     |> Result.ok
     |> Option.value_exn
   in
-  let registry = apply initial (P.Definition.apply definition ~workspace:workspace.id) in
+  let registry : W.Snapshot.t = initialize initial in
+  let workspace = List.hd_exn registry.workspaces in
   let registry =
     apply
       registry
@@ -4590,6 +4605,65 @@ let refinement_fixture (definition : P.Definition.t) =
     List.find_exn (H.tiles host) ~f:(fun tile -> String.equal tile.W.Tile.kind kind)
   in
   host, data, find
+;;
+
+let refinement_fixture definition =
+  refinement_fixture_with (fun (initial : W.Snapshot.t) ->
+    let workspace = List.hd_exn initial.workspaces in
+    let mutation = P.Definition.apply definition ~workspace:workspace.id in
+    W.apply initial (Mutate { expected_revision = initial.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn)
+;;
+
+let project_job_fixture ~compact =
+  let open Workspace_config in
+  let key = "project-job-fixture" in
+  let kinds = [ "execution"; "project-tests" ] in
+  let presentation =
+    if compact
+    then
+      Some
+        { Presentation.inherit_defaults with
+          compact_summary = Some true
+        ; run_reference = Some false
+        ; binding_badge = Some "hidden"
+        ; padding = Some 0
+        ; hints = Some false
+        }
+    else None
+  in
+  let definition : Definition.t =
+    { key
+    ; template =
+        { version = Workspace_template.version
+        ; name = "Project job fixture"
+        ; preset = None
+        ; views =
+            List.map kinds ~f:(fun kind ->
+              { Workspace_template.View.kind
+              ; hidden = false
+              ; geometry = { x = 0; y = 0; width = 80; height = 10 }
+              })
+        }
+    ; tiles = List.map kinds ~f:(fun key -> { Tile.key; presentation })
+    ; layout = None
+    }
+  in
+  let config : Resolved.t =
+    { version
+    ; id = key
+    ; definitions = [ definition ]
+    ; windows =
+        [ { key
+          ; name = "Fixture"
+          ; workspaces = [ { key; name = "Jobs"; definition = Custom key } ]
+          }
+        ]
+    }
+  in
+  refinement_fixture_with (fun initial ->
+    W.apply initial (Initialize_config config) |> Result.ok |> Option.value_exn)
 ;;
 
 let%test_unit "80-column Project button and visible run rows have distinct hit targets" =
@@ -4716,7 +4790,7 @@ let%test_unit "Runs pointer selection follows filtered capped page and never bin
 ;;
 
 let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
-  let host, data, find = refinement_fixture P.Testing.definition in
+  let host, data, find = project_job_fixture ~compact:true in
   let tile = find "project-tests" in
   let job =
     { (List.hd_exn Baseline_fixture.jobs) with
@@ -4726,7 +4800,13 @@ let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
   in
   let data =
     { data with
-      jobs = [ job ]
+      jobs =
+        [ job
+        ; { job with
+            id = Job_id.of_string "non-test-build"
+          ; kind = { namespace = "dune"; name = "build" }
+          }
+        ]
     ; log_lines = (fun _ -> [ "> long-wrapped-attempt-id Complete" ])
     }
   in
@@ -4735,7 +4815,14 @@ let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
     annotated_physical_rows host ~width (execution_annotations host data tile)
   in
   let rows = physical host in
-  assert (List.count rows ~f:(fun (_, (target, _)) -> Option.is_some target) > 1);
+  let targets = List.filter_map rows ~f:(fun (_, (target, _)) -> target) in
+  assert (List.length targets > 1);
+  List.iter targets ~f:(function
+    | Job id -> assert (Job_id.equal id job.id)
+    | _ -> assert false);
+  let text = tile_view host data tile ~width:24 ~height:8 |> plain_text in
+  assert (String.is_substring text ~substring:"Dune test jobs");
+  assert (not (String.is_substring text ~substring:"Generic project tests"));
   let host =
     H.set_local host tile.id { (H.local host tile.id) with scroll = List.length rows - 1 }
   in
@@ -5644,17 +5731,10 @@ let%test_unit "cooperative Testing renderer keeps project scope and bounded pane
       in
       assert (String.equal (plain_text a) (plain_text b));
       assert (
-        not (String.is_substring (plain_text a) ~substring:(run_label Asic_snapshot_fixture.run_a))));
-  let text =
-    tile_view host data (find "project-tests") ~width:24 ~height:8 |> plain_text
-  in
-  assert (not (String.is_substring text ~substring:"Generic project tests"));
-  assert (String.is_substring text ~substring:"Dune test jobs")
+        not (String.is_substring (plain_text a) ~substring:(run_label Asic_snapshot_fixture.run_a))))
 ;;
 
-let%test_unit "long cooperative lists follow typed wrapped cursors and respect manual \
-               scroll"
-  =
+let long_testing_fixture () =
   let host, data, find = refinement_fixture P.Testing.definition in
   let cases =
     List.init 40 ~f:(fun i ->
@@ -5750,6 +5830,13 @@ let%test_unit "long cooperative lists follow typed wrapped cursors and respect m
   let view =
     { Simulation_view.empty with snapshot = Some snapshot; attempt = Some attempt.id }
   in
+  host, data, find, view, snapshot, attempt
+;;
+
+let%test_unit "long cooperative lists follow typed wrapped cursors and respect manual \
+               scroll"
+  =
+  let host, data, find, view, _, _ = long_testing_fixture () in
   let host = H.set_simulation host (find "simulation-catalog").id view in
   let catalog_tile = find "simulation-catalog" in
   let physical = simulation_physical_rows host data catalog_tile ~width:18 in
@@ -5879,12 +5966,7 @@ let%test_unit "long cooperative lists follow typed wrapped cursors and respect m
 let%test_unit "project command hints follow tile policy in compact and full images" =
   List.iter [ "project-tests"; "execution" ] ~f:(fun kind ->
     List.iter [ true; false ] ~f:(fun compact ->
-      let definition =
-        if compact
-        then P.Testing.definition
-        else { P.Testing.definition with id = "overview" }
-      in
-      let host, data, find = refinement_fixture definition in
+      let host, data, find = project_job_fixture ~compact in
       let tile = find kind in
       List.iter [ true; false ] ~f:(fun hints ->
         let host =
@@ -5946,6 +6028,145 @@ let%test_unit "detail field ink follows light and dark themes across wrapped cel
         String.equal
           (ansi (box ~width:(View.width expected) ~height:1 actual))
           (ansi expected))))
+;;
+
+let%test_unit "Cases and Artifacts align painted columns with or without icons" =
+  let host, data, find, view, snapshot, attempt = long_testing_fixture () in
+  let cases =
+    List.map
+      [ "X", Simulation.Case_status.Passed; "鍵-Failed-X", Failed; "MixCase", Skipped ]
+      ~f:(fun (case_id, status) ->
+        { Simulation.Case_result.case_id; status; message = None; progress = None })
+  in
+  let base = List.hd_exn attempt.artifacts in
+  let artifacts =
+    [ { base with id = "short"; label = "Ok"; case_id = Some "X" }
+    ; { base with
+        id = "wide"
+      ; label = "鍵 Failed label"
+      ; case_id = Some "鍵-Failed-X"
+      ; availability = Missing
+      }
+    ; { base with
+        id = "suite"
+      ; label = "Suite report"
+      ; case_id = None
+      ; availability = Changed
+      }
+    ]
+  in
+  let snapshot = { snapshot with detail = Some { attempt with cases; artifacts } } in
+  let host =
+    H.set_simulation
+      host
+      (find "simulation-cases").id
+      { view with snapshot = Some snapshot }
+  in
+  let host =
+    H.update_testing host (find "simulation-artifacts").id (fun state ->
+      Testing_workspace.select_artifact state "wide")
+  in
+  let ansi view =
+    let buffer = Buffer.create 100 in
+    Notty.Render.to_buffer
+      buffer
+      Notty.Cap.ansi
+      (0, 0)
+      (View.width view, View.height view)
+      (View.Private.notty_image view);
+    Buffer.contents buffer
+  in
+  let cell ~x ~width view = View.crop ~l:x view |> box ~width ~height:1 in
+  let position ?(after = 0) view text =
+    let image = plain_text view in
+    let offset = String.length (plain_text (cell ~x:0 ~width:after view)) in
+    let index = String.substr_index_exn image ~pos:offset ~pattern:text in
+    cell_width (String.prefix image index)
+  in
+  let rows ~icons tile ~width =
+    let host = { host with appearance = { host.appearance with icons } } in
+    simulation_physical_rows host data tile ~width
+    |> List.filter_map ~f:(fun (selected, (target, image)) ->
+      Option.map target ~f:(fun target -> selected, target, image))
+  in
+  let check tile ~text_width expectations =
+    List.iter Appearance.Icons.all ~f:(fun icons ->
+      let gutter = if Appearance.Icons.equal icons None_ then 0 else 2 in
+      let actual = rows ~icons tile ~width:(text_width + gutter) in
+      assert (
+        List.equal Bool.equal
+          (List.map actual ~f:(fun (selected, _, _) -> selected))
+          [ false; true; false ]);
+      let framed_host =
+        { host with appearance = { host.appearance with icons; preset = Structured_studio } }
+      in
+      let tile_height = 12 in
+      let initial_width = text_width + gutter in
+      let geometry width = panel_geometry framed_host tile ~width ~height:tile_height in
+      let initial = geometry initial_width in
+      let tile_width = initial_width + (initial_width - initial.content_width) in
+      let body = body_bounds framed_host tile (geometry tile_width) in
+      assert (body.x > 0 && body.width = initial_width);
+      let image =
+        tile_view framed_host data tile ~width:tile_width ~height:tile_height
+        |> View.crop ~l:body.x ~t:body.y
+      in
+      List.iteri actual ~f:(fun y (_, _, row) ->
+        let painted = View.crop ~t:y image |> box ~width:body.width ~height:1 in
+        assert (String.equal (plain_text painted) (plain_text row)));
+      let columns =
+        List.map2_exn actual expectations
+          ~f:(fun (selected, target, image) (expected_target, name, owner, value, role, icon) ->
+            assert (Poly.equal target expected_target);
+            assert (
+              String.equal
+                (plain_text (cell ~x:gutter ~width:1 image))
+                (if selected then ">" else " "));
+            if gutter > 0
+            then (
+              let glyph = Indicator.text icons icon in
+              assert (String.equal (plain_text (cell ~x:0 ~width:1 image)) glyph));
+            let appearance = { host.appearance with icons } in
+            let check_part x text role =
+              let actual = cell ~x ~width:(cell_width text) image in
+              let expected = View.text ~attrs:(Role.attrs appearance role) text in
+              assert (String.equal (ansi actual) (ansi expected))
+            in
+            check_part (gutter + 2) name Foreground;
+            let value_x = position ~after:(gutter + 2 + cell_width name) image value in
+            check_part value_x value role;
+            let owner_x =
+              Option.map owner ~f:(fun owner ->
+                let x = position image ("— " ^ owner) + cell_width "— " in
+                check_part x owner Foreground;
+                x)
+            in
+            owner_x, value_x)
+      in
+      assert (List.for_all columns ~f:(Poly.equal (List.hd_exn columns)));
+      List.iter [ 1; 2; 6; 13; text_width - 2; text_width ] ~f:(fun width ->
+        (* Compare colored, physically wrapped rows on either side of the icon
+           budget, not just the annotation widths. Both the viewport and pointer
+           routing use these physical rows. *)
+        let gutter = if width <= 2 then 0 else gutter in
+        List.iter2_exn
+          (rows ~icons:None_ tile ~width)
+          (rows ~icons tile ~width:(width + gutter))
+          ~f:(fun (selected, target, no_icons) (selected', target', with_icons) ->
+            assert (Bool.equal selected selected' && Poly.equal target target');
+            assert (View.width with_icons = width + gutter && View.height with_icons = 1);
+            assert (String.equal (ansi no_icons) (ansi (cell ~x:gutter ~width with_icons))))))
+  in
+  check (find "simulation-cases") ~text_width:22
+    [ Case "X", "X", None, "Passed", Role.Success, Indicator.Completed
+    ; Case "鍵-Failed-X", "鍵-Failed-X", None, "Failed", Failure, Failed
+    ; Case "MixCase", "MixCase", None, "Skipped", Warning, Skipped
+    ];
+  check (find "simulation-artifacts") ~text_width:43
+    [ Artifact "short", "Ok", Some "X", "Available", Success, Artifact
+    ; Artifact "wide", "鍵 Failed label", Some "鍵-Failed-X", "Missing", Warning, Artifact
+    ; Artifact "suite", "Suite report", Some "suite", "Changed", Warning, Artifact
+    ]
 ;;
 
 let%test_unit "cooperative detail artifacts and logs paint fields and typed statuses" =
@@ -6560,17 +6781,7 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
 ;;
 
 let%test_unit "generic job icons retain exact identity and completion vocabulary" =
-  let definition =
-    { P.Testing.definition with
-      id = "generic-job-icon-regression"
-    ; tiles =
-        List.map P.Testing.definition.tiles ~f:(fun tile ->
-          { tile with
-            presentation = { tile.presentation with compact_summary = Some false }
-          })
-    }
-  in
-  let host, data, find = refinement_fixture definition in
+  let host, data, find = project_job_fixture ~compact:false in
   let tile = find "project-tests" in
   let base = List.hd_exn Baseline_fixture.jobs in
   let frames glyph : Indicator.frames =
@@ -6677,7 +6888,7 @@ let%test_unit "execution labels reuse simulation history from their own workspac
 ;;
 
 let%test_unit "execution images paint typed states and condense only display identities" =
-  let host, data, find = refinement_fixture P.Testing.definition in
+  let host, data, find = project_job_fixture ~compact:true in
   let id = "Failed-0123456789abcdef0123456789-Complete" in
   let base = List.hd_exn Baseline_fixture.jobs in
   let ansi view =
@@ -9793,6 +10004,71 @@ let%test_unit "stock Fit navigation completes rendered subtrees without reassign
           ; "finalization"
           ]);
     assert (W.Snapshot.equal registry (Option.value_exn host.registry)))
+;;
+
+let%test_unit "fresh Testing has independent Fit and Preferred focus orders" =
+  let initial = W.initial ~session_id:(W.Session_id.of_string "stock-testing-render") in
+  let registry =
+    W.apply initial (Initialize_config P.Presets.stock_config)
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let testing =
+    List.find_exn registry.workspaces ~f:(fun workspace ->
+      Option.equal String.equal workspace.preset (Some "testing"))
+  in
+  let host = H.switch (H.receive H.empty registry) testing.id in
+  let kinds mode =
+    H.navigation_tiles { host with layout_mode = mode }
+    |> List.map ~f:(fun tile -> tile.W.Tile.kind)
+  in
+  assert (
+    List.equal
+      String.equal
+      (kinds H.Fit)
+      [ "workspace-tabs"
+      ; "live-status"
+      ; "simulation-attempts"
+      ; "execution"
+      ; "simulation-catalog"
+      ; "simulation-detail"
+      ; "simulation-cases"
+      ; "simulation-artifacts"
+      ; "simulation-logs"
+      ]);
+  assert (
+    List.equal
+      String.equal
+      (kinds H.Preferred)
+      [ "workspace-tabs"
+      ; "live-status"
+      ; "execution"
+      ; "simulation-catalog"
+      ; "simulation-attempts"
+      ; "simulation-cases"
+      ; "simulation-detail"
+      ; "simulation-artifacts"
+      ; "simulation-logs"
+      ]);
+  let _, compact, cells =
+    tile_layout { host with layout_mode = H.Fit } { width = 120; height = 40 }
+  in
+  assert (not compact);
+  let geometry kind =
+    List.find_map_exn cells ~f:(fun (tile, rect) ->
+      Option.some_if (String.equal tile.W.Tile.kind kind) rect)
+  in
+  let status = geometry "live-status"
+  and history = geometry "simulation-attempts"
+  and execution = geometry "execution"
+  and catalog = geometry "simulation-catalog"
+  and detail = geometry "simulation-detail"
+  and logs = geometry "simulation-logs" in
+  assert (status.x = history.x && history.x = execution.x);
+  assert (status.y < history.y && history.y < execution.y);
+  assert (history.x < catalog.x && catalog.x < detail.x);
+  assert (logs.x = catalog.x && logs.y > catalog.y);
+  assert (logs.x + logs.width = detail.x + detail.width)
 ;;
 
 let%test_unit "keyed Fit navigation follows duplicate-kind placement while Preferred \

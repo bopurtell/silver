@@ -10,11 +10,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
+from fixtures.testing_layout import artifact_row, focus_pane
 spec = importlib.util.spec_from_file_location('compression_testing', HERE / 'test-testing-workspace.py')
 T = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(T)
@@ -84,6 +86,9 @@ def run(args):
     def compact(aid):
         return aid[:5] + '…' + aid[-5:]
 
+    def detail_field(label, value):
+        return re.compile(r'[│|] *' + re.escape(label) + r': +' + re.escape(value) + r' *(?=[│|])')
+
     def command(scope, choice):
         titles = {'full': 'Show full identifiers', 'compact': 'Compress identifiers',
                   'reset': 'Reset compression (inherit)'}
@@ -99,9 +104,7 @@ def run(args):
         terminal.palette('Timing preload: Explicit only')
         terminal.key(b'2')
         terminal.capture('testing', ['simulation-detail'])
-        # Navigation, Session, project tests, execution, catalog, attempts.
-        for _ in range(5):
-            terminal.key(b'\t')
+        focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Zoom focused tile')
         terminal.capture('colliding-attempt-list', [compact(aid) for aid in IDS])
         terminal.resize(32, 24)
@@ -118,30 +121,33 @@ def run(args):
         terminal.capture('tile-inherits-workspace', [compact(aid) for aid in IDS])
         check('global/full, workspace/compact, tile/full and tile/reset affect rendered list')
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\t'); terminal.key(b'\t')  # Cases, Detail
+        focus_pane(terminal, 'simulation-detail')
         terminal.palette('Zoom focused tile')
-        terminal.capture('detail-compact', ['Attempt: ' + compact(IDS[0]),
-            'Job: ' + compact(JOB), 'Discovery: ' + compact(DIGEST), SCREEN_LABEL])
+        terminal.capture('detail-compact', [detail_field('Attempt', compact(IDS[0])),
+            detail_field('Job', compact(JOB)), detail_field('Discovery', compact(DIGEST)), SCREEN_LABEL])
         command('workspace', 'reset')
-        terminal.capture('detail-global-full', ['Attempt: ' + IDS[0], 'Job: ' + JOB, 'Discovery: ' + DIGEST])
+        terminal.capture('detail-global-full', [detail_field('Attempt', IDS[0]),
+            detail_field('Job', JOB), detail_field('Discovery', DIGEST)])
         command('workspace', 'compact')
-        terminal.capture('detail-workspace-compact', ['Job: ' + compact(JOB)])
+        terminal.capture('detail-workspace-compact', [detail_field('Job', compact(JOB))])
         check('detail attempt/job/discovery share collision population; provider label stays intact')
         # Restart the actual client against the same daemon and project preferences.
         terminal.close(); terminal = T.Terminal(session)
-        terminal.capture('restart-scopes', ['Attempt: ' + compact(IDS[0]), 'Job: ' + compact(JOB)])
+        terminal.capture('restart-scopes', [detail_field('Attempt', compact(IDS[0])),
+                                            detail_field('Job', compact(JOB))])
         check('workspace override and global default survive fresh client restart')
         terminal.palette('Unzoom workspace')
-        terminal.key(b'\t')  # Artifacts
+        focus_pane(terminal, 'simulation-artifacts')
         terminal.palette('Zoom focused tile')
-        terminal.capture('artifact-label', ['Human provider waveform label', 'Available'])
+        artifact = artifact_row(SCREEN_LABEL, 'case', 'Available')
+        terminal.capture('artifact-label', [artifact])
         terminal.key(b'w')
         terminal.capture('quick-waveform-compact', ['Waveform', 'sim-…abcd'])
         command('workspace', 'full')
         terminal.capture('quick-waveform-full', [IDS[0], hashlib.sha256(VCD).hexdigest()])
         command('workspace', 'compact')
         terminal.key(b'q')
-        terminal.capture('back-to-artifacts', ['simulation-artifacts', 'Available'])
+        terminal.capture('back-to-artifacts', ['simulation-artifacts', artifact])
         check('quick waveform header obeys source tile policy; full mode reveals exact attempt/digest')
         terminal.key(b'W')
         terminal.capture('waveforms', ['Waveforms', 'Ready'])

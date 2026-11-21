@@ -80,10 +80,11 @@ val receive
     facts only. Artifacts lists all cases in protocol order, with label/case/availability;
     Detail carries the selected artifact's identity, digest and provenance, using the
     effective compression choice (full mode reveals exact values). [identifier_width]
-    reserves a stable list-local ordinal for long attempt tokens that cannot fit.
-    [width] is the Detail text width, excluding any host indicator gutter. Labels
-    align by group where possible; otherwise values stack on the next row.
-    Selection/export helpers always use exact source IDs. *)
+    reserves a stable list-local ordinal for long attempt tokens that cannot fit. [width]
+    is the text width, excluding any host indicator gutter. Cases and Artifacts align
+    navigator columns where they fit without introducing wrapping. Detail labels align by
+    group where possible; otherwise values stack on the next row. Selection/export helpers
+    always use exact source IDs. *)
 val rows
   :  ?now:Time_ns.t
   -> ?string_compression:bool

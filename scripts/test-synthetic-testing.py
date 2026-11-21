@@ -24,6 +24,7 @@ import traceback
 
 sys.dont_write_bytecode = True
 REPO = Path(__file__).resolve().parent.parent
+from fixtures.testing_layout import artifact_row, case_row, focus_pane
 
 
 def module(name, path):
@@ -152,15 +153,22 @@ class Terminal:
         os.write(self.master, value)
         self.drain(.15)
 
-    def capture(self, label, expected):
+    def capture(self, label, expected, absent=()):
+        def matches(value, text):
+            if isinstance(value, str):
+                return value.casefold() in text.casefold()
+            return value.search(text) is not None
+
         deadline = time.monotonic() + 12
         while True:
             text = self.drain()
-            if all(value.casefold() in text.casefold() for value in expected):
+            if (all(matches(value, text) for value in expected) and
+                    not any(matches(value, text) for value in absent)):
                 break
             if time.monotonic() >= deadline:
                 self.save(label, text)
-                raise AssertionError(label + ': expected ' + repr(expected) + '\n' + text)
+                raise AssertionError('%s: expected %r, absent %r\n%s' %
+                                     (label, expected, absent, text))
         self.save(label, text)
         return text
 
@@ -519,17 +527,30 @@ def terminal_checks(base, args, client, pass_id, fail_id, check):
         terminal.palette('Switch to Timing')
         terminal.capture('timing', ['Timing', 'Session', 'Timing · Paths', 'Timing · Provenance'])
         terminal.palette('Switch to Testing')
-        terminal.capture('testing', ['Testing', 'session', 'project-tests', 'execution',
+        terminal.capture('testing', ['Testing', 'session', 'execution',
             'simulation-catalog', 'simulation-attempts', 'simulation-cases',
             'simulation-detail', 'simulation-artifacts', 'simulation-logs',
-            'Suite: synthetic-checks', 'Finished/Passed', 'Finished/Failed',
-            'seeded-pattern: Passed', 'injected-mismatch: Failed', '[Available]', '[stdout]'])
+            'Suite: synthetic-checks', 'Finished/Failed',
+            case_row('seeded-pattern', 'Passed'), case_row('injected-mismatch', 'Failed'),
+            '[Available]', '[stdout]'],
+            absent=['project-tests'])
+        # At 120 columns the new left track can wrap an attempt's lifecycle
+        # mid-word. Read both exact outcomes in its zoomed viewport instead.
+        focus_pane(terminal, 'simulation-attempts')
+        terminal.palette('Zoom focused tile')
+        terminal.capture('testing-attempt-outcomes', ['Finished/Passed', 'Finished/Failed'])
+        terminal.palette('Unzoom workspace')
         terminal.focus_simulation()
         terminal.palette('Simulation: Reopen ' + pass_id + ' synthetic-checks')
         terminal.palette('Simulation: Select case seeded-pattern')
         terminal.capture('testing-cooperative-selected-case', ['simulation-cases',
-            '> seeded-pattern: Passed', 'simulation-detail', 'Passed / Finished',
+            case_row('seeded-pattern', 'Passed', selected=True), 'simulation-detail', 'Passed / Finished',
             'simulation-artifacts', '[Available]', 'simulation-logs', '[stdout]'])
+        focus_pane(terminal, 'simulation-artifacts')
+        terminal.palette('Zoom focused tile')
+        terminal.capture('testing-artifact-availability',
+                         [artifact_row('SYNTHETIC report seeded-pattern', 'seeded-pattern', 'Available')])
+        terminal.palette('Unzoom workspace')
         check({field(a, 'id') for a in attempts(client)} == before,
               'Cooperative Testing reopen/case selection updates real panes without allocating attempts')
         terminal.palette('Switch to Legacy simulation')
@@ -576,10 +597,11 @@ def terminal_checks(base, args, client, pass_id, fail_id, check):
         terminal.palette('Switch to Timing')
         terminal.capture('timing-large', ['Session', 'Timing · Paths', 'Timing · Provenance'])
         terminal.palette('Switch to Testing')
-        terminal.capture('testing-large', ['session', 'project-tests', 'execution',
+        terminal.capture('testing-large', ['session', 'execution',
             'simulation-catalog', 'simulation-attempts', 'simulation-cases',
             'simulation-detail', 'simulation-artifacts', 'simulation-logs',
-            'Suite: synthetic-checks', 'seeded-pattern', '[Available]', '[stdout]'])
+            'Suite: synthetic-checks', 'seeded-pattern', '[Available]', '[stdout]'],
+            absent=['project-tests'])
         terminal.palette('Switch to Legacy simulation')
         terminal.capture('legacy-testing-large', ['Structured simulation', 'synthetic-checks'])
         terminal.focus_simulation()

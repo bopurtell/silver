@@ -102,16 +102,15 @@ def main():
         terminal = Terminal(session)
         check('startup', ['Overview'])
         terminal.palette('Switch to Testing')
-        terminal.key(b'\t' * 5)
+        replay.testing_layout.focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Simulation: Reopen ' + field(attempt, 'id') + ' fixture')
         terminal.palette('Simulation: Select case flops256')
-        terminal.key(b'\t' * 3)
+        replay.testing_layout.focus_pane(terminal, 'simulation-artifacts')
         terminal.key(b'w')
         extent = min(args.last, 8 * args.period)
         text = check('default-eight-periods', ['8 cycles', 'window 0..' + str(extent)])
-        clock_row = next(line for line in text.splitlines()
-            if ('clk' if args.response is not None else '-clock') in line and '|' in line and '_' in line)
-        assert '|' in clock_row and '_' in clock_row, clock_row
+        assert replay.clock_graph_visible(
+            text.splitlines(), 'clk' if args.response is not None else '-clock'), text
         if args.response is not None:
             assert 'X/Z in window; no graph' in text
         terminal.key(b'f')
@@ -129,7 +128,7 @@ def main():
                 terminal.key(b'j' * 5)
                 expected.append(args.binary_value)
             check('exact-response', expected)
-            terminal.key(b'l')
+            terminal.key(b'L')  # Lowercase l advances one display column, not one tick.
             check('one-original-tick', ['Cursor ' + str(args.response + 1) + ' ticks'])
         terminal.key(b'\x1b')
         terminal.key(b'W')

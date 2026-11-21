@@ -53,6 +53,9 @@ pretend discovery is process-free. Both seed helpers now print progress notices.
 
 ## Layout changes
 
+These sizes describe the original synthetic demo. For the current stock preset,
+see [Testing layout and selection](testing_workspace.md#layout-and-selection).
+
 - **Timing:** Session:selector top-band width is1:2; at120 columns the Session tile
   is40 columns wide. Paths-left / Detail-over-Provenance remains unchanged.
 - **Testing:** sidebar:main width is1:2. Session and generic project-tests have a

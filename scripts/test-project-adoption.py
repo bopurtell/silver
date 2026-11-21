@@ -559,6 +559,8 @@ def terminal_integration(test, before, starters, header_id):
 
 
 def exercise(test):
+    from fixtures.testing_layout import STOCK_KINDS
+
     root = test.root
     (root / 'dune-project').write_text('(lang dune 3.22)\n(name fs3_acceptance)\n')
     (root / 'dune').write_text('(dirs)\n')
@@ -600,11 +602,8 @@ def exercise(test):
                     len(field(template, 'views')) == {'generic': 4, 'asic': 9}[kind]),
                    kind + ' offline starter matches canonical spec or intentional v1 compatibility template')
         if kind == 'testing':
-            test.check([field(view, 'kind') for view in field(template, 'views')] ==
-                       ['workspace-tabs', 'live-status', 'project-tests', 'execution',
-                        'simulation-catalog', 'simulation-attempts', 'simulation-cases',
-                        'simulation-detail', 'simulation-artifacts', 'simulation-logs'],
-                       'Testing starter has exact ordered cooperative panes without ASIC run selector')
+            test.check(tuple(field(view, 'kind') for view in field(template, 'views')) == STOCK_KINDS,
+                       'Testing starter has exact ordered cooperative panes without Project Tests or the ASIC selector')
         path = test.evidence / (kind + '.sexp')
         path.write_text(text)
         current, created = test.imported(current, template, path, kind + ' imported', 'import-' + kind)
@@ -631,6 +630,7 @@ def exercise(test):
         current, created = test.imported(current, template, path, field(template, 'name'), 'import-' + label)
         test.check(parse(test.cli('export', [created], 'export-' + label)) == portable(template),
                    label + ' roundtrip preserves optional/unknown identity and sparse membership honestly')
+    # Keep exercising the opt-in Project Tests tile (via the legacy generic starter).
     header = replace_field(portable(starters['generic'], 'Header acceptance'), 'views',
                            [v for v in field(starters['generic'], 'views') if field(v, 'kind') == 'project-tests'])
     header_path = test.evidence / 'header-acceptance.sexp'

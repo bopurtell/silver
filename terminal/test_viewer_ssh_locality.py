@@ -212,6 +212,7 @@ def run(args, evidence, result, cleanup):
         (evidence / name).mkdir()
     root = evidence / 'project'
     write(root / 'dune-project', '(lang dune 3.22)\n(name wb052_viewer)\n')
+    write(root / 'suite-id', 'fixture\n')
     write(root / 'hardcaml-workbench-simulation.sexp', handoff.wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(ROOT / 'terminal/test_waveform_handoff_pty.py'), '_provider']),
@@ -300,12 +301,10 @@ def run(args, evidence, result, cleanup):
                 client_cleanup.callback(stop_remote_client)
             terminal.capture('startup', ['Overview'])
             terminal.palette('Switch to Testing')
-            for _ in range(5):
-                terminal.key(b'\t')
+            handoff.testing_layout.focus_pane(terminal, 'simulation-attempts')
             terminal.palette('Simulation: Reopen ' + field(attempt, 'id') + ' fixture')
             terminal.palette('Simulation: Select case flops256')
-            for _ in range(3):
-                terminal.key(b'\t')
+            handoff.testing_layout.focus_pane(terminal, 'simulation-artifacts')
             terminal.key(b'v')
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:

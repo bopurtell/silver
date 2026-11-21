@@ -7,6 +7,7 @@ import importlib.util
 import os
 from pathlib import Path
 import pty
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,8 @@ from support.screen import terminal_screen
 from support.terminal import Terminal
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / 'scripts'))
+from fixtures.testing_layout import artifact_row, case_row
 
 
 class TerminalTests(unittest.TestCase):
@@ -46,6 +49,8 @@ class TerminalTests(unittest.TestCase):
     def test_screen_replaces_stale_diff_and_preserves_unicode_rules(self):
         data = 'OLD\x1b[2J\x1b[Hnew\x1b[2;1H界e\u0301!'.encode()
         self.assertEqual(terminal_screen(data, width=8, height=2), 'new\n界 e!')
+        data = 'abcd\x1b[H試験!'.encode()
+        self.assertEqual(terminal_screen(data, width=8, height=1), '試 験 !')
 
     def test_capture_and_saved_evidence(self):
         terminal = self.idle()
@@ -63,6 +68,25 @@ class TerminalTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, .6)
         self.assertIn('READY', (self.evidence / 'missing.txt').read_text())
         self.assertEqual((self.evidence / 'missing.ansi').read_bytes(), terminal.data)
+
+    def test_capture_supports_compiled_screen_expectations(self):
+        terminal = self.start('import time\nprint("seeded:    Passed", flush=True)\ntime.sleep(30)\n')
+        text = terminal.capture('case', [re.compile(r'^seeded: +Passed$', re.MULTILINE)],
+                                [re.compile(r'^seeded: +Failed$', re.MULTILINE)], timeout=2)
+        self.assertEqual(text.splitlines()[0], 'seeded:    Passed')
+
+    def test_testing_rows_accept_padding_but_keep_pairs_exact(self):
+        case = case_row('seeded', 'Passed', selected=True)
+        self.assertRegex('│✓ > seeded:      Passed │', case)
+        self.assertNotRegex('│✓ > other-seeded: Passed │', case)
+        self.assertNotRegex('│✓   seeded: Passed │', case)
+        self.assertNotRegex('│✓ > seeded: │    Passed │', case)
+        self.assertNotRegex('│✓ > seeded: │\n│ Passed │', case)
+        artifact = artifact_row('seeded.sexp', 'seeded', 'Available')
+        self.assertRegex('│◇ > seeded.sexp    — seeded    [Available] │', artifact)
+        self.assertNotRegex('│◇ > seeded.sexp — other [Available] │', artifact)
+        self.assertNotRegex('│◇ > seeded.sexp — seeded [Missing] │\n'
+                            '│◇   other.vcd — seeded [Available] │', artifact)
 
     def test_exit_is_not_a_successful_empty_capture(self):
         terminal = self.start('print("EXIT", flush=True)\n')

@@ -22,6 +22,17 @@ def load(name, path):
 
 
 wire = load('mixed_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
+testing_layout = load('mixed_testing_layout', ROOT / 'scripts/fixtures/testing_layout.py')
+
+
+def clock_graph_visible(rows, label='clk'):
+    # The clock lane may use ASCII or Unicode graph strokes.
+    for i, row in enumerate(rows[:-1]):
+        if label in row and 'inferred' not in row:
+            lane = row.split(label, 1)[1] + rows[i + 1]
+            if ('_' in lane and '|' in lane) or ('─' in lane and ('┌' in lane or '┘' in lane)):
+                return True
+    return False
 
 
 def provider():
@@ -112,19 +123,15 @@ def main():
         terminal = Terminal(session)
         terminal.capture('startup', ['Overview'])
         terminal.palette('Switch to Testing')
-        for _ in range(5):
-            terminal.key(b'\t')
+        testing_layout.focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Simulation: Reopen ' + field(attempt, 'id') + ' fixture')
         terminal.palette('Simulation: Select case flops256')
-        for _ in range(3):
-            terminal.key(b'\t')
+        testing_layout.focus_pane(terminal, 'simulation-artifacts')
         terminal.key(b'w')
         rows = terminal.rows('quick-default-x')
         qrow = next(row for row in rows if 'X/Z in window; no graph' in row)
         check('q' in qrow[:40], 'quick q label and unknown marker occupy the same lane')
-        clock = next(i for i, row in enumerate(rows) if 'clk' in row and 'inferred' not in row)
-        check('_' in rows[clock] + rows[clock + 1],
-              'quick default keeps known clock graph visible')
+        check(clock_graph_visible(rows), 'quick default keeps known clock graph visible')
         terminal.key(b'j' * 5)
         terminal.capture('quick-exact-x-value', ['xxxxxxxxxxxxxxxx'], absent=['Graph unavailable'])
         check(True, 'quick cursor/sidebar retains exact initial sixteen-bit X')
@@ -139,8 +146,7 @@ def main():
         rows = terminal.rows('workspace-default-x')
         qrow = next(row for row in rows if 'X/Z in window; no graph' in row)
         check('q' in qrow[:65], 'dedicated q label remains aligned with its unknown lane')
-        clock = next(i for i, row in enumerate(rows) if 'clk' in row and 'inferred' not in row)
-        check('_' in rows[clock] + rows[clock + 1],
+        check(clock_graph_visible(rows),
               'dedicated default keeps known clock graph visible alongside q=X')
         terminal.capture('workspace-ready', ['Ready', '1 ps', 'Pinned: flops256-waveform'],
             absent=['Graph unavailable'])

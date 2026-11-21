@@ -31,7 +31,9 @@ def click(t, screen, label, row=None, *, button=0):
 
 
 def inspect_second(t):
-    t.palette("Switch to Testing")
+    tabs = t.capture("workspace-tabs", ["2 Testing", "Project ▾"])
+    if "[2 Testing]" not in tabs.splitlines()[0]:
+        click(t, tabs, "2 Testing", row=0)
     ready = t.capture("testing", ["[2 Testing]", "simulation-catalog", "Project ▾"])
     top = ready.splitlines()[0]
     assert top.index("Project ▾") < top.index("Overview") < top.index("[2 Testing]"), top

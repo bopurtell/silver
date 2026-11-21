@@ -383,7 +383,6 @@ let%test_unit "merged stock content and presentation survive the schema projecti
       (kinds Testing.definition)
       [ "workspace-tabs"
       ; "live-status"
-      ; "project-tests"
       ; "execution"
       ; "simulation-catalog"
       ; "simulation-attempts"
@@ -434,12 +433,11 @@ let%test_unit "stock navigation follows layout subtrees even with shuffled Runs 
     ; ( Testing.definition
       , [ "workspace-tabs"
         ; "live-status"
-        ; "project-tests"
+        ; "simulation-attempts"
         ; "execution"
         ; "simulation-catalog"
-        ; "simulation-attempts"
-        ; "simulation-cases"
         ; "simulation-detail"
+        ; "simulation-cases"
         ; "simulation-artifacts"
         ; "simulation-logs"
         ] )
@@ -875,7 +873,8 @@ let%test_unit "Waveforms log provenance rejects another daemon instance" =
     Result.is_error (F.log_job { pin with log = Unavailable "expired" } ~instance_id))
 ;;
 
-let%test_unit "cooperative Testing is bounded, readable and project scoped" =
+let%test_unit "Testing fits a history column, paired investigation rows and spanning logs"
+  =
   let d = Testing.definition in
   assert (not (List.mem (kinds d) "run-selector" ~equal:String.equal));
   assert (not (List.mem (kinds d) "simulation" ~equal:String.equal));
@@ -900,24 +899,117 @@ let%test_unit "cooperative Testing is bounded, readable and project scoped" =
                 || b.y + b.height <= a.y)));
         if width >= 120
         then (
-          let cell kind =
-            List.nth_exn
-              cells
-              (List.findi_exn (kinds d) ~f:(fun _ k -> String.equal kind k) |> fst)
-          in
-          assert ((cell "live-status").width = width / 4);
-          assert ((cell "simulation-catalog").width = (width * 5 / 8) - (width / 4));
-          assert ((cell "simulation-detail").width = width - (width * 5 / 8));
-          List.iter [ "simulation-catalog"; "simulation-detail" ] ~f:(fun kind ->
-            let g = cell kind in
-            assert (g.width >= 45 && g.height >= 12));
-          List.iter
-            [ "simulation-attempts"
-            ; "simulation-cases"
-            ; "simulation-artifacts"
-            ; "simulation-logs"
-            ]
-            ~f:(fun kind -> assert ((cell kind).height >= 7))))
+          let placed = List.zip_exn (kinds d) cells in
+          let cell kind = List.Assoc.find_exn placed kind ~equal:String.equal in
+          let navigation = cell "workspace-tabs"
+          and session = cell "live-status"
+          and attempts = cell "simulation-attempts"
+          and execution = cell "execution"
+          and catalog = cell "simulation-catalog"
+          and detail = cell "simulation-detail"
+          and cases = cell "simulation-cases"
+          and artifacts = cell "simulation-artifacts"
+          and logs = cell "simulation-logs" in
+          assert (
+            navigation.x = 0
+            && navigation.y = 0
+            && navigation.width = width
+            && navigation.height = 1);
+          assert (session.x = 0 && session.y = 1);
+          assert (session.width = width / 4 && session.height = 6);
+          assert (attempts.x = 0 && attempts.width = session.width);
+          assert (attempts.y = session.y + session.height && attempts.height >= 7);
+          assert (execution.x = 0 && execution.width = session.width);
+          assert (execution.y = attempts.y + attempts.height && execution.height >= 6);
+          assert (execution.y + execution.height = height - 2);
+          assert (catalog.x = session.width && catalog.y = session.y);
+          assert (catalog.width = (width - session.width) / 2 && catalog.height >= 12);
+          assert (detail.x = catalog.x + catalog.width);
+          assert (detail.x + detail.width = width);
+          assert (detail.y = catalog.y && detail.height = catalog.height);
+          assert (cases.x = catalog.x && cases.width = catalog.width);
+          assert (cases.y = catalog.y + catalog.height && cases.height >= 7);
+          assert (artifacts.x = detail.x && artifacts.width = detail.width);
+          assert (artifacts.y = cases.y && artifacts.height = cases.height);
+          assert (logs.x = catalog.x && logs.width = catalog.width + detail.width);
+          assert (logs.y = cases.y + cases.height && logs.height >= 7);
+          assert (logs.y + logs.height = height - 2)))
+;;
+
+let%test_unit "Testing Apply preserves legacy Project Tests and Restore hides it as an \
+               extra"
+  =
+  let module W = Workspace in
+  let d = Testing.definition in
+  let ok result = result |> Result.ok |> Option.value_exn in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "old-testing") in
+  let stock = Presets.builtins "testing" |> Or_error.ok_exn in
+  let layout = Option.value_exn stock.layout in
+  let add_project_tests items extra = List.take items 2 @ [ extra ] @ List.drop items 2 in
+  let legacy =
+    { stock with
+      template =
+        { stock.template with
+          views =
+            add_project_tests
+              stock.template.views
+              { kind = "project-tests"
+              ; hidden = false
+              ; geometry = { x = 3; y = 4; width = 40; height = 9 }
+              }
+        }
+    ; tiles = add_project_tests stock.tiles { key = "project-tests"; presentation = None }
+    ; layout =
+        Some
+          (Stack
+             [ layout
+             ; Leaf { tile = "project-tests"; min_width = 24; min_height = 6; weight = 1 }
+             ])
+    }
+  in
+  let config =
+    { Presets.stock_config with
+      definitions =
+        List.map Presets.stock_config.definitions ~f:(fun spec ->
+          if String.equal spec.key "testing" then legacy else spec)
+    }
+  in
+  let saved = W.apply initial (Initialize_config config) |> ok in
+  let workspace =
+    List.find_exn saved.workspaces ~f:(fun w ->
+      Option.equal String.equal w.preset (Some "testing"))
+  in
+  let members (s : W.Snapshot.t) =
+    List.filter s.tiles ~f:(fun tile -> W.Workspace_id.equal tile.workspace workspace.id)
+  in
+  let extra =
+    List.find_exn (members saved) ~f:(fun tile -> String.equal tile.kind "project-tests")
+  in
+  let mutate (s : W.Snapshot.t) mutation =
+    W.apply s (Mutate { expected_revision = s.revision; mutation }) |> ok
+  in
+  let applied = mutate saved (Definition.apply d ~workspace:workspace.id) in
+  assert (W.Tile.equal extra (W.tile applied extra.id));
+  assert (List.length (members applied) = List.length d.tiles + 1);
+  let restored =
+    mutate applied (Definition.restore d ~workspace:workspace.id)
+    |> W.Snapshot.sexp_of_t
+    |> W.Snapshot.t_of_sexp
+  in
+  assert (Result.is_ok (W.validate restored));
+  assert (W.Tile.equal (W.tile restored extra.id) { extra with hidden = true });
+  assert (List.length (members restored) = List.length d.tiles + 1);
+  assert (
+    List.equal
+      String.equal
+      (List.filter_map (members restored) ~f:(fun tile ->
+         Option.some_if (not tile.hidden) tile.kind))
+      (kinds d));
+  let origin =
+    List.find_exn restored.config_workspaces ~f:(fun origin ->
+      W.Workspace_id.equal origin.workspace workspace.id)
+  in
+  assert origin.policy_detached
 ;;
 
 let%test_unit "Timing thirds preserve investigation geometry" =

@@ -47,7 +47,10 @@ def terminal_screen(data, width=120, height=40):
                 elif char == '\b':
                     x = max(0, x - 1)
                 elif char >= ' ' and not unicodedata.combining(char):
+                    cells = 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
                     if 0 <= y < height and 0 <= x < width:
                         rows[y][x] = char
-                    x += 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+                        if cells == 2 and x + 1 < width:
+                            rows[y][x + 1] = ' '
+                    x += cells
     return '\n'.join(''.join(row).rstrip() for row in rows)

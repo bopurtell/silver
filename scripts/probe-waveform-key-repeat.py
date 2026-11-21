@@ -53,6 +53,10 @@ field = native.field
 
 
 class Terminal(latency.Terminal):
+    def drain(self, seconds=.2):
+        self.idle(seconds)
+        return self.screen.text()
+
     def palette(self, title):
         for key in (b' ', b'c', b'c'):
             self.key(key)
@@ -159,6 +163,8 @@ def setup(args, directory, source):
 
 
 def run_case(args, directory, source, metadata, result):
+    from fixtures.testing_layout import focus_pane
+
     session = setup(args, directory, source)
     t = None
     try:
@@ -176,14 +182,9 @@ def run_case(args, directory, source, metadata, result):
         t.idle(1)
         t.palette('Switch to Testing')
         t.wait(lambda s: 'simulation-artifacts' in s, 'testing')
-        for _ in range(5):
-            t.key(b'\t')
-            t.idle(.08)
+        focus_pane(t, 'simulation-attempts')
         t.palette('Simulation: Reopen ' + aid + ' fixture')
-        t.idle(.3)
-        for _ in range(3):
-            t.key(b'\t')
-            t.idle(.08)
+        focus_pane(t, 'simulation-artifacts')
         t.palette('Simulation: Open embedded waveform retained-vcd')
         t.wait(lambda s: state(s) is not None, 'waveform-ready')
         settle(t)

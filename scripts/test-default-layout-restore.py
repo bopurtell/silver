@@ -38,6 +38,7 @@ spec = importlib.util.spec_from_file_location('fs3', Path(__file__).with_name('t
 fs3 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fs3)
 field, require, sexp, parse = fs3.field, fs3.require, fs3.sexp, fs3.parse
+from fixtures.testing_layout import assert_stock_layout
 
 
 def workspace(snapshot, wid):
@@ -51,14 +52,16 @@ def tiles(snapshot, wid):
 class ReceiptProxy:
     """Observe real client requests, independently of polling/file-save timing.
 
-    Only Restore_default_layout responses are gated. Other requests, including
-    client polling and later local layout choices, remain independently runnable.
+    Restore receipts can be gated. The stale-CAS scenario can also briefly hold
+    workspace reads at the last published revision without gating mutations.
     """
     def __init__(self, test):
         self.test, self.events = test, []
         self.seen_revision = None
         self.lock = threading.Lock()
         self.delay_next = False
+        self.freeze_workspace_reads = False
+        self.last_workspace_read = None
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         owner = self
 
@@ -109,6 +112,14 @@ class ReceiptProxy:
                         response = error
                     with response:
                         status, content = response.status, response.read()
+                    # The stale-CAS test must allow the request through before
+                    # the client learns the newer revision via background polling.
+                    if self.path == '/api/v1/workspace' and self.command == 'GET':
+                        with owner.lock:
+                            if owner.freeze_workspace_reads:
+                                status, content = owner.last_workspace_read
+                            else:
+                                owner.last_workspace_read = status, content
                     if event is not None:
                         event.update(status=status, response=parse(content.decode()))
                         with (owner.test.evidence / 'client-receipts.jsonl').open('a') as out:
@@ -371,6 +382,10 @@ def fixture(test, templates):
     for view in field(templates['testing'], 'views') + field(templates['timing'], 'views'):
         mutate(['Create_tile', ['workspace', wid], ['kind', field(view, 'kind')],
                 ['geometry', field(view, 'geometry')]])
+    # Model an older saved layout with an explicit Project Tests tile even
+    # though it no longer appears in the stock Testing template.
+    mutate(['Create_tile', ['workspace', wid], ['kind', 'project-tests'],
+            ['geometry', [['x', '0'], ['y', '0'], ['width', '80'], ['height', '10']]]])
     # More than one existing occurrence, with the earliest run selector hidden.
     for tile in tiles(snapshot, wid):
         mutate(['Resize_tile', ['tile', field(tile, 'id')], ['geometry',
@@ -456,11 +471,15 @@ def exercise(test):
         terminal.palette('Layout: Requested tile sizes')
         stale_preferences = preferences(test, terminal, 'Preferred')
         proxy.sync(terminal, after)
-        terminal.palette(title, dispatch=False)
-        before = test.mutate(after, ['Rename_workspace', ['workspace', wid], ['name', 'Renamed after capture']])
-        index = len(proxy.events)
-        terminal.key(b'\r')
-        event = proxy.receipt(terminal, index, success=False)
+        proxy.freeze_workspace_reads = True
+        try:
+            terminal.palette(title, dispatch=False)
+            before = test.mutate(after, ['Rename_workspace', ['workspace', wid], ['name', 'Renamed after capture']])
+            index = len(proxy.events)
+            terminal.key(b'\r')
+            event = proxy.receipt(terminal, index, success=False)
+        finally:
+            proxy.freeze_workspace_reads = False
         test.check(field(event['response'][1], 'kind') == 'Conflict' and test.workspace() == before,
                    'Palette-open stale capture rejects with Conflict and no partial mutation')
         terminal.wait('stale-palette-closed', absent=['COMMAND PALETTE'])
@@ -496,12 +515,31 @@ def exercise(test):
         # to a display-name workspace. Export/import checks stable preset identity.
         for name in ('timing', 'testing', 'resources', 'overview'):
             before = test.workspace()
+            if name == 'testing':
+                optional = next(t for t in tiles(before, wid) if field(t, 'kind') == 'project-tests')
+                optional_id = field(optional, 'id')
+                before = test.mutate(before, ['Set_tile_hidden', ['tile', optional_id], ['hidden', 'false']])
+                before = test.mutate(before, ['Set_zoom', ['workspace', wid], ['tile', [optional_id]]])
+                proxy.sync(terminal, before)
+                terminal.wait('testing-legacy-project-tests', ['project-tests', 'Dune test jobs'])
+                terminal.palette('Layout: Requested tile sizes')
+                preferences(test, terminal, 'Preferred')
             proxy.sync(terminal, before)
             index = len(proxy.events)
             terminal.palette('Restore default layout: ' + name.title() + ' (hide extras)')
             event = proxy.receipt(terminal, index)
             after = event['response'][1]
             assert_restore(test, before, after, wid, templates[name])
+            if name == 'testing':
+                test.check(next(t for t in tiles(after, wid) if field(t, 'id') == optional_id) ==
+                           fs3.replace_field(optional, 'hidden', 'true'),
+                           'Testing restore hides the optional Project Tests tile without deleting or rewriting it')
+                preferences(test, terminal, 'Fit')
+                assert_stock_layout(terminal, 'testing-restored-180x55', test.evidence)
+                terminal.resize(120, 40)
+                assert_stock_layout(terminal, 'testing-restored-120x40', test.evidence)
+                terminal.resize(180, 55)
+                test.check(True, 'Testing restore paints both aligned right rows and spanning Logs at both PTY sizes')
             exported = parse(test.cli('export', [wid], 'export-restored-' + name))
             test.check(field(exported, 'preset') == [name] and
                        field(exported, 'name') == 'Renamed after capture',

@@ -25,6 +25,7 @@ import traceback
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
+from fixtures.testing_layout import case_row, focus_pane
 
 
 def load(name, path):
@@ -225,6 +226,8 @@ def exercise(test):
         artifact = field(detail, 'artifacts')[0]
         label = field(artifact, 'label')
 
+        case_status = case_row('reconnect-case', 'Passed')
+
         def painted_identity(text, phase):
             rows = list(pane_rows(text, 'simulation-detail'))
             headings = [row.strip() for row in rows]
@@ -263,26 +266,34 @@ def exercise(test):
             test.check(len(columns) == len(expected) and len(set(columns)) == 1,
                        phase + ': artifact values start in the same column')
             test.check('Passed / Finished' in '\n'.join(rows)
-                       and any(row.strip().endswith('reconnect-case: Passed') for row in rows),
+                       and any(case_status.search(row) for row in rows),
                        phase + ': attempt and case statuses remain visible as text')
             return len(rows[0])
 
         # Explicit attempt selection is a frontend action; artifact is its default.
-        terminal.key(b'\t')
+        focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
-        selected = ['> reconnect-case: Passed', '> ' + label, 'Finished/Passed']
+        selected = ['> reconnect-case:', '> ' + label, 'Finished/Passed']
+        selected_case = case_row('reconnect-case', 'Passed', selected=True)
+
+        def wait_selected(phase, *args, **kwargs):
+            screen = terminal.wait(phase, *args, **kwargs)
+            test.check(any(selected_case.search(row) for row in pane_rows(screen, 'simulation-cases')),
+                       phase + ': Cases shows the selected case with its exact status')
+            return screen
+
         painted = ['selected artifact', 'Artifact size:']
-        stock = terminal.wait('selected', [*selected, 'selected attempt', *painted])
+        stock = wait_selected('selected', [*selected, 'selected attempt', *painted])
         stock_detail = '\n'.join(pane_rows(stock, 'simulation-detail'))
         size = re.escape(field(artifact, 'size')[0])
         test.check(label in stock_detail and bool(re.search(r'Artifact size:\s+' + size + r' B\b', stock_detail)),
                    'Stock 120x40 Detail shows selected artifact label and size without scrolling')
         terminal.resize(120, 96)
-        normal = painted_identity(terminal.wait('selected-full-detail', [*selected, *painted]), 'First client')
+        normal = painted_identity(wait_selected('selected-full-detail', [*selected, *painted]), 'First client')
         terminal.resize(96, 96)
-        narrow = painted_identity(terminal.wait('selected-narrow', [*selected, *painted]), 'First client at 96 columns')
+        narrow = painted_identity(wait_selected('selected-narrow', [*selected, *painted]), 'First client at 96 columns')
         terminal.resize(120, 96)
-        recovered = painted_identity(terminal.wait('selected-recovered', [*selected, *painted]),
+        recovered = painted_identity(wait_selected('selected-recovered', [*selected, *painted]),
                                      'First client after widening')
         test.check(narrow < normal == recovered, 'Detail pane narrows and recovers its original width')
         test.check(counts() == dict(discover=1, run=1), 'First client discovers once and launches one cheap synthetic run')
@@ -302,12 +313,12 @@ def exercise(test):
         terminal = None
         terminal = Terminal(test, 'second-client', tall=True)
         # No input at all to the second client: only drain the actual PTY output.
-        painted_identity(terminal.wait('restored-no-input',
+        painted_identity(wait_selected('restored-no-input',
             [testing_tab, 'Ready for explicit launch', 'simulation-catalog', 'simulation-artifacts',
              *selected, *painted],
             ['Loading workspace...', 'Select an attempt'], ready=True), 'Second client without input')
         terminal.drain(2.5)
-        painted_identity(terminal.wait('restored-after-poll', [*selected, *painted]), 'Second client after polling')
+        painted_identity(wait_selected('restored-after-poll', [*selected, *painted]), 'Second client after polling')
         hello = test.raw('hello')
         test.check(test.process.pid == daemon_pid and test.process.poll() is None and
                    field(hello, 'instance_id') == instance, 'Both frontend processes use the same live daemon PID and instance')

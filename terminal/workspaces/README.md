@@ -1,10 +1,12 @@
 # Workspace definitions
 
-**Current Testing composition:** `stock.sexp` uses cooperative simulation
-catalog/attempt/case/detail/artifact/log panes and a compact Session/generic-tests/
-execution column. Investigation selection is client/workspace-local, not ASIC Main;
-the legacy `simulation` tile remains independently usable. Preset Apply preserves
-old extras rather than silently removing them. [Controls/evidence](../../docs/testing_workspace.md).
+**Current Testing composition:** `stock.sexp` places Session, Simulation Attempts,
+and Execution in a narrow left column. On the right, Catalog and Detail share the
+top row, Cases and Artifacts share the middle row, and Simulation Logs spans both
+columns at the bottom. `project-tests` remains an opt-in generic tile. Investigation
+selection is client/workspace-local, not ASIC Main; the legacy `simulation` tile
+remains independently usable. Preset Apply preserves old extras; explicit Restore
+hides them. [Controls/evidence](../../docs/testing_workspace.md).
 
 Start with **`stock.sexp`** to change stock membership, sparse presentation, Fit trees,
 or the shipped default window composition. This is the actual stock source, embedded
@@ -92,7 +94,9 @@ subtree before moving to the next. Column weights affect size, not traversal;
 `Narrow` preserves its child's order. Shift-Tab follows the exact reverse, and both
 directions wrap. Workspace tabs retain their normal focus stop. In Overview this
 means workspace tabs, then Session → Runs → Stage checklist → Planned run, then
-the right-hand stage tiles.
+the right-hand stage tiles. In Testing it means workspace tabs → Session → Attempts
+→ Execution → Catalog → Detail → Cases → Artifacts → Logs. Testing's template
+order is unchanged except for removing Project Tests.
 
 Configured leaves address authoring keys, so two tiles of the same kind can have
 independent positions and focus stops. For example, `custom.sexp` visits `choose`
@@ -170,9 +174,9 @@ Compared against merged oxcaml `471419a`, including its compiled workspace defin
 - Overview retains the one-third Session/Runs/checklist/plan sidebar and six compact
   domain summaries; Timing retains its Session/Runs row and Paths/Detail/Context tree.
   Four-row Runs defaults and the vertical compact checklist are in the shared spec.
-- Testing retains all six cooperative simulation panes and the compact project-only
-  utility column at the delivered **2:3:3** widths. The guide now reflects those
-  merged source proportions.
+- At the time of the audit, Testing retained all six cooperative simulation panes
+  and the compact project-only utility column at **2:3:3** widths; see the current
+  composition above for the replacement layout.
 - Restored Testing to the canonical default window, matching the three starters in
   `471419a:terminal/workspaces/presets.ml` (introduced before Waveforms and explicitly
   retained in `994cc85`). Existing saved compositions are not replayed or upgraded.

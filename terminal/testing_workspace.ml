@@ -374,6 +374,67 @@ let receive t ~ticket ~selected operation response =
 let atom = Simulation_view.atom
 let row = Simulation_view.row
 let attempt_label id = Presentation.identifier ~compress:true id
+let cursor_prefix selected = if selected then "> " else "  "
+
+let navigator_rows ?width entries =
+  let text_width = Simulation_view.text_width in
+  let entries =
+    List.map entries ~f:(fun (fields, value, render) ->
+      let single_line =
+        (not (String.contains value '\n'))
+        && List.for_all fields ~f:(fun (text, _) -> not (String.contains text '\n'))
+      in
+      let fields =
+        List.map fields ~f:(fun (text, separator) ->
+          text, separator, text_width (text ^ separator))
+      in
+      let compact_width =
+        List.sum (module Int) fields ~f:(fun (_, _, width) -> width) + text_width value
+      in
+      fields, value, render, single_line, compact_width)
+  in
+  (* Compute shared widths from rows that can actually fit. A long or multiline label must
+     not push the other rows' values to the right. *)
+  let columns =
+    List.fold entries ~init:None ~f:(fun columns (fields, _, _, single_line, compact) ->
+      if single_line && Option.value_map width ~default:true ~f:(fun w -> compact <= w)
+      then (
+        let widths = List.map fields ~f:(fun (_, _, width) -> width) in
+        Some
+          (Option.value_map columns ~default:widths ~f:(fun columns ->
+             List.map2_exn columns widths ~f:Int.max)))
+      else columns)
+  in
+  List.concat_map entries ~f:(fun (fields, value, render, single_line, compact) ->
+    let columns = if single_line then columns else None in
+    let rec pad fields columns room =
+      match fields, columns with
+      | (text, separator, used) :: rest, column :: columns when column - used <= room ->
+        let extra = Int.max 0 (column - used) in
+        (text ^ String.make extra ' ' ^ separator) :: pad rest columns (room - extra)
+      | _ -> List.map fields ~f:(fun (text, separator, _) -> text ^ separator)
+    in
+    let room = Option.value_map width ~default:Int.max_value ~f:(fun w -> w - compact) in
+    (* If only the leading columns fit, keep that alignment and leave the rest compact.
+       Never introduce a wrap just to align a value. *)
+    let prefix = String.concat (pad fields (Option.value columns ~default:[]) room) in
+    match String.rsplit2 prefix ~on:'\n' with
+    | None -> [ render ~start:(text_width prefix) (prefix ^ value) ]
+    | Some (_, last_prefix) ->
+      let r : Simulation_view.row =
+        render ~start:(text_width last_prefix) (prefix ^ value)
+      in
+      let lines = String.split_lines r.text in
+      let last = List.length lines - 1 in
+      List.mapi lines ~f:(fun i text ->
+        { r with
+          text
+        ; selected = i = 0 && r.selected
+        ; indicator = (if i = 0 then r.indicator else None)
+        ; value_start = (if i = last then r.value_start else None)
+        ; spans = (if i = last then r.spans else [])
+        }))
+;;
 
 type detail_field =
   { label : string
@@ -606,21 +667,20 @@ let rows
         ~default:[ row "Select an attempt" ]
         ~f:(fun d ->
           List.map d.cases ~f:(fun c ->
-            let prefix =
-              (if Option.equal String.equal t.view.case_id (Some c.case_id)
-               then "> "
-               else "  ")
-              ^ c.case_id
-              ^ ": "
-            in
-            row
-              ~selected:(Option.equal String.equal t.view.case_id (Some c.case_id))
-              ~target:(Case c.case_id)
-              ~indicator:(Simulation_view.case_indicator ~lifecycle:d.lifecycle c.status)
-              ~value_start:
-                (Bonsai_term.View.width
-                   (Bonsai_term.View.text (Artifact_view.safe prefix)))
-              (prefix ^ atom S.Case_status.sexp_of_t c.status)))
+            let selected = Option.equal String.equal t.view.case_id (Some c.case_id) in
+            let fields = [ cursor_prefix selected ^ c.case_id ^ ":", " " ] in
+            let status = atom S.Case_status.sexp_of_t c.status in
+            ( fields
+            , status
+            , fun ~start text ->
+                row
+                  ~selected
+                  ~target:(Case c.case_id)
+                  ~indicator:
+                    (Simulation_view.case_indicator ~lifecycle:d.lifecycle c.status)
+                  ~value_start:start
+                  text ))
+          |> navigator_rows ?width)
     | Detail ->
       Option.value_map
         detail
@@ -632,27 +692,28 @@ let rows
         ~default:[ row "Select an attempt" ]
         ~f:(fun d ->
           List.map d.artifacts ~f:(fun a ->
-            let prefix =
-              (if Option.equal String.equal t.selected_artifact (Some a.id)
-               then "> "
-               else "  ")
-              ^ a.label
-              ^ " — "
-              ^ Option.value a.case_id ~default:"suite"
-              ^ " ["
+            let selected = Option.equal String.equal t.selected_artifact (Some a.id) in
+            let fields =
+              [ cursor_prefix selected ^ a.label, " — "
+              ; Option.value a.case_id ~default:"suite", " ["
+              ]
             in
             let availability = atom S.Artifact.Availability.sexp_of_t a.availability in
-            row
-              ~selected:(Option.equal String.equal t.selected_artifact (Some a.id))
-              ~target:(Artifact a.id)
-              ~indicator:Artifact
-              ~spans:
-                [ Simulation_view.span
-                    ~start:(Simulation_view.text_width prefix)
-                    (Simulation_view.availability_tone a.availability)
-                    availability
-                ]
-              (prefix ^ availability ^ "]")))
+            ( fields
+            , availability ^ "]"
+            , fun ~start text ->
+                row
+                  ~selected
+                  ~target:(Artifact a.id)
+                  ~indicator:Artifact
+                  ~spans:
+                    [ Simulation_view.span
+                        ~start
+                        (Simulation_view.availability_tone a.availability)
+                        availability
+                    ]
+                  text ))
+          |> navigator_rows ?width)
     | Logs ->
       Option.value_map
         detail
@@ -1231,6 +1292,77 @@ let%test_unit "cooperative rows keep facts typed full provenance and logs separa
   assert (not (String.contains (List.nth_exn logs 3).text '\027'))
 ;;
 
+let%test_unit "navigator columns align in terminal cells and fall back without added \
+               wraps"
+  =
+  let attempt =
+    { Test_data.attempt with
+      cases =
+        List.map2_exn Test_data.attempt.cases [ "a"; "試験" ] ~f:(fun c case_id ->
+          { c with case_id })
+    ; artifacts =
+        [ { Test_data.artifact with label = "vcd"; case_id = Some "試験" }
+        ; { Test_data.artifact with
+            id = "other-artifact"
+          ; label = "解析結果"
+          ; availability = Missing
+          }
+        ]
+    }
+  in
+  let t =
+    set_view
+      (Test_data.loaded ())
+      { Simulation_view.empty with
+        snapshot = Some { Test_data.snapshot with detail = Some attempt }
+      ; attempt = Some attempt.id
+      }
+    |> fun t -> select_artifact t Test_data.artifact.id
+  in
+  let navigator pane ~width t =
+    rows t pane ~width ~log_lines:(fun _ -> assert false)
+    |> List.filter ~f:(fun r -> Option.is_some r.Simulation_view.target)
+  in
+  let cases ~width = navigator Cases ~width (select_case t "a") in
+  let labels rows = List.map rows ~f:(fun r -> r.Simulation_view.text) in
+  let aligned_cases = cases ~width:14 in
+  [%test_result: string list]
+    (labels aligned_cases)
+    ~expect:[ "> a:    Failed"; "  試験: Passed" ];
+  [%test_result: int option list]
+    (List.map aligned_cases ~f:(fun r -> r.value_start))
+    ~expect:[ Some 8; Some 8 ];
+  [%test_result: string list]
+    (labels (cases ~width:12))
+    ~expect:[ "> a: Failed"; "  試験: Passed" ];
+  let artifacts ~width = navigator Artifacts ~width t in
+  let aligned_artifacts = artifacts ~width:29 in
+  [%test_result: string list]
+    (labels aligned_artifacts)
+    ~expect:[ "> vcd      — 試験 [Available]"; "  解析結果 — a    [Missing]" ];
+  let first = List.hd_exn aligned_artifacts in
+  let second = List.nth_exn aligned_artifacts 1 in
+  assert (
+    first.selected
+    && Option.equal Poly.equal first.target (Some (Artifact Test_data.artifact.id)));
+  assert (
+    (not second.selected)
+    && Option.equal Poly.equal second.indicator (Some Indicator.Artifact));
+  assert (
+    List.equal
+      Poly.equal
+      [ Simulation_view.span ~start:19 Success "Available" ]
+      first.spans);
+  assert (
+    List.equal
+      Poly.equal
+      [ Simulation_view.span ~start:19 Warning "Missing" ]
+      second.spans);
+  [%test_result: string list]
+    (labels (artifacts ~width:24))
+    ~expect:[ "> vcd — 試験 [Available]"; "  解析結果 — a [Missing]" ]
+;;
+
 let%test_unit "narrow detail stacks long labels without losing artifact identity" =
   let t = Test_data.loaded () |> fun t -> select_case t "a" in
   let artifact_id ~width =
@@ -1329,6 +1461,17 @@ let%test_unit "large navigators expose a unique typed cursor; artifact identity 
   assert (String.equal (only Artifacts t) "> Evidence label");
   let navigator = rows t Artifacts ~log_lines:(fun _ -> assert false) in
   assert (List.length navigator = 65);
+  let continuation = List.nth_exn navigator 63 in
+  assert (String.equal continuation.text "continuation — case-1023 [Available]");
+  assert (not continuation.selected);
+  assert (Option.is_none continuation.indicator);
+  assert (
+    Option.equal Poly.equal continuation.target (Some (Artifact "artifact-31-exact-id")));
+  assert (
+    List.equal
+      Poly.equal
+      continuation.spans
+      [ Simulation_view.span ~start:26 Success "Available" ]);
   assert (
     List.for_all navigator ~f:(fun r ->
       not (String.is_substring r.text ~substring:"SHA256:")));

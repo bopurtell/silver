@@ -195,9 +195,10 @@ class TestingTerminal(native.Terminal):
 
 
 def cooperative(session, evidence, expected, passed):
+    from fixtures.testing_layout import STOCK_KINDS, artifact_row, case_row, focus_pane
+
     checks = []
     result = dict(status='failed', checks=checks)
-    focus_index = 0
 
     def check(ok, label):
         checks.append(dict(passed=bool(ok), expectation=label))
@@ -211,11 +212,8 @@ def cooperative(session, evidence, expected, passed):
         require(reply[0] == 'Ok', str(reply))
         return {field(job, 'id') for job in field(reply[1], 'jobs')}
 
-    def focus(index):
-        nonlocal focus_index
-        for _ in range((index - focus_index) % 10):
-            terminal.key(b'\t')
-        focus_index = index
+    def focus(kind):
+        focus_pane(terminal, 'simulation-' + kind)
 
     def new_attempt(before):
         found = support.wait_for(lambda: [a for a in attempts() if field(a, 'id') not in before],
@@ -261,18 +259,20 @@ def cooperative(session, evidence, expected, passed):
         # Exact provenance assertions below deliberately request full display identities.
         terminal.palette('Strings (global): Show full identifiers')
         terminal.palette('Switch to Testing')
-        terminal.capture('real-testing-120x40', ['simulation-catalog', 'simulation-detail', 'Project tests'])
+        terminal.capture('real-testing-120x40', ['simulation-catalog', 'simulation-detail', 'execution'],
+                         absent=['project-tests'])
         terminal.wait_viewport('testing-120x40')
         terminal.resize(180, 55)
-        terminal.capture('real-testing-180x55', ['simulation-catalog', 'simulation-detail', 'Process results only'])
+        terminal.capture('real-testing-180x55',
+                         ['simulation-catalog', 'simulation-detail', 'execution', 'Process results only'],
+                         absent=['project-tests'])
         terminal.resize(120, 40)
         snapshot = session.api(domain='workspace')
         workspace = next(w for w in field(snapshot, 'workspaces') if field(w, 'preset') == ['testing'])
         tiles = [t for t in field(snapshot, 'tiles') if field(t, 'workspace') == field(workspace, 'id')]
-        check(all(any(field(t, 'kind') == kind for t in tiles) for kind in
-                  ('simulation-catalog', 'simulation-attempts', 'simulation-cases', 'simulation-detail',
-                   'simulation-artifacts', 'simulation-logs')), 'Testing includes all six cooperative panes')
-        focus(4)
+        check(tuple(field(t, 'kind') for t in tiles) == STOCK_KINDS,
+              'Testing includes all six cooperative panes in stock order without Project Tests')
+        focus('catalog')
         terminal.palette('Zoom focused tile')
         terminal.capture('real-catalog-discovered', ['directed', 'seeded', 'Ready for explicit launch'])
         current = session.api()
@@ -285,14 +285,15 @@ def cooperative(session, evidence, expected, passed):
         failed = launch('mismatch')
         aid = field(failed, 'id')
         terminal.palette('Unzoom workspace')
-        focus(5)
+        focus('attempts')
         terminal.palette('Simulation: Reopen ' + aid + ' controlled-fifo')
-        focus(6)
+        focus('cases')
         terminal.palette('Zoom focused tile')
         terminal.key(b'j')
-        terminal.capture('real-cooperative-cases', ['> seeded: Failed'], absent=['directed:'])
+        terminal.capture('real-cooperative-cases', [case_row('seeded', 'Failed', selected=True)],
+                         absent=['directed:'])
         terminal.palette('Unzoom workspace')
-        focus(7)
+        focus('detail')
         terminal.palette('Zoom focused tile')
         detail_text = terminal.capture('real-cooperative-detail', ['CHECK_FAILED', aid,
                          '18446744073709551615', 'Captured cases:', 'checker mismatch', 'cycles 64'])
@@ -304,12 +305,14 @@ def cooperative(session, evidence, expected, passed):
         terminal.capture('real-testing-failure-120x40', ['simulation-cases', 'simulation-detail', 'simulation-artifacts', 'simulation-logs'])
         terminal.wait_viewport('failure-120x40')
         terminal.resize(180, 55)
-        terminal.capture('real-testing-failure-180x55', ['seeded: Failed', 'simulation-detail', 'simulation-artifacts', 'simulation-logs'])
+        terminal.capture('real-testing-failure-180x55',
+                         [case_row('seeded', 'Failed'), 'simulation-detail', 'simulation-artifacts', 'simulation-logs'])
         terminal.resize(120, 40)
-        focus(8)
+        focus('artifacts')
         terminal.palette('Zoom focused tile')
         terminal.key(b'j'); terminal.key(b'j')
-        terminal.capture('real-cooperative-artifacts-report', ['seeded.sexp', 'Available'])
+        terminal.capture('real-cooperative-artifacts-report',
+                         [artifact_row('seeded.sexp', 'seeded', 'Available', selected=True)])
         for name, key in [('seeded.sexp', None), ('seeded.vcd', b'k')]:
             if key:
                 terminal.key(key)
@@ -324,7 +327,7 @@ def cooperative(session, evidence, expected, passed):
             check(raw == expected['failure'][name] and hashlib.sha256(raw).hexdigest() == field(artifact, 'sha256')[0],
                   'selected cooperative export matches native ' + name + ' bytes and captured digest')
         terminal.palette('Unzoom workspace')
-        focus(9)
+        focus('logs')
         terminal.palette('Zoom focused tile')
         terminal.capture('real-cooperative-logs', [aid, field(failed, 'job')[:25], 'FIFO seeded', 'CHECK_FAILED'])
         before = {field(a, 'id') for a in attempts()}
@@ -336,33 +339,35 @@ def cooperative(session, evidence, expected, passed):
               same_selection(field(field(child, 'captured'), 'selection'), field(field(failed, 'captured'), 'selection')),
               'cooperative targeted rerun preserves original inputs and exact parent with fresh job/attempt')
         terminal.palette('Unzoom workspace')
-        focus(6)
+        focus('cases')
         terminal.palette('Simulation: Reopen ' + field(passed, 'id') + ' controlled-fifo')
         terminal.palette('Zoom focused tile')
         for case in ('seeded', 'directed'):
             terminal.palette('Simulation: Select case ' + case)
             for poll in range(3):
                 terminal.drain(.8)
-                terminal.capture('real-case-stable-' + case + '-' + str(poll), ['> ' + case + ': Passed'])
+                terminal.capture('real-case-stable-' + case + '-' + str(poll),
+                                 [case_row(case, 'Passed', selected=True)])
             terminal.palette('Unzoom workspace')
-            focus(7)
+            focus('detail')
             terminal.palette('Zoom focused tile')
-            terminal.capture('real-detail-selected-' + case, [case + ': Passed', field(passed, 'id')],
-                             absent=[('directed' if case == 'seeded' else 'seeded') + ': Passed'])
+            terminal.capture('real-detail-selected-' + case, [case_row(case, 'Passed'), field(passed, 'id')],
+                             absent=[case_row('directed' if case == 'seeded' else 'seeded', 'Passed')])
             terminal.palette('Unzoom workspace')
-            focus(6)
+            focus('cases')
             terminal.palette('Zoom focused tile')
         check(True, 'seeded then directed selection survives repeated polling and is coherent in shared Detail')
         terminal.palette('Unzoom workspace')
-        focus(4)
+        focus('catalog')
         terminal.palette('Zoom focused tile')
         terminal.capture('real-catalog-retained-subset', ['Selected cases: seeded'])
         passing = launch('normal')
         terminal.palette('Unzoom workspace')
-        focus(7)
+        focus('detail')
         terminal.palette('Zoom focused tile')
         terminal.palette('Simulation: Select case seeded')
-        terminal.capture('real-catalog-pass-detail', ['seeded: Passed', field(passing, 'id'), '18446744073709551615'])
+        terminal.capture('real-catalog-pass-detail',
+                         [case_row('seeded', 'Passed'), field(passing, 'id'), '18446744073709551615'])
         check(True, 'passing seeded-only launch also uses catalog form and cooperative detail')
         result.update(status='passed', failed=failed, rerun=child, passed=passing)
     finally:
@@ -422,7 +427,7 @@ def http_pty(args, evidence, expected):
             workspace = field(field(layout, 'workspaces')[-1], 'id')
             client.mutate(layout, '(Create_tile (workspace %s) (kind simulation) (geometry ((x 0)(y 0)(width 110)(height 30))))' % sexp(workspace))
             terminal = native.Terminal(session)
-            terminal.capture('ready', ['Overview', 'FIFO acceptance', 'connected'])
+            terminal.capture('ready', ['Space c c commands', 'connected'])
             terminal.palette('Switch to FIFO acceptance')
             support.Terminal.focus_simulation(terminal)
             terminal.palette('Simulation: Reopen ' + field(details[1], 'id') + ' controlled-fifo')

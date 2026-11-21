@@ -307,6 +307,7 @@
   ../scripts/test-native-execution.py
   ../scripts/test-embedded-waveform.py
   ../scripts/fixtures/simulation_fixture_wire.py
+  ../scripts/fixtures/testing_layout.py
   ../test/support/__init__.py
   ../test/support/screen.py
   ../test/support/terminal.py)

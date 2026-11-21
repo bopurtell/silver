@@ -420,21 +420,19 @@ def pty_acceptance(args, evidence, fixture, check):
             terminal.drain(.1)
         # Native startup consumes the canonical stock window composition. The
         # explicit Testing action also supports older saved two-workspace sessions.
-        check([field(w, 'preset') for w in field(initial_registry, 'workspaces')] ==
-              [['overview'], ['testing'], ['waveforms'], ['timing']],
-              'ordinary fresh startup opens the four ordered built-in workspaces')
+        stock_presets = [['overview'], ['testing'], ['waveforms'], ['timing'], ['resources']]
+        check([field(w, 'preset') for w in field(initial_registry, 'workspaces')] == stock_presets,
+              'ordinary fresh startup opens the ordered built-in workspaces')
         has_testing = any(field(w, 'preset') == ['testing'] for w in field(initial_registry, 'workspaces'))
         terminal.palette('Switch to Testing' if has_testing else 'Create Testing workspace')
         terminal.capture('testing', ['simulation-catalog', 'simulation-artifacts'])
         testing_registry = session.api(domain='workspace')
-        check(len(field(testing_registry, 'workspaces')) == 4 and
-              {field(w, 'preset')[0] for w in field(testing_registry, 'workspaces')} == {'overview', 'timing', 'testing', 'waveforms'},
-              'Testing setup preserves the four starter workspaces')
-        for _ in range(5):
-            terminal.key(b'\t')  # Navigation, Session, Tests, Execution, Catalog, Attempts
+        check([field(w, 'preset') for w in field(testing_registry, 'workspaces')] == stock_presets,
+              'Testing setup preserves the ordered starter workspaces')
+        from fixtures.testing_layout import focus_pane
+        focus_pane(terminal, 'simulation-attempts')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
-        for _ in range(3):
-            terminal.key(b'\t')  # Cases, Detail, Artifacts (palette is captured-target scoped)
+        focus_pane(terminal, 'simulation-artifacts')
         artifacts = field(detail, 'artifacts')
         retained = next(a for a in artifacts if field(a, 'label') == 'retained-vcd')
         check(len(artifacts) == 2 and field(artifacts[0], 'sha256') != field(artifacts[1], 'sha256'),
@@ -638,7 +636,7 @@ def pty_acceptance(args, evidence, fixture, check):
                   for r in proxy.records[gate['record_start']:]),
                   gate['label'] + ': stale load stops without fetching remaining pages')
 
-        terminal.key(b'j')  # Select first actual artifact, rather than opening by palette label.
+        terminal.key(b'k')  # Select first actual artifact even when a row was already selected.
         gate = proxy.arm('close-during-load')
         terminal.key(b'w')
         await_gate(gate)

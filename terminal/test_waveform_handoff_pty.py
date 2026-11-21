@@ -26,6 +26,7 @@ def load(name, path):
 
 
 wire = load('handoff_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
+testing_layout = load('handoff_testing_layout', ROOT / 'scripts/fixtures/testing_layout.py')
 
 
 def provider():
@@ -132,8 +133,7 @@ def run(args, evidence):
         terminal = Terminal(session)
         terminal.capture('startup', ['Overview'])
         terminal.palette('Switch to Testing')
-        for _ in range(5):
-            terminal.key(b'\t')
+        testing_layout.focus_pane(terminal, 'simulation-attempts')
 
         def reopen(attempt):
             suite = field(field(field(attempt, 'captured'), 'selection'), 'suite')
@@ -149,8 +149,7 @@ def run(args, evidence):
             terminal.key(b'\x1b')
 
         reopen(attempts[0])
-        for _ in range(3):
-            terminal.key(b'\t')
+        testing_layout.focus_pane(terminal, 'simulation-artifacts')
         terminal.key(b'w')
         terminal.capture('json-only-no-vcd', ['No available supported VCD'],
             absent=['Embedded viewer supports VCD only', 'Captured waveform identity'])
@@ -168,7 +167,9 @@ def run(args, evidence):
             'embedded waveform loading never requests clipboard writes')
         terminal.key(b'\x1b')
         terminal.key(b'e')
-        terminal.capture('export-clipboard', ['Export ready; path sent to clipboard'],
+        # The notice wraps in the narrower History column. Verify the full
+        # clipboard outcome from the OSC 52 payload rather than one screen row.
+        terminal.capture('export-clipboard', ['Export ready; path sent'],
             absent=['Verified simulation bytes retained:'])
         copies = re.findall(rb'\x1b\]52;c;([A-Za-z0-9+/=]+)\x07', bytes(terminal.data))
         check(len(copies) == 1, 'successful verified external export emits one OSC52 request')

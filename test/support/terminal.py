@@ -58,11 +58,17 @@ class Terminal:
         return terminal_screen(bytes(self.data), self.width, self.height)
 
     def capture(self, label, expected=(), absent=(), timeout=12):
+        """Wait for literal substrings or compiled patterns on the painted screen."""
+        def matches(expectation, text):
+            if isinstance(expectation, str):
+                return expectation.casefold() in text.casefold()
+            return expectation.search(text) is not None
+
         deadline = time.monotonic() + timeout
         while True:
             text = self.drain(min(.3, max(0, deadline - time.monotonic())))
-            if (all(s.casefold() in text.casefold() for s in expected)
-                    and all(s.casefold() not in text.casefold() for s in absent)):
+            if (all(matches(s, text) for s in expected)
+                    and not any(matches(s, text) for s in absent)):
                 break
             if time.monotonic() >= deadline:
                 self.save(label, text)
