@@ -11,6 +11,14 @@ for its slice, including any Cobalt source, packaging, or test changes it needs.
 Reference the same WB ID from changes in both repos and link their verification
 on the Silver ticket; no matching Cobalt ticket is required.
 
+For asynchronous implementation, the **Cobalt repo** has a module-level work
+queue at `docs/backlog/silver_integration.md`. C1/C2 hand off the editor and
+generic open action; C3 hands off ToggleTerm. C4 addresses a separately running
+main editor; C5/C6 cover a standalone Cobalt overview and test-launch command.
+The latter tracks can proceed independently of the embedded editor demo. The
+Cobalt harnesses prove module readiness; the live two-app demos remain Silver
+acceptance work.
+
 | Order | Ticket | What to try before moving on |
 | --- | --- | --- |
 | 1 | [WB-087 — Persistent editor and generic file open](features/workspaces/WB-087-cobalt-editor.md) | Open a project file at a line, edit it, leave, and come back to the same buffer. |

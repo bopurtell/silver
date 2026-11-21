@@ -77,6 +77,11 @@ type workspace_deletion =
   ; intent : unit ref
   }
 
+type workspace_rename =
+  { original_name : string
+  ; intent : unit ref
+  }
+
 type action =
   | New_flow of string option
   | Duplicate_profile of (string * string * string) option
@@ -166,6 +171,8 @@ type action =
   | Create_blank_workspace
   | Request_workspace_deletion
   | Confirm_workspace_deletion of workspace_deletion
+  | Request_workspace_rename
+  | Submit_workspace_rename of string * workspace_rename
   | Close_workspace of W.Workspace_id.t
   | Reopen_workspace of W.Workspace_id.t
   | Local_headers
@@ -235,6 +242,7 @@ type theme_picker =
 type argument =
   | Theme_picker of theme_picker
   | Delete_workspace_confirmation of workspace_deletion
+  | Rename_workspace_name of workspace_rename
   | Flow_field of Flow_authoring.field
   | Plan_endpoint of string * string
   | Run_endpoint of string * string
@@ -2476,7 +2484,45 @@ let workspace_deletion_current t capture (deletion : workspace_deletion) =
   current t capture && phys_equal t.layout_intent deletion.intent
 ;;
 
+let workspace_rename_current t capture (rename : workspace_rename) =
+  current t capture && phys_equal t.layout_intent rename.intent
+;;
+
+let stale_workspace_rename = "Workspace changed; reopen Rename current workspace"
+
+let open_workspace_rename t capture =
+  if not (current t capture)
+  then { t with notice = stale_workspace_rename }
+  else (
+    let registry = Option.value_exn t.registry in
+    let workspace = W.workspace registry capture.workspace in
+    { t with
+      notice = ""
+    ; palette =
+        Some
+          { capture
+          ; commands = []
+          ; query = workspace.name
+          ; index = 0
+          ; viewport = `Follow 0
+          ; argument =
+              Some
+                (Rename_workspace_name { original_name = workspace.name; intent = t.layout_intent })
+          }
+    })
+;;
+
+let workspace_switch_prefix = "Switch to "
+let workspace_reopen_prefix = "Reopen workspace: "
+
 let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrangement.t) =
+  let rename =
+    command
+      "workspace.rename-current"
+      "Rename current workspace"
+      "edit name workspace tab"
+      Request_workspace_rename
+  in
   let close =
     command
       ?unavailable:
@@ -2490,12 +2536,12 @@ let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrang
       "hide workspace tab retain layout"
       (Close_workspace workspace.id)
   in
-  close
+  rename :: close
   :: List.filter_map registry.workspaces ~f:(fun w ->
     Option.some_if w.closed
       (command
          ("workspace.reopen." ^ W.Workspace_id.to_string w.id)
-         ("Reopen workspace: " ^ Artifact_view.safe w.name)
+         (workspace_reopen_prefix ^ Artifact_view.safe w.name)
          "show closed workspace tab"
          (Reopen_workspace w.id)))
 ;;
@@ -3029,7 +3075,7 @@ let added_stock_reader t (p : W.Config_workspace.t) =
   | _ -> None
 ;;
 
-let render_definition t (workspace : W.Arrangement.t) =
+let configured_render_definition t (workspace : W.Arrangement.t) =
   let base =
     match provenance t workspace.id with
     | Some p when Option.is_some (added_stock_reader t p) -> definition workspace
@@ -3125,6 +3171,30 @@ let layout_keys t (tiles : W.Tile.t list) =
                   else None))))
     in
     Option.value key ~default:("extra:" ^ W.Tile_id.to_string tile.id))
+;;
+
+let render_definition t (workspace : W.Arrangement.t) =
+  let base = configured_render_definition t workspace in
+  if Option.is_some workspace.preset
+     || not (Option.equal W.Workspace_id.equal t.active (Some workspace.id))
+  then base
+  else (
+    let visible = tiles t in
+    match List.findi visible ~f:(fun _ tile -> String.equal tile.kind "workspace-tabs") with
+    | None -> base
+    | Some (_, tile)
+      when Option.exists (provenance t workspace.id) ~f:(fun origin ->
+        Option.exists (configured_tile origin tile) ~f:(fun keyed ->
+          Option.exists keyed.presentation ~f:(fun p ->
+            Option.value p.frame ~default:false
+            || Option.value p.title ~default:false
+            || Option.value p.padding ~default:0 > 0))) ->
+      (* An explicitly framed/padded navigation panel needs more than a row,
+         even when its configuration leaves placement to the automatic grid. *)
+      base
+    | Some (index, _) ->
+      let key = List.nth_exn (layout_keys t visible) index in
+      Some (P.Layout.with_default_workspace_tabs base ~key))
 ;;
 
 (** Fit follows semantic tree order even when placement falls back to a grid or Compact.
@@ -3739,7 +3809,11 @@ let policy t (tile : W.Tile.t) =
   let base =
     if String.equal tile.kind "workspace-tabs"
     then
-      T.apply density_defaults { T.navigation with frame = Some false; padding = Some 0 }
+      (* An untitled strip is the default; don't also disable the header gate, or
+         an authored [title true] would have no effect. *)
+      T.apply
+        density_defaults
+        { T.navigation with header = None; frame = Some false; padding = Some 0 }
     else density_defaults
   in
   let defaults = preset_presentation (composition_policy t tile) in
@@ -4250,7 +4324,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
      @ List.map (W.open_workspaces s) ~f:(fun w ->
       command
         ("workspace." ^ W.Workspace_id.to_string w.id)
-        ("Switch to " ^ w.name)
+         (workspace_switch_prefix ^ w.name)
         "workspace navigation tabs"
         (Switch w.id))
      @ (if has_closed_preset s ~preset:"testing"
@@ -5043,10 +5117,39 @@ let global_palette_aliases =
   ]
 ;;
 
-let global_palette_commands commands =
+let stock_workspace_palette_aliases t commands =
+  Option.value_map t.registry ~default:[] ~f:(fun registry ->
+    (* Follow preset identity, not the editable name. If there are several copies,
+       prefer an open tab, then use registry order within each group. *)
+    let closed = List.filter registry.workspaces ~f:(fun w -> w.closed) in
+    let destinations = W.open_workspaces registry @ closed in
+    [ "te", "testing"
+    ; "ti", "timing"
+    ; "ov", "overview"
+    ; "wa", "waveforms"
+    ; "re", "resources"
+    ; "wo", "workloads"
+    ]
+    |> List.filter_map ~f:(fun (query, preset) ->
+      List.find_map destinations ~f:(fun w ->
+        if Option.equal String.equal w.preset (Some preset)
+        then
+          List.find_map commands ~f:(fun c ->
+            match c.action with
+            | Switch id when not w.closed && W.Workspace_id.equal id w.id ->
+              Some (query, c.id)
+            | Reopen_workspace id when w.closed && W.Workspace_id.equal id w.id ->
+              Some (query, c.id)
+            | _ -> None)
+        else None)))
+;;
+
+let global_palette_commands t commands =
   (* Reserved global intents take precedence over provider endpoint names, even
-     when the intended command is absent. Don't change the scoped catalogs. *)
-  let reserved = List.map global_palette_aliases ~f:fst in
+     when the intended launch command is absent. A workspace alias is reserved
+     only if its destination exists. Don't change the scoped catalogs. *)
+  let aliases = global_palette_aliases @ stock_workspace_palette_aliases t commands in
+  let reserved = List.map aliases ~f:fst in
   let fallbacks =
     [ ( "asic.launch"
       , "Launch planned run without view"
@@ -5076,7 +5179,7 @@ let global_palette_commands commands =
   in
   List.map commands ~f:(fun c ->
     let exact_queries =
-      List.filter_map global_palette_aliases ~f:(fun (query, id) ->
+      List.filter_map aliases ~f:(fun (query, id) ->
         Option.some_if (String.equal id c.id) query)
     in
     let exact_queries =
@@ -5090,7 +5193,43 @@ let global_palette_commands commands =
     { c with exact_queries })
 ;;
 
-let ranked_matches (p : palette) =
+let workspace_destination_prefix (c : command) =
+  match c.action with
+  | Switch _ -> Some workspace_switch_prefix
+  | Reopen_workspace _ -> Some workspace_reopen_prefix
+  | _ -> None
+;;
+
+let goto_query (p : palette) =
+  let query = String.lstrip p.query in
+  if Option.is_none p.argument
+     && String.length query > 4
+     && String.equal (String.lowercase (String.prefix query 4)) "goto"
+     && Char.is_whitespace query.[4]
+     && List.exists p.commands ~f:(fun c -> Option.is_some (workspace_destination_prefix c))
+  then Some (String.lstrip (String.drop_prefix query 4))
+  else None
+;;
+
+let rank_workspace_destinations ~query commands =
+  (* Rank the name, not words in its action label, then translate match offsets
+     back to the displayed command. Keep the original row and action. *)
+  let candidates =
+    List.filter_map commands ~f:(fun c ->
+      Option.bind (workspace_destination_prefix c) ~f:(fun prefix ->
+        Option.map (String.chop_prefix c.title ~prefix) ~f:(fun name ->
+          (c, String.length prefix), [ { Palette_search.text = name; weight = 100 } ])))
+  in
+  Palette_search.rank ~query candidates
+  |> List.map ~f:(fun { Palette_search.item = (item, offset); score; positions } ->
+    let positions =
+      List.map positions ~f:(fun (_, offsets) ->
+        item.title, List.map offsets ~f:(( + ) offset))
+    in
+    { Palette_search.item; score; positions })
+;;
+
+let ranked_command_matches (p : palette) =
   let rank commands =
     Palette_search.rank
       ~query:p.query
@@ -5120,6 +5259,12 @@ let ranked_matches (p : palette) =
      | [] -> [ { Palette_search.item; score = 0; positions = [] } ]
      | ranked -> ranked)
     @ rank (List.filter fuzzy ~f:(fun c -> not (String.equal c.id item.id)))
+;;
+
+let ranked_matches p =
+  match goto_query p with
+  | Some query -> rank_workspace_destinations ~query p.commands
+  | None -> ranked_command_matches p
 ;;
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
@@ -5483,6 +5628,51 @@ let append_reference t text =
 ;;
 
 let drop_last_codepoint = Text_edit.drop_character
+
+let workspace_rename_limit = 4096
+
+let workspace_rename_name (rename : workspace_rename) query =
+  if String.is_empty (String.strip query)
+  then Error "Workspace name cannot be blank"
+  else if String.equal query rename.original_name
+  then Ok None
+  else if String.length query > workspace_rename_limit || not (printable_utf8 query)
+  then Error "Enter a single-line workspace name (at most 4096 UTF-8 bytes)"
+  else (
+    let name = String.strip query in
+    Ok (Option.some_if (not (String.equal name rename.original_name)) name))
+;;
+
+let workspace_rename_form t =
+  match t.palette with
+  | Some ({ argument = Some (Rename_workspace_name rename); _ } as p) -> Some (p, rename)
+  | _ -> None
+;;
+
+let workspace_rename_input t (p : palette) rename event =
+  let close = { t with palette = None; prefix = 0; notice = "" } in
+  let edit query = { t with palette = Some { p with query }; notice = "" }, No_effect in
+  let append text =
+    if printable_utf8 text && String.length p.query + String.length text <= workspace_rename_limit
+    then edit (p.query ^ text)
+    else { t with notice = "Enter a single-line workspace name (at most 4096 UTF-8 bytes)" }, No_effect
+  in
+  match event with
+  | Escape -> close, No_effect
+  | Enter when not (workspace_rename_current t p.capture rename) ->
+    { close with notice = stale_workspace_rename }, No_effect
+  | Enter ->
+    (match workspace_rename_name rename p.query with
+     | Error notice -> { t with notice }, No_effect
+     | Ok None -> { close with notice = "Workspace name unchanged" }, No_effect
+     | Ok (Some name) -> close, Execute (p.capture, Submit_workspace_rename (name, rename)))
+  | Character ch -> append (String.of_char ch)
+  | Text text -> append text
+  | Clear_filter -> edit ""
+  | Backspace -> edit (drop_last_codepoint p.query)
+  | Delete_word -> edit (Text_edit.delete_word p.query)
+  | _ -> t, No_effect
+;;
 
 type inspection_filter_result =
   | Filter_interrupt
@@ -6050,6 +6240,9 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
       | _ -> reject_reference_text t)
    | _ when Option.is_some t.menu ->
      menu_input t (Option.value_exn t.menu) event ~height:menu_height
+   | _ when Option.is_some (workspace_rename_form t) ->
+     let p, rename = Option.value_exn (workspace_rename_form t) in
+     workspace_rename_input t p rename event
   | Open_menu kind when Option.is_none t.palette && not t.editing_filter ->
     open_menu t kind commands ~height:menu_height
   | Open_menu _ | Menu_click _ | Dismiss_menu -> t, No_effect
@@ -6143,7 +6336,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                    | Acceptance _
                     | Simulation_selection _
                     | Catalog_configuration _ ) -> String.length p.query >= 4096
-                 | None | Some (Delete_workspace_confirmation _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
+                  | None | Some (Delete_workspace_confirmation _ | Rename_workspace_name _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
           { t with notice = "Finalization reference is limited to 4096 bytes" }, No_effect
         | Character ch ->
           ( { t with palette = Some (palette_query p (p.query ^ String.of_char ch)) }
@@ -6198,7 +6391,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                        | Simulation_selection _
                        | Catalog_configuration _ ) ->
                     String.length p.query > reference_limit t
-                    | None | Some (Delete_workspace_confirmation _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
+                     | None | Some (Delete_workspace_confirmation _ | Rename_workspace_name _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
           then
             ( { t with notice = "Finalization reference is limited to 4096 bytes" }
             , No_effect )
@@ -6211,7 +6404,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
-                    | Delete_workspace_confirmation _ | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
+                     | Delete_workspace_confirmation _ | Rename_workspace_name _ | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Catalog_configuration _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
                   | Flow_field field -> Flow_step (Flow_authoring.accept field p.query)
@@ -6392,7 +6585,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
           let palette =
             Option.map (capture t) ~f:(fun capture ->
               { capture
-               ; commands = global_palette_commands commands
+               ; commands = global_palette_commands t commands
                ; query = ""
                ; index = 0
                ; viewport = `Follow 0
@@ -8506,6 +8699,233 @@ let%test_unit "workspace lifecycle palette closes presets and reopens exact clos
     String.is_prefix c.id ~prefix:"workspace.reopen.")))
 ;;
 
+let%test_unit "goto ranks only workspace destinations and requires explicit selection" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "goto-workspace") in
+  let overview = List.hd_exn registry.workspaces in
+  let timing = List.last_exn registry.workspaces in
+  let host = switch (receive empty registry) timing.id in
+  let search host text =
+    let commands = catalog host ~project:None ~jobs:[] in
+    let events = [ ' '; 'c'; 'c' ] @ String.to_list text in
+    List.fold events ~init:host ~f:(fun host ch ->
+      match input host (Character ch) ~commands with
+      | after, No_effect ->
+        assert (Option.equal W.Workspace_id.equal after.active host.active);
+        after
+      | _ -> assert false)
+  in
+  List.iter [ "goto ov"; "goto overview"; "GOTO  oV" ] ~f:(fun query ->
+    let searched = search host query in
+    let result = List.hd_exn (ranked_matches (Option.value_exn searched.palette)) in
+    assert (String.equal result.item.title "Switch to Overview");
+    assert (List.mem (Palette_search.positions result result.item.title) 10 ~equal:Int.equal);
+    match input searched Enter ~commands:[] with
+    | { palette = None; _ }, Execute (capture, Switch id) ->
+      assert (W.Workspace_id.equal capture.workspace timing.id);
+      assert (W.Workspace_id.equal id overview.id)
+    | _ -> assert false);
+  let no_destination = search host "goto synthesis" in
+  assert (List.is_empty (matches (Option.value_exn no_destination.palette)));
+  (match input no_destination Enter ~commands:[] with
+   | { palette = Some _; _ }, No_effect -> ()
+   | _ -> assert false);
+  let bare = search host "overview" in
+  assert (List.exists (matches (Option.value_exn bare.palette)) ~f:(fun c ->
+    match c.action with Switch id -> W.Workspace_id.equal id overview.id | _ -> false));
+  let closed =
+    W.apply registry
+      (Mutate
+         { expected_revision = registry.revision; mutation = Close_workspace overview.id })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let closed_host = receive host closed in
+  let searched = search closed_host "goto ov" in
+  let rows = matches (Option.value_exn searched.palette) in
+  (match rows with
+   | [ row ] -> assert (String.equal row.title "Reopen workspace: Overview")
+   | _ -> assert false);
+  (match input searched Enter ~commands:[] with
+   | { palette = None; _ }, Execute (capture, Reopen_workspace id) ->
+     assert (capture.revision = closed.revision);
+     assert (W.Workspace_id.equal id overview.id)
+   | _ -> assert false);
+  let searched = search closed_host "goto reopen" in
+  assert (List.is_empty (matches (Option.value_exn searched.palette)))
+;;
+
+let%test_unit "bare global workspace aliases switch or reopen renamed stock presets" =
+  let ok = function Ok registry -> registry | Error _ -> assert false in
+  let apply (registry : W.Snapshot.t) mutation =
+    W.apply registry (Mutate { expected_revision = registry.revision; mutation }) |> ok
+  in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "stock-workspace-aliases") in
+  let registry = W.apply initial (Initialize_config P.Presets.stock_config) |> ok in
+  let overview = List.hd_exn registry.workspaces in
+  let template = (P.Presets.builtins "workloads" |> Or_error.ok_exn).template in
+  let with_workloads =
+    apply registry (Instantiate_template { window = overview.window; template })
+  in
+  let step host event ~commands =
+    match input host event ~commands with
+    | after, No_effect ->
+      assert (Poly.equal after.active host.active);
+      assert (phys_equal after.registry host.registry);
+      after
+    | _ -> assert false
+  in
+  let catalog host = catalog host ~project:None ~jobs:[] in
+  let search host commands text =
+    List.fold ([ ' '; 'c'; 'c' ] @ String.to_list text) ~init:host ~f:(fun host ch ->
+      step host (Character ch) ~commands)
+  in
+  let palette host = Option.value_exn host.palette in
+  let first host = List.hd_exn (matches (palette host)) in
+  let competing query =
+    command (named_stage_command_id (String.uppercase query)) query "" Toggle_chrome
+  in
+  List.iter
+    [ "te", "testing"
+    ; "ti", "timing"
+    ; "ov", "overview"
+    ; "wa", "waveforms"
+    ; "re", "resources"
+    ; "wo", "workloads"
+    ]
+    ~f:(fun (query, preset) ->
+      let target =
+        List.find_exn with_workloads.workspaces ~f:(fun w ->
+          Option.equal String.equal w.preset (Some preset))
+      in
+      let name = "Renamed " ^ Int.to_string (String.length preset) in
+      let renamed = apply with_workloads (Rename_workspace { workspace = target.id; name }) in
+      List.iter [ false; true ] ~f:(fun closed ->
+        let registry = if closed then apply renamed (Close_workspace target.id) else renamed in
+        let host = receive empty registry in
+        let commands = competing query :: catalog host in
+        List.iter [ query; " " ^ String.uppercase query ^ " " ] ~f:(fun text ->
+          let searched = search host commands text in
+          assert (
+            String.equal
+              (first searched).title
+              ((if closed then workspace_reopen_prefix else workspace_switch_prefix) ^ name));
+          match input searched Enter ~commands with
+          | { palette = None; _ }, Execute (capture, Switch id) when not closed ->
+            assert (capture.revision = registry.revision);
+            assert (W.Workspace_id.equal id target.id)
+          | { palette = None; _ }, Execute (capture, Reopen_workspace id) when closed ->
+            assert (capture.revision = registry.revision);
+            assert (W.Workspace_id.equal id target.id)
+          | _ -> assert false)));
+  let host = receive empty registry in
+  (* No saved Workloads: the existing exact provider command is still selected. *)
+  let work = competing "wo" in
+  let commands = work :: catalog host in
+  assert (String.equal (first (search host commands "wo")).id work.id);
+  List.iter
+    [ "test", "testing.test"
+    ; "test suites", "testing.suites"
+    ; "synth", named_stage_command_id "synthesis"
+    ; "timing", named_stage_command_id "timing"
+    ]
+    ~f:(fun (query, id) ->
+      assert (String.equal (first (search host commands query)).id id));
+  let rows p =
+    List.map (ranked_matches p) ~f:(fun { Palette_search.item; score; positions } ->
+      item.id, score, positions)
+  in
+  List.iter [ "tes"; "overview"; "reopen"; "wa help"; "goto ov"; "" ] ~f:(fun query ->
+    let p = palette (search host commands query) in
+    let without_stock_aliases = { p with commands = global_palette_commands empty commands } in
+    assert (Poly.equal (rows p) (rows without_stock_aliases)));
+  let rename = open_workspace_rename host (Option.value_exn (capture host)) in
+  let rename = step rename Clear_filter ~commands in
+  let rename = step (step rename (Character 't') ~commands) (Character 'e') ~commands in
+  match input rename Enter ~commands with
+  | { palette = None; _ }, Execute (_, Submit_workspace_rename ("te", _)) -> ()
+  | _ -> assert false
+;;
+
+let%test_unit "workspace rename edits a captured ID and revision without no-op mutations" =
+  let apply s ~expected_revision mutation =
+    W.apply s (Mutate { expected_revision; mutation }) |> Result.ok |> Option.value_exn
+  in
+  let registry = W.initial ~session_id:(W.Session_id.of_string "rename-workspace") in
+  let overview = List.hd_exn registry.workspaces in
+  let timing = List.last_exn registry.workspaces in
+  let registry =
+    apply registry ~expected_revision:registry.revision
+      (Rename_workspace { workspace = timing.id; name = overview.name })
+  in
+  let host = receive empty registry in
+  let commands = catalog host ~project:None ~jobs:[] in
+  let step host input_event =
+    match input host input_event ~commands with
+    | host, No_effect -> host
+    | _ -> assert false
+  in
+  let search =
+    List.fold ([ ' '; 'c'; 'c' ] @ String.to_list "rename current workspace") ~init:host
+      ~f:(fun host ch -> step host (Character ch))
+  in
+  let prompt =
+    match input search Enter ~commands with
+    | { palette = None; _ }, Execute (captured, Request_workspace_rename) ->
+      open_workspace_rename host captured
+    | _ -> assert false
+  in
+  assert (String.equal (Option.value_exn prompt.palette).query overview.name);
+  let assert_no_change result =
+    assert (phys_equal result.registry host.registry);
+    assert (Option.is_none result.palette)
+  in
+  assert_no_change (step prompt Escape);
+  assert_no_change (step prompt Enter);
+  assert_no_change (step (step prompt (Character ' ')) Enter);
+  let clear =
+    decode_event
+      (Bonsai_term.Event.Key_press { key = ASCII 'u'; mods = [ Ctrl ] })
+    |> Option.value_exn
+  in
+  let cleared = step prompt clear in
+  let blank = step (step cleared (Character ' ')) Enter in
+  assert (Option.is_some blank.palette && String.is_substring blank.notice ~substring:"blank");
+  let invalid = step cleared (Text "no\nnewlines") in
+  assert (String.is_empty (Option.value_exn invalid.palette).query);
+  assert (String.is_substring invalid.notice ~substring:"single-line");
+  let edited =
+    List.fold (String.to_list "  Design review  ") ~init:cleared
+      ~f:(fun host ch -> step host (Character ch))
+  in
+  let edited = step (step edited (Text "界")) Backspace in
+  let newer =
+    apply registry ~expected_revision:registry.revision
+      (Rename_workspace { workspace = timing.id; name = "Other" })
+  in
+  List.iter
+    [ receive edited newer; switch edited timing.id; switch (switch edited timing.id) overview.id ]
+    ~f:(fun stale ->
+      let stopped = step stale Enter in
+      assert (Option.is_none stopped.palette);
+      assert (String.equal stopped.notice stale_workspace_rename));
+  match input edited Enter ~commands with
+  | pending, Execute (captured, Submit_workspace_rename (name, rename)) ->
+    assert_no_change pending;
+    assert (workspace_rename_current pending captured rename);
+    assert (captured.revision = registry.revision);
+    assert (W.Workspace_id.equal captured.workspace overview.id);
+    assert (String.equal name "Design review");
+    let after =
+      apply registry ~expected_revision:captured.revision
+        (Rename_workspace { workspace = captured.workspace; name })
+    in
+    assert (W.Arrangement.equal (W.workspace after overview.id) { overview with name });
+    assert (String.equal (W.workspace after timing.id).name overview.name);
+    assert (List.equal W.Tile.equal registry.tiles after.tiles);
+    assert (Option.equal W.Workspace_id.equal (receive pending after).active (Some overview.id))
+  | _ -> assert false
+;;
+
 let%test_unit "workspace deletion confirms the named ID and fences stale intent"
   =
   let apply s mutation =
@@ -8662,6 +9082,15 @@ let%test_unit "blank workspaces start with one navigation tile and accept more t
   let host = switch (receive host first) id in
   assert (Option.equal W.Workspace_id.equal host.active (Some id));
   assert (Option.equal W.Tile_id.equal host.focus (Some nav.id));
+  let check_fit host snapshot expected =
+    let definition = render_definition host workspace |> Option.value_exn in
+    let kinds = layout_keys host (tiles host) in
+    (match P.Layout.compute ~width:80 ~height:28 ~kinds definition with
+     | Compact -> assert false
+     | Grid cells -> assert (List.equal W.Geometry.equal cells expected));
+    assert (W.Snapshot.equal snapshot (Option.value_exn host.registry))
+  in
+  check_fit host first [ { x = 0; y = 0; width = 80; height = 1 } ];
   let commands = catalog host ~project:None ~jobs:[] in
   let browsing, _ = input host (Character 'k') ~commands in
   (match input browsing Enter ~commands with
@@ -8679,6 +9108,12 @@ let%test_unit "blank workspaces start with one navigation tile and accept more t
     | _ -> assert false
   in
   let host = receive host populated in
+  check_fit
+    host
+    populated
+    [ { x = 0; y = 0; width = 80; height = 1 }
+    ; { x = 0; y = 1; width = 80; height = 27 }
+    ];
   let host, _ = input host Focus ~commands in
   let tile = Option.value_exn (focused host) in
   assert (String.equal tile.kind "logs" && W.Binding.equal tile.binding Follow);

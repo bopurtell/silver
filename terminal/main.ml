@@ -1456,7 +1456,7 @@ let workspace_request ?(poll = false) ?(on_snapshot = fun _ -> ()) session opera
         on_snapshot snapshot)
 ;;
 
-let mutate_workspace ?on_snapshot ?(current = fun () -> true) session mutation =
+let mutate_workspace ?on_snapshot ?expected_revision ?(current = fun () -> true) session mutation =
   match session.host.registry with
   | None -> return ()
   | Some snapshot ->
@@ -1514,7 +1514,10 @@ let mutate_workspace ?on_snapshot ?(current = fun () -> true) session mutation =
             | Ok mutation -> workspace_request
               ?on_snapshot
               session
-              (Mutate { expected_revision = snapshot.revision; mutation })
+               (Mutate
+                  { expected_revision = Option.value expected_revision ~default:snapshot.revision
+                  ; mutation
+                  })
           in
           (* Refresh after a conflict, but never silently retry the captured mutation. *)
           let notice = session.host.notice in
@@ -6261,11 +6264,16 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       match session.host.registry with
       | None -> return ()
       | Some before ->
-        mutate_workspace ~current session mutation ~on_snapshot:(fun snapshot ->
-          if navigation_revision = session.navigation_revision
-             && Workspace.Session_id.equal captured.session snapshot.session_id
-             && snapshot.revision > captured.revision
-          then on_snapshot ~before snapshot))
+         mutate_workspace
+           ~expected_revision:captured.revision
+           ~current
+           session
+           mutation
+           ~on_snapshot:(fun snapshot ->
+             if navigation_revision = session.navigation_revision
+                && Workspace.Session_id.equal captured.session snapshot.session_id
+                && snapshot.revision > captured.revision
+             then on_snapshot ~before snapshot))
   in
   let focus_workspace_fallback ~before snapshot notice =
     (* [receive] has already selected the surviving workspace. Do not override
@@ -6791,9 +6799,22 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
         then restore_default_layout session captured ticket workspace definition
         else return ())
     | Restore_default_layout_unavailable -> Effect.Ignore
-    | Request_workspace_deletion ->
-      session.host <- Host.open_workspace_deletion session.host captured;
-      Effect.Ignore
+     | Request_workspace_deletion ->
+       session.host <- Host.open_workspace_deletion session.host captured;
+       Effect.Ignore
+     | Request_workspace_rename ->
+       session.host <- Host.open_workspace_rename session.host captured;
+       Effect.Ignore
+     | Submit_workspace_rename (name, rename) ->
+       workspace_lifecycle
+         ~intent_current:(fun () -> Host.workspace_rename_current session.host captured rename)
+         (Workspace.Mutation.Rename_workspace { workspace = captured.workspace; name })
+         ~on_snapshot:(fun ~before:_ snapshot ->
+           if List.exists snapshot.workspaces ~f:(fun w ->
+                Workspace.Workspace_id.equal w.id captured.workspace && String.equal w.name name)
+           then
+             session.host
+             <- { session.host with notice = "Renamed workspace: " ^ Artifact_view.safe name })
     | Confirm_workspace_deletion deletion ->
       workspace_lifecycle
         ~intent_current:(fun () -> Host.workspace_deletion_current session.host captured deletion)

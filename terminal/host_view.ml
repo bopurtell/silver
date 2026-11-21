@@ -3313,9 +3313,18 @@ let show_global_header host =
   let tiles = H.tiles host in
   host.H.chrome
   && (not (List.exists tiles ~f:(fun tile -> P.Waveforms.is_pane tile.kind)))
-  && not
-       (List.exists (H.tiles host) ~f:(fun tile ->
-          String.equal tile.W.Tile.kind "live-status"))
+  && (not (List.exists tiles ~f:(fun tile -> String.equal tile.W.Tile.kind "live-status")))
+  &&
+  (* The runtime top strip takes the place of the banner. An authored navigation
+     panel can be anywhere, so its presence alone does not suppress the banner. *)
+  not
+    (match H.effective_layout_mode host, H.active host with
+     | Fit, Some workspace when Option.is_none workspace.zoomed_tile ->
+       Option.exists (H.render_definition host workspace) ~f:(fun definition ->
+         match definition.layout with
+         | P.Common.Workspace_tabs_bar _ -> true
+         | _ -> false)
+     | _ -> false)
 ;;
 
 (** Waveform tiles use their focused hint policy in any composition. Notices and
@@ -4007,6 +4016,13 @@ let palette_controls host (p : H.palette) =
   | None -> []
   | Some (Delete_workspace_confirmation deletion) ->
     submit "Confirm delete" (H.workspace_deletion_current host p.capture deletion)
+  | Some (Rename_workspace_name rename) ->
+    let changed =
+      match H.workspace_rename_name rename p.query with
+      | Ok (Some _) -> true
+      | _ -> false
+    in
+    submit "Rename" (changed && H.workspace_rename_current host p.capture rename)
   | Some (Theme_picker _) ->
     submit "Apply" (Option.is_some (List.nth (H.matches p) p.index))
   | Some (Starter_name _) -> submit "Preview" nonblank
@@ -4100,6 +4116,7 @@ let palette_page host dimensions =
     let heading =
       match p.argument with
       | Some (H.Delete_workspace_confirmation _) -> "Confirm workspace deletion"
+      | Some (H.Rename_workspace_name _) -> "Rename current workspace"
       | Some (H.Theme_picker _) -> "Choose theme"
       | Some (H.Plan_endpoint _) ->
         "PLAN ENDPOINT — "
@@ -4165,6 +4182,7 @@ let palette_page host dimensions =
         "SELECTED LIBRARY — choose action"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "setup.add") ->
         "SET UP PROJECT — choose how to configure this project"
+      | None when Option.is_some (H.goto_query p) -> "Go to workspace"
       | None ->
         (match List.hd p.commands with
          | Some c when String.is_prefix c.id ~prefix:"flow.choice." -> c.aliases
@@ -4194,6 +4212,13 @@ let palette_page host dimensions =
     in
     let help =
       match p.argument with
+      | Some (H.Rename_workspace_name rename) ->
+        let instruction =
+          if H.workspace_rename_current host p.capture rename
+          then "Enter a new workspace name · Ctrl-U clears · Esc cancels"
+          else H.stale_workspace_rename
+        in
+        wrap_cells ~width instruction
       | Some (H.Delete_workspace_confirmation deletion) ->
         let question = "Delete workspace: " ^ Artifact_view.safe deletion.name in
         let instruction =
@@ -4266,7 +4291,9 @@ let palette_page host dimensions =
                | Ascii | None_ -> "|")
             ~caret_attrs:(Role.attrs appearance Focus)
             ~width
-            p.query
+            (match p.argument with
+             | Some (H.Rename_workspace_name _) -> Artifact_view.safe p.query
+             | _ -> p.query)
         ]
       else List.map query ~f:(text ~role:Focus)
     in
@@ -4326,7 +4353,11 @@ let palette_page host dimensions =
     let commands =
       if H.palette_has_results p && List.is_empty ranked && shown > 0
       then (
-        let empty = if Option.is_some theme then "No matching themes" else "No matching commands" in
+        let empty =
+          if Option.is_some theme then "No matching themes"
+          else if Option.is_some (H.goto_query p) then "No matching workspaces"
+          else "No matching commands"
+        in
         [ Palette_view.inert (text ~role:Muted empty) ])
       else commands
     in
@@ -5126,6 +5157,134 @@ let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
     ~f:(fun target -> assert (Option.equal W.Workspace_id.equal target (Some other.id)));
   assert (Option.is_none (click ~width:120 ~row:0 ~column:119));
   assert (Option.is_none (click ~width:4 ~row:2 ~column:0))
+;;
+
+let%test_unit "blank workspace paints and hit-tests the stock navigation strip on row zero"
+  =
+  let stock, data, _ =
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config P.Presets.stock_config)
+      |> Result.ok
+      |> Option.value_exn)
+  in
+  let registry = Option.value_exn stock.registry in
+  let window = (Option.value_exn (H.active stock)).window in
+  let registry =
+    W.apply
+      registry
+      (Mutate
+         { expected_revision = registry.revision
+         ; mutation = H.blank_workspace_mutation registry ~window
+         })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let custom = List.last_exn registry.workspaces in
+  let host = H.switch (H.receive stock registry) custom.id in
+  let tile = List.hd_exn (H.tiles host) in
+  List.iter [ 80; 180 ] ~f:(fun width ->
+    let dimensions = { Dimensions.width; height = 40 } in
+    let screen host = render host data dimensions |> plain_text |> String.split_lines in
+    let stock_top = List.hd_exn (screen stock) in
+    let top = List.hd_exn (screen host) in
+    assert (String.is_prefix stock_top ~prefix:" Project ▾ │");
+    assert (String.is_prefix top ~prefix:" Project ▾ │");
+    assert (String.is_substring top ~substring:(" " ^ custom.name ^ "]"));
+    assert (
+      not
+        (List.exists (screen host) ~f:(String.is_prefix ~prefix:(custom.name ^ " |"))));
+    let project_x = String.substr_index_exn top ~pattern:"Project" in
+    assert (
+      Poly.equal (menu_trigger_at host data dimensions ~x:project_x ~y:0) (Some `Project));
+    assert (Option.is_none (menu_trigger_at host data dimensions ~x:project_x ~y:1));
+    let cell_x pattern =
+      cell_width (String.prefix top (String.substr_index_exn top ~pattern))
+    in
+    assert (Option.is_none (menu_trigger_at host data dimensions ~x:(cell_x "│") ~y:0));
+    let tab_x = cell_x custom.name in
+    assert (Option.is_none (menu_trigger_at host data dimensions ~x:tab_x ~y:0));
+    (match pointer_geometry host dimensions ~x:tab_x ~y:0 with
+     | Some (hit, body, Some (column, row)) ->
+       assert (W.Tile_id.equal hit.id tile.id);
+       assert (body.x = 0 && body.y = 0 && body.height = 1);
+       assert (
+         Option.equal
+           W.Workspace_id.equal
+           (workspace_tab_at
+              host
+              data
+              tile
+              ~width:body.width
+              ~height:body.height
+              ~column
+              ~row)
+           (Some custom.id))
+     | _ -> assert false);
+    let opened, _ = H.open_menu host Project_menu [] ~height:dimensions.height in
+    let overlay = screen opened in
+    assert (String.equal top (List.hd_exn overlay));
+    assert (String.is_substring (List.nth_exn overlay 1) ~substring:"Project"))
+;;
+
+let%test_unit "authored workspace navigation retains intentional panel chrome" =
+  let open Workspace_config in
+  let key = "authored-navigation" in
+  let definition : Definition.t =
+    { key
+    ; template =
+        { version = Workspace_template.version
+        ; name = "Authored navigation"
+        ; preset = None
+        ; views =
+            [ { Workspace_template.View.kind = "workspace-tabs"
+              ; hidden = false
+              ; geometry = { x = 0; y = 0; width = 80; height = 5 }
+              }
+            ]
+        }
+    ; tiles =
+        [ { Tile.key = "tabs"
+          ; presentation =
+              Some
+                { Presentation.inherit_defaults with
+                  title = Some true
+                ; frame = Some true
+                ; padding = Some 2
+                ; hints = Some true
+                }
+          }
+        ]
+    ; layout = Some (Leaf { tile = "tabs"; min_width = 24; min_height = 5; weight = 1 })
+    }
+  in
+  let config : Resolved.t =
+    { version
+    ; id = key
+    ; definitions = [ definition ]
+    ; windows =
+        [ { key; name = "Fixture"; workspaces = [ { key; name = key; definition = Custom key } ] } ]
+    }
+  in
+  let host, data, find =
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config config) |> Result.ok |> Option.value_exn)
+  in
+  let tile = find "workspace-tabs" in
+  let host = { host with appearance = { host.appearance with preset = Instrument } } in
+  assert (show_global_header host);
+  let policy = H.policy host tile in
+  assert (T.show_title policy && policy.frame && policy.padding = 2 && policy.hints);
+  let dimensions = { Dimensions.width = 80; height = 20 } in
+  let screen = render_workspace host data dimensions |> plain_text |> String.split_lines in
+  assert (String.is_prefix (List.hd_exn screen) ~prefix:"authored-navigation |");
+  assert (String.is_substring (List.nth_exn screen 1) ~substring:"workspaces");
+  let body = List.nth_exn screen 2 in
+  let x =
+    cell_width (String.prefix body (String.substr_index_exn body ~pattern:"Project ▾"))
+  in
+  assert (x = 4);
+  assert (Poly.equal (menu_trigger_at host data dimensions ~x ~y:2) (Some `Project));
+  assert (Option.is_none (menu_trigger_at host data dimensions ~x ~y:1))
 ;;
 
 let%test_unit "preparation pointer selects wrapped history headings but not attempt \
@@ -8388,6 +8547,29 @@ let%test_unit "palette uses one result viewport for navigation, rendering and po
   let stale = { scrolled with registry = Option.map scrolled.registry ~f:(fun registry ->
     { registry with revision = registry.revision + 1 }) } in
   assert (List.is_empty (page stale))
+;;
+
+let%test_unit "workspace rename shows its editable name and only offers a valid submit" =
+  let host = H.receive H.empty (W.initial ~session_id:(W.Session_id.of_string "rename-view")) in
+  let capture = Option.value_exn (H.capture host) in
+  let name = (Option.value_exn (H.active host)).name in
+  let prompt = H.open_workspace_rename host capture in
+  let dimensions = { Dimensions.width = 100; height = 30 } in
+  let frame =
+    render_palette prompt dimensions (View.rectangle ~width:100 ~height:30 ())
+    |> plain_text
+  in
+  assert (String.is_substring frame ~substring:"Rename current workspace");
+  assert (String.is_substring frame ~substring:("> " ^ name));
+  assert (String.is_substring frame ~substring:"Ctrl-U clears");
+  let controls host = palette_controls host (Option.value_exn host.H.palette) in
+  let edit host input = fst (H.input host input ~commands:[]) in
+  let cleared = edit prompt Clear_filter in
+  let edited = edit cleared (Text "Shared design desk") in
+  assert (Poly.equal (controls prompt) [ "Cancel", `Input H.Escape ]);
+  assert (Poly.equal (controls cleared) (controls prompt));
+  assert (Poly.equal (controls edited) [ "Rename", `Input H.Enter; "Cancel", `Input H.Escape ]);
+  assert (Poly.equal (controls (H.invalidate_layout_intent edited)) (controls prompt))
 ;;
 
 let%test_unit "palette hit tests use visible row IDs and exact rendered form buttons" =

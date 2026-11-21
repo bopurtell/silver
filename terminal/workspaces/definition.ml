@@ -96,4 +96,6 @@ let rec leaf_min_height tree ~key =
   | Weighted_columns trees ->
     List.find_map trees ~f:(fun (_, tree) -> leaf_min_height tree ~key)
   | Narrow tree -> leaf_min_height tree ~key
+  | Workspace_tabs_bar { key = bar; body } ->
+    if String.equal key bar then Some 1 else leaf_min_height body ~key
 ;;

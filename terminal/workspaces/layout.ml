@@ -130,7 +130,30 @@ let rec place ?(gutter = 0) tree (g : G.t) =
     cells
 ;;
 
-let resolve ?(min_height_for_index = fun _ -> None) tree kinds =
+(** Runtime fallback for tiles without an authored layout leaf. Preserve an explicit
+    layout for the tabs, just like any other configured tile. *)
+let with_default_workspace_tabs (definition : Definition.t option) ~key =
+  let definition =
+    Option.value
+      definition
+      ~default:{ id = ""; name = ""; tiles = []; layout = Common.Stack [] }
+  in
+  if Option.is_some (Definition.leaf_min_height definition.layout ~key)
+  then definition
+  else
+    { definition with
+      layout = Common.Workspace_tabs_bar { key; body = definition.layout }
+    }
+;;
+
+let workspace_tabs_index layout kinds =
+  match layout with
+  | Common.Workspace_tabs_bar { key; _ } ->
+    List.findi kinds ~f:(fun _ kind -> String.equal kind key) |> Option.map ~f:fst
+  | _ -> None
+;;
+
+let resolve ?(min_height_for_index = fun _ -> None) layout kinds =
   let minimum i h = Int.max h (Option.value (min_height_for_index i) ~default:0) in
   let claimed = ref [] in
   let rec loop = function
@@ -151,24 +174,36 @@ let resolve ?(min_height_for_index = fun _ -> None) tree kinds =
        | [ (_, child) ] -> Some child
        | children -> Some (Weighted_columns children))
     | Common.Narrow tree -> Option.map (loop tree) ~f:(fun t -> Narrow t)
+    | Common.Workspace_tabs_bar { body; _ } -> loop body
   and node children make =
     match List.filter_map children ~f:loop with
     | [] -> None
     | [ child ] -> Some child
     | children -> Some (make children)
   in
-  let primary = loop tree in
+  let bar =
+    Option.map (workspace_tabs_index layout kinds) ~f:(fun i ->
+      claimed := [ i ];
+      Cell (i, 24, 1, 0))
+  in
+  let primary = loop layout in
   let extras =
     List.filter_mapi kinds ~f:(fun i _ ->
       if List.mem !claimed i ~equal:Int.equal
       then None
       else Some (Cell (i, 24, minimum i 6, 1)))
   in
-  match primary, extras with
-  | None, [] -> None
-  | Some tree, [] -> Some tree
-  | None, extras -> Some (Stack extras)
-  | Some tree, extras -> Some (Stack [ tree; Stack extras ])
+  let body =
+    match primary, extras with
+    | None, [] -> None
+    | Some tree, [] -> Some tree
+    | None, extras -> Some (Stack extras)
+    | Some tree, extras -> Some (Stack [ tree; Stack extras ])
+  in
+  match bar, body with
+  | None, body -> body
+  | Some bar, None -> Some bar
+  | Some bar, Some body -> Some (Stack [ bar; body ])
 ;;
 
 (** Input indices in depth-first layout order, independent of available geometry. [kinds]
@@ -212,6 +247,33 @@ let grid ?(gutter = 0) ?(min_height_for_index = fun _ -> None) ~width ~height co
       else Some (place ~gutter tree { G.x = 0; y = 0; width; height })))
 ;;
 
+let fallback_grid ~gutter ~min_height_for_index ~width ~height layout kinds =
+  match workspace_tabs_index layout kinds with
+  | None -> grid ~gutter ~min_height_for_index ~width ~height (List.length kinds)
+  | Some i ->
+    let body =
+      Array.of_list
+        (List.filter (List.range 0 (List.length kinds)) ~f:(fun j -> not (Int.equal i j)))
+    in
+    if width < 24 || height < 1
+    then None
+    else (
+      let top = { G.x = 0; y = 0; width; height = 1 } in
+      if Array.is_empty body
+      then Some [ i, top ]
+      else (
+        let offset = 1 + gutter in
+        grid
+          ~gutter
+          ~min_height_for_index:(fun j -> min_height_for_index body.(j))
+          ~width
+          ~height:(height - offset)
+          (Array.length body)
+        |> Option.map ~f:(fun cells ->
+          (i, top)
+          :: List.map cells ~f:(fun (j, g) -> body.(j), { g with y = g.y + offset }))))
+;;
+
 (** Fit never writes persisted requested geometry. Host handles [Compact] by showing the
     focused tile; zoom should bypass this function entirely. *)
 let compute
@@ -231,13 +293,23 @@ let compute
       Option.bind (resolve ~min_height_for_index layout kinds) ~f:(fun tree ->
         let w, h = min_size ~gutter tree in
         if width >= w && height >= h
-        then Some (place ~gutter tree { G.x = 0; y = 0; width; height })
+        then (
+          let area : G.t = { x = 0; y = 0; width; height } in
+          match workspace_tabs_index layout kinds, tree with
+          | Some i, Stack [ Cell (bar, _, _, _); body ] when Int.equal i bar ->
+            (* Even if every authored body leaf is fixed-height, don't assign any of the
+               surplus to the navigation track. *)
+            let y = 1 + gutter in
+            Some
+              ((i, { area with height = 1 })
+               :: place ~gutter body { area with y; height = height - y })
+          | _ -> Some (place ~gutter tree area))
         else None)
     in
     let cells =
       match cells with
       | Some _ -> cells
-      | None -> grid ~gutter ~min_height_for_index ~width ~height (List.length kinds)
+      | None -> fallback_grid ~gutter ~min_height_for_index ~width ~height layout kinds
     in
     match cells with
     | None -> Compact

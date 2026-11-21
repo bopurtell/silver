@@ -46,4 +46,8 @@ type tree =
   | Columns of tree list
   | Weighted_columns of (int * tree) list
   | Narrow of tree
+  | Workspace_tabs_bar of
+      { key : string
+      ; body : tree
+      }
 [@@deriving sexp]

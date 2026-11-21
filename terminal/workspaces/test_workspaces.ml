@@ -544,6 +544,43 @@ let%test_unit "empty navigation trees retain every input as a stable extra" =
     assert (List.is_empty (Layout.navigation_order definition ~kinds:[])))
 ;;
 
+let%test_unit "default workspace tabs claim one full-width row above unconfigured panes" =
+  let definition = Layout.with_default_workspace_tabs None ~key:"tabs" in
+  let check ~width ~height ~kinds expected =
+    match Layout.compute ~gutter:1 definition ~width ~height ~kinds with
+    | Compact -> assert false
+    | Grid cells ->
+      assert (List.equal Workspace.Geometry.equal cells expected)
+  in
+  let rect x y width height : Workspace.Geometry.t = { x; y; width; height } in
+  check ~width:80 ~height:28 ~kinds:[ "tabs" ] [ rect 0 0 80 1 ];
+  check
+    ~width:80
+    ~height:28
+    ~kinds:[ "logs"; "tabs"; "execution" ]
+    [ rect 0 2 80 12; rect 0 0 80 1; rect 0 15 80 13 ];
+  (* On a shorter terminal the panes fall back to columns without moving the bar. *)
+  check
+    ~width:80
+    ~height:8
+    ~kinds:[ "logs"; "tabs"; "execution" ]
+    [ rect 0 2 39 6; rect 0 0 80 1; rect 40 2 40 6 ];
+  assert (
+    List.equal
+      Int.equal
+      (Layout.navigation_order definition ~kinds:[ "logs"; "tabs"; "execution" ])
+      [ 1; 0; 2 ])
+;;
+
+let%test_unit "default workspace tabs respect explicit custom placement" =
+  let leaf kind : Common.tree = Leaf { kind; min_width = 24; min_height = 6; weight = 1 } in
+  let definition =
+    { Overview.definition with layout = Columns [ leaf "content"; leaf "tabs" ] }
+  in
+  let unchanged = Layout.with_default_workspace_tabs (Some definition) ~key:"tabs" in
+  assert (phys_equal definition unchanged)
+;;
+
 let%test_unit "navigation leaves computed geometry associated with original input indices"
   =
   let definition = Overview.definition in

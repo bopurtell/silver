@@ -31,6 +31,30 @@ an **Add … tile** command, such as **Add run-selector tile**, **Add live-statu
 tile**, **Add synthesis tile**, or **Add logs tile**. Tile contents depend on the
 project's available evidence. Names are automatic; this command has no naming prompt.
 
+## Go to or rename a workspace
+
+Open **Space c c**, type **`te`**, and press **Enter** to switch to Testing.
+The global palette has these two-letter shortcuts:
+
+| Palette query | Destination |
+| --- | --- |
+| `ov` | Overview |
+| `te` | Testing |
+| `wa` | Waveforms |
+| `ti` | Timing |
+| `re` | Resources |
+| `wo` | Workloads (if present) |
+
+These shortcuts follow the built-in workspace even if you rename it. If it
+is closed, Enter reopens its saved layout. For any workspace, including a
+custom one, you can still type `goto` and part of its name, for example
+`goto ov`. If several names match, use the arrow keys to choose.
+
+To name a scratch workspace, switch to it and choose **Rename current workspace**
+in the palette. Enter saves the new name; Esc cancels. You can then navigate
+by that name: for example, `goto hier` for **Hierarchy lab**. Renaming changes
+the label, not the workspace's ID, tiles or preset.
+
 ## Close, reopen, or delete
 
 To keep a workspace for later, just switch to another one. The active workspace
