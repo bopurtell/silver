@@ -18,11 +18,13 @@ custom mixed workspaces and preservation of authored layouts during investigatio
 ## Create a blank workspace from the palette
 
 Open **Space c c**, choose **Create blank workspace**, and press Enter. Workbench
-creates and switches to an empty `Workspace N` using the next available name.
+creates and switches to `Workspace N` using the next available name. Its first
+tile lists the workspaces in the current window: use `j` / `k` to highlight
+a workspace and Enter to switch to it.
 It belongs to the current window, follows Main context, and persists in the daemon
 registry. Switching occurs only after successful creation.
 
-The palette works even before any tile exists. Open **Space c c** again and choose
+To add other tiles, open **Space c c** again and choose
 an **Add … tile** command, such as **Add run-selector tile**, **Add live-status
 tile**, **Add synthesis tile**, or **Add logs tile**. Tile contents depend on the
 project's available evidence. Names are automatic; this command has no naming prompt.

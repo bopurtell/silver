@@ -220,7 +220,13 @@ let edit_key event =
    wider than the viewport. Accumulation and the indicator stay bounded too. *)
 let max_count = 9_999
 let count_indicator t = Option.map t.pending_count ~f:(sprintf "Count: %d")
-let transition_hint = "w/b next/prev transition · focused signal"
+let transition_hint = "n/w next · p/b previous transition · focused signal"
+
+let transition_direction = function
+  | Char ('n' | 'w') -> Some `Next
+  | Char ('p' | 'b') -> Some `Previous
+  | _ -> None
+;;
 
 let input t key =
   match t.identity_scroll with
@@ -378,9 +384,8 @@ let input t key =
 ;;
 
 let waves_input t key =
-  match key with
-  | Char (('w' | 'b') as motion)
-    when Option.is_none t.editing && Option.is_none t.identity_scroll ->
+  match transition_direction key with
+  | Some direction when Option.is_none t.editing && Option.is_none t.identity_scroll ->
     let count = Option.value t.pending_count ~default:1 in
     let t = clear_count t in
     if count = 0
@@ -392,7 +397,7 @@ let waves_input t key =
         (match List.nth (filtered t data) t.focus with
          | None -> { t with notice = "No focused signal" }
          | Some signal ->
-           let forward = Char.equal motion 'w' in
+           let forward = match direction with `Next -> true | `Previous -> false in
            let lookup ~count ~time = D.transition data signal ~time ~forward ~count in
            (match lookup ~count ~time:t.cursor with
             | None ->
@@ -1090,7 +1095,14 @@ let offscreen_status appearance mapping cursor =
   | Column _ -> None
 ;;
 
-let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~height =
+let render_waves
+  ?(appearance = Appearance.default)
+  ?(hints = true)
+  ?(transition_keys = true)
+  t
+  ~width
+  ~height
+  =
   let open Bonsai_term in
   let module R = Host_view.Role in
   let text role s = View.text ~attrs:(R.attrs appearance role) (safe s) in
@@ -1241,7 +1253,7 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
          ; (if Option.is_some t.editing && not (String.is_empty t.notice)
             then text R.Warning t.notice
             else View.none)
-         ; (if hints && Option.is_none t.editing
+          ; (if hints && transition_keys && Option.is_none t.editing
             then text R.Muted transition_hint
             else View.none)
          ]
@@ -1435,7 +1447,14 @@ let render_waveform
           ~width:side_width
           ~height:body_height
       in
-      let waves = render_waves ~appearance t ~width:graph_width ~height:body_height in
+      let waves =
+        render_waves
+          ~appearance
+          ~transition_keys:false
+          t
+          ~width:graph_width
+          ~height:body_height
+      in
       View.vcat
         (List.map header ~f:(line ~role:R.Muted)
          @ [ line
@@ -1620,8 +1639,7 @@ module%test Counts = struct
     [%equal: int64 * int64 * int64 * string * int * int] (navigation a) (navigation b)
   ;;
 
-  let screen ?(hints = false) ?(width = 30) ?(height = 12) t =
-    let view = render_waves ~hints t ~width ~height in
+  let plain view ~width ~height =
     let buf = Buffer.create 1024 in
     Notty.Render.to_buffer
       buf
@@ -1630,6 +1648,10 @@ module%test Counts = struct
       (width, height)
       (Bonsai_term.View.Private.notty_image view);
     Buffer.contents buf
+  ;;
+
+  let screen ?(hints = false) ?(width = 30) ?(height = 12) t =
+    plain (render_waves ~hints t ~width ~height) ~width ~height
   ;;
 
   let%test_unit "Waves counts are visible before and after load, without applying motion" =
@@ -1731,8 +1753,16 @@ module%test Counts = struct
     assert (Int64.equal prev.cursor 10L && Int64.equal prev.start 10L);
     assert (same_navigation prev (keys next "bb"));
     assert (same_navigation prev (keys next "9999b"));
+    let check_alias t (alias, original) =
+      let actual = keys t alias in
+      assert (same_navigation actual (keys t original) && Option.is_none actual.pending_count)
+    in
+    List.iter [ "n", "w"; "2n", "2w"; "3n", "3w"; "9999n", "9999w" ] ~f:(check_alias t);
+    List.iter [ "p", "b"; "2p", "2b"; "9999p", "9999b"; "0p", "0b" ] ~f:(check_alias next);
     let next_stuck = keys next "w" and prev_stuck = keys prev "b" in
     assert (same_navigation next next_stuck && same_navigation prev prev_stuck);
+    assert (String.equal (keys next "n").notice next_stuck.notice);
+    assert (String.equal (keys prev "p").notice prev_stuck.notice);
     List.iter [ 6; 12 ] ~f:(fun height ->
       assert (String.is_substring (screen ~height next_stuck) ~substring:"No next transition");
       assert
@@ -1744,12 +1774,21 @@ module%test Counts = struct
     let no_focus = keys { t with filter = "unmatched" } "w" in
     assert (same_navigation no_focus t);
     assert (String.is_substring (screen no_focus) ~substring:"No focused signal");
-    assert (String.is_substring (screen ~hints:true ~width:80 t) ~substring:transition_hint);
+    assert (
+      String.is_substring
+        (screen ~hints:true ~width:80 t)
+        ~substring:"n/w next · p/b previous transition");
     assert (not (String.is_substring (screen ~width:80 t) ~substring:transition_hint));
-    assert (same_navigation t (input t (Char 'w')));
-    assert (same_navigation t (signals_input t (Char 'w')));
-    let editor = keys t "/wb" in
-    assert (same_navigation t editor && String.equal editor.query "wb")
+    let quick = plain (render_waveform t { width = 120; height = 30 }) ~width:120 ~height:30 in
+    assert (not (String.is_substring quick ~substring:"n/w next"));
+    List.iter [ 'w'; 'b'; 'n'; 'p' ] ~f:(fun c ->
+      assert (same_navigation t (input t (Char c)));
+      assert (same_navigation t (signals_input t (Char c))));
+    let editor = keys t "/wbnp" in
+    assert (same_navigation t editor && String.equal editor.query "wbnp");
+    let identity = keys t "inp" in
+    assert (
+      same_navigation t identity && Option.equal Int.equal identity.identity_scroll (Some 0))
   ;;
 end
 

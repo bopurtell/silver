@@ -165,7 +165,7 @@ completed using its own bounded fixtures.
 ## Follow-up — focused signal transitions
 
 The optional value-change jump above is available in the dedicated Waves tile:
-`w` / `b` jump forward / backward through the actual transitions of the row
+`n` / `p` (also `w` / `b`) jump forward / backward through the actual transitions of the row
 highlighted in Signals. Like column and tick motions, they accept a numeric
 count. See the [Waveforms controls](../../testing_workspace.md#dedicated-waveforms-workspace).
 

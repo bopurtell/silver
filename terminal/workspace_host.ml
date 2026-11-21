@@ -1820,8 +1820,20 @@ let blank_workspace_mutation (registry : W.Snapshot.t) ~window =
     then available (n + 1)
     else name
   in
-  W.Mutation.Create_workspace
-    { window; name = available 1; context = registry.main_context }
+  W.Mutation.Instantiate_template
+    { window
+    ; template =
+        { version = Workspace_template.version
+        ; name = available 1
+        ; preset = None
+        ; views =
+            [ { kind = "workspace-tabs"
+              ; hidden = false
+              ; geometry = { x = 0; y = 0; width = 80; height = 1 }
+              }
+            ]
+        }
+    }
 ;;
 
 (** Only an acknowledged single mutation may drive creation navigation. A refresh after a
@@ -8171,8 +8183,7 @@ let%test_unit "selectors and project-scoped tiles do not acquire ASIC evidence i
   assert (List.is_empty (evidence_runs (receive empty s)))
 ;;
 
-let%test_unit "blank workspaces have unique names and IDs, share Main, and accept tiles \
-               through the palette without a focused tile"
+let%test_unit "blank workspaces start with one navigation tile and accept more tiles"
   =
   let apply s mutation =
     W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
@@ -8214,10 +8225,29 @@ let%test_unit "blank workspaces have unique names and IDs, share Main, and accep
   assert (W.Window_id.equal workspace.window original.window);
   assert (W.Context_id.equal workspace.context first.main_context);
   assert (Option.is_none workspace.preset && Option.is_none workspace.zoomed_tile);
-  assert (List.equal W.Tile.equal registry.tiles first.tiles);
+  let navigation snapshot id =
+    match
+      List.filter snapshot.W.Snapshot.tiles ~f:(fun tile ->
+        W.Workspace_id.equal tile.workspace id)
+    with
+    | [ tile ] ->
+      assert (String.equal tile.kind "workspace-tabs");
+      assert (not tile.hidden && W.Binding.equal tile.binding Follow);
+      tile
+    | _ -> assert false
+  in
+  let nav = navigation first id in
+  assert (List.equal W.Tile.equal (registry.tiles @ [ nav ]) first.tiles);
   let host = switch (receive host first) id in
   assert (Option.equal W.Workspace_id.equal host.active (Some id));
-  assert (Option.is_none host.focus && List.is_empty (tiles host));
+  assert (Option.equal W.Tile_id.equal host.focus (Some nav.id));
+  let commands = catalog host ~project:None ~jobs:[] in
+  let browsing, _ = input host (Character 'k') ~commands in
+  (match input browsing Enter ~commands with
+   | _, Execute (capture, Switch destination) ->
+     assert (W.Workspace_id.equal capture.workspace id);
+     assert (W.Workspace_id.equal destination (List.last_exn registry.workspaces).id)
+   | _ -> assert false);
   let host, effect = invoke host "Add logs tile" in
   let populated =
     match effect with
@@ -8228,6 +8258,7 @@ let%test_unit "blank workspaces have unique names and IDs, share Main, and accep
     | _ -> assert false
   in
   let host = receive host populated in
+  let host, _ = input host Focus ~commands in
   let tile = Option.value_exn (focused host) in
   assert (String.equal tile.kind "logs" && W.Binding.equal tile.binding Follow);
   let second =
@@ -8236,6 +8267,9 @@ let%test_unit "blank workspaces have unique names and IDs, share Main, and accep
   let second_id = Option.value_exn (created_workspace ~before:populated ~after:second) in
   assert (not (W.Workspace_id.equal id second_id));
   assert (String.equal (W.workspace second second_id).name "Workspace 2");
+  let second_nav = navigation second second_id in
+  assert (not (W.Tile_id.equal nav.id second_nav.id));
+  assert (List.equal W.Tile.equal (populated.tiles @ [ second_nav ]) second.tiles);
   let host = switch (switch (receive host second) second_id) id in
   assert (Option.equal W.Tile_id.equal host.focus (Some tile.id));
   let renamed =
@@ -8260,7 +8294,7 @@ let%test_unit "blank workspaces have unique names and IDs, share Main, and accep
       ~preserve_focus:[]
   in
   assert (Option.equal W.Workspace_id.equal restored.active (Some second_id));
-  assert (Option.is_none restored.focus)
+  assert (Option.equal W.Tile_id.equal restored.focus (Some second_nav.id))
 ;;
 
 let%test_unit "palette captures text and revalidates registry target" =

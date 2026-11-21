@@ -9008,7 +9008,8 @@ let host_waveform_key session event ~exit =
     clear_waveform_transients session;
     fallback ()
   | Waveform key -> update Waveform_view.input key
-  | Waves (Char ('w' | 'b')) when Option.is_none context ->
+  | Waves key
+    when Option.is_none context && Option.is_some (Waveform_view.transition_direction key) ->
     (* The empty Waves pane already explains that no trace is pinned. Do not fall
        through to host shortcuts for a Waves-owned motion. *)
     Some Bonsai_term.Effect.Ignore

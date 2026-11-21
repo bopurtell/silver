@@ -67,7 +67,9 @@ let route (host : Host.t) ~quick ~editing_text ~identity_modal event =
     else (
       let pane = Option.bind (Host.focused host) ~f:(fun tile -> Waveforms.pane tile.kind) in
       match pane, key with
-       | Some Waves, Some (Char ('0' .. '9' | 'w' | 'b') as key) -> Waves key
+       | Some Waves, Some (Char ('0' .. '9') as key) -> Waves key
+       | Some Waves, Some key when Option.is_some (View.transition_direction key) ->
+         Waves key
       | Some Signals, Some (Char ('0' .. '9' | 'V') as key) -> Signals key
       | ( Some (Session | Signals | Waves)
         , Some
@@ -142,10 +144,11 @@ let%test_unit "leaders and editors take precedence; Signals gets visual and togg
 
 let%test_unit "transition keys belong only to focused Waves outside modals" =
   let focus = test_host () in
+  let route_event = route in
   let route ?(quick = false) ?(editing_text = false) ?(identity_modal = false) host c =
-    route host ~quick ~editing_text ~identity_modal (ascii c)
+    route_event host ~quick ~editing_text ~identity_modal (ascii c)
   in
-  List.iter [ 'w'; 'b' ] ~f:(fun c ->
+  List.iter [ 'w'; 'b'; 'n'; 'p' ] ~f:(fun c ->
     let host = focus Waves in
     assert (Poly.equal (route host c) (Waves (Char c)));
     assert (Poly.equal (route ~quick:true host c) (Waveform (Char c)));
@@ -154,7 +157,26 @@ let%test_unit "transition keys belong only to focused Waves outside modals" =
     assert (Poly.equal (route { host with prefix = 1 } c) Host_boundary);
     assert (Poly.equal (route Host.empty c) Host);
     List.iter [ Waveforms.Session; Signals; Picker; Logs ] ~f:(fun pane ->
-      assert (Poly.equal (route (focus pane) c) Host)))
+      assert (Poly.equal (route (focus pane) c) Host)));
+  let host = focus Waves in
+  let host_step host c = Host.input host (Character c) ~commands:[] in
+  let leader = fst (host_step (fst (host_step host ' ')) 'c') in
+  assert (Poly.equal (route leader 'p') Host_boundary);
+  (match snd (host_step leader 'p') with
+   | Execute (_, Toggle_palette_hints) -> ()
+   | _ -> assert false);
+  let palette = fst (host_step leader 'c') in
+  assert (Option.is_some palette.palette);
+  List.iter [ 'n'; 'p' ] ~f:(fun c ->
+    assert (Poly.equal (route palette c) Host_boundary);
+    assert (Poly.equal (route { host with editing_filter = true } c) Host_boundary);
+    assert (Poly.equal (route { host with paste = true } c) Host_boundary);
+    assert (Poly.equal (route host (Char.uppercase c)) Host);
+    let ctrl = Bonsai_term.Event.Key_press { key = ASCII c; mods = [ Ctrl ] } in
+    assert (
+      Poly.equal
+        (route_event host ~quick:false ~editing_text:false ~identity_modal:false ctrl)
+        Host))
 ;;
 
 let%test_unit "leaving Waves discards its count; Signals applies and cancels a visual range" =
@@ -175,7 +197,7 @@ let%test_unit "leaving Waves discards its count; Signals applies and cancels a v
   let data =
     Waveform_data.parse
       "$timescale 1ns $end $var wire 1 ! a $end $var wire 1 @ b $end \
-       $enddefinitions $end #0 0! 0@ #9 1! 1@"
+       $enddefinitions $end #0 0! 0@ #9 1! 1@ #12 0! #16 1!"
   in
   let step host view event =
     let editing_text = Option.is_some view.View.editing in
@@ -205,9 +227,10 @@ let%test_unit "leaving Waves discards its count; Signals applies and cancels a v
   assert (Option.is_none view.pending_count);
   let view = step waves (move_focus signals waves view) (ascii 'L') in
   assert (Int64.equal view.cursor 1L);
-  let jumped = step waves (step waves view (ascii '3')) (ascii 'w') in
-  assert (Int64.equal jumped.cursor 9L && Option.is_none jumped.pending_count);
-  assert (Int64.equal (step waves jumped (ascii 'b')).cursor 9L);
+  let jumped = step waves (step waves view (ascii '3')) (ascii 'n') in
+  assert (Int64.equal jumped.cursor 16L && Option.is_none jumped.pending_count);
+  let returned = step waves (step waves jumped (ascii '2')) (ascii 'p') in
+  assert (Int64.equal returned.cursor 9L && Option.is_none returned.pending_count);
   let visual = step signals (step signals view (ascii 'V')) (ascii 'j') in
   assert (Option.is_some visual.visual_selection);
   assert (Option.is_none (move_focus signals waves visual).visual_selection);
