@@ -10,7 +10,7 @@ provider. The Testing workspace exposes catalog, attempts, cases, result detail,
 artifacts and logs as coordinated panes. The original FS2 milestone remains closed;
 this is an adoption/investigation extension using its existing contract.
 
-[Shared implementation plan and evidence](testing_cluster_plan.md).
+[Shared implementation plan and evidence](archive/delivery/testing_cluster_plan.md).
 Owner visual review of the new composition remains separate from automated acceptance.
 
 ## Open it in the real example
@@ -141,11 +141,11 @@ tile to Testing. **Esc/q** returns to the existing workspace/focus/selection.
 The viewer uses the active Workbench appearance: panel framing, background,
 selection, values and waveform strokes follow its preset/color scheme. A compact
 header shows case and shortened attempt/digest; full provenance is available with
-`i`. One adaptive 20–30-cell signal column replaces duplicate labels. The graph
-fits an integer raster to the available width and reports its actual visible tick
-range; resizing can therefore change that range. Compressed views identify their
-ticks-per-cell scale and dense transitions. Blank space after the trace end is
-explicitly identified, rather than implying more recorded data.
+`i`. The graph maps the visible time window onto the available columns and
+preserves the exact VCD tick at the cursor. A resize recomputes the mapping
+without changing a user-selected time window. In compressed views, a column
+containing multiple transitions is marked `#`; a flat rendered sample does not
+by itself mean the signal stayed stable throughout the column.
 
 **Visible cursor and absolute-time ruler:** quick viewing and the workspace Waves
 tile now share an exact integer tick-to-cell mapping. A theme-colored vertical
@@ -169,7 +169,10 @@ including physical values exceeding signed-int64 multiplication range.
 | Enter | Toggle focused signal in graph selection; disabled names remain visible |
 | Space c c | Open the global command palette |
 | `/` | Edit signal filter; Enter applies, Esc cancels |
-| `h/l`, Left/Right | Move cursor by one exact VCD tick |
+| `h/l`, Left/Right | Move to the previous/next visible column |
+| `H/L` | Move by one exact VCD tick |
+| `f` | Fit the full trace |
+| `d` | Restore the default extent: eight periods when a reliable clock is inferred, otherwise Fit |
 | `:` | Enter absolute VCD tick; Enter applies |
 | `[` / `]` | Pan half a window |
 | `+` / `-` | Zoom in/out |
@@ -291,16 +294,17 @@ the same evidence directory. Native client/daemon/probe/exporter builds, inline
 tests, lint and formatting passed; synthetic preset smoke passed at
 `/tmp/opencode/synthetic-flow-2hka9ct5/`.
 
-**Declared initial limits:** 8 MiB VCD, 4,096 signal declarations, 4,096-bit widths,
+**Declared parser limits:** 8 MiB VCD, 4,096 signal declarations, 4,096-bit widths,
 500,000 assignments, 64 MiB expanded values, hierarchy depth 128 and paths of 1,024
 bytes. Graph selection is at most 16 signals with viewport-sized lane paging and
-windows of at most 4,096 exact ticks. Parsing is bounded full-file loading, not lazy
+at most 4,096 projected columns. Parsing is bounded full-file loading, not lazy
 trace streaming. Timestamps remain signed-int64 nonnegative integers with explicit
 VCD units. Cursor ticks and ruler physical-time labels are absolute.
 
-X/Z and uninitialized values remain exact in textual inspection. The installed
-Hardcaml renderer is two-state: affected graphical windows show an explicit error
-rather than fabricated logic values. Missing timescales, real/string/event variables,
+X/Z and uninitialized values remain exact in textual inspection. In a mixed window,
+affected lanes show an explicit limitation rather than fabricated logic values;
+known lanes still show connected scalar transitions or labeled bus segments.
+Missing timescales, real/string/event variables,
 dump-on/off gaps, malformed data and exhausted limits are rejected explicitly.
 Return to Testing to export/open externally when a trace is unsupported.
 

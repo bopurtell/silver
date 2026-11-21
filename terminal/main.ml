@@ -25,7 +25,7 @@ module Artifact_export = Terminal_presentation.Artifact_export
 module Artifact_binary_export = Terminal_presentation.Artifact_binary_export
 module Inspection_view = Terminal_presentation.Inspection_view
 module Timing_workspace = Terminal_presentation.Timing_workspace
-module Fs0_fixture = Terminal_presentation.Fs0_fixture
+module Asic_snapshot_fixture = Terminal_presentation.Asic_snapshot_fixture
 module Simulation_view = Terminal_presentation.Simulation_view
 module Testing_workspace = Terminal_presentation.Testing_workspace
 module Simulation_catalog = Terminal_presentation.Simulation_catalog
@@ -726,7 +726,7 @@ let load_presentation_preferences session =
         if Option.is_some session.presentation_preferences_loaded
         then
           session.host
-          <- { session.host with
+          <- { (Host.dismiss_theme_picker session.host) with
                appearance = Appearance.default
              ; layout_mode = Fit
              ; resource_orientations = []
@@ -4412,7 +4412,7 @@ let hierarchy_pane session (tile : Workspace.Tile.t) ~width ~height =
     in
     Some
       (Host_view.lines
-         ~appearance:session.host.appearance
+         ~appearance:(Host.effective_appearance session.host)
          ~width
          ~height
          (List.map rows ~f:Terminal_presentation.Artifact_view.safe))
@@ -4427,7 +4427,7 @@ let picker_page rt ~height =
 
 let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
   Option.map (Waveforms.pane tile.kind) ~f:(fun pane ->
-    let appearance = session.host.appearance in
+    let appearance = Host.effective_appearance session.host in
     let hints = (Host.policy session.host tile).hints in
     let lines ?(role = Host_view.Role.Foreground) rows =
       Host_view.lines ~appearance ~role ~width ~height rows
@@ -4645,6 +4645,7 @@ let retire_stale_browser session =
 
 let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   ignore (retire_stale_browser session : bool);
+  session.host <- Host.dismiss_stale_theme_picker session.host;
   session.painted_palette <- None;
   session.painted_browser <- None;
   let remember_palette (host : Host.t) =
@@ -4673,10 +4674,10 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   | _ when session.show_connection_details -> render_legacy session dimensions
   | true, Some view ->
     session.last_dimensions <- Some dimensions;
-    let appearance = session.host.appearance in
+    let appearance = Host.effective_appearance session.host in
     let view =
       Waveform_view.prepare_quick
-        ~appearance
+        ~appearance:session.host.appearance
         ~value_layout:session.waveform_value_layout
         view
         dimensions
@@ -4714,7 +4715,9 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   | Some browser ->
     let hints = Host.project_browser_hints session.host in
     session.painted_browser <- Some (browser, hints);
-    let window = Browser.render ~hints browser session.host.appearance dimensions background in
+    let window =
+      Browser.render ~hints browser (Host.effective_appearance session.host) dimensions background
+    in
     let host = displayed_host session in
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
     Host_view.render_palette host dimensions window
@@ -5073,7 +5076,7 @@ let host_catalog_base session =
                  [ Host.command
                      "workloads.inspect-result"
                      "Inspect workload result (selected Testing case)"
-                     "PT8 retained result reference"
+                     "memory workload retained result reference"
                      (Host.Workload_reference (tile.id, artifact))
                  ]))
        @ Option.value_map (Simulation_view.detail v) ~default:[] ~f:(fun d ->
@@ -8036,6 +8039,12 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Set_appearance appearance ->
       session.host <- Host.set_appearance session.host appearance;
       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+    | Choose_theme ->
+      session.host <- Host.open_theme_picker session.host captured;
+      Effect.Ignore
+    | Set_scheme scheme ->
+      session.host <- Host.set_scheme session.host scheme;
+      Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
     | Set_layout_mode layout_mode ->
       session.host <- Host.set_layout_mode session.host layout_mode;
       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
@@ -8906,16 +8915,16 @@ let host_handler session event ~exit =
     | Filter_pass -> host_handler_overlays session event ~exit)
 ;;
 
-let fs0_fixture scenario =
+let asic_snapshot_fixture scenario =
   (* Explicit synthetic data, only reachable from the capture hook. Production startup
      always obtains both registry and runs from their daemon services. *)
   let session = session_of_baseline_fixture (List.hd_exn Baseline_fixture.all) in
-  let a = Fs0_fixture.run_a
-  and b = Fs0_fixture.run_b in
-  session.asic <- Some Fs0_fixture.snapshot;
+  let a = Asic_snapshot_fixture.run_a
+  and b = Asic_snapshot_fixture.run_b in
+  session.asic <- Some Asic_snapshot_fixture.snapshot;
   let registry =
     Workspace.initial
-      ~session_id:(Workspace.Session_id.of_string "explicit-synthetic-fs0")
+      ~session_id:(Workspace.Session_id.of_string "explicit-synthetic-asic")
   in
   let overview = List.hd_exn registry.workspaces
   and timing = List.last_exn registry.workspaces in
@@ -9052,11 +9061,11 @@ let fs0_fixture scenario =
         Host.input session.host (Character ch) ~commands:(host_catalog session)
       in
       session.host <- host);
-  session.status <- "SYNTHETIC FS0 FIXTURE — no tool evidence";
+  session.status <- "SYNTHETIC ASIC FIXTURE — no tool evidence";
   session
 ;;
 
-let capture_fs0_frames ~directory =
+let capture_asic_fixture_frames ~directory =
   Core_unix.mkdir_p directory;
   List.iter
     [ "overview"
@@ -9079,7 +9088,7 @@ let capture_fs0_frames ~directory =
             ~f:(fun (extension, cap) ->
               let file =
                 sprintf
-                  "fs0-%s.%dx%d.%s"
+                  "asic-fixture-%s.%dx%d.%s"
                   scenario
                   dimensions.width
                   dimensions.height
@@ -9087,7 +9096,7 @@ let capture_fs0_frames ~directory =
               in
               Out_channel.write_all
                 (Filename.concat directory file)
-                ~data:(render_to_string (fs0_fixture scenario) dimensions ~cap ^ "\n"))))
+                ~data:(render_to_string (asic_snapshot_fixture scenario) dimensions ~cap ^ "\n"))))
 ;;
 
 let capture_appearance_frames ~directory =
@@ -9101,7 +9110,7 @@ let capture_appearance_frames ~directory =
             List.iter
               [ "txt", Notty.Cap.dumb; "ansi", Notty.Cap.ansi ]
               ~f:(fun (extension, cap) ->
-                let session = fs0_fixture scenario in
+                let session = asic_snapshot_fixture scenario in
                 session.host
                 <- Host.set_appearance
                      session.host
@@ -9311,6 +9320,13 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if Host.has_theme_picker session.host
+    then
+      if retire_stale_browser session
+      then Effect.Ignore
+      else
+        Option.value_map (Host.decode_theme_event event) ~default:Effect.Ignore ~f:(fun input ->
+          modal_input session input ~exit)
     else if Option.is_some session.host.menu || Option.is_some session.browser
     then host_handler session event ~exit |> Option.value ~default:Effect.Ignore
     else if match event with
@@ -10512,12 +10528,12 @@ let command =
          ~doc:
            "DIR render the deterministic UI fixtures into DIR and exit (development \
             baseline capture; no daemon or project needed)"
-     and capture_fs0 =
-       flag
-         "--capture-fs0"
-         (optional string)
-         ~doc:
-           "DIR capture actual workspace renderer with explicitly synthetic FS0 fixtures"
+      and capture_asic_fixture =
+        flag
+          "--capture-asic-fixture"
+          (optional string)
+          ~doc:
+            "DIR capture the workspace renderer with synthetic ASIC fixtures"
      and capture_appearance =
        flag
          "--capture-appearance"
@@ -10525,7 +10541,7 @@ let command =
          ~doc:"DIR capture experimental A-E skins over identical synthetic fixtures"
      in
      let standalone = standalone || local_by_default in
-     match capture_appearance, capture_fs0, capture_baseline with
+     match capture_appearance, capture_asic_fixture, capture_baseline with
      | (Some _, _, _ | _, Some _, _ | _, _, Some _) when api ->
        fun () ->
          let message = "--api cannot be combined with capture hooks" in
@@ -10541,7 +10557,7 @@ let command =
          return (Ok ())
      | None, Some directory, _ ->
        fun () ->
-         capture_fs0_frames ~directory;
+         capture_asic_fixture_frames ~directory;
          return (Ok ())
      | None, None, Some directory ->
        (* The capture renders fixtures; it neither connects to a daemon nor opens a

@@ -10,8 +10,8 @@ New views consume shared typed modules; they do not create new authoritative sto
 or per-tile execution engines. See [catalog conventions](README.md).
 
 Status (2026-10-16): **FS0 execution boundary, daemon ASIC service and tile host,
-plus FS1 shared typed inspection delivered**. See [Execution](../fs0_execution_module.md),
-[terminal](../fs0_terminal.md) and [FS1 investigation](../fs1_investigation.md).
+plus FS1 shared typed inspection delivered**. See [Execution](../execution_module.md),
+[terminal](../terminal_controls.md) and [FS1 investigation](../asic_evidence_inspection.md).
 Timing/clock/physical/routing explorers share bounded indexes and on-demand detail,
 with independent tile-local filters/selection/scroll and stale-response fences.
 Local input and deferred/poll completion now invalidate the Bonsai view immediately;
@@ -20,7 +20,7 @@ the owner confirms Escape works. Domain delivery still polls every 500 ms and a
 domain publication and measured high-tile-count scaling remain followups.
 FS2 adds structured simulation state, independent investigation tiles and bounded
 history over the existing supervisor; its substantial milestone is accepted and
-closed. See [FS2 acceptance](../fs2_acceptance.md). Requirements below remain
+closed. See [FS2 acceptance](../structured_simulation.md). Requirements below remain
 normative beyond the adopted scope.
 
 ## Ownership
@@ -68,8 +68,8 @@ FS0 establishes the synthesis/shared-service baseline; FS1 adds provider-free wa
 inspection and local browsing, including independent pinned/following explorers.
 The fan-out model below is the target contract, not a claim that every domain
 already uses subscriptions. Numerical read/cache limits are recorded in
-[provider integration](../fs0_provider_integration.md) and
-[FS1 bounds](../fs1_investigation.md#bounds-caches-and-responsiveness).
+[provider integration](../asic_provider_integration.md) and
+[FS1 bounds](../asic_evidence_inspection.md#bounds-caches-and-responsiveness).
 
 ### Asynchronous access and fan-out
 

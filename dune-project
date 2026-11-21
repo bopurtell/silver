@@ -45,8 +45,8 @@
 
 (package
  (name hardcaml_workbench_provider)
- (synopsis "Synchronous FS2 simulation provider adapter library")
- (description "Shared FS2 wire types, validation and synchronous provider plumbing.")
+ (synopsis "Synchronous simulation provider library for Silver")
+ (description "Wire types, validation and a synchronous runner for simulation providers.")
   (depends
    (ocaml (>= 5.1))
    core

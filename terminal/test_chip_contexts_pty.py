@@ -10,7 +10,7 @@ import runpy
 
 from test_checklist_defaults_pty import ROOT, Terminal, calls, equipment, wait
 
-fs = runpy.run_path(str(ROOT / "scripts/test-fs0.py"))
+fs = runpy.run_path(str(ROOT / "scripts/test-native-execution.py"))
 Session, sexp, field = (fs[k] for k in ("Session", "sexp", "field"))
 FIFO = ("fifo", "deep", "fast")
 MEM = ("program_memory", "rom", "small")

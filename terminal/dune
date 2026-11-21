@@ -7,7 +7,8 @@
  (name terminal_presentation)
  (modules
   baseline_fixture
-  fs0_fixture
+  asic_snapshot_fixture
+  theme_catalog
   appearance
   indicator
   planned_run
@@ -113,21 +114,6 @@
   hardcaml_workbench_protocol)
  (preprocess (pps ppx_jane)))
 
-(rule
- (target frontend_review_recheck.ml)
- (deps frontend_review_recheck.py ../backend/test/frontend_review/review_frontend.ml)
- (action
-  (with-stdout-to %{target}
-   (run python3 -B %{dep:frontend_review_recheck.py}
-    %{dep:../backend/test/frontend_review/review_frontend.ml}))))
-
-(test
- (name frontend_review_recheck)
- (modules frontend_review_recheck)
- (libraries core async core_unix cryptokit yojson terminal_presentation
-  hardcaml_workbench_backend hardcaml_workbench_protocol hardcaml_workbench_workspaces)
- (preprocess (pps ppx_jane)))
-
 (executable
  (name streaming_memory_probe)
  (modules streaming_memory_probe)
@@ -204,6 +190,16 @@
  (action (run python3 -B %{dep:test_startup_entry_pty.py} %{exe:main.exe})))
 
 (rule
+ (alias test-theme-picker-pty)
+ (deps (sandbox always) test_theme_picker_pty.py ../test/support/__init__.py
+       ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_theme_picker_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-theme-picker-pty)))
+
+(rule
  (alias runtest)
  (deps test_asic_adoption_pty.py ../test/support/__init__.py
        ../test/support/screen.py ../test/support/terminal.py)
@@ -223,7 +219,7 @@
 
 (rule
  (alias test-chip-contexts-pty)
- (deps test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-fs0.py
+ (deps test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-native-execution.py
        ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py
        ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
        ../scripts/fixtures/unified_fresh_prefix.py)
@@ -237,7 +233,7 @@
 (rule
  (alias test-palette-launch-aliases-pty)
  (deps test_palette_launch_aliases_pty.py test_chip_contexts_pty.py test_checklist_defaults_pty.py
-       ../scripts/test-fs0.py ../test/support/__init__.py ../test/support/screen.py
+       ../scripts/test-native-execution.py ../test/support/__init__.py ../test/support/screen.py
        ../test/support/terminal.py ../backend/test/asic/production_flow_list.json
        ../backend/test/fresh_provider.py ../scripts/fixtures/unified_fresh_prefix.py)
  (action (run python3 -B %{dep:test_palette_launch_aliases_pty.py}
@@ -251,8 +247,8 @@
  (alias test-project-menus-pty)
   (deps test_project_menus_pty.py test_ip_authoring_pty.py ip_starter_fixture.py
         test_chip_contexts_pty.py test_checklist_defaults_pty.py
-       ../scripts/test-fs0.py ../test/support/__init__.py ../test/support/screen.py
-       ../test/support/terminal.py ../scripts/fixtures/fs2_provider.py ../scripts/fixtures/fs2_wire.py
+       ../scripts/test-native-execution.py ../test/support/__init__.py ../test/support/screen.py
+       ../test/support/terminal.py ../scripts/fixtures/simulation_fault_provider.py ../scripts/fixtures/simulation_fixture_wire.py
        ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
        ../scripts/fixtures/unified_fresh_prefix.py)
  (action (run python3 -B %{dep:test_project_menus_pty.py}
@@ -265,9 +261,9 @@
 (rule
  (alias test-flow-authoring-pty)
  (deps test_flow_authoring_pty.py test_project_menus_pty.py test_ip_authoring_pty.py
-       test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-fs0.py
+       test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-native-execution.py
        ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py
-       ../scripts/fixtures/fs2_provider.py ../scripts/fixtures/fs2_wire.py
+       ../scripts/fixtures/simulation_fault_provider.py ../scripts/fixtures/simulation_fixture_wire.py
        ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
        ../scripts/fixtures/unified_fresh_prefix.py)
  (action (run python3 -B %{dep:test_flow_authoring_pty.py}
@@ -291,8 +287,8 @@
 ; Opt-in palette acceptance with a private structured simulation provider.
 (rule
  (alias test-testing-aliases-pty)
- (deps (sandbox always) test_testing_aliases_pty.py ../scripts/test-fs2-native.py
-       ../scripts/test-fs0.py ../scripts/fixtures/fs2_wire.py
+ (deps (sandbox always) test_testing_aliases_pty.py ../scripts/test-native-simulation.py
+       ../scripts/test-native-execution.py ../scripts/fixtures/simulation_fixture_wire.py
        ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py)
  (action
   (run python3 -B %{dep:test_testing_aliases_pty.py}
@@ -306,10 +302,10 @@
  (deps
   (sandbox always)
   test_waveform_handoff_pty.py
-  ../scripts/test-fs2-native.py
-  ../scripts/test-fs0.py
+  ../scripts/test-native-simulation.py
+  ../scripts/test-native-execution.py
   ../scripts/test-embedded-waveform.py
-  ../scripts/fixtures/fs2_wire.py
+  ../scripts/fixtures/simulation_fixture_wire.py
   ../test/support/__init__.py
   ../test/support/screen.py
   ../test/support/terminal.py)
@@ -325,9 +321,9 @@
   (sandbox always)
   test_mouse_pty.py
   ../scripts/synthetic-flow-demo.py
-  ../scripts/test-fs2-native.py
-  ../scripts/test-fs0.py
-  ../scripts/fixtures/fs2_wire.py
+  ../scripts/test-native-simulation.py
+  ../scripts/test-native-execution.py
+  ../scripts/fixtures/simulation_fixture_wire.py
   ../demo/synthetic_flow/provider.py
   ../demo/synthetic_flow/simulation_provider.py
   ../demo/synthetic_flow/simulation_wire.py

@@ -72,10 +72,10 @@ let%test_unit "native and explicit word gestures edit every palette argument loc
     [ None
     ; Some (H.Plan_endpoint ("flow", "profile"))
     ; Some (Preparation_inputs ("flow", "profile"))
-    ; Some (Finalization_attempt Fs0_fixture.run_a)
+    ; Some (Finalization_attempt Asic_snapshot_fixture.run_a)
     ; Some (Resource_path false)
     ; Some (Resource_path true)
-    ; Some (Acceptance (Fs0_fixture.run_a, "key", "/execution"))
+    ; Some (Acceptance (Asic_snapshot_fixture.run_a, "key", "/execution"))
     ]
     @ List.init 3 ~f:(fun field ->
       Some (H.Simulation_selection (tile.id, "scope", "digest", { form with field })))
@@ -153,7 +153,7 @@ let%test_unit "production inspector and shared Timing filter gate edits without 
                  { workspace = workspace.id
                  ; context = context.id
                  ; expected_selection_revision = context.selection_revision
-                 ; run = Some Fs0_fixture.run_a
+                 ; run = Some Asic_snapshot_fixture.run_a
                  }
            })
       |> Result.ok
@@ -163,7 +163,7 @@ let%test_unit "production inspector and shared Timing filter gate edits without 
     let host = { host with focus = Some tile.id; chrome = false } in
     let view =
       { (Inspection_view.create
-           ~run:Fs0_fixture.run_a
+           ~run:Asic_snapshot_fixture.run_a
            ~domain:"timing"
            ~stage:"signoff"
            ())
@@ -196,7 +196,7 @@ let%test_unit "production inspector and shared Timing filter gate edits without 
 
 let%test_unit "inspector action API reuses Unicode deletion and protects paste" =
   let view =
-    { (Inspection_view.create ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
+    { (Inspection_view.create ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
       editing = true
     ; filter = "top.界é🙂"
     }

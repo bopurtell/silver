@@ -903,7 +903,7 @@ let rows ?(now = Time_ns.now ()) ~width ~height t =
 let%test_unit "literal endpoint filtering, stable numeric selection and explicit axis \
                ALL cycles"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let row id value corner producer : Asic_inspection.Row.t =
     { id
     ; category = "path"
@@ -980,7 +980,7 @@ let%test_unit "literal endpoint filtering, stable numeric selection and explicit
 let%test_unit "detail responses require exact digest row stage scope and request \
                generation"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let row : Asic_inspection.Row.t =
     { id = "row"
     ; category = "path"
@@ -1010,7 +1010,7 @@ let%test_unit "detail responses require exact digest row stage scope and request
     ; times = Evidence_time.Index.empty
     }
   in
-  let snapshot = { Fs0_fixture.snapshot with inspections = [ index ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let initial =
     reconcile (create ~scope:run ~run ~domain:"timing" ~stage:"signoff" ()) snapshot
   in
@@ -1031,7 +1031,7 @@ let%test_unit "detail responses require exact digest row stage scope and request
     [ { detail with source_digest = "old" }
     ; { detail with row_id = "other" }
     ; { detail with stage = "placement" }
-    ; { detail with run = Fs0_fixture.run_b }
+    ; { detail with run = Asic_snapshot_fixture.run_b }
     ]
     ~f:(fun stale ->
       assert (
@@ -1057,14 +1057,14 @@ let%test_unit "detail responses require exact digest row stage scope and request
   assert (Option.is_none (apply_response changed ticket (Error "late detail error")).error);
   let retry = Option.value_exn (fst (input ~width:30 ~height:10 loaded Open)) in
   assert (Option.is_none (apply_response retry ticket (Error "late retry error")).error);
-  assert (Option.is_none (reconcile_scope loaded ~scope:(Some Fs0_fixture.run_b)));
+  assert (Option.is_none (reconcile_scope loaded ~scope:(Some Asic_snapshot_fixture.run_b)));
   assert (Option.is_some (reconcile_scope loaded ~scope:(Some run)))
 ;;
 
 let%test_unit "inspection memo preserves projections across scrolling repaint and equal \
                polling but checks same-digest rows"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let source = String.make 2048 'S' in
   let source_rows =
     List.init 1021 ~f:(fun i : Asic_inspection.Row.t ->
@@ -1096,7 +1096,7 @@ let%test_unit "inspection memo preserves projections across scrolling repaint an
     ; times = Evidence_time.Index.empty
     }
   in
-  let snapshot = { Fs0_fixture.snapshot with inspections = [ index ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let initial =
     reconcile (create ~scope:run ~run ~domain:"timing" ~stage:"signoff" ()) snapshot
   in
@@ -1165,7 +1165,7 @@ let%test_unit "inspection memo preserves projections across scrolling repaint an
 let%test_unit "1000 detail downs then one up reverses the visible viewport and retains \
                immutable wrapped lines"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let row : Asic_inspection.Row.t =
     { id = "row"
     ; category = "path"
@@ -1213,7 +1213,7 @@ let%test_unit "1000 detail downs then one up reverses the visible viewport and r
     normalize
       { (reconcile
            (create ~run ~domain:"timing" ~stage:"signoff" ())
-           { Fs0_fixture.snapshot with inspections = [ index ] })
+           { Asic_snapshot_fixture.snapshot with inspections = [ index ] })
         with
         index = Some index
       ; selected = Some "row"
@@ -1236,7 +1236,7 @@ let%test_unit "1000 detail downs then one up reverses the visible viewport and r
       let polled =
         reconcile
           initial
-          { Fs0_fixture.snapshot with
+          { Asic_snapshot_fixture.snapshot with
             inspections = [ copied_index ]
           ; inspection_details = [ copied_detail ]
           }
@@ -1246,7 +1246,7 @@ let%test_unit "1000 detail downs then one up reverses the visible viewport and r
       let diagnostic_change =
         reconcile
           polled
-          { Fs0_fixture.snapshot with
+          { Asic_snapshot_fixture.snapshot with
             inspections = [ { copied_index with diagnostics = [ "new-diagnostic" ] } ]
           ; inspection_details = [ copied_detail ]
           }

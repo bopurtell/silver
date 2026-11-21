@@ -1,5 +1,6 @@
 # dune
 _build/
+_build_workbench/
 _build_pt8_workbench/
 *.install
 

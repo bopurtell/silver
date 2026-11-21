@@ -2,7 +2,7 @@
 
 Verified 2026-11-05 on `bpurtell/asic-lifecycle-matrix`, based on `oxcaml`
 `2b42815`. This completes the selected deterministic matrix, supplementing the
-[retained FS1 evidence](fs1_lifecycle_and_artifacts.md) and the already-delivered
+[retained FS1 evidence](finalization_and_artifacts.md) and the already-delivered
 failed-launcher reconciliation. It does not establish exhaustive race coverage.
 
 ## Coverage matrix
@@ -29,7 +29,7 @@ failed-launcher reconciliation. It does not establish exhaustive race coverage.
   termination markers. Rendezvous establishes ordering; snapshot polling waits
   for publication rather than using elapsed sleeps to choose a winner.
 - `daemon/test/test_asic_clients.ml`: HTTP against in-process RPC services,
-  including a held response after dispatch. See [transport details](../daemon/test/WB065_COVERAGE.md).
+  including a held response after dispatch. See [transport details](../daemon/test/asic_lifecycle_coverage.md).
 - `terminal/evidence_session_test.ml`: focused production callback-seam tests.
 
 Two demonstrated defects were fixed in `backend/asic_service.ml`: queued

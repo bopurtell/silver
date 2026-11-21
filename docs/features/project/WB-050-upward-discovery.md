@@ -107,11 +107,11 @@ the non-signoff-dependent tickets in this set. Discovery remains explicit/opt-in
   - Manual private daemon: `--discover-project` from `proj/src/rtl` and via a
     symlink returned the same workspace `session_id` as `--project-root /abs/proj`;
     no-marker, conflict and `--api` conflict produced the diagnostics above.
-  - `python3 -B scripts/test-fs3-adoption.py` (with snapshot binaries): PASSED;
+  - `python3 -B scripts/test-project-adoption.py` (with snapshot binaries): PASSED;
     full `dune build -j20`, `dune runtest -j20`, `@setup/fmt @setup/lint
     @terminal/lint` pass.
 
 ## References
 - [Root validation](../../../backend/service.ml)
 - [Setup entrypoint](../../../setup/main.ml)
-- [Current adoption behavior](../../fs3_adoption.md)
+- [Current adoption behavior](../../existing_project_setup.md)

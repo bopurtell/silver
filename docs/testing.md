@@ -13,8 +13,8 @@ workspace executes project-defined tests and hardware verification; see
 
 The next-session continuation plan is
 [cached under migration guides](migration_guides/workbench-test-refactor.md).
-Read [the session checkpoint](session_checkpoint.md) first for paused acceptance,
-the independent example refactor and the authoritative feature queues.
+The [session checkpoint](session_checkpoint.md) preserves the earlier example
+refactor and acceptance context; it is not a current test queue.
 
 ## The hardware analogy is useful
 
@@ -64,7 +64,6 @@ test/
   support/                 shared PTY/screen helpers and controlled regression tests
   fixtures/                DATA ONLY, including miniature projects
   baselines/               DATA ONLY, expected terminal captures
-  pt8_frontend_review/     DATA ONLY, retained review inputs
 ```
 
 OCaml `let%test`/`let%test_unit`/expect tests run through explicitly enabled Dune
@@ -104,9 +103,9 @@ aggregate has not been executed or bounded as a concurrent group. **An outer
 Dune limit still does not override subprocess budgets.**
 
 Native PTY scripts, actual hardware providers, retained external evidence and EDA
-need their own explicit input/budget/registration policy. This pass did not run or
-inspect the independently refactored sibling example. The existing synthesis
-acceptance remains paused, and no EDA was activated by this restructuring.
+need their own explicit input/budget/registration policy. No EDA was activated by
+the test restructuring. The [separate workflow closeout](developer_workflow_refactored_closeout.md)
+records the accepted developer synthesis and restart checks.
 
 ## Integration is about contracts, not a complete N×M product
 

@@ -6,8 +6,8 @@ Timing is now a real `hardcaml_asic` stage and checkpoint. New recipes execute:
 Synthesis → Floorplan → Placement → CTS → Routing → Timing → Signoff
 ```
 
-This extends [WB-069's original analysis-only delivery](timing_checklist_overview_plan.md).
-The [follow-on plan](executable_timing_stage_plan.md) records scope and agent ownership.
+This extends [WB-069's original analysis-only delivery](archive/delivery/timing_checklist_overview_plan.md).
+The [follow-on plan](archive/delivery/executable_timing_stage_plan.md) records scope and agent ownership.
 
 ## Use it from Overview
 

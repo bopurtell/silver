@@ -66,6 +66,6 @@ inline editing inside a list view and the field layout are the new work.
 - Do edited values persist per suite between sessions?
 
 ## References
-- [Simulation contract](../../fs2_simulation_contract.md)
+- [Simulation contract](../../simulation_provider_contract.md)
 - [Catalog controls](../../testing_workspace.md)
 - [Catalog view](../../../terminal/simulation_catalog.ml)

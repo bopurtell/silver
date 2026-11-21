@@ -38,7 +38,7 @@ def main():
     args = parser.parse_args()
     for name in ('daemon', 'client'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    native = load('inspector_native', ROOT / 'scripts/test-fs2-native.py')
+    native = load('inspector_native', ROOT / 'scripts/test-native-simulation.py')
     demo = load('inspector_demo', ROOT / 'scripts/synthetic-flow-demo.py')
     field = native.field
     base = demo.prepare(args.evidence_parent.resolve() / ('wb052-inspector-' + secrets.token_hex(6)),

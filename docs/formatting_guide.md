@@ -383,9 +383,12 @@ helpers, expect-test versus waveform tests, and VCD output locations.
 Use the repository formatter and lint configuration rather than manually aligning code:
 
 ```sh
-./scripts/with-switch.sh dune build @fmt
-./scripts/with-switch.sh dune build @lint
-./scripts/with-switch.sh dune build
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench @fmt
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench @lint
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench
 ```
 
 Exception: a `create` body may be wrapped in `[@@@ocamlformat "disable"]` /

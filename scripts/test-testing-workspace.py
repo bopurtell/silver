@@ -21,7 +21,7 @@ import traceback
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('native_testing', HERE / 'test-fs2-native.py')
+spec = importlib.util.spec_from_file_location('native_testing', HERE / 'test-native-simulation.py')
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
 field, require, sexp = native.field, native.require, native.sexp
@@ -83,7 +83,7 @@ def run(args):
     mode('pass')
     (root / 'hardcaml-workbench-simulation.sexp').write_text(sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
-        ('provider_args', [str(HERE / 'fixtures/fs2_provider.py'), '--control', str(control), '--calls', str(calls)]),
+        ('provider_args', [str(HERE / 'fixtures/simulation_fault_provider.py'), '--control', str(control), '--calls', str(calls)]),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 90)]))
     session = native.Session(args, evidence, root)
     session.env.update(HOME=str(evidence / 'home'), XDG_CONFIG_HOME=str(evidence / 'config'),

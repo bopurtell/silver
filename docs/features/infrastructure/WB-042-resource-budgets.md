@@ -66,5 +66,5 @@ exhaustion policy. Distinguish build jobs, process slots and tool-internal threa
 
 ## References
 - [FS2-F05 output budgets](../../backlog/fs2_followups.md#fs2-f05--durable-logs-and-output-budgets).
-- [FS3 operational build pool](../../fs3_integration_plan.md).
+- [FS3 operational build pool](../../archive/delivery/project_adoption_integration.md).
 - [Current limits](../../../protocol/simulation.ml) and [supervisor](../../../backend/service.ml).

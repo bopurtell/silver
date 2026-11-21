@@ -24,7 +24,7 @@ import traceback
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location(
-    'fs3', Path(__file__).with_name('test-fs3-adoption.py'))
+    'fs3', Path(__file__).with_name('test-project-adoption.py'))
 fs3 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fs3)
 field, require, sexp, parse = fs3.field, fs3.require, fs3.sexp, fs3.parse

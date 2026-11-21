@@ -79,7 +79,7 @@ From `hardcaml_asic_example`, with the sibling development binaries built:
 
 ```sh
 SILVER_ASIC_PROVIDER="$PWD/../hardcaml_asic/_build/install/default/bin/hardcaml-asic-flow" \
-  ../silver/_build/default/terminal/main.exe --standalone
+  ../silver/_build_workbench/default/terminal/main.exe --standalone
 ```
 
 Discover the catalog, select `sram_budget / two_slot`, and choose **Plan ASIC

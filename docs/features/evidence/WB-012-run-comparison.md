@@ -71,4 +71,4 @@ prevent comparison; incompatible quantities remain inspectable side by side.
 - [Run-context requirements](../run_contexts.md)
 - [Retained runs](../runs_and_evidence.md)
 - [Typed inspection rows](../../../protocol/asic_inspection.ml)
-- [Existing evidence behavior](../../fs1_investigation.md)
+- [Existing evidence behavior](../../asic_evidence_inspection.md)

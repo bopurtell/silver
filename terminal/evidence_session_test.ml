@@ -13,7 +13,7 @@ let%test_unit "WB-065 late inspection receipts cannot retarget selection or reco
     H.set_timing
       host
       paths
-      (Timing_workspace.create ~generation:7 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:7 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let original = Option.value_exn (H.inspection host paths.id) in
   let identity = (H.local host paths.id).identity in
@@ -43,12 +43,12 @@ let%test_unit "WB-065 late inspection receipts cannot retarget selection or reco
     in
     H.receive host registry
   in
-  let changed = select host Fs0_fixture.run_b in
+  let changed = select host Asic_snapshot_fixture.run_b in
   let changed =
     H.set_timing
       changed
       paths
-      (Timing_workspace.create ~generation:8 ~run:Fs0_fixture.run_b ~stage:"signoff")
+      (Timing_workspace.create ~generation:8 ~run:Asic_snapshot_fixture.run_b ~stage:"signoff")
   in
   let assert_ignored host ticket =
     let host = { host with H.notice = "newer selection notice" } in
@@ -67,7 +67,7 @@ let%test_unit "WB-065 late inspection receipts cannot retarget selection or reco
   assert_ignored changed ticket;
   (* Return to the same run/stage before the old response arrives. The workspace epoch,
      not just equal-looking selection labels, must distinguish this new intention. *)
-  let returned = select changed Fs0_fixture.run_a in
+  let returned = select changed Asic_snapshot_fixture.run_a in
   let returned = H.set_timing returned paths { original with generation = 9 } in
   assert_ignored returned ticket;
   let current = Option.value_exn (H.inspection returned paths.id) in
@@ -99,7 +99,7 @@ let%test_unit "WB-065 reused tile and request counters cannot accept an old rece
     H.set_timing
       host
       paths
-      (Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let original = Option.value_exn (H.inspection host paths.id) in
   let identity = (H.local host paths.id).identity in
@@ -150,17 +150,17 @@ let%test_unit "Session line projects scoped evidence reads through the real rend
   let paths = find "timing-paths"
   and session = find "live-status" in
   let view =
-    Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff"
+    Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff"
   in
   let host = H.set_timing host paths view in
   let key =
-    Asic_inspection.index_key ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff"
+    Asic_inspection.index_key ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff"
   in
   let operation state activity : Asic.Pending.t =
     { key
     ; kind = "inspection"
     ; state
-    ; run = Some Fs0_fixture.run_a
+    ; run = Some Asic_snapshot_fixture.run_a
     ; error = None
     ; activity
     }
@@ -193,7 +193,7 @@ let%test_unit "Session line projects scoped evidence reads through the real rend
   let other =
     { (operation "executing" Evidence_read) with
       key =
-        Asic_inspection.index_key ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"routing"
+        Asic_inspection.index_key ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"routing"
     }
   in
   assert (has (session_text (with_operations [ other ])) "Evidence: idle")
@@ -209,7 +209,7 @@ let%test_unit "Session context markers preserve labels and typed refresh owns on
     H.set_timing
       host
       paths
-      (Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let registry = Option.value_exn host.registry in
   let active = Option.value_exn host.active in
@@ -220,14 +220,14 @@ let%test_unit "Session context markers preserve labels and typed refresh owns on
     H.set_timing
       independent
       paths
-      (Timing_workspace.create ~generation:2 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:2 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let operation activity : Asic.Pending.t =
     { key =
-        Asic_inspection.index_key ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff"
+        Asic_inspection.index_key ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff"
     ; kind = "inspection"
     ; state = "executing"
-    ; run = Some Fs0_fixture.run_a
+    ; run = Some Asic_snapshot_fixture.run_a
     ; error = None
     ; activity
     }
@@ -280,17 +280,17 @@ let%expect_test "Session line wording at the preset Session width" =
   let paths = find "timing-paths"
   and session = find "live-status" in
   let view =
-    Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff"
+    Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff"
   in
   let host = H.set_timing host paths view in
   let key stage =
-    Asic_inspection.index_key ~run:Fs0_fixture.run_a ~domain:"timing" ~stage
+    Asic_inspection.index_key ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage
   in
   let operation ?error ?(stage = "signoff") state : Asic.Pending.t =
     { key = key stage
     ; kind = "inspection"
     ; state
-    ; run = Some Fs0_fixture.run_a
+    ; run = Some Asic_snapshot_fixture.run_a
     ; error
     ; activity = Evidence_read
     }
@@ -311,7 +311,7 @@ let%expect_test "Session line wording at the preset Session width" =
   let routing =
     Inspection_view.create
       ~generation:1
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~domain:"timing"
       ~stage:"routing"
       ()

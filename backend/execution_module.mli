@@ -2,7 +2,7 @@ open! Core
 open! Async
 open Hardcaml_workbench_protocol
 
-(** FS0 generic Build/Test feature boundary over the existing supervisor. *)
+(** Generic Build/Test feature boundary over the existing supervisor. *)
 type t
 
 val of_service : Service.t -> t

@@ -63,4 +63,4 @@ or aggregated; label aggregation and missing descendants rather than implying co
 ## References
 - [Generic supervisor state](../../../backend/service.ml).
 - [Supervisor ownership contract](../../../backend/simulation_task.ml).
-- [Execution foundations](../../fs0_execution_module.md).
+- [Execution foundations](../../execution_module.md).

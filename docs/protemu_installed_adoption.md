@@ -1,6 +1,6 @@
 # Protemu installed adoption — bounded acceptance
 
-The [Protemu normal workflow and full evidence record](../../hardcaml_protemu/docs/adoption-release.md)
+The [Protemu normal workflow and full evidence record](../../electrum/docs/adoption-release.md)
 is the operational entry point. This page records Workbench's release-facing scope,
 not another implementation queue or a claim that Protemu meets timing.
 

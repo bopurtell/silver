@@ -24,6 +24,8 @@ import time
 import traceback
 
 sys.dont_write_bytecode = True
+from fixtures.memory_workload_oracle import verify_result
+
 HERE = Path(__file__).resolve().parent
 
 
@@ -34,7 +36,7 @@ def load(name, file):
     return module
 
 
-native = load('development_native', 'test-fs2-native.py')
+native = load('development_native', 'test-native-simulation.py')
 fifo = load('development_fifo', 'test-fifo-testing.py')
 field, require, parse, sexp = native.field, native.require, native.parse, native.sexp
 
@@ -464,6 +466,13 @@ def run(args):
             else:
                 check(b'$enddefinitions' in raw and b'#13070000' in raw,
                       'PT8 same-execution VCD retained full 13.07us')
+        simulation_ids = {
+            verify_result(
+                Path(reference['result']), field(pt8, 'id'), case,
+                Path(manifest['inputs']['asic_generation']))
+            for case, reference in references.items()
+        }
+        check(len(simulation_ids) == 2, 'distinct simulator attempts, raw traces and 1RW oracle agree')
         workloads_handoff(pt8, references)
         wave, text = open_wave(pt8, 'exact256')
         check('tb.clk' in text and ('80 ns' in text or '80000' in text), 'PT8 useful ~eight-period default')

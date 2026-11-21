@@ -122,13 +122,13 @@ windows need not block named workspace switching within one terminal surface.
 [D1 and D2/D3 FS0 defaults](decisions.md) are accepted, including guarded
 launch-and-view and follow/pin-run first; immutable snapshots are deferred.
 The [construction plan](construction_phase_plan.md) records delivered conditions,
-true leftovers and consolidated candidate/evidence links. [Acceptance](fs0_acceptance.md)
-and [installed checks](fs0_install_checks.md) record runtime results. FS1's
+true leftovers and consolidated candidate/evidence links. [Acceptance](archive/delivery/native_and_synthesis_acceptance.md)
+and [installed checks](archive/delivery/initial_installation_checks.md) record runtime results. FS1's
 adopted-evidence scope and FS5's first appearance slice are delivered.
-[FS1 investigation](fs1_investigation.md) records current completion, real evidence,
+[FS1 investigation](asic_evidence_inspection.md) records current completion, real evidence,
 provider adoption and limits. The owner confirmed the Escape-responsiveness fix;
 inspector presentation polish and broader race/scaling coverage are followups,
-not FS1 feature blockers. [Substantial FS2 delivery](fs2_acceptance.md) includes
+not FS1 feature blockers. [Substantial FS2 delivery](structured_simulation.md) includes
 structured project-scoped simulation and real Cyclesim acceptance. The agreed FS2
 milestone is accepted and closed; [followups](backlog/fs2_followups.md) preserve later
 scope independently of closure.

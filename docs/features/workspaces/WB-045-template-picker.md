@@ -61,6 +61,6 @@ Choose first supported source locations, name-conflict behavior and preview deta
 Do not imply automatic whole-filesystem or upward discovery in the first delivery.
 
 ## References
-- [Delivered template operations](../../fs3_adoption.md#workspace-templates)
+- [Delivered template operations](../../existing_project_setup.md#workspace-templates)
 - [Template codec](../../../protocol/workspace_template.ml)
 - [Workspace service](../../../backend/workspace_service.ml)

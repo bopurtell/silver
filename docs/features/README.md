@@ -233,7 +233,7 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 
 ## Project adoption and design scope
 
-[WB-083](project/WB-083-flow-authoring.md) is **delivered**: create flows and duplicate profiles for a chosen chip without retargeting launch. [WB-086](workspaces/WB-086-management-surface.md) is **closed**: the owner chose the [centered management window](workspaces/WB-086-owner-trial.md). Done or Cancel returns to the selected object; closing the window resumes inspection.
+[WB-083](project/WB-083-flow-authoring.md) is **closed**: create flows and duplicate profiles for a chosen chip without retargeting launch. [WB-086](workspaces/WB-086-management-surface.md) is **closed**: the owner chose the [centered management window](workspaces/WB-086-owner-trial.md). Done or Cancel returns to the selected object; closing the window resumes inspection.
 
 [WB-077](presentation/WB-077-project-action-menu.md) is **closed**. Open **Project ▾ / F2** from any workspace. Right-click a run for its actions, or press **F3** on the highlighted run.
 

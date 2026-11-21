@@ -21,7 +21,7 @@ def load(name, path):
     return module
 
 
-wire = load('mixed_wire', ROOT / 'scripts/fixtures/fs2_wire.py')
+wire = load('mixed_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
 
 
 def provider():
@@ -57,7 +57,7 @@ def main():
         setattr(args, name, getattr(args, name).resolve(strict=True))
     evidence = Path(tempfile.mkdtemp(prefix='pt8-mixed-rows-pty-', dir='/tmp/opencode'))
     print('Evidence: ' + str(evidence), flush=True)
-    native = load('mixed_native', ROOT / 'scripts/test-fs2-native.py')
+    native = load('mixed_native', ROOT / 'scripts/test-native-simulation.py')
     cells = native.load_module('mixed_cells', 'test-frontend-composition.py')
     field = native.field
     for name in ('project', 'state', 'home', 'config', 'tmp'):

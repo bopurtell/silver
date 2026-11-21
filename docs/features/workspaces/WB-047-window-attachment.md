@@ -62,5 +62,5 @@ Define detach/empty-window lifecycle and the first two-surface owner-review scen
 
 ## References
 - [Window and context ownership](../workspaces_and_layouts.md)
-- [FS3 reconnect baseline](../../fs3_adoption.md)
+- [FS3 reconnect baseline](../../existing_project_setup.md)
 - [Workspace registry](../../../protocol/workspace.ml)

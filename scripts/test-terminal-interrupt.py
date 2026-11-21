@@ -31,7 +31,7 @@ import traceback
 # Reuse the FS0 transport/parser without writing __pycache__ in the checkout.
 sys.dont_write_bytecode = True
 SPEC = importlib.util.spec_from_file_location(
-    "fs0", Path(__file__).with_name("test-fs0.py"))
+    "fs0", Path(__file__).with_name("test-native-execution.py"))
 FS0 = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FS0)
 
@@ -187,7 +187,7 @@ def main():
                        XDG_CACHE_HOME=str(evidence / "cache"), XDG_CONFIG_HOME=str(evidence / "config"),
                        TMPDIR=str(evidence / "tmp"))
     paths = [args.client, args.daemon, Path(__file__).resolve(),
-             Path(__file__).with_name("test-fs0.py").resolve()]
+             Path(__file__).with_name("test-native-execution.py").resolve()]
     report = dict(evidence=str(evidence), hashes_before={str(p): digest(p) for p in paths},
                   cases=[], errors=[])
     try:

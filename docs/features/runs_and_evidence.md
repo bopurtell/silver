@@ -9,10 +9,10 @@ Lifecycle, freshness, report availability and verdicts remain independent facts.
 Estimates and concrete open decisions live in the [individual tickets](README.md).
 
 Status (2026-10-16): **FS0 exact registered runs/follow/pin/reopening and FS1
-adopted-evidence investigation delivered**. [FS0 acceptance](../fs0_acceptance.md)
-proves real 673/685 switching and restart identity. [FS1 lifecycle](../fs1_lifecycle_and_artifacts.md)
+adopted-evidence investigation delivered**. [FS0 acceptance](../archive/delivery/native_and_synthesis_acceptance.md)
+proves real 673/685 switching and restart identity. [FS1 lifecycle](../finalization_and_artifacts.md)
 adds exact finalization attempts, persistent keys, independent operation/acceptance
-outcomes and selected terminal-result artifacts. [FS1 investigation](../fs1_investigation.md)
+outcomes and selected terminal-result artifacts. [FS1 investigation](../asic_evidence_inspection.md)
 adds source-hashed, stage/producer-attributed timing/clock/physical/routing indexes,
 exact row/digest detail and binary handoff. Requirements below remain normative:
 broad store discovery is absent; immutable snapshots/archival retention remain

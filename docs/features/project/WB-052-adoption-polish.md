@@ -61,8 +61,8 @@ TBD: representative remote environment and the finite issue list selected for th
 Help changes should point to real controls rather than promise future shortcuts.
 
 ## References
-- [Adoption guide](../../fs3_adoption.md)
-- [Inspector/tmux guidance](../../fs1_investigation.md)
+- [Adoption guide](../../existing_project_setup.md)
+- [Inspector/tmux guidance](../../asic_evidence_inspection.md)
 - [Terminal entrypoint](../../../terminal/main.ml)
 
 ## Added bounded scope — isolated review tooling (2026-11-05)
@@ -73,13 +73,13 @@ and preferences, endpoint handoff, identity reporting and actionable preflight.
 This implementation was **not part of the original ticket scope/estimate above**.
 It supports adoption review without disturbing the owner's manual-validation pair.
 
-Implementation and verification: [WB-052 isolated review notes](../../wb052_isolated_review.md).
+Implementation and verification: [isolated example verification](../../archive/delivery/isolated_example_verification.md).
 
 ## Recovery and adoption pass — 2026-11-19
 
 - Recovered the isolated review tooling onto `oxcaml` (`92b3f3d`), retaining the
   configured build target fix without the old branch tip's unrelated deletions.
-- The [adoption guide](../../fs3_adoption.md) and F8 connection details now cover
+- The [adoption guide](../../existing_project_setup.md) and F8 connection details now cover
   generic project opening, attach-only behavior, host-local paths and viewers,
   reconnect, inspector exits, and explicit refresh. Missing-project and invalid
   endpoint diagnostics suggest a next action.
@@ -89,4 +89,4 @@ Implementation and verification: [WB-052 isolated review notes](../../wb052_isol
 - The automated retained-evidence inspector test passed, including Esc from
   detail/filter and direct close. The automated viewer-locality test passed in
   loopback mode. Status stays **partial** until it runs against a second host;
-  see the [automated acceptance commands](../../wb052_isolated_review.md#automated-inspector-and-viewer-acceptance).
+  see the [automated acceptance commands](../../archive/delivery/isolated_example_verification.md#automated-inspector-and-viewer-acceptance).

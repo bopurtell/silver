@@ -84,6 +84,6 @@ Keep requested layout data separate from effective terminal-size clamping.
 
 ## References
 - [User-composable windows/workspaces: implementation plan](../../workspace_configuration_plan.md)
-- [Delivered template format/workflow](../../fs3_adoption.md#workspace-templates)
+- [Delivered template format/workflow](../../existing_project_setup.md#workspace-templates)
 - [Template codec](../../../protocol/workspace_template.ml)
 - [Workspace contract](../workspaces_and_layouts.md)

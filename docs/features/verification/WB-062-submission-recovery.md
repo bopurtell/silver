@@ -63,5 +63,5 @@ and fail honestly when an old daemon identity no longer permits safe reconciliat
 
 ## References
 - [FS2-F04 recovery](../../backlog/fs2_followups.md#fs2-f04--reconnect-and-uncertain-submission-recovery).
-- [FS2 acceptance](../../fs2_acceptance.md).
+- [FS2 acceptance](../../structured_simulation.md).
 - [Simulation selection/parent types](../../../protocol/simulation.ml).

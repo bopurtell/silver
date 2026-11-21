@@ -184,7 +184,7 @@ open findings; the review did not repeat the reported stale-script baseline comp
     Timing workspace with an identical registry, and that the palette shows `Close
     inspector (Space c x)` with `no inspector open on the focused tile`. These pass. The
     run then stops at the known pre-existing `refinement-overview-final` failure.
-  - PTY scripts also passed: `test-fs3-adoption.py`, `test-frontend-composition.py`,
+  - PTY scripts also passed: `test-project-adoption.py`, `test-frontend-composition.py`,
     `test-default-layout-restore.py`, `test-overview-sidebar.py`,
     `test-checklist-launch-workflow.py`, `test-launch-stage-consistency.py`.
     `test-terminal-indicators.py` stops at its known `cooperative-testing-default`
@@ -198,5 +198,5 @@ open findings; the review did not repeat the reported stale-script baseline comp
   Native repeat/source-change, conflicting-pin and separate/close tests passed;
   this does not imply owner acceptance of the original contextual-controls ticket.
 - [Frontend composition](../../frontend_composition.md)
-- [Investigation contract](../../fs1_investigation.md)
-- [Simulation contract](../../fs2_simulation_contract.md)
+- [Investigation contract](../../asic_evidence_inspection.md)
+- [Simulation contract](../../simulation_provider_contract.md)

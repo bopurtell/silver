@@ -117,7 +117,7 @@ Fresh startup uses `Initialize_config` with the Overview/Testing/Waveforms/Timin
 placeholders through a single idempotent daemon operation, even after a CLI import
 has advanced registry revision. It does not add Testing to existing sessions. Legacy
 saved arrangements are never mistaken for incomplete bootstrap. Custom layouts
-honor generic Fit as well as requested-size mode. See [FS3 adoption](../../docs/fs3_adoption.md).
+honor generic Fit as well as requested-size mode. See [FS3 adoption](../../docs/existing_project_setup.md).
 
 ## Waveforms integration contract
 
@@ -190,4 +190,4 @@ Regression coverage in `test_workspaces.ml` checks exact starter membership, fre
 initialization versus legacy preservation, cooperative Testing membership/presentation,
 and stock/user tree parity. Central workspace/terminal tests, native builds, lint,
 configuration and domain/reconnect acceptance passed; see the
-[audit and exact evidence](../../docs/workspace_post_merge_audit.md).
+[audit and exact evidence](../../docs/archive/delivery/workspace_post_merge_audit.md).

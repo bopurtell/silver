@@ -120,6 +120,6 @@ delivered behavior. Historical unpublished raw reports are not automatically imp
 ## References
 - [Actual a023 diagnosis and cache behavior](../../timing_workspace_loading.md)
 - [Timing usability/preloading delivery](../../timing_workspace_usability.md)
-- [Accepted timing behavior and deployment history](../../fs1_investigation.md)
+- [Accepted timing behavior and deployment history](../../asic_evidence_inspection.md)
 - [Inspection service](../../../backend/asic_inspection.ml)
 - [Stage/selection presentation](../../../terminal/inspection_view.ml)

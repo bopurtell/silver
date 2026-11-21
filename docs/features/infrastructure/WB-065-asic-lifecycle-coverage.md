@@ -71,7 +71,7 @@ Use fixture evidence where it proves ownership/order, retaining limits on real-t
 
 ## References
 - [Construction lifecycle coverage gaps](../../construction_phase_plan.md).
-- [FS1 lifecycle/cancellation evidence](../../fs1_lifecycle_and_artifacts.md).
+- [FS1 lifecycle/cancellation evidence](../../finalization_and_artifacts.md).
 - [ASIC service ownership/shutdown contract](../../../backend/asic_service.mli).
 - [Backlog coverage followups](../../backlog/README.md).
 

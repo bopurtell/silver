@@ -84,7 +84,7 @@ Implemented selectors:
 
 The names are mixed local test families, not claims of unit-only, complete or
 uniformly fast coverage. Default `@runtest` registrations remain unchanged.
-`test/{fixtures,baselines,pt8_frontend_review}` remain data-only. In particular,
+`test/{fixtures,baselines}` remain data-only. In particular,
 `test/fixtures/example_project` is a specimen with its own Dune project, not active
 Workbench test code. Never remove that boundary as incidental cleanup.
 
@@ -200,9 +200,9 @@ routed measurements as proof for newly changed hardware.
 From Workbench, subject to the shared global job budget:
 
 ```bash
-flock /tmp/opencode/workbench-pt8-build.lock \
+flock /tmp/opencode/workbench-build.lock \
   opam exec --switch=5.2.0+ox -- dune build -j2 \
-  --build-dir _build_pt8_workbench @test-contracts @test-presentation
+  --build-dir _build_workbench @test-contracts @test-presentation
 ```
 
 Those two groups are the admitted first-slice executions. Do not replace them

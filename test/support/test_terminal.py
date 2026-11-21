@@ -119,20 +119,20 @@ class TerminalTests(unittest.TestCase):
             with patch('subprocess.Popen', side_effect=AssertionError('spawn on import')), \
                  patch('subprocess.run', side_effect=AssertionError('run on import')), \
                  patch('tempfile.mkdtemp', side_effect=AssertionError('evidence on import')):
-                for filename in ('test-fs0.py', 'test-fs0-dashboard.py', 'test-fs2-native.py'):
+                for filename in ('test-native-execution.py', 'test-retained-asic-dashboard.py', 'test-native-simulation.py'):
                     spec = importlib.util.spec_from_file_location('compat_' + filename, REPO / 'scripts' / filename)
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     modules[filename] = module
         finally:
             os.chdir(previous)
-        self.assertIs(modules['test-fs0.py'].terminal_screen, terminal_screen)
-        self.assertIs(modules['test-fs0-dashboard.py'].Terminal, Terminal)
-        self.assertTrue(issubclass(modules['test-fs2-native.py'].Terminal, Terminal))
+        self.assertIs(modules['test-native-execution.py'].terminal_screen, terminal_screen)
+        self.assertIs(modules['test-retained-asic-dashboard.py'].Terminal, Terminal)
+        self.assertTrue(issubclass(modules['test-native-simulation.py'].Terminal, Terminal))
         self.assertEqual(list(self.evidence.iterdir()), [])
 
-    def test_historical_help_entrypoints_from_another_directory(self):
-        for filename in ('test-fs0.py', 'test-fs0-dashboard.py', 'test-fs2-native.py'):
+    def test_helper_entrypoints_offer_help_from_another_directory(self):
+        for filename in ('test-native-execution.py', 'test-retained-asic-dashboard.py', 'test-native-simulation.py'):
             result = subprocess.run([sys.executable, '-B', str(REPO / 'scripts' / filename), '--help'],
                                     cwd=self.evidence, capture_output=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr.decode())

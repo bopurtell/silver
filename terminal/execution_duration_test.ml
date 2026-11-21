@@ -154,13 +154,13 @@ let%test_unit "Overview actual five-row tiles show exact selected and pinned exe
     { snapshot with
       runs =
         List.map snapshot.runs ~f:(fun r ->
-          let seconds = if Run_ref.equal r.run Fs0_fixture.run_a then 127. else 14. in
+          let seconds = if Run_ref.equal r.run Asic_snapshot_fixture.run_a then 127. else 14. in
           { r with
             execution_timing = measured seconds
           ; stages =
               List.map r.stages ~f:(fun s ->
                 let seconds =
-                  if not (Run_ref.equal r.run Fs0_fixture.run_a)
+                  if not (Run_ref.equal r.run Asic_snapshot_fixture.run_a)
                   then 29.
                   else (
                     match s.id with
@@ -173,7 +173,7 @@ let%test_unit "Overview actual five-row tiles show exact selected and pinned exe
           })
     ; finalizations =
         [ { Asic.Finalization.key = "receipt"
-          ; run = Fs0_fixture.run_a
+          ; run = Asic_snapshot_fixture.run_a
           ; execution_file = "execution"
           ; acceptance_requested = false
           ; attempt = Some "final"
@@ -208,7 +208,7 @@ let%test_unit "Overview actual five-row tiles show exact selected and pinned exe
     ~f:(fun (kind, expected) ->
       let tile = find kind in
       assert (String.is_substring (text tile) ~substring:("Time: " ^ expected));
-      let pin = { tile with binding = Pin_run Fs0_fixture.run_b } in
+      let pin = { tile with binding = Pin_run Asic_snapshot_fixture.run_b } in
       let pinned = text ~host:(pin_host pin) pin in
       assert (String.is_substring pinned ~substring:"Time: 29s");
       assert (not (String.is_substring pinned ~substring:("Time: " ^ expected))));
@@ -226,16 +226,16 @@ let%test_unit "Overview actual five-row tiles show exact selected and pinned exe
   assert (String.is_substring (text ~height:10 (find "run-selector")) ~substring:"2m 07s");
   let checklist = find "stage-checklist" in
   assert (String.is_substring (text ~height:10 checklist) ~substring:"2m 07s");
-  let pinned = { checklist with binding = Pin_run Fs0_fixture.run_b } in
+  let pinned = { checklist with binding = Pin_run Asic_snapshot_fixture.run_b } in
   assert (
     String.is_substring (text ~host:(pin_host pinned) ~height:10 pinned) ~substring:"29s");
-  let stages = Overview_tiles.observed_stages ~asic:data.asic ~run:Fs0_fixture.run_a in
+  let stages = Overview_tiles.observed_stages ~asic:data.asic ~run:Asic_snapshot_fixture.run_a in
   let model =
     Overview_tiles.Stage_strip.model
       ~now
       ~appearance:host.appearance
       ~width:60
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~selected_id:(Some "placement")
       stages
   in
@@ -303,7 +303,7 @@ let%test_unit "horizontal checklist truncates Unicode labels before raw duration
           ~now:Time_ns.epoch
           ~appearance
           ~width
-          ~run:Fs0_fixture.run_a
+          ~run:Asic_snapshot_fixture.run_a
           ~selected_id:(Some "1")
           stages
       in
@@ -409,7 +409,7 @@ let%test_unit "live Overview duration uses supplied clock; terminal run freezes;
       ~status_width:7
       ~cursor:false
       ~active:false
-      Fs0_fixture.run_a
+      Asic_snapshot_fixture.run_a
       "running"
   in
   assert (String.is_substring (V.plain_text row) ~substring:"running | 2m 07s")

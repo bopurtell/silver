@@ -64,7 +64,7 @@ The indicator must distinguish evidence reading from actual producer execution.
 - [Inspection lifecycle](../../../backend/asic_inspection.ml)
 - [Utility projections](../../../terminal/overview_tiles.ml)
 - [Indicator primitives](../../../terminal/indicator.ml)
-- [Inspection cache behavior](../../fs1_investigation.md)
+- [Inspection cache behavior](../../asic_evidence_inspection.md)
 
 ## Owner closure — 2026-10-25
 
@@ -164,7 +164,7 @@ focused regression checks above, not only the existing pure projection tests.
 - **Owner visual review:** the wording/placement was checked through the real tile
   renderer at 30x7 (`terminal/evidence_session_test.ml`), not in a live PTY against a
   delayed real provider (the retained FS1 evidence used by
-  `scripts/test-fs1-investigation.py` / `test-inspector-latency.py` is not present on
+  `scripts/test-retained-asic-investigation.py` / `test-inspector-latency.py` is not present on
   this machine).
 - **Tests:** `terminal/evidence_activity.ml` (one test per criterion, plus icon modes),
   `terminal/evidence_session_test.ml` (real Session renderer, scoping, expect capture),

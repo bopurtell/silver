@@ -92,11 +92,11 @@ authorized closure of the non-signoff-dependent tickets. WB-019 is closed/accept
     compatibility, strict validation) pass.
   - `terminal/test_presentation_preferences_restart.py` (fresh-process round-trip of
     all four combinations and a schema 1 file) passes.
-  - `scripts/test-fs3-adoption.py` extended with a real HTTP/PTY segment: Space c h /
+  - `scripts/test-project-adoption.py` extended with a real HTTP/PTY segment: Space c h /
     Space c p in every combination, palette footer presence, saved file contents, a
     fresh client restoring both hidden and keyboard-restoring each area: PASSED.
 
 ## References
 - [Appearance contract](../appearance.md)
 - [Composition controls](../../frontend_composition.md)
-- [Existing persistence](../../fs3_adoption.md#persistent-presentation-preferences)
+- [Existing persistence](../../existing_project_setup.md#persistent-presentation-preferences)

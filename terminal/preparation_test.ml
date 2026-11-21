@@ -5,18 +5,18 @@ module H = Workspace_host
 module O = Overview_tiles
 
 let%test_unit "rejected and unavailable execution retain exact endpoint without invented prefix" =
-  let intent = Fs0_fixture.fresh_intent "rejected" in
+  let intent = Asic_snapshot_fixture.fresh_intent "rejected" in
   let intent = { intent with selection = { intent.selection with endpoint = "placement" } } in
   let workflow =
-    { (Fs0_fixture.workflow ~run:Fs0_fixture.run_a ~phase:Failed "rejected" intent) with
+    { (Asic_snapshot_fixture.workflow ~run:Asic_snapshot_fixture.run_a ~phase:Failed "rejected" intent) with
       elaboration_status = "completed"
     ; error = Some "placement rejected by synthesis-only envelope"
     }
   in
   let run =
-    { (Fs0_fixture.run Fs0_fixture.run_a) with status = "observation_unavailable" }
+    { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_a) with status = "observation_unavailable" }
   in
-  let snapshot = { Fs0_fixture.snapshot with runs = [ run ]; workflows = [ workflow ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with runs = [ run ]; workflows = [ workflow ] } in
   let items = O.checklist_items ~asic:(Some snapshot) ~run:run.run in
   assert (List.equal String.equal (List.map items ~f:O.checklist_id)
             [ "preparation:elaboration"; "placement" ]);
@@ -49,19 +49,19 @@ let%test_unit "failure overview unwraps nested OCaml failure and keeps raw detai
   let host, data, find =
     Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
   in
-  let run = { (Fs0_fixture.run Fs0_fixture.run_a) with
+  let run = { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_a) with
     status = "observation_unavailable"; error = Some raw } in
-  let data = { data with asic = Some { Fs0_fixture.snapshot with runs = [ run ] } } in
+  let data = { data with asic = Some { Asic_snapshot_fixture.snapshot with runs = [ run ] } } in
   let rows = Host_view.utility_rows host data (find "stage-checklist") |> Option.value_exn in
   assert (List.exists rows ~f:(fun r ->
     String.is_substring r.O.value ~substring:"missing preflight"
     || List.exists r.details ~f:(fun line -> String.is_substring line ~substring:"missing preflight")));
   assert (List.exists rows ~f:(fun r -> List.mem r.O.details raw ~equal:String.equal));
   let workflow =
-    { (Fs0_fixture.workflow ~phase:Failed "rejected" (Fs0_fixture.fresh_intent "failure")) with
+    { (Asic_snapshot_fixture.workflow ~phase:Failed "rejected" (Asic_snapshot_fixture.fresh_intent "failure")) with
       elaboration_status = "completed"; error = Some raw }
   in
-  let snapshot = { Fs0_fixture.snapshot with workflows = [ workflow ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with workflows = [ workflow ] } in
   let host = { host with planned_run = Planned_run.receive host.planned_run ~revision:1 snapshot } in
   let rows = Host_view.planned_source_rows host (find "planned-run") in
   assert (List.exists rows ~f:(fun r ->
@@ -82,9 +82,9 @@ let%test_unit "manual launch palette retains exact local stage receipt through \
   let host, _, _ =
     Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
   in
-  let first = Fs0_fixture.fresh_intent "local-receipt" in
+  let first = Asic_snapshot_fixture.fresh_intent "local-receipt" in
   let foreign = { first with id = "other-client-same-selection-and-scope" } in
-  let snapshot intent = { Fs0_fixture.snapshot with fresh_intent = Some intent } in
+  let snapshot intent = { Asic_snapshot_fixture.snapshot with fresh_intent = Some intent } in
   let pending, ticket =
     Planned_run.begin_fresh host.planned_run ~elaboration_only:false first.selection
   in
@@ -118,20 +118,20 @@ let%test_unit "selected run Elaboration uses durable workflow linkage, never lat
   let host, data, find =
     Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
   in
-  let intent = Fs0_fixture.fresh_intent "linked" in
+  let intent = Asic_snapshot_fixture.fresh_intent "linked" in
   let linked =
-    { (Fs0_fixture.workflow ~run:Fs0_fixture.run_a ~phase:Completed "old" intent) with
+    { (Asic_snapshot_fixture.workflow ~run:Asic_snapshot_fixture.run_a ~phase:Completed "old" intent) with
       elaboration_status = "completed"
     ; elaboration_finished_at =
         Some (Timestamp.of_time_ns (Time_ns.add Time_ns.epoch (Time_ns.Span.of_sec 12.)))
     }
   in
   let unrelated =
-    { (Fs0_fixture.workflow ~run:Fs0_fixture.run_b ~phase:Failed "new" intent) with
+    { (Asic_snapshot_fixture.workflow ~run:Asic_snapshot_fixture.run_b ~phase:Failed "new" intent) with
       elaboration_status = "emission_failed"
     }
   in
-  let asic = { Fs0_fixture.snapshot with workflows = [ unrelated; linked ] } in
+  let asic = { Asic_snapshot_fixture.snapshot with workflows = [ unrelated; linked ] } in
   let data = { data with asic = Some asic } in
   let host = { host with preparation = Some (Preparation_view.fixture_snapshot ()) } in
   let row host =
@@ -149,7 +149,7 @@ let%test_unit "selected run Elaboration uses durable workflow linkage, never lat
   let historical =
     O.workflow_for_run
       ~asic:(Some { asic with workflows = [ unrelated ] })
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
   in
   assert (Option.is_none historical);
   assert (
@@ -164,8 +164,8 @@ let%test_unit "fresh manual launch captures intent, preallocation progress cance
   let host, data, find =
     Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
   in
-  let intent = Fs0_fixture.fresh_intent "manual" in
-  let snapshot = { Fs0_fixture.snapshot with fresh_intent = Some intent } in
+  let intent = Asic_snapshot_fixture.fresh_intent "manual" in
+  let snapshot = { Asic_snapshot_fixture.snapshot with fresh_intent = Some intent } in
   let planned_run = Planned_run.receive host.planned_run ~revision:1 snapshot in
   let host = { host with planned_run; planned_preparation = false } in
   List.iter (H.launch_commands host ~preview:None ~view_pending:false) ~f:(fun command ->
@@ -176,7 +176,7 @@ let%test_unit "fresh manual launch captures intent, preallocation progress cance
       assert (Option.is_none captured.expected_plan_identity)
     | _ -> assert false);
   let target = H.launch_target host |> Option.value_exn in
-  let w = Fs0_fixture.workflow "manual-key" intent in
+  let w = Asic_snapshot_fixture.workflow "manual-key" intent in
   let snapshot = { snapshot with workflows = [ w ] } in
   assert (
     match Asic_intents.allocation ~key:w.key snapshot with
@@ -204,27 +204,27 @@ let%test_unit "fresh manual launch captures intent, preallocation progress cance
       match c.H.action with
       | Asic (Cancel_workflow id) -> String.equal id w.id
       | _ -> false));
-  let allocated = { w with phase = Physical; run = Some Fs0_fixture.run_b } in
+  let allocated = { w with phase = Physical; run = Some Asic_snapshot_fixture.run_b } in
   assert (
     match
       Asic_intents.allocation ~key:w.key { snapshot with workflows = [ allocated ] }
     with
-    | Allocated run -> Run_ref.equal run Fs0_fixture.run_b
+    | Allocated run -> Run_ref.equal run Asic_snapshot_fixture.run_b
     | _ -> false);
   let registry = Option.value_exn host.registry in
-  assert (Option.is_some (H.selection_after_allocation registry target Fs0_fixture.run_b));
+  assert (Option.is_some (H.selection_after_allocation registry target Asic_snapshot_fixture.run_b));
   let changed =
     { registry with
       revision = registry.revision + 1
     ; contexts =
         List.map registry.contexts ~f:(fun c ->
           { c with
-            selected_run = Some Fs0_fixture.run_b
+            selected_run = Some Asic_snapshot_fixture.run_b
           ; selection_revision = c.selection_revision + 1
           })
     }
   in
-  assert (Option.is_none (H.selection_after_allocation changed target Fs0_fixture.run_b));
+  assert (Option.is_none (H.selection_after_allocation changed target Asic_snapshot_fixture.run_b));
   let _ = data in
   List.iter [ Asic.Fresh.Phase.Failed; Cancelled; Interrupted ] ~f:(fun phase ->
     let terminal = { w with phase } in
@@ -483,14 +483,14 @@ let%test_unit "preparation tile keyboard inspection and history preserve stage l
       | Execute (_, Preparation_artifact), `Artifact -> ()
       | _ -> assert false);
   let checklist = find "stage-checklist" in
-  let items = O.checklist_items ~asic:data.asic ~run:Fs0_fixture.run_a in
+  let items = O.checklist_items ~asic:data.asic ~run:Asic_snapshot_fixture.run_a in
   assert (String.equal (O.checklist_id (List.hd_exn items)) "preparation:elaboration");
   assert (Option.is_none (Host_view.checklist_preview host data checklist));
   let rows = Host_view.utility_rows host data checklist |> Option.value_exn in
   assert (String.equal (List.hd_exn rows).label "Elaboration");
   assert (Option.equal O.Status.equal (List.hd_exn rows).status (Some Unknown));
   let matching_summary =
-    { (Option.value_exn (data.summary Fs0_fixture.run_a)) with
+    { (Option.value_exn (data.summary Asic_snapshot_fixture.run_a)) with
       Asic.Summary.plan_identity = Some "plan"
     }
   in

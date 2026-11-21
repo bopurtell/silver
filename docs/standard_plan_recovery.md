@@ -155,9 +155,8 @@ launch execution has not been reviewed by this gate.
 
 ## Supplemental P2 correction: exact multiword prompt tokens
 
-2026-11-05. C's original review and repro in
-`docs/pt8_endpoint_independent_review.md` and `review_pt8_endpoint_defaults/`
-remain unchanged. The pre-existing space-split bug is now corrected in the shared
+2026-11-05. The [original review](archive/workloads-waveforms/endpoint_independent_review.md)
+records the reproduction. The pre-existing space-split bug is corrected in the shared
 `Launch_preferences.Prompt` encoder/parser and the Plan/Preparation Enter handler.
 For example, remembered inputs are rendered as:
 
@@ -184,16 +183,12 @@ The parser is a data-only quoted-token grammar, never a shell:
 The supplemental regression extends `terminal/endpoint_prompt_test.ml` with an
 8×8 token-pair corpus, both real Enter action variants, hand-written single/double
 quoted forms, literal command-like text, and rejected-input/no-dispatch checks.
-The unchanged C executable now passes its original multiword assertions using the
-encoded prompt from the production helper:
+Run the maintained catalog, grammar, and multiword round-trip assertions with:
 
 ```sh
-_build_pt8_workbench/default/review_pt8_endpoint_defaults/review.exe --spaced-assignment
+opam exec --switch=5.2.0+ox -- dune exec terminal/endpoint_prompt_test.exe -- \
+  backend/test/asic/production_flow_list.json
 ```
-
-Observed: **2841 checks pass**, and expected/captured selections both contain
-`("SYNTH_STRATEGY=DELAY 1" SYNTH_ABC_BUFFERING=false)`; exit 0. This is supplemental
-verification by the correction owner, ready for C's independent recheck.
 
 The updated real-project PTY regression additionally enters:
 

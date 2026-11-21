@@ -63,5 +63,5 @@ Low confidence reflects that product decision; optional drag integration must be
 
 ## References
 - [Requested/effective layout contract](../workspaces_and_layouts.md)
-- [Existing modes and template limits](../../fs3_adoption.md#workspace-templates)
+- [Existing modes and template limits](../../existing_project_setup.md#workspace-templates)
 - [Workspace host](../../../terminal/workspace_host.ml)

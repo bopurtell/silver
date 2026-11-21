@@ -457,7 +457,7 @@ let input
 let%test_unit "ten-row selected detail leads with provider text and retains full \
                provenance in Context"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let source =
     "{\"path\":\"/report/" ^ String.make 2048 's' ^ "\",\"row_id\":\"selected\"}"
   in
@@ -491,7 +491,7 @@ let%test_unit "ten-row selected detail leads with provider text and retains full
     ; times = Evidence_time.Index.empty
     }
   in
-  let snapshot = { Fs0_fixture.snapshot with inspections = [ index ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let t =
     Inspection_view.reconcile (create ~generation:1 ~run ~stage:"signoff") snapshot
   in
@@ -601,7 +601,7 @@ let%test_unit "ten-row selected detail leads with provider text and retains full
 let%test_unit "retained attachment preserves intent until index and attaches only exact \
                detail"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let row : Asic_inspection.Row.t =
     { id = "saved-row"
     ; name = "endpoint/Q"
@@ -644,12 +644,12 @@ let%test_unit "retained attachment preserves intent until index and attaches onl
   let view =
     { (create ~generation:0 ~run ~stage:"signoff") with selected = Some row.id }
   in
-  let pending = attach_retained view Fs0_fixture.snapshot in
+  let pending = attach_retained view Asic_snapshot_fixture.snapshot in
   assert (Option.equal String.equal pending.selected (Some row.id));
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       inspections = [ index ]
-    ; inspection_details = [ { detail with run = Fs0_fixture.run_b } ]
+    ; inspection_details = [ { detail with run = Asic_snapshot_fixture.run_b } ]
     }
   in
   let attached = attach_retained pending snapshot in
@@ -727,7 +727,7 @@ let%test_unit "Timing weighted layout remains bounded at narrow and roomy sizes"
 
 let%test_unit "cooperating panes select actual paths; browsing is local and details exact"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let row id value : Asic_inspection.Row.t =
     { id
     ; category = "path"
@@ -757,7 +757,7 @@ let%test_unit "cooperating panes select actual paths; browsing is local and deta
     ; times = Evidence_time.Index.empty
     }
   in
-  let snapshot = { Fs0_fixture.snapshot with inspections = [ index ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let original =
     Inspection_view.reconcile (create ~generation:1 ~run ~stage:"signoff") snapshot
   in
@@ -932,7 +932,7 @@ let%test_unit "WB-006: evidence times keep their meanings through refresh, cache
   let routed = "OpenROAD.DetailedRouting@9-route"
   and sta = "OpenROAD.STAPostPNR@11-sta" in
   let index : Asic_inspection.Index.t =
-    { run = Fs0_fixture.run_a
+    { run = Asic_snapshot_fixture.run_a
     ; execution_file = "/exact/execution.json"
     ; execution_sha256 = String.make 64 'a'
     ; domain = "timing"
@@ -951,10 +951,10 @@ let%test_unit "WB-006: evidence times keep their meanings through refresh, cache
           ~at:(ago 90.)
     }
   in
-  let snapshot index = { Fs0_fixture.snapshot with inspections = [ index ] } in
+  let snapshot index = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let view =
     Inspection_view.reconcile
-      (create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
       (snapshot index)
   in
   let has lines substring = List.exists lines ~f:(String.is_substring ~substring) in
@@ -1029,7 +1029,7 @@ let%test_unit "WB-006: evidence times keep their meanings through refresh, cache
 
 let%test_unit "explicit reinspection hydrates original-target Timing view and visibly preserves historical unknown" =
   let module W = Asic_inspection in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let original : W.Analysis_target.t =
     {attempt_id=run.id;occurrence_id=run.id^"/implementation.timing";
      analysis_id=run.id^"/post-pnr-sta";source_digest=String.make 64 'a';
@@ -1049,7 +1049,7 @@ let%test_unit "explicit reinspection hydrates original-target Timing view and vi
      diagnostics=[label;W.Reinspection.encode metadata];truncated=true;cached_unverified=false;
      analysis=Some recomputed;times=Evidence_time.Index.empty} in
   let initial = Inspection_view.create ~analysis:original ~run ~domain:"timing" ~stage:"timing" () in
-  let view = Inspection_view.reconcile initial {Fs0_fixture.snapshot with inspections=[index]} in
+  let view = Inspection_view.reconcile initial {Asic_snapshot_fixture.snapshot with inspections=[index]} in
   assert (List.length (path_items view)=193);
   assert (Option.equal W.Analysis_target.equal view.analysis (Some recomputed));
   let lines = rows ~pane:Paths ~scroll:0 ~width:200 ~height:20 view in

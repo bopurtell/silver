@@ -3,7 +3,7 @@
 Implemented and verified 2026-10-16 following the owner's visual review of the
 [composition delivery](frontend_composition.md). This is the current frontend guide;
 the earlier record retains its historical verification. Shared implementation plan:
-[frontend_refinement_plan.md](frontend_refinement_plan.md).
+[frontend_refinement_plan.md](archive/delivery/frontend_refinement_plan.md).
 
 **Latest owner-review pass:** Overview now uses a wide left sidebar with a vertical
 checklist and individual stacked right panels, plus planned-run. Titles are lowercase,
@@ -163,7 +163,8 @@ them; existing processes are not changed automatically. From this checkout, futu
 builds can remain small and serial:
 
 ```sh
-scripts/with-switch.sh dune build -j 2 \
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
 ```
 
@@ -176,7 +177,7 @@ Existing saved arrangements are preserved. **Apply preset** adds missing default
 **Reset arrangement** also restores requested sizes, but neither deletes or hides
 old tiles. Thus an older Timing workspace may retain its summary/checklist extras.
 Hide unwanted extras explicitly or use a fresh demo for the intended default layout.
-The subsequent [FS3 integration](fs3_adoption.md) persists global appearance,
+The subsequent [FS3 integration](existing_project_setup.md) persists global appearance,
 layout mode, chrome and explicit tile headers. Other tile overrides remain
 transient; freeform drag-and-drop layout editing remains later scope.
 

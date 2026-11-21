@@ -30,7 +30,7 @@ They are new proposed scopes, not retroactive requirements of the closed milesto
 ## Original closure and activation notes
 
 Recorded 2026-10-16. The agreed substantial FS2 milestone is **delivered, accepted
-and closed**. [Acceptance](../fs2_acceptance.md) records automated evidence and the
+and closed**. [Acceptance](../structured_simulation.md) records automated evidence and the
 owner's scoped manual confirmation. The items below preserve additional scope;
 none is an outstanding gate on that milestone. Activate one by adding its concrete
 scope to the construction plan rather than reopening all of FS2.

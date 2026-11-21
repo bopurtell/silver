@@ -170,6 +170,8 @@ type action =
   | Toggle_palette_hints
   | Set_timing_preload of bool
   | Set_appearance of Appearance.t
+  | Choose_theme
+  | Set_scheme of Appearance.Scheme.t
   | Set_layout_mode of layout_mode
   | Synthesis_mode of Synthesis_view.Mode.t
   | Synthesis_sort of Synthesis.Sort.t
@@ -214,7 +216,14 @@ type capture =
   ; workspace : W.Workspace_id.t
   }
 
+type theme_picker =
+  { original : Appearance.Scheme.t
+  (* The last valid preview is independent of the current result set. *)
+  ; preview : Appearance.Scheme.t
+  }
+
 type argument =
+  | Theme_picker of theme_picker
   | Flow_field of Flow_authoring.field
   | Plan_endpoint of string * string
   | Run_endpoint of string * string
@@ -1066,25 +1075,25 @@ let%test_unit "stage cursor uses stable IDs within exact runs and resets stale i
   let tile = List.hd_exn registry.tiles in
   let host = { empty with registry = Some registry } in
   let host =
-    browse_stages host tile.id ~run:Fs0_fixture.run_a ~stages:[ a; b ] ~delta:1
+    browse_stages host tile.id ~run:Asic_snapshot_fixture.run_a ~stages:[ a; b ] ~delta:1
   in
   let local = local host tile.id in
   assert (Option.equal String.equal local.cursor (Some "b"));
   let selected stages run = Option.value_exn (stage_cursor local ~run ~stages) in
-  assert (String.equal (selected [ b; a ] Fs0_fixture.run_a).id "b");
-  assert (String.equal (selected [ a; b ] Fs0_fixture.run_b).id "a");
-  assert (String.equal (selected [ a ] Fs0_fixture.run_a).id "a");
+  assert (String.equal (selected [ b; a ] Asic_snapshot_fixture.run_a).id "b");
+  assert (String.equal (selected [ a; b ] Asic_snapshot_fixture.run_b).id "a");
+  assert (String.equal (selected [ a ] Asic_snapshot_fixture.run_a).id "a");
   let detailed = { local with utility_detail = true; scroll = 99 } in
   let refreshed =
-    reconcile_stages detailed ~run:(Some Fs0_fixture.run_a) ~stages:[ b; a ]
+    reconcile_stages detailed ~run:(Some Asic_snapshot_fixture.run_a) ~stages:[ b; a ]
   in
   assert (refreshed.utility_detail && refreshed.scroll = 99);
   let changed =
-    reconcile_stages detailed ~run:(Some Fs0_fixture.run_b) ~stages:[ a; b ]
+    reconcile_stages detailed ~run:(Some Asic_snapshot_fixture.run_b) ~stages:[ a; b ]
   in
   assert ((not changed.utility_detail) && changed.scroll = 0);
   assert (Option.equal String.equal changed.cursor (Some "a"));
-  let removed = reconcile_stages detailed ~run:(Some Fs0_fixture.run_a) ~stages:[] in
+  let removed = reconcile_stages detailed ~run:(Some Asic_snapshot_fixture.run_a) ~stages:[] in
   assert (Option.is_none removed.cursor && not removed.utility_detail)
 ;;
 
@@ -1622,7 +1631,7 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
   let view =
     { (Inspection_view.create
          ~generation:7
-         ~run:Fs0_fixture.run_a
+         ~run:Asic_snapshot_fixture.run_a
          ~domain:"timing"
          ~stage:"signoff"
          ())
@@ -1633,7 +1642,7 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
     }
   in
   let inspection_ticket = Inspection_view.capture view (Inspection_view.operation view) in
-  let artifacts = Artifact_view.create ~generation:4 Fs0_fixture.run_a in
+  let artifacts = Artifact_view.create ~generation:4 Asic_snapshot_fixture.run_a in
   let instance_id = V1.Daemon_instance_id.of_string "reconnect-instance" in
   let project = Project_id.of_string "reconnect-project" in
   let artifact_ticket =
@@ -1641,7 +1650,7 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
       artifacts
       ~instance_id
       ~project
-      (List_artifacts Fs0_fixture.run_a)
+      (List_artifacts Asic_snapshot_fixture.run_a)
     |> Option.value_exn
   in
   let simulation =
@@ -2213,7 +2222,7 @@ let%test_unit "Timing reconnect keeps investigation until pane or session identi
          { workspace = workspace.id
          ; context = context.id
          ; expected_selection_revision = context.selection_revision
-         ; run = Some Fs0_fixture.run_a
+         ; run = Some Asic_snapshot_fixture.run_a
          })
     |> fun registry ->
     apply registry (P.Definition.apply P.Timing.definition ~workspace:workspace.id)
@@ -2225,7 +2234,7 @@ let%test_unit "Timing reconnect keeps investigation until pane or session identi
   in
   let host = switch (receive empty registry) workspace.id in
   let view =
-    { (Timing_workspace.create ~generation:5 ~run:Fs0_fixture.run_a ~stage:"signoff") with
+    { (Timing_workspace.create ~generation:5 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff") with
       filter = "critical endpoint"
     ; selected = Some "chosen-row"
     ; scroll = 7
@@ -2628,9 +2637,9 @@ let%test_unit "launch catalog captures exact ready preview and explains pending 
   let preview : Asic.Preview.t =
     { selection; plan_identity = "exact-routing-plan"; plan_json = "{}" }
   in
-  let key = List.hd_exn (Plain_rpc.keys (Plan selection) Fs0_fixture.snapshot) in
+  let key = List.hd_exn (Plain_rpc.keys (Plan selection) Asic_snapshot_fixture.snapshot) in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       preview = Some preview
     ; operations =
         [ { key
@@ -2690,6 +2699,10 @@ let%test_unit "launch catalog captures exact ready preview and explains pending 
 
 let set_appearance t appearance = { t with appearance }
 
+let set_scheme t scheme = set_appearance t { t.appearance with scheme }
+
+let choose_theme_id = "appearance.choose-theme"
+
 let appearance_commands t =
   let make key label selected appearance =
     command
@@ -2698,14 +2711,7 @@ let appearance_commands t =
       "theme style skin colors icons density preset"
       (Set_appearance appearance)
   in
-  List.map Appearance.Scheme.all ~f:(fun scheme ->
-    command
-      ("appearance.scheme." ^ Appearance.Scheme.key scheme)
-      ("Color scheme: "
-       ^ Appearance.Scheme.label scheme
-       ^ if Appearance.Scheme.equal scheme t.appearance.scheme then " [active]" else "")
-      "theme palette background colors client local"
-      (Set_appearance { t.appearance with scheme }))
+  [ command choose_theme_id "Choose theme…" "color scheme palette background colors" Choose_theme ]
   @ List.map Appearance.Preset.all ~f:(fun preset ->
     make
       ("preset." ^ Appearance.Preset.key preset)
@@ -3282,18 +3288,18 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
   let s =
     apply s (P.Definition.apply P.Timing.definition ~workspace:timing_workspace.id)
   in
-  let s = choose s main.id Fs0_fixture.run_a in
-  assert (Option.is_some (matching_timing s ~run:Fs0_fixture.run_a));
-  assert (Option.is_none (matching_timing s ~run:Fs0_fixture.run_b));
+  let s = choose s main.id Asic_snapshot_fixture.run_a in
+  assert (Option.is_some (matching_timing s ~run:Asic_snapshot_fixture.run_a));
+  assert (Option.is_none (matching_timing s ~run:Asic_snapshot_fixture.run_b));
   let path =
     List.find_exn s.tiles ~f:(fun tile ->
       W.Workspace_id.equal tile.workspace timing_workspace.id
       && String.equal tile.kind "timing-paths")
   in
   let s =
-    apply s (Set_tile_binding { tile = path.id; binding = Pin_run Fs0_fixture.run_b })
+    apply s (Set_tile_binding { tile = path.id; binding = Pin_run Asic_snapshot_fixture.run_b })
   in
-  assert (Option.is_none (matching_timing s ~run:Fs0_fixture.run_a));
+  assert (Option.is_none (matching_timing s ~run:Asic_snapshot_fixture.run_a));
   let s =
     apply
       s
@@ -3302,17 +3308,17 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
   in
   let independent = List.last_exn s.workspaces in
   let s = apply s (Make_independent independent.id) in
-  let s = choose s independent.id Fs0_fixture.run_b in
+  let s = choose s independent.id Asic_snapshot_fixture.run_b in
   let s = apply s (P.Definition.apply P.Timing.definition ~workspace:independent.id) in
   assert (
     Option.equal
       Run_ref.equal
       (W.context s main.context).selected_run
-      (Some Fs0_fixture.run_a));
+      (Some Asic_snapshot_fixture.run_a));
   assert (
     W.Binding.equal
       (List.find_exn s.tiles ~f:(fun tile -> W.Tile_id.equal path.id tile.id)).binding
-      (Pin_run Fs0_fixture.run_b));
+      (Pin_run Asic_snapshot_fixture.run_b));
   let second =
     List.find_exn s.tiles ~f:(fun tile ->
       W.Workspace_id.equal tile.workspace independent.id
@@ -3323,13 +3329,13 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
     set_timing
       host
       path
-      (Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let host =
     set_timing
       host
       second
-      (Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_b ~stage:"routing")
+      (Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_b ~stage:"routing")
   in
   assert (Option.is_none (timing host path));
   assert (String.equal (Option.value_exn (timing host second)).stage "routing");
@@ -3340,7 +3346,7 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
     Inspection_view.capture
       view
       (Inspect_detail
-         { run = Fs0_fixture.run_b
+         { run = Asic_snapshot_fixture.run_b
          ; domain = "timing"
          ; stage = "routing"
          ; source_digest = "digest"
@@ -3348,7 +3354,7 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
          })
   in
   let pinned =
-    apply s (Set_tile_binding { tile = second.id; binding = Pin_run Fs0_fixture.run_b })
+    apply s (Set_tile_binding { tile = second.id; binding = Pin_run Asic_snapshot_fixture.run_b })
   in
   let invalid = receive host pinned in
   assert (Option.is_none (timing invalid second));
@@ -3368,21 +3374,21 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
         .error);
   assert (Option.is_some (timing (receive host s) second));
   let hidden = apply s (Set_tile_hidden { tile = second.id; hidden = true }) in
-  assert (Option.is_none (matching_timing hidden ~run:Fs0_fixture.run_b));
+  assert (Option.is_none (matching_timing hidden ~run:Asic_snapshot_fixture.run_b));
   let detail =
     List.find_exn s.tiles ~f:(fun tile ->
       W.Workspace_id.equal tile.workspace independent.id
       && String.equal tile.kind "timing-detail")
   in
   let zoomed = apply s (Set_zoom { workspace = independent.id; tile = Some detail.id }) in
-  assert (Option.is_none (matching_timing zoomed ~run:Fs0_fixture.run_b));
+  assert (Option.is_none (matching_timing zoomed ~run:Asic_snapshot_fixture.run_b));
   let host = set_local host second.id { default_local with scroll = 9 } in
   assert ((local host path.id).scroll = 0);
   assert ((local host second.id).scroll = 9);
-  let switched = choose s independent.id Fs0_fixture.run_a in
+  let switched = choose s independent.id Asic_snapshot_fixture.run_a in
   let changed = receive host switched in
   assert (Option.is_none (timing changed second));
-  let switched_back = choose switched independent.id Fs0_fixture.run_b in
+  let switched_back = choose switched independent.id Asic_snapshot_fixture.run_b in
   assert (Option.is_none (timing (receive changed switched_back) second))
 ;;
 
@@ -3929,7 +3935,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
     ; command
         "workloads.open"
         "Open Workloads workspace"
-        "PT8 retained inspection comparison"
+        "memory workload retained inspection comparison"
         Open_workloads
     ; command
         "workloads.import"
@@ -3938,7 +3944,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         Workload_import
     ; command
         "workloads.launch"
-        "Workloads: Launch fresh PT.8 workload… (Testing)"
+        "Workloads: Launch fresh memory workload… (Testing)"
         "simulation suite discovery form"
         Workload_testing
     ; command
@@ -4253,7 +4259,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
                command
                  ("workloads." ^ id)
                  ("Workloads: " ^ title)
-                 "PT8 evidence"
+                 "memory workload evidence"
                  (Workload_input input))
            @ (let unavailable =
                 if Workloads_view.capture_ready (local t tile.id).workloads
@@ -4845,6 +4851,7 @@ let global_palette_aliases =
   ; "test", "testing.test"
   ; "test suites", "testing.suites"
   ; "verification", "testing.suites"
+  ; "theme", choose_theme_id
   ]
 ;;
 
@@ -4928,6 +4935,76 @@ let ranked_matches (p : palette) =
 ;;
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
+
+let theme_picker (p : palette) =
+  match p.argument with
+  | Some (Theme_picker picker) -> Some picker
+  | _ -> None
+;;
+
+let has_theme_picker t =
+  Option.exists t.palette ~f:(fun p -> Option.is_some (theme_picker p))
+;;
+
+let palette_has_results (p : palette) =
+  Option.is_none p.argument || Option.is_some (theme_picker p)
+;;
+
+let effective_appearance t =
+  (* Rendering only: preference capture always reads [t.appearance]. *)
+  match t.palette with
+  | Some p ->
+    (match theme_picker p with
+     | Some { preview; _ } when current t p.capture -> { t.appearance with scheme = preview }
+     | _ -> t.appearance)
+  | None -> t.appearance
+;;
+
+let dismiss_theme_picker t =
+  if has_theme_picker t then { t with palette = None; prefix = 0 } else t
+;;
+
+let dismiss_stale_theme_picker t =
+  match t.palette with
+  | Some { argument = Some (Theme_picker _); capture; _ } when not (current t capture) ->
+    dismiss_theme_picker t
+  | _ -> t
+;;
+
+let theme_index commands scheme =
+  List.findi commands ~f:(fun _ c ->
+    match c.action with
+    | Set_scheme candidate -> Appearance.Scheme.equal candidate scheme
+    | _ -> false)
+  |> Option.value_map ~default:0 ~f:fst
+;;
+
+let open_theme_picker t capture =
+  if not (current t capture)
+  then t
+  else (
+    let original = t.appearance.scheme in
+    let commands =
+      List.map Appearance.Scheme.all ~f:(fun scheme ->
+        command
+          (Appearance.Scheme.key scheme)
+          (Appearance.Scheme.label scheme)
+          ""
+          (Set_scheme scheme))
+    in
+    { t with
+      palette =
+        Some
+          { capture
+          ; commands
+          ; query = ""
+          ; index = theme_index commands original
+          ; argument = Some (Theme_picker { original; preview = original })
+          }
+    ; prefix = 0
+    ; notice = ""
+    })
+;;
 
 let chip_assumptions (source : Authoring.Chip_source.t) =
   [ "Harness: Tiny Tapeout 6×4 · Technology: IHP SG13CMOS5L" ]
@@ -5061,6 +5138,21 @@ let decode_event (event : Bonsai_term.Event.t) : input option =
         | Arrow `Up -> Some Previous
         | _ -> None)
      | _ -> None)
+;;
+
+let decode_theme_event (event : Bonsai_term.Event.t) =
+  let is_letter c lower upper =
+    Uchar.equal c (Uchar.of_char lower) || Uchar.equal c (Uchar.of_char upper)
+  in
+  match event with
+  | Key_press { key = ASCII ('n' | 'N'); mods = [ Ctrl ] } -> Some Next
+  | Key_press { key = ASCII ('p' | 'P'); mods = [ Ctrl ] } -> Some Previous
+  | Key_press { key = Uchar c; mods = [ Ctrl ] } when is_letter c 'n' 'N' -> Some Next
+  | Key_press { key = Uchar c; mods = [ Ctrl ] } when is_letter c 'p' 'P' -> Some Previous
+  | _ ->
+    (match decode_event event with
+     | Some (Open_menu _) -> None
+     | input -> input)
 ;;
 
 let%test_unit "Shift-R decodes to quick-launch character" =
@@ -5255,7 +5347,7 @@ let%test_unit "production inspection filter gate captures bracketed endpoint pas
   in
   let tile = List.hd_exn registry.tiles in
   let view =
-    { (Inspection_view.create ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
+    { (Inspection_view.create ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
       editing = true
     }
   in
@@ -5333,7 +5425,7 @@ let%test_unit "inspection filter paste enforces 4096 UTF-8 bytes and consumes or
   in
   let tile = List.hd_exn registry.tiles in
   let view =
-    { (Inspection_view.create ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
+    { (Inspection_view.create ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
       editing = true
     ; filter = String.make 4094 'a'
     }
@@ -5399,7 +5491,7 @@ let%test_unit "Timing workspace filter paste is literal and shared only within i
          { workspace = workspace.id
          ; context = context.id
          ; expected_selection_revision = context.selection_revision
-         ; run = Some Fs0_fixture.run_a
+         ; run = Some Asic_snapshot_fixture.run_a
          })
   in
   let s = apply s (P.Definition.apply P.Timing.definition ~workspace:workspace.id) in
@@ -5413,7 +5505,7 @@ let%test_unit "Timing workspace filter paste is literal and shared only within i
     set_timing
       { host with focus = Some tile.id }
       tile
-      { (Timing_workspace.create ~generation:7 ~run:Fs0_fixture.run_a ~stage:"signoff") with
+      { (Timing_workspace.create ~generation:7 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff") with
         editing = true
       }
   in
@@ -5560,10 +5652,66 @@ let menu_input t menu event =
   | _ -> t, No_effect
 ;;
 
+let theme_picker_input t (p : palette) picker event =
+  let close t = { t with palette = None; prefix = 0 } in
+  let rows p = matches p in
+  let selected p = List.nth (rows p) p.index in
+  let update p =
+    let preview =
+      match selected p with
+      | Some { action = Set_scheme scheme; _ } -> scheme
+      | _ -> picker.preview
+    in
+    { t with palette = Some { p with argument = Some (Theme_picker { picker with preview }) } }
+    , No_effect
+  in
+  let query query =
+    if String.equal p.query query then t, No_effect
+    else (
+      let p = palette_query p query in
+      let index = if String.is_empty query then theme_index p.commands picker.original else 0 in
+      update { p with index })
+  in
+  let append text =
+    if printable_utf8 text && String.length p.query + String.length text <= 4096
+    then query (p.query ^ text)
+    else t, No_effect
+  in
+  if not (current t p.capture)
+  then close t, No_effect
+  else (
+    match event with
+    | Character ch -> append (String.of_char ch)
+    | Text text -> append text
+    | _ when t.paste -> t, No_effect
+    | Escape -> close t, No_effect
+    | Clear_filter ->
+      update { p with query = ""; index = theme_index p.commands picker.original }
+    | Backspace -> query (drop_last_codepoint p.query)
+    | Delete_word -> query (Text_edit.delete_word p.query)
+    | Next | Focus ->
+      update { p with index = Int.min (Int.max 0 (List.length (rows p) - 1)) (p.index + 1) }
+    | Previous | Focus_previous -> update { p with index = Int.max 0 (p.index - 1) }
+    | Palette_click id ->
+      (* Selecting a result previews it; Apply and Enter share the commit path. *)
+      (match List.findi (rows p) ~f:(fun _ c -> String.equal c.id id) with
+       | Some (index, _) -> update { p with index }
+       | None -> t, No_effect)
+    | Enter ->
+      (match selected p with
+       | Some command ->
+         dispatch_command t p.capture command ~close ~stale_notice:"Theme picker expired"
+       | None -> t, No_effect)
+    | _ -> t, No_effect)
+;;
+
 let input t event ~commands : t * effect =
   match event with
   | Paste_start -> { t with paste = true; prefix = 0 }, No_effect
   | Paste_end -> { t with paste = false }, No_effect
+  | _ when has_theme_picker t ->
+    let p = Option.value_exn t.palette in
+    theme_picker_input t p (Option.value_exn (theme_picker p)) event
   | _ when t.paste ->
     if not (finalization_form t)
     then t, No_effect
@@ -5644,7 +5792,7 @@ let input t event ~commands : t * effect =
                    | Workload_bundle _
                    | Acceptance _
                    | Simulation_selection _ ) -> String.length p.query >= 4096
-               | None | Some (Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
+                | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
           { t with notice = "Finalization reference is limited to 4096 bytes" }, No_effect
         | Character ch ->
           ( { t with palette = Some (palette_query p (p.query ^ String.of_char ch)) }
@@ -5697,7 +5845,7 @@ let input t event ~commands : t * effect =
                       | Acceptance _
                       | Simulation_selection _ ) ->
                     String.length p.query > reference_limit t
-                  | None | Some (Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
+                   | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
           then
             ( { t with notice = "Finalization reference is limited to 4096 bytes" }
             , No_effect )
@@ -5706,7 +5854,7 @@ let input t event ~commands : t * effect =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
-                 | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
+                  | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
                   | Flow_field field -> Flow_step (Flow_authoring.accept field p.query)
                   | Chip_directory ->
@@ -6169,9 +6317,9 @@ let%test_unit "counted menu navigation, pointer and keyboard invoke captured com
   let commands =
     List.init 12 ~f:(fun i ->
       command ("asic.artifacts." ^ Int.to_string i) ("Run " ^ Int.to_string i) ""
-        (Browse_artifacts Fs0_fixture.run_b))
+        (Browse_artifacts Asic_snapshot_fixture.run_b))
     @ [ command "asic.use-run-target" "Use chip/variant" ""
-          (Use_run_target (Fs0_fixture.run_b, target))
+          (Use_run_target (Asic_snapshot_fixture.run_b, target))
       ; command ~unavailable:"offline" "asic.refresh.disabled" "Refresh" "" Refresh_integration
       ]
   in
@@ -6190,7 +6338,7 @@ let%test_unit "counted menu navigation, pointer and keyboard invoke captured com
   List.iter [ Enter; Menu_click "asic.use-run-target" ] ~f:(fun event ->
     match input filtered event ~commands:[] with
     | { menu = None; _ }, Execute (_, Use_run_target (run, chip)) ->
-      assert (Run_ref.equal run Fs0_fixture.run_b && Asic.Chip_target.equal target chip)
+      assert (Run_ref.equal run Asic_snapshot_fixture.run_b && Asic.Chip_target.equal target chip)
     | _ -> assert false);
   let disabled = step opened (Menu_click "asic.refresh.disabled") in
   assert (Option.is_some disabled.menu && String.equal disabled.notice "offline");
@@ -6201,7 +6349,7 @@ let%test_unit "counted menu navigation, pointer and keyboard invoke captured com
 let%test_unit "resource reader uses only its workspace list, including through zoom" =
   let registry = W.initial ~session_id:(W.Session_id.of_string "linked-resources") in
   let base = List.hd_exn registry.tiles in
-  let list = { base with kind = "resources"; binding = Pin_run Fs0_fixture.run_a } in
+  let list = { base with kind = "resources"; binding = Pin_run Asic_snapshot_fixture.run_a } in
   let reader = { base with id = W.Tile_id.of_string "reader"; kind = "resource-detail" } in
   let other =
     { list with id = W.Tile_id.of_string "other"; workspace = W.Workspace_id.of_string "elsewhere" }
@@ -6228,7 +6376,7 @@ let%test_unit "resource reader uses only its workspace list, including through z
   let host = receive host zoomed in
   let host = route host reader (Move 3) in
   assert ((local host list.id).resources.scroll = 3);
-  assert (Option.equal Run_ref.equal (tile_run host reader) (Some Fs0_fixture.run_a));
+  assert (Option.equal Run_ref.equal (tile_run host reader) (Some Asic_snapshot_fixture.run_a));
   let legacy = receive empty { registry with tiles = [ list ] } in
   assert (Option.is_none (resource_reader legacy list));
   assert (
@@ -6248,7 +6396,7 @@ let%test_unit "hierarchy controls are focused, local and yield to palette and pr
   let registry =
     { registry with
       tiles =
-        [ { first with kind = "hierarchy"; binding = Pin_run Fs0_fixture.run_a }; second ]
+        [ { first with kind = "hierarchy"; binding = Pin_run Asic_snapshot_fixture.run_a }; second ]
     }
   in
   let host = receive empty registry in
@@ -7027,7 +7175,7 @@ let%test_unit "overview utilities and explicit Testing creation are available ad
          ~f:(fun c -> String.equal c.id "workspace.create-testing")))
 ;;
 
-let%test_unit "planned-run browsing and scheme commands have no producer effect or run \
+let%test_unit "planned-run browsing has no producer effect or run \
                binding"
   =
   let registry = W.initial ~session_id:(W.Session_id.of_string "planned-run-commands") in
@@ -7072,27 +7220,98 @@ let%test_unit "planned-run browsing and scheme commands have no producer effect 
         revision = registry.revision + 1
       ; contexts =
           List.map registry.contexts ~f:(fun context ->
-            { context with selected_run = Some Fs0_fixture.run_b })
+            { context with selected_run = Some Asic_snapshot_fixture.run_b })
       }
   in
-  assert (phys_equal changed.planned_run host.planned_run);
-  List.iter Appearance.Scheme.all ~f:(fun scheme ->
-    let command =
-      List.find_exn (appearance_commands host) ~f:(fun c ->
-        String.equal c.id ("appearance.scheme." ^ Appearance.Scheme.key scheme))
-    in
-    match command.action with
-    | Set_appearance appearance ->
-      let changed = set_appearance host appearance in
-      assert (Appearance.Scheme.equal changed.appearance.scheme scheme);
-      assert (
-        Appearance.equal
-          { changed.appearance with scheme = host.appearance.scheme }
-          host.appearance);
-      assert (phys_equal changed.planned_run host.planned_run);
-      assert (phys_equal changed.registry host.registry);
-      assert (phys_equal changed.locals host.locals)
-    | _ -> assert false)
+   assert (phys_equal changed.planned_run host.planned_run)
+;;
+
+let%test_unit "theme picker separates current result, last preview and committed appearance" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "theme-picker-test") in
+  let base = receive empty registry in
+  let base = { base with appearance = { base.appearance with scheme = Slate; color = Selective } } in
+  let tile = List.hd_exn registry.tiles in
+  let base = set_local base tile.id { default_local with scroll = 7; filter = "retained" } in
+  let commands = catalog base ~project:None ~jobs:[] in
+  let step t key =
+    match input t key ~commands with
+    | t, No_effect -> t
+    | _ -> failwith "unexpected command dispatch"
+  in
+  let preview t scheme = assert (Appearance.Scheme.equal (effective_appearance t).scheme scheme) in
+  let selected t =
+    let p = Option.value_exn t.palette in
+    Option.map (List.nth (matches p) p.index) ~f:(fun c -> c.action)
+  in
+  let plain = List.fold [ ' '; 'c'; 'c' ] ~init:base ~f:(fun t ch -> step t (Character ch)) in
+  let plain = step plain (Text "theme") in
+  assert (Poly.equal (selected plain) (Some Choose_theme));
+  assert (List.count commands ~f:(fun c -> Poly.equal c.action Choose_theme) = 1);
+  assert (not (List.exists commands ~f:(fun c -> String.is_prefix c.id ~prefix:"appearance.scheme.")));
+  let opened =
+    match input plain Enter ~commands with
+    | t, Execute (captured, Choose_theme) -> open_theme_picker t captured
+    | _ -> failwith "theme did not dispatch the picker"
+  in
+  let rows = matches (Option.value_exn opened.palette) in
+  assert (
+    List.equal String.equal
+      (List.map rows ~f:(fun row -> row.id))
+      (List.map Appearance.Scheme.all ~f:Appearance.Scheme.key));
+  assert (Poly.equal (selected opened) (Some (Set_scheme Slate)));
+  let ctrl key =
+    let event = Bonsai_term.Event.Key_press { key; mods = [ Ctrl ] } in
+    assert (Option.is_none (decode_event event));
+    Option.value_exn (decode_theme_event event)
+  in
+  let moved = step opened (ctrl (ASCII 'n')) in
+  preview moved Crimson;
+  preview (step opened Focus) Crimson;
+  preview (step moved Focus_previous) Slate;
+  preview (step moved (ctrl (Uchar (Uchar.of_char 'P')))) Slate;
+  preview (step moved Clear_filter) Slate;
+  let filtered = step moved (Text "neon") in
+  preview filtered Neon;
+  let unmatched = step filtered (Text "zzzzzz") in
+  preview unmatched Neon;
+  assert (Option.is_none (selected unmatched));
+  preview (step unmatched Next) Neon;
+  assert (phys_equal unmatched (step unmatched Enter));
+  let cleared = step unmatched Clear_filter in
+  assert (Poly.equal (selected cleared) (Some (Set_scheme Slate)));
+  preview cleared Slate;
+  let erased = step (step moved (Text "n")) Backspace in
+  assert (Poly.equal (selected erased) (Some (Set_scheme Slate)));
+  let clicked = step cleared (Palette_click "carbon") in
+  preview clicked Carbon;
+  assert (has_theme_picker clicked);
+  let pasted = List.fold [ Paste_start; Text "crimson"; Enter; Paste_end ] ~init:opened ~f:step in
+  preview pasted Crimson;
+  let latest = set_local unmatched tile.id { default_local with filter = "updated" } in
+  let cancelled = step latest Escape in
+  assert (Option.is_none cancelled.palette);
+  preview cancelled Slate;
+  assert (String.equal (local cancelled tile.id).filter "updated");
+  let stale = { filtered with registry = Some { registry with revision = registry.revision + 1 } } in
+  preview stale Slate;
+  assert (Option.is_none (step stale Enter).palette);
+  let latest = set_appearance filtered { filtered.appearance with density = Compact } in
+  let committed =
+    match input latest Enter ~commands with
+    | closed, Execute (_, Set_scheme Neon) ->
+      assert (Option.is_none closed.palette);
+      set_scheme closed Neon
+    | _ -> failwith "Enter did not dispatch the selected scheme"
+  in
+  preview committed Neon;
+  assert (Appearance.equal committed.appearance { latest.appearance with scheme = Neon });
+  let reopened = open_theme_picker committed (Option.value_exn (capture committed)) in
+  assert (Poly.equal (selected reopened) (Some (Set_scheme Neon)));
+  List.iter [ opened; moved; filtered; unmatched; cleared; clicked; pasted; cancelled ] ~f:(fun t ->
+    assert (Appearance.equal t.appearance base.appearance);
+    assert (phys_equal t.registry base.registry);
+    assert (phys_equal t.focus base.focus);
+    assert (phys_equal t.planned_run base.planned_run))
 ;;
 
 let%test_unit "finalization form dispatches only an explicit exact attempt and captured \
@@ -7101,7 +7320,7 @@ let%test_unit "finalization form dispatches only an explicit exact attempt and c
   let snapshot = W.initial ~session_id:(W.Session_id.of_string "finalization-form") in
   let host = receive empty snapshot in
   let capture = Option.value_exn (capture host) in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let form query =
     { host with
       palette =
@@ -7160,7 +7379,7 @@ let%test_unit "acceptance form is typed bounded collateral captured with run and
   let snapshot = W.initial ~session_id:(W.Session_id.of_string "acceptance-form") in
   let host = receive empty snapshot in
   let capture = Option.value_exn (capture host) in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let execution_file = "/daemon/captured execution.json" in
   let acceptance : Asic.Acceptance.t =
     { support_tools = "/tools/界"
@@ -7240,7 +7459,7 @@ let%test_unit "finalization paths accept UTF-8 and bracketed paste without comma
           ; commands = []
           ; query = ""
           ; index = 0
-          ; argument = Some (Finalization_attempt Fs0_fixture.run_a)
+          ; argument = Some (Finalization_attempt Asic_snapshot_fixture.run_a)
           }
     }
   in
@@ -7309,7 +7528,7 @@ let%test_unit "finalization text rejects controls and truncates only at UTF-8 bo
           ; commands = []
           ; query
           ; index = 0
-          ; argument = Some (Finalization_attempt Fs0_fixture.run_a)
+          ; argument = Some (Finalization_attempt Asic_snapshot_fixture.run_a)
           }
     }
   in
@@ -7851,7 +8070,7 @@ let%test_unit "additive default preset exposes synthesis and preserves saved con
          { workspace = workspace.id
          ; context = context.id
          ; expected_selection_revision = context.selection_revision
-         ; run = Some Fs0_fixture.run_b
+         ; run = Some Asic_snapshot_fixture.run_b
          })
   in
   let selector = List.hd_exn s.tiles in
@@ -8412,7 +8631,7 @@ let%test_unit "mixed spec restores domain navigation and hierarchy without built
          { workspace = workspace.id
          ; context = context.id
          ; expected_selection_revision = context.selection_revision
-         ; run = Some Fs0_fixture.run_a
+         ; run = Some Asic_snapshot_fixture.run_a
          })
   in
   let find kind =
@@ -8422,10 +8641,10 @@ let%test_unit "mixed spec restores domain navigation and hierarchy without built
   let registry =
     apply
       registry
-      (Set_tile_binding { tile = synthesis.id; binding = Pin_run Fs0_fixture.run_b })
+      (Set_tile_binding { tile = synthesis.id; binding = Pin_run Asic_snapshot_fixture.run_b })
   in
   assert (Option.is_none workspace.preset);
-  assert (Option.is_some (matching_timing registry ~run:Fs0_fixture.run_a));
+  assert (Option.is_some (matching_timing registry ~run:Asic_snapshot_fixture.run_a));
   let paths = find "timing-paths" in
   let catalog_tile = find "simulation-catalog" in
   let hierarchy_tile = find "hierarchy" in
@@ -8439,7 +8658,7 @@ let%test_unit "mixed spec restores domain navigation and hierarchy without built
     set_timing
       host
       paths
-      { (Timing_workspace.create ~generation:0 ~run:Fs0_fixture.run_a ~stage:"routing") with
+      { (Timing_workspace.create ~generation:0 ~run:Asic_snapshot_fixture.run_a ~stage:"routing") with
         filter = "endpoint/Q"
       }
   in
@@ -8477,5 +8696,5 @@ let%test_unit "mixed spec restores domain navigation and hierarchy without built
         List.filter registry.tiles ~f:(fun tile -> not (W.Tile_id.equal tile.id paths.id))
     }
   in
-  assert (Option.is_none (matching_timing no_paths ~run:Fs0_fixture.run_a))
+  assert (Option.is_none (matching_timing no_paths ~run:Asic_snapshot_fixture.run_a))
 ;;

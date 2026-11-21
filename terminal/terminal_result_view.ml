@@ -389,7 +389,7 @@ module%test Tests = struct
     assert (
       List.mem cts "Declared clock period: unavailable / not reported" ~equal:String.equal);
     let s =
-      { (List.hd_exn Fs0_fixture.snapshot.summaries) with terminal = Some terminal }
+      { (List.hd_exn Asic_snapshot_fixture.snapshot.summaries) with terminal = Some terminal }
     in
     let state =
       State.reconcile State.empty ~run:s.run ~summary:(Some s) |> State.inspect
@@ -462,7 +462,7 @@ module%test Tests = struct
     assert (has " — passed failed" Plain);
     assert (has terminal.evidence Plain);
     let s =
-      { (List.hd_exn Fs0_fixture.snapshot.summaries) with
+      { (List.hd_exn Asic_snapshot_fixture.snapshot.summaries) with
         terminal = Some terminal
       ; freshness = Validated
       }
@@ -497,7 +497,7 @@ module%test Tests = struct
 
   let%test_unit "run/result replacement clears details and paging; rendering is bounded" =
     let s =
-      { (List.hd_exn Fs0_fixture.snapshot.summaries) with terminal = Some terminal }
+      { (List.hd_exn Asic_snapshot_fixture.snapshot.summaries) with terminal = Some terminal }
     in
     let state =
       State.reconcile State.empty ~run:s.run ~summary:(Some s) |> State.inspect
@@ -536,7 +536,7 @@ module%test Tests = struct
 
   let%test_unit "bottom paging reverses immediately, including after viewport resize" =
     let s =
-      { (List.hd_exn Fs0_fixture.snapshot.summaries) with terminal = Some terminal }
+      { (List.hd_exn Asic_snapshot_fixture.snapshot.summaries) with terminal = Some terminal }
     in
     let initial =
       State.reconcile State.empty ~run:s.run ~summary:(Some s) |> State.inspect

@@ -8,8 +8,8 @@ not a hardware/EDA acceptance result or a complete external-dependency audit.
 
 Only root `dune`, new `test/dune`, and this receipt were edited by this slice.
 Root `dune` replaces `(data_only_dirs test)` with six forwarding aliases.
-`test/dune` preserves `(data_only_dirs fixtures baselines pt8_frontend_review)`.
-No fixture, baseline, retained review, owned test stanza or existing source was moved.
+`test/dune` preserves `(data_only_dirs fixtures baselines)`.
+No fixture, baseline, owned test stanza or existing source was moved in that slice.
 
 | Root selector | Index alias | Existing actions selected recursively |
 | --- | --- | --- |

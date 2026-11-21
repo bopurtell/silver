@@ -285,12 +285,12 @@ let inspection_receipt host ~tile_id ~identity ~ticket ~publish_notice response 
 ;;
 
 module Test = struct
-  let run = Fs0_fixture.run_a
+  let run = Asic_snapshot_fixture.run_a
 
   let index ?(stage = "routing") ?(cached_unverified = false) () : Asic_inspection.Index.t
     =
     { run
-    ; execution_file = Fs0_fixture.execution_file run
+    ; execution_file = Asic_snapshot_fixture.execution_file run
     ; execution_sha256 = String.make 64 'a'
     ; domain = "timing"
     ; stage
@@ -324,7 +324,7 @@ module Test = struct
   ;;
 
   let snapshot ?(inspections = []) operations =
-    Some { Fs0_fixture.snapshot with operations; inspections }
+    Some { Asic_snapshot_fixture.snapshot with operations; inspections }
   ;;
 
   let view ?(stage = "routing") () =
@@ -559,7 +559,7 @@ let%test_unit "WB-003 #5: overlapping reads are summarized and never reported id
   in
   [%test_result: string] (text three) ~expect:"updating evidence (3)";
   (* A refresh for a run no tile shows is out of scope. *)
-  assert (is_idle (summarize ~runs:[ Fs0_fixture.run_b ] [] (snapshot [ refresh ])));
+  assert (is_idle (summarize ~runs:[ Asic_snapshot_fixture.run_b ] [] (snapshot [ refresh ])));
   (* A read in progress plus an earlier failure keeps the failure in the details. *)
   let failing =
     summarize

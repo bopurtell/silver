@@ -56,6 +56,10 @@ let pure () =
   rejects (fun () -> S.validate_response q (raw (replace inspection "schema_version" (`Int 2))));
   rejects (fun () -> S.validate_response q (raw (replace inspection "metrics" (`List (List.init 257 ~f:(fun _ -> metric))))));
   rejects (fun () -> S.validate_response q ("{\"contract\":0," ^ String.drop_prefix (raw inspection) 1));
+  rejects (fun () ->
+    S.validate_response q
+      (String.chop_suffix_exn (raw inspection) ~suffix:"}"
+       ^ ",\"source_\\u0064igest\":\"" ^ d ^ "\"}"));
   rejects (fun () -> S.validate_response q (raw (replace inspection "extra" `Null)));
   rejects (fun () -> S.validate_response q (raw (replace inspection "metrics" (`List [replace metric "value" (`Float Float.nan)]))));
   rejects (fun () -> S.validate_response q (String.make (1024*1024+1) ' '));
@@ -216,19 +220,85 @@ let integration () =
   let%bind s=refresh () in
   check (Option.exists (List.hd_exn s.entries).error ~f:(fun e -> String.is_substring e ~substring:"budget" || String.is_substring e ~substring:"too large")) "Output drain budget not enforced";
   Core_unix.unlink (file "oversize");
+  let%bind () =
+    Deferred.List.iter
+      ["line-pressure", true; "byte-limit", false; "stderr-pressure", false]
+      ~how:`Sequential ~f:(fun (mode, fails) ->
+        Out_channel.write_all (file mode) ~data:"enabled";
+        let%map s=refresh () in
+        Core_unix.unlink (file mode);
+        check (Option.is_some s.selected
+          && Bool.equal (Option.is_some (List.hd_exn s.entries).error) fails)
+          ("Unexpected workload reader result under " ^ mode))
+  in
+  Out_channel.write_all (file "metadata-oversize") ~data:"enabled";
+  let n=reads () in
+  let%bind s=refresh () in
+  check (reads ()=n && Option.is_some (List.hd_exn s.entries).error)
+    "Oversized metadata did not fence the reader";
+  Core_unix.unlink (file "metadata-oversize");
   Out_channel.write_all (file "unsupported") ~data:"unsupported";
   let n=reads () in
   let%bind s=refresh () in
   check (reads ()=n && Option.exists (List.hd_exn s.entries).error ~f:(fun e -> String.is_substring e ~substring:"workload_inspection1")) "Unsupported capability executed reader";
   Core_unix.unlink (file "unsupported");
-  let%bind _=refresh () in
+  let%bind s=refresh () in
+  let previous=s.selected in
+  let rec entered attempts =
+    match Or_error.try_with (fun () -> Int.of_string (In_channel.read_all (file "entered"))) with
+    | Ok pid -> return pid
+    | Error _ when attempts > 0 ->
+      let%bind ()=Clock.after (Time_float.Span.of_ms 10.) in
+      entered (attempts - 1)
+    | Error e -> Error.raise e
+  in
+  let hold operation =
+    (match Sys_unix.file_exists (file "entered") with
+     | `Yes -> Core_unix.unlink (file "entered")
+     | `No | `Unknown -> ());
+    Out_channel.write_all (file "hold") ~data:"hold";
+    let%bind _=handle service (Workloads operation) in
+    entered 300
+  in
+  let%bind pid=hold (op true) in
+  let%bind _=handle service (Cancel (W.Operation.key (op true))) in
+  let%bind s=wait service (op true) in
+  Core_unix.unlink (file "hold");
+  check (Option.equal W.Response.equal previous s.selected
+    && match (List.hd_exn s.entries).freshness with Refresh_failed _ -> true | _ -> false)
+    "Cancelled workload refresh did not preserve its prior payload";
+  check (Poly.equal (Sys_unix.file_exists ("/proc/" ^ Int.to_string pid)) `No)
+    "Cancelled workload refresh did not reap its child";
+  let alias = file "source-link" in
+  let retarget target = Core_unix.symlink ~target ~link_name:alias in
+  retarget retained;
+  let alternate = file "alternate-source" in
+  Core_unix.mkdir_p alternate;
+  let aliased refresh : W.Operation.t =
+    Load {query=inspect (Filename.concat alias "result.json");refresh}
+  in
+  let%bind _=handle service (Workloads (aliased false)) in
+  let%bind s=wait service (aliased false) in
+  let prior=s.selected in
+  check (Option.is_some prior) "Source alias was not admitted before retarget";
+  let%bind pid=hold (aliased true) in
+  Core_unix.unlink alias;
+  retarget alternate;
+  Core_unix.unlink (file "hold");
+  let%bind s=wait service (aliased true) in
+  check (Option.equal W.Response.equal prior s.selected
+    && match (List.hd_exn s.entries).freshness with Refresh_failed _ -> true | _ -> false)
+    "A source alias retarget during the read replaced the validated document";
+  check (Poly.equal (Sys_unix.file_exists ("/proc/" ^ Int.to_string pid)) `No)
+    "A failed alias refresh did not reap its child";
   let%bind ()=Service.shutdown service in
   let restarted=Service.create ~state_dir in
   let n=List.length (calls ()) in
   let%bind s=handle restarted Get in
   let s=Option.value_exn s.workloads in
   check (List.length (calls ())=n && Option.is_none s.selected
-    && W.Freshness.equal (List.hd_exn s.entries).freshness Cached_unverified) "Restart queried provider or claimed validation";
+    && List.for_all s.entries ~f:(fun d -> W.Freshness.equal d.W.Descriptor.freshness Cached_unverified))
+    "Restart queried provider or claimed validation";
   let%bind _=handle restarted (Workloads (op false)) in
   let%bind s=wait restarted (op false) in
   check (List.length (calls ())=n && Option.is_some s.selected) "Restart cache-only reopen failed";

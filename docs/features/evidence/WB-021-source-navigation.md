@@ -62,6 +62,6 @@ Default: exact provenance or explicit unmapped; no jump inferred from similar na
 If no producer mapping exists, include its bounded generation in the chosen first slice.
 
 ## References
-- [Source mapping limits](../../fs1_investigation.md)
+- [Source mapping limits](../../asic_evidence_inspection.md)
 - [External navigation contract](../external_clients.md)
 - [Structural hierarchy](../../../protocol/hierarchy.ml)

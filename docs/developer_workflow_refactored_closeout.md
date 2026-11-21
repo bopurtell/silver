@@ -1,7 +1,7 @@
 # Refactored-example developer workflow — acceptance closeout
 
 Subsequent interactive follow-up: [unsupported endpoint rejection and checklist
-recovery](developer_workflow_endpoint_rejection.md). The owner's placement attempt
+recovery](archive/example-development/developer_workflow_endpoint_rejection.md). The owner's placement attempt
 in this synthesis-only session revealed a late-rejection/observation presentation
 defect. Corrected app binaries are built and reviewed, but require explicit adoption;
 the accepted hashes below remain the original acceptance identities.

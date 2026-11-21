@@ -81,7 +81,7 @@ def decode_fields(fs0, item):
 
 def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
     g = groundwork
-    dashboard = g.module("resource_pty_dashboard", g.HERE / "test-fs0-dashboard.py")
+    dashboard = g.module("resource_pty_dashboard", g.HERE / "test-retained-asic-dashboard.py")
 
     class Terminal(dashboard.Terminal):
         def save(self, label, text):
@@ -281,7 +281,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
 
 def cached_pty(args, base, session, targets, check):
     g = groundwork
-    dashboard = g.module("resource_cached_pty", g.HERE / "test-fs0-dashboard.py")
+    dashboard = g.module("resource_cached_pty", g.HERE / "test-retained-asic-dashboard.py")
     if (base / "pty.ansi").exists():
         (base / "pty.ansi").rename(base / "pty-warm-reopen.ansi")
     baseline = (base / "provider-calls.jsonl").read_bytes()

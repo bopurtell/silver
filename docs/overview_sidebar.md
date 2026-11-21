@@ -3,7 +3,7 @@
 Implemented and verified 2026-10-16 following the owner's latest layout review.
 This supersedes the paired-panel/horizontal-checklist Overview arrangement in the
 [earlier refinement](frontend_refinement.md). Timing's investigation topology is
-preserved. [Shared implementation plan](overview_sidebar_plan.md).
+preserved. [Shared implementation plan](archive/delivery/overview_sidebar_plan.md).
 
 **Subsequent owner polish delivered:** planned-run now sits below a shorter
 checklist in the left sidebar; right side has six domain summaries. New clients
@@ -82,14 +82,19 @@ lowercase titles, tighter packing and schemes apply there as well.
 
 ## Live color schemes
 
-Open **Space c c**, type `theme`, and press **Enter**. Inside the picker,
+Open **Space c c**, type `theme`, and press **Enter** on **Choose theme…**.
+The picker opens on your current theme, marked **[active]**. Inside the picker,
 type to filter the list, then use **↑/↓** or **Tab/Shift-Tab** to see how a
 highlighted theme looks on your actual workspace. **Enter** keeps it;
 **Escape** returns to the theme you had when you opened the picker.
 
-Start with `silver-dark` or `silver-light`, or search `silver` to explore the
-rest of the family. The picker also includes Cobalt's light and dark palettes
-and Silver's original Carbon, Slate, Crimson and Neon.
+Start with **Silver Dark** (cool graphite) or **Silver Light** (brushed silver).
+For a dark workspace with more color try **Silver Blue**, **Silver Dusk**
+(violet), or **Silver Patina** (oxidized green). **Silver Pearl** is a warmer
+light option. All 58 Cobalt palettes are here as well: search `cobalt` to
+compare Cobalt Midnight, Electric, Mist and Frost. Silver's original Carbon,
+Slate, Crimson and Neon keep their colors; **Cobalt Crimson** is the separate
+Cobalt interpretation.
 
 Scheme is independent of the A–E skin, Vivid/Selective/Restrained color intensity,
 icons and density. It changes the whole current client, including Timing, palette

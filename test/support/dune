@@ -8,9 +8,9 @@
   __init__.py
   screen.py
   terminal.py
-  ../../scripts/test-fs0.py
-  ../../scripts/test-fs0-dashboard.py
-  ../../scripts/test-fs2-native.py
-  ../../scripts/fixtures/fs2_wire.py)
+  ../../scripts/test-native-execution.py
+  ../../scripts/test-retained-asic-dashboard.py
+  ../../scripts/test-native-simulation.py
+  ../../scripts/fixtures/simulation_fixture_wire.py)
  (action
   (run timeout 30s python3 -B %{dep:test_terminal.py} -v)))

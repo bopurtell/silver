@@ -69,6 +69,6 @@ interpretation is provisional; confirm language, editor depth, recipes and persi
 
 ## References
 - [Module/tile foundations](../modules_and_tiles.md).
-- [Execution module](../../fs0_execution_module.md).
+- [Execution module](../../execution_module.md).
 - [Generic supervisor ownership](../../../backend/simulation_task.ml).
 - [External integration architecture](../integration.md).

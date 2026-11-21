@@ -505,6 +505,34 @@ module%test Permanent_project_window = struct
     | _ -> assert false
   ;;
 
+  let%test_unit "selected object label uses the theme ink and selection surface" =
+    let d : Dimensions.t = { width = 100; height = 30 } in
+    let bounds, cells = page state d in
+    let row = List.find_exn cells ~f:(fun cell -> Poly.equal cell.role Selection) in
+    let ansi image =
+      let b = Buffer.create 64 in
+      Notty.Render.to_buffer b Notty.Cap.ansi (0, 0) (1, 1) (View.Private.notty_image image);
+      Buffer.contents b
+    in
+    List.iter [ "silver-dark"; "silver-light" ] ~f:(fun key ->
+      let scheme = Option.value_exn (Appearance.Scheme.of_key key) in
+      let appearance = { Appearance.default with scheme } in
+      let label = String.chop_prefix_exn row.text ~prefix:selection_marker in
+      let actual =
+        render state appearance d View.none
+        |> View.crop
+             ~l:(bounds.x + row.col + View.width (View.text selection_marker))
+             ~t:(bounds.y + row.row)
+      in
+      let expected =
+        View.text
+          ~attrs:[ Attr.fg (Host_view.Role.foreground appearance Foreground)
+                 ; Attr.bg (Host_view.Role.backdrop appearance Selection) ]
+          (String.prefix label 1)
+      in
+      assert (String.equal (ansi actual) (ansi expected)))
+  ;;
+
   let%test_unit "painted labels hit the scrolled selection in either layout" =
     List.iter
       [ 80, 24; 120, 30 ]

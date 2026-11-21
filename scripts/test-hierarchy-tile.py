@@ -40,7 +40,7 @@ def load(name, path):
     return module
 
 
-native = load('hierarchy_native', HERE / 'test-fs0.py')
+native = load('hierarchy_native', HERE / 'test-native-execution.py')
 pty_harness = load('hierarchy_pty', HERE / 'test-inspector-latency.py')
 wire = load('hierarchy_http', HERE.parent / 'demo/synthetic_flow/http_client.py')
 fixture = load('hierarchy_fixture', HERE / 'fixtures/hierarchy_tile_driver.py')

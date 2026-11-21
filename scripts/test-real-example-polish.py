@@ -33,8 +33,8 @@ def startup_check(t, check, http, screen):
     # This is before any palette command can replace the fresh client's default.
     left, top, right, bottom = pane_rect(screen, 'session')
     background = screen.cells[top + 1][right - 2][1][1]
-    check(background.startswith('rgb:') and max(map(int, background[4:].split(','))) <= 16,
-          'Fresh default paints an explicit black/near-black Session background')
+    check(background == 'rgb:25,29,34',
+          'Fresh default paints the exact silver-dark Session background')
     for title in ('session', 'runs', 'stage checklist', 'planned-run', 'synthesis',
                   'timing', 'placement', 'routing', 'checks', 'finalization'):
         _, y, _, _ = pane_rect(screen, title)

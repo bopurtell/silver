@@ -1,6 +1,0 @@
-(executable
- (name cancellation_prefix_probe)
- (modules cancellation_prefix_probe)
- (libraries core hardcaml_workbench_protocol hardcaml_workbench_backend
-  hardcaml_workbench_project_integration)
- (preprocess (pps ppx_jane)))

@@ -9,10 +9,6 @@ Start with [the testing guide](../docs/testing.md),
 [source inventory](../docs/testing_inventory.md) and
 [tool-tests versus hardware verification](../docs/testing_strategy_status.md).
 
-To continue restructuring in another session, use the
-[cached test-refactor handoff](../docs/migration_guides/workbench-test-refactor.md),
-starting with the [overall checkpoint](../docs/session_checkpoint.md).
-
 ## Select existing suites
 
 | Root alias | Existing owners selected | What it means |
@@ -27,39 +23,30 @@ starting with the [overall checkpoint](../docs/session_checkpoint.md).
 | `@test-native-standalone` | installed `silver` and persistent daemon | Opt-in project discovery, locking, retained state and PTY quit/reattach lifecycle |
 | `@test-local` | contracts + presentation + backend + setup + support | Aggregate; **excludes API, native smoke and real EDA** |
 
-These aliases select existing actions; they are not new coverage or "unit-only"
-labels. Shared-support tests now participate in default `@runtest`; native smoke
-remains opt-in. `local` describes
-input ownership, not absence of subprocesses, Git fixture writes or nested builds.
-
-Contracts, presentation and API passed forced reruns together at `-j2`. Backend
-and setup each passed separately at `-j1`; support and native smoke passed with
-copy sandboxing. Use the shared lock and explicit budgets. Example:
+Shared-support tests participate in `@runtest`; native smoke is opt-in.
+Local tests may start subprocesses, create Git fixtures and run nested builds.
+Use the same build directory and lock as the example launcher when testing a
+checkout used by both repositories:
 
 ```bash
-flock /tmp/opencode/workbench-pt8-build.lock \
+flock /tmp/opencode/workbench-build.lock \
   opam exec --switch=5.2.0+ox -- dune build -j2 \
-  --build-dir _build_pt8_workbench @test-contracts @test-presentation
+  --build-dir _build_workbench @test-contracts @test-presentation
 ```
 
-Run backend and setup separately with `-j1`: setup intentionally starts twelve
-initializer processes. API tests explicitly request nested `-j1`; production
-adapter defaults remain unchanged. Disposable Git fixture authoring is permitted
-by the owner's clarified policy; owner-checkout staging/commits/pushes are not.
-The combined `@test-local` alias has not itself been rerun or given a concurrent
-resource bound. See [current verification](../docs/test_refactor_verification.md).
-
-For either new selector:
+On a resource-constrained machine, run backend and setup separately with `-j1`:
+setup intentionally starts twelve initializer processes. To run the PTY waveform
+smoke test and the support library controls from fresh sandboxes:
 
 ```bash
-flock /tmp/opencode/workbench-pt8-build.lock \
+flock /tmp/opencode/workbench-build.lock \
   opam exec --switch=5.2.0+ox -- dune build -j2 \
-  --build-dir _build_pt8_workbench --sandbox=copy --force @test-support @test-native-smoke
+  --build-dir _build_workbench --sandbox=copy --force @test-support @test-native-smoke
 ```
 
 ## Opt-in real fresh-prefix tests
 
-For WB-040's real FIFO 64 MiB export and retained ASIC GDS handoff, use the
+For the real FIFO 64 MiB export and retained ASIC GDS handoff, use the
 [streaming export acceptance runner](../docs/streaming_export_acceptance.md).
 It lives at `test/integration/streaming_export.py`, takes explicit prebuilt and
 retained-evidence inputs, and is not selected by the default/local/native-smoke
@@ -93,13 +80,8 @@ the later endpoint selectors/full pyramid are implemented but not yet executed h
 
 - `fixtures/`: specimen inputs, including a separate miniature Dune project.
 - `baselines/`: retained expected terminal output.
-- `pt8_frontend_review/`: retained review data, not automatically active tests.
 
-Their nested Dune files remain fixture bytes; they are not Workbench build targets.
-No existing fixtures, baselines, test sources or evidence were moved in this pass.
+Their nested Dune files are fixture data rather than Workbench build targets.
 
-`test/support/` now contains shared screen reconstruction and the PTY driver,
-with controlled regression tests. Historical script exports remain compatible.
-`test/integration/pyramid/` now hosts explicit real-flow integration and its cheap
-runner controls. Broader existing-driver migration remains pending. The waveform
-smoke stays with its terminal owner.
+`test/support/` contains shared screen reconstruction and the PTY driver.
+`test/integration/pyramid/` contains real-flow integration and its runner tests.

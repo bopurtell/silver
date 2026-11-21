@@ -17,7 +17,7 @@ import traceback
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('development_provider_wire', HERE / 'test-fs2-native.py')
+spec = importlib.util.spec_from_file_location('development_provider_wire', HERE / 'test-native-simulation.py')
 wire = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wire)
 

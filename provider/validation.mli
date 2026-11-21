@@ -1,6 +1,6 @@
 open! Core
 
-(** Pure FS2 validators shared verbatim by the daemon and provider runner.
+(** Simulation protocol validators shared by the daemon and provider runner.
     [validate_discovery] and [validate_event] raise on invalid values; parsers and
     selection validation return structured errors. Selection is normalized to discovery
     case order and sorted parameter keys. *)

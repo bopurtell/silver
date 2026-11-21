@@ -7,7 +7,7 @@ expected revision or revision-validation policy may be changed to make them pass
 
 **Correction implemented and independently verified in isolated captures.**
 The active user generation was not refreshed or restarted. See
-[independent consumer/preflight review](development_git_context_independent_review.md).
+[independent consumer/preflight review](archive/example-development/development_git_context_independent_review.md).
 
 ## Established cause
 

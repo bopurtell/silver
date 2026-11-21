@@ -8,7 +8,7 @@ let () =
     Hardcaml_workbench_backend.Asic_public.flow_catalog
       (Yojson.Safe.from_file (Sys.get_argv ()).(1))
   in
-  let snapshot = { Fs0_fixture.snapshot with flows; catalog_default } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with flows; catalog_default } in
   let query ?remembered ?(snapshot = snapshot) flow profile =
     Launch_preferences.endpoint_query ~remembered ~asic:(Some snapshot) ~flow ~profile
   in
@@ -92,12 +92,27 @@ let () =
         | Execute (_, (Asic (Plan actual) | Select_preparation actual)) ->
           assert (Asic.Selection.equal actual remembered)
         | _ -> assert false)));
+  for code = 32 to 126 do
+    let literal = String.of_char (Char.of_int_exn code) in
+    let tokens = [ ""; literal; literal ^ "\\\"' end" ] in
+    assert (
+      List.equal
+        String.equal
+        tokens
+        (Launch_preferences.Prompt.encode tokens
+         |> Launch_preferences.Prompt.decode
+         |> Or_error.ok_exn))
+  done;
   List.iter
     [ "synthesis SYNTH_STRATEGY='DELAY 1'", [ "SYNTH_STRATEGY=DELAY 1" ]
     ; "synthesis SYNTH_STRATEGY=\"DELAY 1\"", [ "SYNTH_STRATEGY=DELAY 1" ]
     ; "  synthesis  A=1 A=2  ", [ "A=1"; "A=2" ]
     ; "synthesis PATH=C:\\literal\\path", [ "PATH=C:\\literal\\path" ]
     ; "synthesis LITERAL=$HOME;$(whoami)", [ "LITERAL=$HOME;$(whoami)" ]
+    ; "synthesis '' \"\" a''b\"\"", [ ""; ""; "ab" ]
+    ; "synthesis 'a b'\"c d\"e", [ "a bc de" ]
+    ; "synthesis a\\ b", [ "a\\"; "b" ]
+    ; "synthesis \"a\\\"b\\\\c\"", [ "a\"b\\c" ]
     ]
     ~f:(fun (text, assignments) ->
       let actual =
@@ -127,6 +142,13 @@ let () =
           | No_effect -> true
           | _ -> false);
         assert (String.is_substring rejected.notice ~substring:diagnostic);
+        assert (
+          Host_view.render_palette
+            rejected
+            { width = 200; height = 60 }
+            (Bonsai_term.View.text "")
+          |> Host_view.plain_text
+          |> String.is_substring ~substring:"Invalid typed input:");
         assert (
           Option.value_map rejected.palette ~default:false ~f:(fun p ->
             String.equal p.query text))));
@@ -184,4 +206,75 @@ let () =
           Planned_run.equal_role row.role Error
           && String.is_substring row.text ~substring:diagnostic))));
   print_endline "catalog endpoint prompts and plan diagnostics: ok"
+;;
+
+let () =
+  let flow id fresh_stage_endpoints : Asic.Flow.t =
+    { id; profiles = [ "one"; "two" ]; default_profile = "one"; fresh_stage_endpoints }
+  in
+  let remembered : Asic.Selection.t =
+    { flow = "chosen"
+    ; profile = "one"
+    ; endpoint = "routing"
+    ; chip_target = None
+    ; assignments = [ "Z=last"; "A=contains spaces"; "Z=again" ]
+    }
+  in
+  let endpoints =
+    [ "signoff"; "timing"; "routing"; "cts"; "placement"; "floorplan"; "synthesis" ]
+  in
+  for mask = 0 to (1 lsl List.length endpoints) - 1 do
+    let chosen = List.filteri endpoints ~f:(fun i _ -> mask land (1 lsl i) <> 0) in
+    List.iter
+      [ chosen; List.rev chosen ]
+      ~f:(fun chosen ->
+        let expected =
+          if List.mem chosen "synthesis" ~equal:String.equal
+          then Some "synthesis"
+          else List.hd chosen
+        in
+        let snapshot =
+          { Asic_snapshot_fixture.snapshot with
+            flows = [ flow "decoy" [ "synthesis" ]; flow "chosen" chosen ]
+          ; catalog_default = Some { flow = "chosen"; profile = "one" }
+          }
+        in
+        let query ?remembered flow profile =
+          Launch_preferences.endpoint_query
+            ~remembered
+            ~asic:(Some snapshot)
+            ~flow
+            ~profile
+        in
+        assert (String.equal (query "chosen" "one") (Option.value expected ~default:""));
+        assert (
+          String.equal
+            (query ~remembered "chosen" "two")
+            (Option.value expected ~default:""));
+        assert (String.equal (query ~remembered "decoy" "one") "synthesis");
+        assert (
+          List.equal
+            String.equal
+            (Launch_preferences.Prompt.decode (query ~remembered "chosen" "one")
+             |> Or_error.ok_exn)
+            (remembered.endpoint :: remembered.assignments));
+        match
+          Preparation_view.selection ~remembered:None ~asic:(Some snapshot), expected
+        with
+        | Error _, None -> ()
+        | Ok selected, Some endpoint ->
+          assert (
+            Asic.Selection.equal selected { remembered with endpoint; assignments = [] })
+        | _ -> failwith "Preparation default disagrees with catalog endpoint order")
+  done;
+  List.iter
+    [ None; Some { Asic_snapshot_fixture.snapshot with catalog_default = None } ]
+    ~f:(fun asic ->
+      assert (Result.is_error (Preparation_view.selection ~remembered:None ~asic));
+      assert (
+        Result.equal
+          Asic.Selection.equal
+          String.equal
+          (Preparation_view.selection ~remembered:(Some remembered) ~asic)
+          (Ok remembered)))
 ;;

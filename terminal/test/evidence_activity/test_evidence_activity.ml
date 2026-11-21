@@ -8,7 +8,7 @@ module Config = Hardcaml_workbench_project_integration.Asic_config
 module H = Workspace_host
 
 let environment = V1.Environment_selection.Inherit_daemon
-let run = Fs0_fixture.run_a
+let run = Asic_snapshot_fixture.run_a
 let has text substring = String.is_substring text ~substring
 
 let handle service root operation =
@@ -60,10 +60,10 @@ let summary_refresh () =
   let state_dir = file "state" in
   Core_unix.mkdir_p state_dir ~perm:0o700;
   let registered =
-    { (Fs0_fixture.run run) with execution_file = Some (file "execution.json") }
+    { (Asic_snapshot_fixture.run run) with execution_file = Some (file "execution.json") }
   in
   let summary =
-    { (Fs0_fixture.summary run 50 [ "NAND2", 50 ]) with
+    { (Asic_snapshot_fixture.summary run 50 [ "NAND2", 50 ]) with
       execution_file = Option.value_exn registered.execution_file
     }
   in
@@ -144,7 +144,7 @@ let summary_refresh () =
             match
               Evidence_activity.summarize
                 ~views:[]
-                ~runs:[ Fs0_fixture.run_b ]
+                ~runs:[ Asic_snapshot_fixture.run_b ]
                 (Some snapshot)
             with
             | Idle -> true

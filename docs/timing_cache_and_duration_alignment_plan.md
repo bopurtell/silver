@@ -111,7 +111,7 @@ fixture-based correctness tests.
 The daemon accepts:
 
 ```sh
-./scripts/with-switch.sh _build/default/daemon/main.exe \
+silver-daemon \
   --port 8080 \
   --inspection-detail-cache-entries 64 \
   --inspection-detail-cache-bytes 4194304
@@ -128,7 +128,7 @@ does not change project identity or run-history namespace.
 The terminal accepts:
 
 ```sh
-./scripts/with-switch.sh _build/default/terminal/main.exe \
+silver \
   --connect http://127.0.0.1:8080 \
   --project-root /absolute/path/to/project --environment opam:5.2.0+ox \
   --timing-prefetch-neighbors 2

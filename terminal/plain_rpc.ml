@@ -90,11 +90,11 @@ let rec watched_keys operation keys (snapshot : Asic.Snapshot.t) =
 ;;
 
 let%test_unit "artifact waits distinguish offset and byte budget with the shared key" =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let key offset limit =
     keys
       (Read_artifact { run; artifact_id = "exact-report"; offset; limit })
-      Fs0_fixture.snapshot
+      Asic_snapshot_fixture.snapshot
     |> List.hd_exn
   in
   assert (
@@ -106,8 +106,8 @@ let%test_unit "artifact waits distinguish offset and byte budget with the shared
 ;;
 
 let%test_unit "FS1 waits use shared index detail and binary page identities" =
-  let run = Fs0_fixture.run_a in
-  let keys_for op = keys op Fs0_fixture.snapshot in
+  let run = Asic_snapshot_fixture.run_a in
+  let keys_for op = keys op Asic_snapshot_fixture.snapshot in
   let index refresh =
     keys_for (Inspect { run; domain = "timing"; stage = "signoff"; refresh })
   in
@@ -155,7 +155,7 @@ type progress =
 let%test_unit "fresh RPC keys preserve historical snapshot defaults and distinguish \
                workflow ownership"
   =
-  let old = Asic.Snapshot.sexp_of_t Fs0_fixture.snapshot in
+  let old = Asic.Snapshot.sexp_of_t Asic_snapshot_fixture.snapshot in
   let historical =
     match old with
     | Sexp.List fields ->
@@ -167,8 +167,8 @@ let%test_unit "fresh RPC keys preserve historical snapshot defaults and distingu
   in
   let restored = Asic.Snapshot.t_of_sexp historical in
   assert (Option.is_none restored.fresh_intent && List.is_empty restored.workflows);
-  let intent = Fs0_fixture.fresh_intent "wait" in
-  let w = Fs0_fixture.workflow "wait-key" intent in
+  let intent = Asic_snapshot_fixture.fresh_intent "wait" in
+  let w = Asic_snapshot_fixture.workflow "wait-key" intent in
   let snapshot = { restored with fresh_intent = Some intent; workflows = [ w ] } in
   assert (
     List.is_empty
@@ -278,10 +278,10 @@ let%test_unit "documented typed operation sexps decode without a shell or human-
 let%test_unit "workflow wait consults durable phase including failure after successful \
                RPC and restored terminal history"
   =
-  let intent = Fs0_fixture.fresh_intent "wait" in
-  let w = Fs0_fixture.workflow "wait-key" intent in
+  let intent = Asic_snapshot_fixture.fresh_intent "wait" in
+  let w = Asic_snapshot_fixture.workflow "wait-key" intent in
   let check phase expected =
-    let snapshot = { Fs0_fixture.snapshot with workflows = [ { w with phase } ] } in
+    let snapshot = { Asic_snapshot_fixture.snapshot with workflows = [ { w with phase } ] } in
     match progress ~wait:true [ "workflow:" ^ w.id ] snapshot, expected with
     | Pending, `Pending | Complete, `Complete | Failed _, `Failed -> ()
     | _ -> assert false
@@ -297,7 +297,7 @@ let%test_unit "workflow wait consults durable phase including failure after succ
 let%test_unit "lifecycle wait keys distinguish collection, reconnect, and acceptance \
                failure"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let key = "exact-finalization-key" in
   let finalization : Asic.Finalization.t =
     { key
@@ -324,7 +324,7 @@ let%test_unit "lifecycle wait keys distinguish collection, reconnect, and accept
     }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       finalizations = [ finalization ]
     ; operations = [ pending ("finalize:" ^ key); pending ("finalize-observe:" ^ key) ]
     }
@@ -416,10 +416,10 @@ let%test_unit "Observe waits for its read, independently of a long execution" =
 ;;
 
 let%test_unit "finalization waits for the exact attempt rather than an earlier import" =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let old_attempt = "/private/finalization/old/operation.json" in
   let attempt = "/private/finalization/exact/operation.json" in
-  let snapshot = Fs0_fixture.snapshot in
+  let snapshot = Asic_snapshot_fixture.snapshot in
   let requested = keys (Inspect_finalization { run; attempt }) snapshot in
   let old_key =
     List.hd_exn (keys (Inspect_finalization { run; attempt = old_attempt }) snapshot)

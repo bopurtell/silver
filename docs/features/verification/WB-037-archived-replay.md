@@ -65,4 +65,4 @@ captured versus externally pinned and expose any resulting reproducibility limit
 ## References
 - [FS2-F08 archived replay](../../backlog/fs2_followups.md#fs2-f08--archived-build-replay).
 - [F09 rerun foundations](../simulation_and_tests.md).
-- [FS2 provider contract](../../fs2_simulation_contract.md).
+- [FS2 provider contract](../../simulation_provider_contract.md).

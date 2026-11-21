@@ -21,7 +21,7 @@ preserves desired behavior without making every feature a first-demo requirement
 Shared run contexts and workspace terminology are accepted in D1. D2/D3's FS0
 defaults are also accepted; richer command grammar/shared preferences and exact
 immutable snapshots remain deferred in the [decision log](../decisions.md).
-The agreed [FS2 simulation/test milestone](../fs2_acceptance.md) is delivered,
+The agreed [FS2 simulation/test milestone](../structured_simulation.md) is delivered,
 accepted and closed. [Named FS2 followups](fs2_followups.md) preserve FIFO adoption,
 trace streaming, responsiveness/reconnect/log retention and additional simulation
 capabilities with explicit activation and acceptance criteria. Embedded waveform
@@ -46,7 +46,7 @@ The delivered refactor remains in place; this is not an automatic next work item
 The owner confirmed that Escape now responds well after the local redraw fix and
 tmux guidance. Keep that manual acceptance separate from the automated latency
 matrix and from final aesthetic approval; see the
-[measured followup](../fs1_investigation.md#escape-responsiveness-in-tmux--2026-10-16-followup).
+[measured followup](../asic_evidence_inspection.md#escape-responsiveness-in-tmux--2026-10-16-followup).
 
 The following are presentation followups, not FS1 feature blockers:
 

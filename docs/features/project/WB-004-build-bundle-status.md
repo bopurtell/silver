@@ -177,4 +177,4 @@ scope and do not block closure. No implementation acceptance remains open on WB-
 ## References
 - [Driver operations](../../../project_integration/driver_protocol.ml)
 - [Existing checklist projection](../../../terminal/overview_tiles.ml)
-- [Execution foundation](../../fs0_execution_module.md)
+- [Execution foundation](../../execution_module.md)

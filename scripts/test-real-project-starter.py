@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import urllib.request
 
-from fixtures.fs2_wire import parse, sexp
+from fixtures.simulation_fixture_wire import parse, sexp
 
 
 def exercise(endpoint, dest, author, flow_recipe=None):

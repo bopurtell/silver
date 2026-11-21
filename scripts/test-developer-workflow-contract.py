@@ -143,9 +143,9 @@ class Contract(unittest.TestCase):
         config = project / 'hardcaml-workbench-preparation.sexp'
         config.write_text(w.sexp([['schema_version', 1], ['build_target', target]]))
         # Real captured helpers and their exact declared ownership-v1 roots.
-        dirs = ['ip/controlled_fifo', 'asics/fifo_demo', 'asics/program_memory',
+        dirs = ['ip/controlled_fifo', 'asics/fifo_demo', 'asics/program_memory', 'asics/sram_budget',
                 'tooling_acceptance', 'integration/workbench', 'scripts']
-        files = ['dune-project', 'asic-dependency.json', 'README.md', 'bootstrap.sh',
+        files = ['dune-project', 'asic-dependency.json', 'hardcaml-asic-targets.json', 'README.md', 'bootstrap.sh',
                  'asics/fifo_demo/verif/bundle/dune', 'asics/fifo_demo/verif/bundle/export_trace.ml',
                  'asics/fifo_demo/verif/bundle/check_bundle.py', 'asics/fifo_demo/verif/bundle/replay.v']
         for name in dirs:
@@ -248,7 +248,7 @@ class Contract(unittest.TestCase):
             w.prepare(args, evidence)
         argv = command.call_args_list[1].args[2]
         self.assertEqual(argv[argv.index('--synthesis-task-limit') + 1], '6')
-        self.assertEqual(argv[argv.index('--wb-build-root') + 1], str(w.HERE.parent / '_build_pt8_workbench'))
+        self.assertEqual(argv[argv.index('--wb-build-root') + 1], str(w.HERE.parent / '_build_workbench'))
 
     def test_run_selection_option_wire(self):
         selection = [['flow', 'standard'], ['profile', 'balanced'], ['endpoint', 'synthesis'], ['assignments', []]]

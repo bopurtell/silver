@@ -45,7 +45,7 @@ def main():
         setattr(args, name, getattr(args, name).resolve(strict=True))
     evidence = Path(tempfile.mkdtemp(prefix='development-waveform-a-', dir='/tmp/opencode'))
     print('Evidence: ' + str(evidence), flush=True)
-    native = load('development_native', ROOT / 'scripts/test-fs2-native.py')
+    native = load('development_native', ROOT / 'scripts/test-native-simulation.py')
     field, wire = native.field, replay.wire
     for name in ('project', 'state', 'home', 'config', 'tmp'):
         (evidence / name).mkdir()

@@ -80,7 +80,7 @@ Synthesis PASS. Floorplan through Signoff/full-pyramid execution is not claimed.
 ## Interactive endpoint rejection recovery — 2026-11-10
 
 Owner's placement request in the synthesis-only accepted session exposed late
-admission and a secondary observation error. [Fix and adoption handoff](developer_workflow_endpoint_rejection.md)
+admission and a secondary observation error. [Fix and adoption handoff](archive/example-development/developer_workflow_endpoint_rejection.md)
 records early capability admission, definitive pre-execution rejection recovery,
 retained checklist context and readable diagnostics. Independent backend/terminal
 tests and actual retained-journal rendering pass. The live session remains on its
@@ -144,7 +144,7 @@ inspection/restart evidence without rerunning producers. No P&R or Protemu work.
 
 Owner authorized section-1 closeout: production client startup, FIFO pass/failure
 investigation, PT.8 comparison, fresh synthesis, report/check inspection and
-same-session restart/reopen. [Bounded acceptance and execution allocation](developer_workflow_acceptance_plan.md)
+same-session restart/reopen. [Bounded acceptance and execution allocation](archive/example-development/developer_workflow_acceptance_plan.md)
 requires durable automated TUI tests with separately identified supporting RPCs,
 one actual synthesis under the supported six-worker ceiling and no P&R.
 
@@ -155,7 +155,7 @@ one actual synthesis under the supported six-worker ceiling and no P&R.
 Use only test-owned private state; existing live owner sessions/evidence remain
 unchanged. Passing metadata/preparation is not synthesis completion.
 
-The [phase-1 handoff](developer_workflow_acceptance_handoff.md) is historical.
+The [phase-1 handoff](archive/example-development/developer_workflow_acceptance_handoff.md) is historical.
 Its lost pre-crash temporary store was replaced with new ownership-v1 captures,
 explicit capability support and a kernel-enforced six-total-task synthesis envelope.
 The [closeout](developer_workflow_refactored_closeout.md) is current authority for
@@ -175,7 +175,7 @@ stopped-daemon same-store refresh. [Recovery and evidence](development_git_conte
 ## Unified development session and waveform time navigation — 2026-11-05
 
 Owner requests a coherent everyday example session, not another PT.8-only demo.
-[Bounded implementation plan](development_session_plan.md) defines exclusive slices,
+[Bounded implementation plan](archive/example-development/development_session_plan.md) defines exclusive slices,
 combined FIFO/PT.8 catalog, stable editable source/state and explicit refresh, and
 bounded event-aware waveform Default/Fit over exact retained physical time.
 
@@ -200,7 +200,7 @@ earlier sessions/captures/evidence are preserved.
 ## PT.8 fresh simulation → Waveforms recovery — 2026-11-05
 
 Owner found result-reference JSON opened as a waveform, with no VCD in the
-attempt. [Bounded plan](pt8_waveform_recovery_plan.md) is delivered: explicit
+attempt. [Bounded plan](archive/workloads-waveforms/waveform_recovery_plan.md) is delivered: explicit
 six-interface-signal capture/publication, exact case/attempt VCD handoff, truthful
 no-VCD availability and preserved JSON Workloads inspection. Mixed known/X/Z
 windows retain known graphs and mark unknown lanes without inventing values.
@@ -208,8 +208,8 @@ Independent review corrected producer admission/publication and restored artifac
 palette membership gaps. Final real Flops/Exact direct cases and production
 Testing→fresh Exact→quick/dedicated Waveforms pass in `session-waveforms-final-01`;
 same-execution raw signal samples, original counters and standard public Plan pass.
-See [final evidence](pt8_waveform_final_acceptance.md) and
-[updated launch guide](pt8_workloads.md). Existing sessions/results remain unchanged;
+See [final evidence](archive/workloads-waveforms/waveform_acceptance.md) and
+[updated launch guide](workloads.md). Existing sessions/results remain unchanged;
 no EDA or user-pair restart occurred. User visual acceptance remains manual.
 
 ## Standard Plan / private-session recovery — 2026-11-05
@@ -223,12 +223,12 @@ controls pass against `session-standard-recovery-02`, without physical submissio
 Both profiles × seven endpoints plan successfully; private source build/emission
 and a fresh Exact workload pass. Original user session remains unchanged.
 See [review and recovery commands](standard_plan_recovery.md) and
-[independent endpoint review](pt8_endpoint_independent_review.md).
+[independent endpoint review](archive/workloads-waveforms/endpoint_independent_review.md).
 
 ## Completed PT.8 workload inspection and execution scope — 2026-11-05
 
 User authorized the Workbench integration of the accepted PT.8 library/example
-workflow. [Bounded plan](pt8_workloads_plan.md) owns shared APIs, exclusive slices,
+workflow. [Bounded plan](archive/workloads-waveforms/workloads_integration_plan.md) owns shared APIs, exclusive slices,
 isolated provider/session setup and acceptance. Existing configured sessions and
 live daemons remain unchanged.
 
@@ -241,7 +241,7 @@ No new synthesis/P&R/STA or Protemu scope. Provider-owned verification/deltas an
 existing FS2 supervision are reused; root configuration adoption is separate.
 
 Implementation and native HTTP/PTY acceptance complete, 2026-11-05;
-user visual acceptance remains pending: [launch/acceptance guide](pt8_workloads.md). Corrected private
+user visual acceptance remains pending: [launch/acceptance guide](workloads.md). Corrected private
 session `session-final-review-01` runs immutable provider generation
 `ee3af8de9f83418b9afed9c67e473e3c`. Actual retained comparison and production-form
 fresh Exact launch, digest-pinned artifact handoff and fresh-versus-retained
@@ -336,7 +336,7 @@ See [compression controls and evidence](identifier_compression.md).
 
 ## Active Timing usability and preloading — 2026-10-23
 
-Owner authorized the [Timing usability/preload plan](timing_usability_preload_plan.md):
+Owner authorized the [Timing usability/preload plan](archive/delivery/timing_usability_preload_plan.md):
 configurable three-decimal display and compression, semantic colors, wider paths,
 built-in Timing inspection, Overview/Testing/Waveforms/Timing order and bounded
 background index preparation with explicit-only mode.
@@ -358,7 +358,7 @@ the pre-reboot VCD fixture limitation on full waveform acceptance.
 ## Active Timing workspace follow-up — 2026-10-23
 
 Owner reports an unwanted simulation catalog in Timing and empty paths for the
-latest `a023` Timing run. The [follow-up plan](timing_workspace_followup_plan.md)
+latest `a023` Timing run. The [follow-up plan](archive/delivery/timing_workspace_followup_plan.md)
 owns membership/navigation diagnosis, retained real evidence and loading-policy
 research. No physical rerun or new automatic preloading policy is implied.
 
@@ -376,7 +376,7 @@ proposal, not implemented behavior. See [findings and policy](timing_workspace_l
 ## Active executable Timing stage — 2026-10-21
 
 Owner authorized extending WB-069 into a true provider stage/checkpoint. The
-[executable Timing plan](executable_timing_stage_plan.md) owns boundaries, legacy
+[executable Timing plan](archive/delivery/executable_timing_stage_plan.md) owns boundaries, legacy
 compatibility, agent ownership and verification. This supersedes the earlier
 non-runnable restriction for new capable providers, while retaining historical
 supplementary observations.
@@ -396,7 +396,7 @@ flow was run; global formatting retains unrelated baseline differences.
 
 ## Active WB-069 Timing checklist and Overview — 2026-10-21
 
-Owner authorized implementation of the [Timing plan](timing_checklist_overview_plan.md).
+Owner authorized implementation of the [Timing plan](archive/delivery/timing_checklist_overview_plan.md).
 Delivery uses a supplementary end-of-segment STA observation, preserving completed
 timing evidence after later signoff failure without adding an execution endpoint.
 
@@ -458,7 +458,7 @@ is now delivered, including richer paths, measured clock evidence, stage-specifi
 physical/routing investigation and external binary handoff. Later F06 extensions
 remain separately qualified in the investigation record.
 FS2 structured project-scoped simulation is now delivered; see the M4 FS2 record
-and [FS2 acceptance](fs2_acceptance.md), added 2026-10-16.
+and [FS2 acceptance](structured_simulation.md), added 2026-10-16.
 
 ## Evidence and candidate baseline
 
@@ -466,15 +466,15 @@ Use these records together rather than interpreting an old audit as current stat
 
 | Record | Scope / retained evidence |
 | --- | --- |
-| [Environment inventory](fs0_environment_inventory.md#ready-executable-pair) | Exact executable paths, SHA-256 inventory, capture receipts, tools and wire versions; historical audit, whose pending-wiring/test notes are superseded below |
-| [Provider integration](fs0_provider_integration.md) | Implemented API/configuration, supervision, summary identities, budgets and freshness limits |
-| [Execution module](fs0_execution_module.md) | Protocol projection and daemon routing over the existing generic supervisor |
-| [Terminal host](fs0_terminal.md) | Controls, ownership, launch policy, renderer coverage and known UI limits |
-| [Installed checks](fs0_install_checks.md) | Native installed workflow, external fixture, legacy capture checks: all passed |
-| [Native acceptance](fs0_acceptance.md) | Actual HTTP/PTY fixtures, real serial synthesis, allocation/detach, warm/restart identity and live cached UI reopening |
-| [FS1 physical/terminal acceptance](fs1_acceptance.md) | Physical completion, independently accepted/rejected operations, cache reopening and real cancellation |
-| [FS1 lifecycle/artifacts](fs1_lifecycle_and_artifacts.md) | Workbench-owned collect/accept, postcheck cancellation, bounded report reads and external text handoff |
-| [FS1 investigation](fs1_investigation.md) | Current adopted-evidence completion, exact upgraded provider, timing/clock/physical/routing exploration, binary handoff and Escape responsiveness |
+| [Environment inventory](archive/delivery/initial_environment_inventory.md#ready-executable-pair) | Exact executable paths, SHA-256 inventory, capture receipts, tools and wire versions; historical audit, whose pending-wiring/test notes are superseded below |
+| [Provider integration](asic_provider_integration.md) | Implemented API/configuration, supervision, summary identities, budgets and freshness limits |
+| [Execution module](execution_module.md) | Protocol projection and daemon routing over the existing generic supervisor |
+| [Terminal host](terminal_controls.md) | Controls, ownership, launch policy, renderer coverage and known UI limits |
+| [Installed checks](archive/delivery/initial_installation_checks.md) | Native installed workflow, external fixture, legacy capture checks: all passed |
+| [Native acceptance](archive/delivery/native_and_synthesis_acceptance.md) | Actual HTTP/PTY fixtures, real serial synthesis, allocation/detach, warm/restart identity and live cached UI reopening |
+| [FS1 physical/terminal acceptance](archive/delivery/asic_evidence_initial_acceptance.md) | Physical completion, independently accepted/rejected operations, cache reopening and real cancellation |
+| [FS1 lifecycle/artifacts](finalization_and_artifacts.md) | Workbench-owned collect/accept, postcheck cancellation, bounded report reads and external text handoff |
+| [FS1 investigation](asic_evidence_inspection.md) | Current adopted-evidence completion, exact upgraded provider, timing/clock/physical/routing exploration, binary handoff and Escape responsiveness |
 
 Historical FS0 accepted candidate (not the upgraded FS1 inspection provider, and
 not an assertion that today's sibling HEAD was linked):
@@ -510,7 +510,7 @@ Primary Workbench acceptance roots:
   `results/` root. The authorized config correction sets stage timeout to `()`.
 
 Exact run/report paths, plan identities and normalized report digests are in
-[acceptance](fs0_acceptance.md#successful-real-rerun). Real report-call counts are
+[acceptance](archive/delivery/native_and_synthesis_acceptance.md#successful-real-rerun). Real report-call counts are
 not instrumented; fixture warm/restart report calls remain **2 → 2**. Timing `[]`
 means unsupported, and synthesis counts are checkpoint-boundary measurements,
 not signoff acceptance or per-step attribution.
@@ -682,7 +682,7 @@ the additive Overview preset supplies 13 views including honest unrequested/
 unsupported stages. Requested shelf sizes remain selectable and persisted pins
 unchanged. Actual PTY reproduction over a private state copy passed with real
 cached 673/685 evidence, all five skins and no provider/result changes:
-`scripts/test-fs0-dashboard.py`, `/tmp/opencode/workbench-fs0-dashboard-52akmtcc/`.
+`scripts/test-retained-asic-dashboard.py`, `/tmp/opencode/workbench-fs0-dashboard-52akmtcc/`.
 Terminal tests, format/lint, installed workflow and legacy baselines passed.
 
 **Owner review, 2026-10-15:** the user reports the Overview works and content renders
@@ -717,7 +717,7 @@ evidence are preserved. [Plan and exact evidence](native_provider_plan.md).
 
 ### Testing adoption/investigation cluster — 2026-10-17
 
-Activated WB-034, WB-032 and WB-063; [shared plan](testing_cluster_plan.md),
+Activated WB-034, WB-032 and WB-063; [shared plan](archive/delivery/testing_cluster_plan.md),
 [current user guide and evidence](testing_workspace.md).
 
 - [x] Genuine FIFO directed/seeded Cyclesim adapter with native VCD/reports,
@@ -743,7 +743,7 @@ operations occurred; the original FS2 milestone remains accepted and closed.
 ### Real checklist preparation/launch followup — 2026-10-17
 
 [Workflow and evidence](checklist_launch_workflow.md),
-[shared plan](checklist_launch_workflow_plan.md).
+[shared plan](archive/delivery/checklist_launch_workflow_plan.md).
 
 - [x] Normalize declared fresh-prefix endpoints and actual catalog default pair;
   unknown providers retain explicit Plan/Run without guessed stage actions.
@@ -763,7 +763,7 @@ the stage-action gap noted in the earlier consistency/adoption records below.
 
 Fixed after owner real synthesis launches exposed retained-plan and stage-contract
 gaps. [Semantics, evidence and restart instructions](launch_stage_consistency.md),
-[shared implementation plan](launch_stage_consistency_plan.md).
+[shared implementation plan](archive/delivery/launch_stage_consistency_plan.md).
 
 - [x] Separate preview readiness from exact durable launch reservation/allocation and
   producer lifecycle; no false “no job allocated” statement after submission.
@@ -783,7 +783,7 @@ adapter; explicit structured occurrence normalization is now supported.
 
 **FS1 adopted-evidence functional scope delivered: synthesis, aggregate and rich inspection.
 FS2 substantial project-scoped simulation delivered.** Exact commands/results are
-in [FS1 acceptance](fs1_acceptance.md) and [FS2 acceptance](fs2_acceptance.md).
+in [FS1 acceptance](archive/delivery/asic_evidence_initial_acceptance.md) and [FS2 acceptance](structured_simulation.md).
 Features: F06/F09 and execution/regression extensions.
 
 - [x] F06 synthesis inspection over existing cache: count/name sorting, literal
@@ -869,7 +869,7 @@ at `/tmp/opencode/workbench-fs1-acceptance-5oa67d8u` reports **pass**, with TT p
 and gate-level replay passing. This is not a universal signoff assertion. Exact
 identities, failed attempts and remaining scope are in the linked acceptance record.
 
-**Lifecycle/artifact followup delivered:** [controls and evidence](fs1_lifecycle_and_artifacts.md).
+**Lifecycle/artifact followup delivered:** [controls and evidence](finalization_and_artifacts.md).
 Actual palette→daemon→provider collection, acceptance (**pass**) and cancellation
 during external postcheck passed in separate private evidence directories:
 `/tmp/opencode/workbench-fs1-lifecycle-qkm54grn`, `...-2p10_520`, and `...-wtprmfgc`.
@@ -880,7 +880,7 @@ Final format/lint, full build/runtest, installed workflow and five-mode interrup
 passed after integration. No provider upgrade or new physical implementation run
 was needed for that lifecycle followup.
 
-**Final FS1 investigation delivery (2026-10-16):** [scope, controls and evidence](fs1_investigation.md).
+**Final FS1 investigation delivery (2026-10-16):** [scope, controls and evidence](asic_evidence_inspection.md).
 Provider-owned `inspect` schema 1 is installed privately at
 `/tmp/opencode/workbench-fs1-inspection-provider/generations/59466eda06df463e8d921678830ff5c2`.
 Its receipt identifies captured snapshot `0423a76848cdc41f79ec5fd67502445b08b783050d8eba9de83991e8550cda09`,
@@ -902,9 +902,9 @@ extensions, not inferred capabilities of these tables or the external handoff.
 
 ### FS2 substantial delivery — accepted and closed 2026-10-16
 
-Shared [implementation plan](fs2_implementation_plan.md),
-[provider/RPC contract](fs2_simulation_contract.md), and
-[controls/acceptance](fs2_acceptance.md).
+Shared [implementation plan](archive/delivery/structured_simulation_delivery.md),
+[provider/RPC contract](simulation_provider_contract.md), and
+[controls/acceptance](structured_simulation.md).
 
 **Milestone closed: structured project-scoped simulation delivered and accepted.**
 The owner reported the basic demo works and authorized closeout. This is scoped
@@ -932,7 +932,7 @@ manual launch/view acceptance, complementing the automated evidence below.
 Generated-RTL/gate-level adapters, archived replay, embedded waveforms and ASIC
 acceptance contribution are separately activated followups, not open milestone
 checkboxes. The owner retains Git integration; the
-[post-integration verification handoff](fs2_acceptance.md#integration-handoff)
+[post-integration verification handoff](structured_simulation.md#integration-handoff)
 does not claim the main branch is already updated or tested.
 
 Final combined checks passed serially through `scripts/with-switch.sh` with `-j 20`,
@@ -953,7 +953,7 @@ completion. Actual private-tmux 10 ms tests with real path detail measured
 the two causes. The owner server was not changed. Final latency regression
 `/tmp/opencode/workbench-inspector-latency-pa1haj23` passed its 80 ms ceiling;
 terminal tests/build, format/lint, installed lifecycle and Ctrl-C matrix passed.
-See [evidence and commands](fs1_investigation.md#escape-responsiveness-in-tmux--2026-10-16-followup).
+See [evidence and commands](asic_evidence_inspection.md#escape-responsiveness-in-tmux--2026-10-16-followup).
 
 **Owner confirmation, 2026-10-16:** after the fix and setup guidance, the owner
 reported Escape now works fine. This closes the manual latency report, without
@@ -1006,7 +1006,7 @@ Synthesis area/check counters are now projected into the current summary.
 
 ### User-authored window/workspace composition — 2026-10-21
 
-Post-merge follow-up: [composition audit](workspace_post_merge_audit.md) reconciles
+Post-merge follow-up: [composition audit](archive/delivery/workspace_post_merge_audit.md) reconciles
 the merged hierarchy/domain/navigation work with canonical stock and custom layouts.
 Implementation and integrated acceptance are complete; the audit records exact
 configuration, hierarchy, Testing, frontend-refinement and reconnect evidence.
@@ -1031,7 +1031,7 @@ No Git staging, commits or pushes are authorized.
 
 ### Explicit default-layout recovery — 2026-10-18
 
-[Shared plan](default_layout_restore_plan.md), [controls/evidence](default_layout_restore.md).
+[Shared plan](archive/delivery/default_layout_restore_plan.md), [controls/evidence](default_layout_restore.md).
 
 - [x] One atomic captured-revision restore: show default occurrences, hide extras/
   duplicates, restore requested sizes, clear zoom; preserve identities/pins/context.
@@ -1047,7 +1047,7 @@ Final native receipt: `/tmp/opencode/default-layout-restore-t4rz4qvv/result.json
 **First adoption slice delivered; full multi-monitor acceptance pending.**
 
 **Post-merge integration completed 2026-10-17:**
-[shared plan and evidence](fs3_integration_plan.md).
+[shared plan and evidence](archive/delivery/project_adoption_integration.md).
 
 - [x] Real header-toggle/reset actions persist sparse intent; polling no longer
   reapplies stale saved preferences. Same-session reconnect preserves browsing and
@@ -1068,7 +1068,7 @@ Final native receipt: `/tmp/opencode/default-layout-restore-t4rz4qvv/result.json
 - [x] Persistent local appearance/layout/chrome/header choices, malformed-file recovery
   and project/environment/session identity checks.
 - [x] Actual private-daemon HTTP template lifecycle and restart restoration, plus
-  real PTY appearance change/restart acceptance (`scripts/test-fs3-adoption.py`).
+  real PTY appearance change/restart acceptance (`scripts/test-project-adoption.py`).
 - [x] Configuration-directory migration/precedence (WB-049), upward discovery
   (WB-050), and provider-backed project creation and in-app setup (WB-051/078).
 - [ ] TUI workspace template discovery/selection comfort.
@@ -1076,7 +1076,7 @@ Final native receipt: `/tmp/opencode/default-layout-restore-t4rz4qvv/result.json
 - [ ] Reviewed appearance presets, SSH/tmux controls and glyph fallback validation.
 - [ ] Final adopted-scope checks and deliberate provider-version adoption.
 
-See [FS3 adoption](fs3_adoption.md) for commands, boundaries and verification.
+See [FS3 adoption](existing_project_setup.md) for commands, boundaries and verification.
 Current normal build, full tests and repository-wide format/lint pass serially at
 `-j 20`, within one shared aggregate pool of 20. FS3 native acceptance passes 140
 checks at `/tmp/opencode/fs3-adoption-n5sxf42_/result.json`; installed handoff evidence
@@ -1107,7 +1107,7 @@ Initial Off-mode redraw failure was fixed and covered by the final native run.
 
 ### Synthetic Testing and wider Session panels — 2026-10-17
 
-[Shared plan](synthetic_testing_plan.md), [controls, evidence and both demo launch pairs](synthetic_testing.md).
+[Shared plan](archive/delivery/synthetic_testing_plan.md), [controls, evidence and both demo launch pairs](synthetic_testing.md).
 
 - [x] Synthetic seeding creates Overview/Timing/Testing from stable exported presets;
   repeats/renames preserve one default per preset and existing custom state.
@@ -1128,7 +1128,7 @@ remains distinct. Existing user sessions/state and Git index/history were preser
 
 ### Black/status polish and actual ASIC example adoption — 2026-10-16
 
-Delivered from owner feedback. [Shared plan](real_example_polish_plan.md),
+Delivered from owner feedback. [Shared plan](archive/delivery/real_example_polish_plan.md),
 [launch commands and evidence](real_asic_example_demo.md).
 
 - [x] Checklist/planned-run split remaining left-column space with equal weights;
@@ -1157,7 +1157,7 @@ No Git staging/commits/pushes. Existing sibling user edits and live sessions pre
 ### Dense Overview sidebar, color schemes and planned-run — 2026-10-16
 
 Delivered from the owner's Lazygit-inspired packing/layout and theme request.
-[Shared plan](overview_sidebar_plan.md), [controls/source settings/evidence](overview_sidebar.md).
+[Shared plan](archive/delivery/overview_sidebar_plan.md), [controls/source settings/evidence](overview_sidebar.md).
 
 - [x] Overview1:2 sidebar/main split with Session/Runs/vertical stages on the left;
   synthesis/timing/placement/routing/checks/finalization/planned-run stacked at right.
@@ -1184,7 +1184,7 @@ preview and same-selection receipt races have separately identified pure coverag
 ### Owner-review panel and investigation refinement — 2026-10-16
 
 Delivered after manual feedback on the composition slice. [Shared implementation
-plan](frontend_refinement_plan.md), [controls and evidence](frontend_refinement.md).
+plan](archive/delivery/frontend_refinement_plan.md), [controls and evidence](frontend_refinement.md).
 
 - [x] Shared styled panel/palette borders, title-in-border, colored query caret,
   distinct match/selection emphasis and footer separator; short panels retain frames.
@@ -1210,7 +1210,7 @@ No live demo-state changes, real EDA, Git staging or commits were performed.
 ### Frontend composition follow-on — 2026-10-16
 
 Delivered from the owner's palette/layout/configurability request; this does not
-reopen the accepted FS2 milestone. [Shared plan](frontend_composition_plan.md),
+reopen the accepted FS2 milestone. [Shared plan](archive/delivery/frontend_composition_plan.md),
 [source map, controls and acceptance](frontend_composition.md).
 
 - [x] Bounded centered palette over the actual workspace/inspector, ranked fuzzy
@@ -1247,7 +1247,7 @@ datasets, optional typed stage observations and checklist planning through exist
 Plan/Run operations. Three agents implemented backend, provider and terminal slices;
 parent checks stayed serialized at `-j20`. Real HTTP and terminal/PTY acceptance
 passed at `/tmp/opencode/synthetic-flow-8rmfu7xu/`. See the
-[user guide and evidence](synthetic_flow.md) and [bounded implementation plan](synthetic_flow_plan.md).
+[user guide and evidence](synthetic_flow.md) and [bounded implementation plan](archive/delivery/synthetic_flow_plan.md).
 This supports the appearance track and future FS2 fixture integration; it does not
 implement another structured-suite contract or imply real-provider stage support.
 

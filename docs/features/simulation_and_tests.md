@@ -21,8 +21,8 @@ scheduler. FS2 adds versioned suite/case discovery, explicit seeds/parameters, l
 progress/outcomes, failure detail/reports, targeted reruns, independent tiles,
 bounded durable simulation history and byte-exact trace export/external handoff.
 Actual Cyclesim and native HTTP/PTY acceptance passed; see
-[FS2 controls and evidence](../fs2_acceptance.md) and
-[provider/RPC contract](../fs2_simulation_contract.md).
+[FS2 controls and evidence](../structured_simulation.md) and
+[provider/RPC contract](../simulation_provider_contract.md).
 Owner acceptance covers the basic demo workflow; additional adoption/performance
 work is in [FS2 followups](../backlog/fs2_followups.md).
 
@@ -34,7 +34,7 @@ and process/semantic distinctions below remain authoritative.
 Generic Dune test jobs still do not acquire structured cases or restart history
 automatically. Gate-level adapters, archived-build replay and embedded waveform
 exploration remain later integrations. Historical FS0 evidence is in
-[Execution](../fs0_execution_module.md) and [acceptance](../fs0_acceptance.md).
+[Execution](../execution_module.md) and [acceptance](../archive/delivery/native_and_synthesis_acceptance.md).
 
 ## User outcome
 

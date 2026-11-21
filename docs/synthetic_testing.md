@@ -138,13 +138,7 @@ Refresh. Checklist r also uses the project's explicit fresh-prefix capability
 mapping, with bounded discovery when needed. See [real evidence and limitations](real_asic_example_demo.md)
 and [the restored preparation workflow](checklist_launch_workflow.md).
 
-For future builds refresh the persistent real-demo copies explicitly:
-
-```sh
-scripts/with-switch.sh dune build -j 2 \
-  daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
-python3 -B scripts/real-asic-example-demo.py refresh-binaries
-```
+After rebuilding, [refresh the persistent real-demo binaries explicitly](real_asic_example_demo.md#refresh-the-demo-after-future-workbench-builds).
 
 ## Verification
 

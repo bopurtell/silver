@@ -2,7 +2,7 @@
 
 Implemented and verified 2026-10-18. This is the one-step recovery command for a
 workspace that has accumulated extra tiles, hidden defaults, unusual sizes or zoom.
-[Implementation plan and evidence](default_layout_restore_plan.md).
+[Implementation plan and evidence](archive/delivery/default_layout_restore_plan.md).
 
 ## Use it
 

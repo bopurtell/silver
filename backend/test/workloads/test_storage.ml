@@ -14,7 +14,9 @@ let key q=W.Operation.key (Load {query=q;refresh=false})
 let raw result = sprintf
   {|{"contract":"hardcaml-asic.workload-inspection","schema_version":1,"source_digest":"%s","binding":{"bundle_identity":"%s","hardware_variant_identity":"%s","workload_identity":"%s","simulation_sha256":"%s","simulation_attempt_id":"sim"},"controls":{},"provenance":{"sources":[{"path":%s}]},"outcome":{"status":"completed","functional":"pass","performance":"available"},"metrics":[]}|}
   d d d d d (Yojson.Safe.to_string (`String result))
-let temporary ()=Core_unix.mkdtemp "/tmp/opencode/pt8-storage-fix-" |> Filename_unix.realpath
+let temporary ()=
+  Core_unix.mkdtemp (Filename.concat Filename.temp_dir_name "silver-workload-storage-")
+  |> Filename_unix.realpath
 let mkdir p=Core_unix.mkdir_p p ~perm:0o700
 let symlink src dst=Core_unix.symlink ~target:src ~link_name:dst
 let set_link link target=Core_unix.unlink link;symlink target link
@@ -22,18 +24,23 @@ let exists p=Poly.equal (Sys_unix.file_exists p) `Yes
 let rejects f=check (Result.is_error (Or_error.try_with f)) "Expected storage rejection"
 
 let descriptor_races () =
-  List.iter [2;3] ~f:(fun barrier ->
+  List.iter [1;2;3] ~f:(fun barrier ->
     let root=temporary () in
     let outside=Filename.concat root "outside" and evidence=Filename.concat root "evidence" in
     mkdir outside;mkdir evidence;
     let alias=Filename.concat root "state" in symlink outside alias;
+    let old = Filename.concat outside "cache.sexp" in
+    Out_channel.write_all old ~data:"prior cache";
     let storage=Storage.create alias in
     let calls=ref 0 in
     rejects (fun () -> Storage.write storage ~name:"cache.sexp" ~data:"new"
       ~before_write:(fun () -> incr calls; if !calls=barrier then set_link alias evidence));
     check (!calls=barrier) "Deterministic descriptor barrier was not reached";
     check (List.is_empty (Sys_unix.ls_dir evidence)) "Cache alias retarget wrote into evidence";
-    check (List.is_empty (Sys_unix.ls_dir outside)) "Failed descriptor publication left a temporary file");
+    check (List.equal String.equal (Sys_unix.ls_dir outside) ["cache.sexp"])
+      "Failed descriptor publication left a temporary file";
+    check (String.equal (In_channel.read_all old) "prior cache")
+      "Failed descriptor publication changed the prior cache");
   let root=temporary () in
   let ancestor=Filename.concat root "ancestor" and evidence=Filename.concat root "evidence" in
   mkdir ancestor;mkdir evidence;
@@ -47,6 +54,30 @@ let descriptor_races () =
   check (List.is_empty (Sys_unix.ls_dir evidence)) "Canonical ancestor retarget wrote into evidence";
   check (List.is_empty (Sys_unix.ls_dir (Filename.concat root "old-ancestor/state")))
     "Canonical ancestor failure left temporary files"
+;;
+let descriptor_failure_cleanup () =
+  let root = temporary () in
+  let blocked = Filename.concat root "blocked" in
+  mkdir blocked;
+  let storage = Storage.create root in
+  let identity = "malformed-cache" in
+  let malformed =
+    "asic-workloads-" ^ Hardcaml_workbench_backend.Asic_public.digest identity ^ ".sexp"
+  in
+  Out_channel.write_all (Filename.concat root malformed) ~data:"not valid sexp)";
+  let fd_count () = List.length (Sys_unix.ls_dir "/proc/self/fd") in
+  let before = fd_count () in
+  for _ = 1 to 256 do
+    rejects (fun () ->
+      Storage.write storage ~name:"blocked" ~data:"new" ~before_write:(fun () -> ()));
+    check (Option.is_some (S.snapshot (S.create ~state_dir:root ~identity)).cache_error)
+      "Malformed cache restore succeeded"
+  done;
+  check (fd_count () = before) "Descriptor leaks during repeated cache write/read failures";
+  check (List.equal String.equal
+           (List.sort (Sys_unix.ls_dir root) ~compare:String.compare)
+           [malformed; "blocked"])
+    "Failed publication left temporary cache files"
 ;;
 let rewrite_cache ?old_key ?new_key file original wrong =
   let old_key=Option.value old_key ~default:(key (query original))
@@ -78,6 +109,23 @@ let restore_binding () =
   let restored=S.create ~state_dir:state ~identity:"binding" in S.select restored (query wrong);
   check (Option.is_some (S.snapshot restored).cache_error && Option.is_none (S.snapshot restored).selected)
     "Coherent query/key/checksum restore forgery was admitted";
+  Out_channel.write_all file ~data:original;
+  rewrite_cache file (raw result) (raw wrong);
+  let restored=S.create ~state_dir:state ~identity:"binding" in S.select restored q;
+  check (Option.is_some (S.snapshot restored).cache_error && Option.is_none (S.snapshot restored).selected)
+    "A valid document for the wrong source restored under an otherwise unchanged cache entry";
+  let legacy =
+    match Sexp.of_string original with
+    | List fields ->
+      Sexp.List (List.map fields ~f:(function
+        | Sexp.List [ Atom "version"; _ ] -> Sexp.List [ Atom "version"; Atom "1" ]
+        | field -> field))
+    | Atom _ -> assert false
+  in
+  Out_channel.write_all file ~data:(Sexp.to_string_mach legacy);
+  let restored=S.create ~state_dir:state ~identity:"binding" in
+  check (List.is_empty (S.snapshot restored).entries && Option.is_some (S.snapshot restored).cache_error)
+    "Legacy unbound cache version restored";
   Out_channel.write_all file ~data:original;
   let restored=S.create ~state_dir:state ~identity:"binding" in S.select restored q;
   check (Option.is_none (S.snapshot restored).cache_error && Option.is_some (S.snapshot restored).selected)
@@ -119,6 +167,27 @@ let bundle_locator () =
   List.iter [`String "relative";`String "/bad\000path";`Null;`Int 1;`String ("/"^String.make 4096 'x')]
     ~f:(fun value -> rejects (fun () -> S.validate_response q (with_bundle value)));
   ignore (S.validate_response q (raw "/retained/result.json") : W.Response.t)
+;;
+let bundle_locator_separation () =
+  let root = temporary () in
+  let bundle = Filename.concat root "uncreated-bundle" in
+  let source = Filename.concat root "source/result.json" in
+  let document =
+    match Yojson.Safe.from_string (raw source) with
+    | `Assoc xs ->
+      `Assoc (List.map xs ~f:(function
+        | "binding", `Assoc fields -> "binding", `Assoc (("bundle", `String bundle) :: fields)
+        | field -> field))
+    | _ -> assert false
+  in
+  let q = query source in
+  let cache = S.create ~state_dir:(Filename.concat bundle "cache") ~identity:"locator" in
+  let%map published =
+    Monitor.try_with (fun () ->
+      S.publish cache q ~provider_identity:d (Yojson.Safe.to_string document))
+  in
+  check (Result.is_error published && not (exists bundle) && not (S.cached cache q))
+    "Workload publication created or cached data inside the bundle locator"
 ;;
 let comparison_restore () =
   let root=temporary () in
@@ -195,8 +264,9 @@ let service_race () =
   Service.shutdown service
 ;;
 let main () =
-  descriptor_races ();bundle_locator ();
+  descriptor_races ();descriptor_failure_cleanup ();bundle_locator ();
   let%bind ()=restore_binding () in
+  let%bind ()=bundle_locator_separation () in
   let%bind ()=comparison_restore () in
   let%map ()=service_race () in
   printf "PT8 storage corrections: %d checks passed\n%!" !checks

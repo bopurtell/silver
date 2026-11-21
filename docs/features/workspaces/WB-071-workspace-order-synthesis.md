@@ -88,7 +88,7 @@ extra-tile investigation hold most of the work.
 ## References
 - [Timing workspace controls, order and acceptance](../../timing_workspace_usability.md)
 - [Saved-extra diagnosis](../../timing_workspace_loading.md)
-- [Agent implementation plan](../../timing_usability_preload_plan.md)
+- [Agent implementation plan](../../archive/delivery/timing_usability_preload_plan.md)
 - [Preset registry](../../../terminal/workspaces/presets.ml)
 - [Timing preset](../../../terminal/workspaces/timing.ml)
 - [Synthesis inspection](../../synthesis_inspection.md)

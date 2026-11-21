@@ -77,4 +77,4 @@ authoritative; generic commands need an explicit unavailable-details presentatio
 ## References
 - [F09 generic versus structured tests](../simulation_and_tests.md).
 - [Suite/case discovery types](../../../protocol/simulation.ml).
-- [FS2 acceptance](../../fs2_acceptance.md).
+- [FS2 acceptance](../../structured_simulation.md).

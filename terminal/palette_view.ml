@@ -53,6 +53,7 @@ let matched ~attrs ~match_attrs text positions =
 
 let result_row
   ?marker_attrs
+  ?(suffix = "")
   ~attrs
   ~match_attrs
   ~width
@@ -119,7 +120,7 @@ let result_row
          (if selected then "> " else "  ")
      ; title
      ]
-     @ [ extra ]
+      @ [ extra; View.text ~attrs suffix ]
      @ Option.to_list
          (Option.map command.unavailable ~f:(fun reason ->
             View.text ~attrs (" [" ^ reason ^ "]"))))

@@ -148,7 +148,7 @@ let%test_unit "fresh stage resolution captures exact inputs and rejects stale ch
     }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       flows =
         [ { id = "other"
           ; profiles = [ "first" ]
@@ -206,7 +206,7 @@ let%test_unit "fresh Timing intent preserves captured inputs and requires curren
     ; fresh_stage_endpoints = [ "timing" ]
     }
   in
-  let snapshot = { Fs0_fixture.snapshot with flows = [ flow ] } in
+  let snapshot = { Asic_snapshot_fixture.snapshot with flows = [ flow ] } in
   let resolve ?remembered ?(snapshot = Some snapshot) () =
     resolve_intent
       ~intent:(Fresh_endpoint "timing")

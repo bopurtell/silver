@@ -239,7 +239,7 @@ module%test Wb006_timestamp_presentation = struct
   ;;
 
   let make_index ~times ~producers : Asic_inspection.Index.t =
-    { run = Fs0_fixture.run_a
+    { run = Asic_snapshot_fixture.run_a
     ; execution_file = "/exact/execution.json"
     ; execution_sha256 = String.make 64 'a'
     ; domain = "timing"

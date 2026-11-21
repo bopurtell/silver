@@ -95,7 +95,7 @@ nothing, because the state is spelled out in the text. The full value and detail
 unchanged for inspection.
 
 **Not changed.** The global header (`<workspace> | run … | Linked: Main | …`) has no
-nested colon, and several PTY scripts and `docs/fs0_install_checks.md` pin it. If the
+nested colon, and several PTY scripts and `docs/archive/delivery/initial_installation_checks.md` pin it. If the
 vocabulary should match there too, that's a follow-up for WB-054 or the owner. Bindings,
 the registry and run selection are untouched. The edit is presentation-only, in the
 `status_rows` value construction.

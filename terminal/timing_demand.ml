@@ -217,7 +217,7 @@ let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot
 ;;
 
 module Fixture = struct
-  let run = Fs0_fixture.run_a
+  let run = Asic_snapshot_fixture.run_a
 
   let row id value : Asic_inspection.Row.t =
     { id
@@ -250,7 +250,7 @@ module Fixture = struct
     }
   ;;
 
-  let snapshot = { Fs0_fixture.snapshot with inspections = [ index ] }
+  let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] }
   let cold = Timing_workspace.create ~generation:1 ~run ~stage:"signoff"
   let view = Inspection_view.reconcile cold snapshot
 
@@ -391,7 +391,7 @@ let%test_unit "production planner: exact lifecycle invalidation stops scheduling
   let state, view, _ = issued (create ~neighbors:2 view) view snapshot "a" in
   List.iter
     [ { view with stage = "routing" }
-    ; { view with run = Fs0_fixture.run_b }
+    ; { view with run = Asic_snapshot_fixture.run_b }
     ; { view with workspace_epoch = Some "reselected" }
     ; { view with index = None }
     ; { view with index = Some { index with source_digest = "new" } }

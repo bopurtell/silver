@@ -52,7 +52,7 @@ Changes affect only this client. They retain workspace, selected run, pinned til
 references, focus, filters, scroll and requested layout. They do not submit provider
 work or change the daemon registry. FS3 now saves explicit presentation choices for
 the next client restart, scoped to project/environment; see
-[presentation persistence](fs3_adoption.md#persistent-presentation-preferences).
+[presentation persistence](existing_project_setup.md#persistent-presentation-preferences).
 Other attached clients retain their current choices until restarted or changed.
 
 Frames/padding degrade on small tiles to protect evidence rows. Comfortable density
@@ -95,7 +95,7 @@ checks plus existing FS2, Overview, checklist and interrupt regressions passed.
 Generate plain-text and ANSI terminal frames without a daemon or EDA:
 
 ```sh
-_build/default/terminal/main.exe --capture-appearance /tmp/opencode/wb-appearance-review
+_build_workbench/default/terminal/main.exe --capture-appearance /tmp/opencode/wb-appearance-review
 ```
 
 The command emits A–E × compact/comfortable × five identical synthetic scenarios
@@ -167,7 +167,7 @@ Apply default layout (add missing tiles)** for the full dashboard, then **Fit ti
 to window**. Appearance presets change style only. Default stage views explicitly
 report not-requested/unsupported evidence for a synthesis-only run.
 
-Regression coverage: `python3 -B scripts/test-fs0-dashboard.py` operates on a private
+Regression coverage: `python3 -B scripts/test-retained-asic-dashboard.py` operates on a private
 copy of saved Workbench state and verifies startup/loading, additive 13-tile Overview,
 full-surface pinned/following comparison, Preferred/Fit transitions and unchanged
 provider evidence. Captures: `/tmp/opencode/workbench-fs0-dashboard-52akmtcc/`.

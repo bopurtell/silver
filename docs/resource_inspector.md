@@ -200,12 +200,17 @@ Index truncation is visible. Catalog/detail pages are bounded; a single item too
 large to represent produces an explicit error. Current limits are 32 source
 descriptors, eight indexes and a bounded detail cache; these are not unlimited archives.
 
-## Start the tested app pair
+## Restart the app
 
-Both daemon and client changed. Stop the previous pair when no work is active, then
-start the rebuilt default binaries. No demo `seed` or pinned-binary refresh is needed.
-Only one daemon may own the selected state directory. Substitute your intended
-state directory if it differs from the earlier session below.
+Use the [checkout-backed example launcher](../../hardcaml_asic_example/docs/workbench_main.md)
+for the current example environment. Restart the client and daemon when no work
+is active if you need to pick up rebuilt binaries. Only one daemon may own a
+state directory.
+
+### Historical acceptance app pair
+
+The commands below describe the original Resources acceptance setup, including
+its pinned provider, original build paths, and temporary state.
 
 Server:
 
@@ -240,5 +245,5 @@ original result bytes remain intact. The SRAM import above works independently o
 that named-run cache and does not create/execute a physical run.
 
 See [implementation contract](resource_inspector_plan.md),
-[frozen API handoff](resource_inspector_handoff.md) and
+[frozen API handoff](archive/delivery/resource_inspector_handoff.md) and
 [native acceptance evidence](resource_inspector_acceptance.md).

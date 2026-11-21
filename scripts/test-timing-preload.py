@@ -23,7 +23,7 @@ def load(name, path):
     return module
 
 
-OLD = load('preload_legacy', HERE / 'test-wb069-timing.py')
+OLD = load('preload_legacy', HERE / 'test-timing-checklist.py')
 EX = load('preload_executable', HERE / 'test-executable-timing.py')
 H = load('preload_sidebar', HERE / 'test-overview-sidebar.py')
 C = H.composition

@@ -31,7 +31,7 @@ import urllib.request
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('waveform_wire', HERE / 'fixtures/fs2_wire.py')
+spec = importlib.util.spec_from_file_location('waveform_wire', HERE / 'fixtures/simulation_fixture_wire.py')
 wire = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wire)
 
@@ -280,7 +280,7 @@ def check_ruler_image(check, image, label, magnitude, unit, bounds=None):
 
 
 def pty_acceptance(args, evidence, fixture, check):
-    spec = importlib.util.spec_from_file_location('waveform_native', HERE / 'test-fs2-native.py')
+    spec = importlib.util.spec_from_file_location('waveform_native', HERE / 'test-native-simulation.py')
     native = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(native)
     cells = native.load_module('waveform_cell_support', 'test-frontend-composition.py')

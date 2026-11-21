@@ -117,6 +117,19 @@ let reducers () =
   let case_start = event 1 (Case_started "c") in
   let pass = event 2 (Case_finished { case_id = "c"; status = Passed; message = None }) in
   let finish = event 3 (Finished Passed) in
+  let cancelled = Reducer.create initial in
+  (* The provider can stop mid-case, before emitting any terminal event. *)
+  List.iter [ start; case_start ] ~f:(fun e ->
+    Reducer.line
+      cancelled
+      (Sexp.to_string_mach (Provider.Event.sexp_of_t e))
+      ~artifact:(fun _ -> failwith "Unexpected cancellation artifact"));
+  require (Option.is_none cancelled.attempt.diagnostic) "Rejected valid cancellation prefix";
+  require
+    (Option.is_none (Reducer.finish cancelled ~cancelled:true (Some (Exited 130)))
+     && Lifecycle.equal cancelled.attempt.lifecycle Cancelled
+     && Outcome.equal cancelled.attempt.outcome Incomplete)
+    "Cancelling a valid prefix required a terminal provider event";
   let passed = run [ start; case_start; pass; finish ] in
   require (Outcome.equal passed.outcome Passed) "Valid reducer stream failed";
   let payload =

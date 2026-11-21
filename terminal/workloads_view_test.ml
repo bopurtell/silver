@@ -27,7 +27,7 @@ let loaded () =
     ; cache_error = None
     }
   in
-  let asic = Some { Fs0_fixture.snapshot with workloads = Some snapshot } in
+  let asic = Some { Asic_snapshot_fixture.snapshot with workloads = Some snapshot } in
   V.reconcile t asic, asic
 ;;
 
@@ -323,7 +323,7 @@ let published query digest json =
     }
   in
   Some
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       workloads =
         Some
           { entries = [ descriptor ]

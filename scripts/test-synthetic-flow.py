@@ -30,7 +30,7 @@ import provider
 
 # Reuse the existing ANSI screen reconstruction oracle rather than matching stale
 # PTY diff bytes (Enter/Esc must change the CURRENT screen).
-screen_spec = importlib.util.spec_from_file_location('fs0_screen', REPO / 'scripts/test-fs0.py')
+screen_spec = importlib.util.spec_from_file_location('fs0_screen', REPO / 'scripts/test-native-execution.py')
 fs0_screen = importlib.util.module_from_spec(screen_spec)
 screen_spec.loader.exec_module(fs0_screen)
 

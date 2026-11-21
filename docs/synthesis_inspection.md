@@ -4,7 +4,7 @@ This is **FS1's first F06 slice**, reusing FS0/F11 cached summaries and extendin
 the F12 table/inspector presentation. It is not a new standalone feature set or
 a claim that timing/physical inspection is complete.
 
-The later [FS1 metrics/physical extension](fs1_acceptance.md) adds `m` / **Synthesis:
+The later [FS1 metrics/physical extension](archive/delivery/asic_evidence_initial_acceptance.md) adds `m` / **Synthesis:
 Inspect metrics**, synthesis diagnostic counters and explicitly imported terminal
 results. Its wire/cache additions and real physical evidence supersede the
 unchanged-schema statement below for that later implementation. Cell browsing
@@ -57,8 +57,8 @@ python3 scripts/test-synthesis-inspector.py
 
 Requires Python 3, `strace`, existing compiled terminal/daemon executables, the
 saved real Workbench state, and its example project configuration. The script
-uses the `Session` and ANSI-screen emulator from `scripts/test-fs0.py`, and the
-PTY/inventory helpers from `scripts/test-fs0-dashboard.py`.
+uses the `Session` and ANSI-screen emulator from `scripts/test-native-execution.py`, and the
+PTY/inventory helpers from `scripts/test-retained-asic-dashboard.py`.
 
 **Historical replay prerequisite:** the saved state is keyed to its original
 project/environment/configuration identity. The current example selects the
@@ -66,7 +66,7 @@ upgraded FS1 provider, so copying old state files alone does not make the old
 registry visible. Preserve the original state and use matching configuration in
 an isolated replay; do not revert the owner's live project configuration just
 to reproduce this historical test. For current manual use, follow the
-[FS1 example instructions](../README.md#open-the-completed-fs1-example).
+[ASIC example instructions](../README.md#open-the-current-real-asic-example-demo).
 
 Optional paths:
 

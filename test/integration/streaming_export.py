@@ -30,8 +30,8 @@ def load(name, path):
     return module
 
 
-native = load('streaming_native', ROOT / 'scripts/test-fs2-native.py')
-wire = load('streaming_wire', ROOT / 'scripts/fixtures/fs2_wire.py')
+native = load('streaming_native', ROOT / 'scripts/test-native-simulation.py')
+wire = load('streaming_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
 field = native.field
 
 

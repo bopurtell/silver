@@ -60,9 +60,9 @@ Important qualifications:
   currently spans the registry. `web/main.ml` is a stub.
 
 Delivered foundations and their evidence:
-[FS3 adoption](fs3_adoption.md), [composition plan](frontend_composition_plan.md),
-[FS3 integration plan](fs3_integration_plan.md), and
-[default restoration plan](default_layout_restore_plan.md).
+[FS3 adoption](existing_project_setup.md), [composition plan](archive/delivery/frontend_composition_plan.md),
+[FS3 integration plan](archive/delivery/project_adoption_integration.md), and
+[default restoration plan](archive/delivery/default_layout_restore_plan.md).
 
 ## Proposed contract
 
@@ -194,7 +194,7 @@ serially while agents have stopped builds, using the shared pool of **20 jobs**:
 ./scripts/with-switch.sh dune runtest -j20 protocol/test backend/test/workspace terminal/workspaces
 ./scripts/with-switch.sh dune runtest -j20 terminal
 ./scripts/with-switch.sh dune build -j20 daemon/main.exe terminal/main.exe workspace_cli/main.exe setup/main.exe
-python3 scripts/test-fs3-adoption.py
+python3 scripts/test-project-adoption.py
 python3 scripts/test-default-layout-restore.py --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe --workspace-cli _build/default/workspace_cli/main.exe --setup _build/default/setup/main.exe
 ```
 

@@ -8,7 +8,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "fixtures"))
-from fs2_wire import EventWriter, catalog, parse, sexp
+from simulation_fixture_wire import EventWriter, catalog, parse, sexp
 
 
 def provider():
@@ -28,7 +28,7 @@ def provider():
 
 
 def exercise(args, base):
-    source = importlib.util.spec_from_file_location("native", ROOT / "scripts/test-fs2-native.py")
+    source = importlib.util.spec_from_file_location("native", ROOT / "scripts/test-native-simulation.py")
     native = importlib.util.module_from_spec(source)
     source.loader.exec_module(native)
     field = native.field

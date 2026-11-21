@@ -10,7 +10,7 @@
 The [catalog](README.md) separates additional work from the delivered initializer.
 
 Status: bounded existing-project initializer delivered; current root manifest remains
-supported. See [FS3 adoption](../fs3_adoption.md) for the initializer, portable
+supported. See [FS3 adoption](../existing_project_setup.md) for the initializer, portable
 starter templates and persistent presentation preferences. Configuration-directory
 migration is delivered in [WB-049](../migration_guides/project-configuration.md);
 upward discovery is delivered in [WB-050](project/WB-050-upward-discovery.md).

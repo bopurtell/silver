@@ -117,12 +117,12 @@ Feature implementation formatting, scoped backend/protocol/transport checks and
 Reproduce the focused acceptance with prebuilt matching binaries:
 
 ```sh
-python3 -B scripts/test-wb069-timing.py \
+python3 -B scripts/test-timing-checklist.py \
   --daemon _build/default/daemon/main.exe \
   --client _build/default/terminal/main.exe \
   --preset-export _build/default/terminal/workspaces/export_presets.exe \
   --timeout 300
 ```
 
-The [implementation plan](timing_checklist_overview_plan.md) records ownership,
+The [implementation plan](archive/delivery/timing_checklist_overview_plan.md) records ownership,
 contract decisions, job budgets and agent work packages.

@@ -63,6 +63,6 @@ and avoid associating generic tests with a viewed ASIC run without actual proven
 
 ## References
 - [Construction plan](../../construction_phase_plan.md).
-- [Execution module baseline](../../fs0_execution_module.md).
+- [Execution module baseline](../../execution_module.md).
 - [Generic runner semantics](../simulation_and_tests.md).
 - [Supervisor job/log state](../../../backend/service.ml).

@@ -397,7 +397,7 @@ def module(name, path):
 
 
 def native_setup(args, base, provider):
-    fs0 = module("resources_fs0", HERE / "test-fs0.py")
+    fs0 = module("resources_fs0", HERE / "test-native-execution.py")
     http_module = module("resources_native_http", WB / "demo/synthetic_flow/http_client.py")
 
     class NativeSession(fs0.Session):
@@ -478,7 +478,7 @@ def operation_load(fs0, path, kind="Coarse_run", refresh=False):
 def synthetic_pty_race(args, base, session, fs0, check):
     """Real client navigation while an old target's provider read is in flight."""
     require(args.client and args.client.is_file(), "--pty needs matching --client")
-    dashboard = module("resources_synthetic_pty", HERE / "test-fs0-dashboard.py")
+    dashboard = module("resources_synthetic_pty", HERE / "test-retained-asic-dashboard.py")
     t = dashboard.Terminal(session)
     field, sexp = fs0.field, fs0.sexp
 

@@ -2897,3 +2897,54 @@ let%test_unit "short inferred clock labels its clipped target rather than achiev
   assert (String.is_substring rendered ~substring:"extent 50 ps");
   assert (not (String.is_substring rendered ~substring:"8 cycles"))
 ;;
+
+let%test_unit "wide alias lanes share the renderer budget; distinct X/Z lanes do not" =
+  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    { id = "wide-lanes"
+    ; attempt_id = "attempt"
+    ; case_id = None
+    ; label = "wide lanes"
+    ; kind = "trace"
+    ; media_type = "text/vcd"
+    ; size = Some 100
+    ; sha256 = Some (String.make 64 'a')
+    ; availability = Available
+    }
+  in
+  List.iter
+    [ true, false; false, false; false, true ]
+    ~f:(fun (aliases, unknown) ->
+      let ids = if aliases then [ "!"; "!"; "!"; "!" ] else [ "!"; "\""; "#"; "$" ] in
+      let declarations =
+        List.mapi ids ~f:(fun i id -> sprintf "$var wire 4096 %s lane%d $end\n" id i)
+        |> String.concat
+      in
+      let source_ids = List.dedup_and_sort ids ~compare:String.compare in
+      let events =
+        List.init 1000 ~f:(fun i ->
+          let value = if unknown then "x" else Int.to_string (i % 2) in
+          sprintf
+            "#%d\n%s"
+            i
+            (List.map source_ids ~f:(fun id -> sprintf "b%s %s\n" value id)
+             |> String.concat))
+        |> String.concat
+      in
+      let data =
+        D.parse
+          ("$timescale 1ps $end\n" ^ declarations ^ "$enddefinitions $end\n" ^ events)
+        |> Or_error.ok_exn
+      in
+      let t = receive (create ~project:"p" artifact) (Ok data) in
+      let t = input t (Char 'f') in
+      let signals = Array.to_list (D.signals data) in
+      let text = graph t data ~width:118 ~height:24 signals in
+      if aliases
+      then (
+        assert (not (String.is_substring text ~substring:"Graph unavailable"));
+        assert (List.length (String.split_lines text) >= 14))
+      else (
+        assert (String.is_substring text ~substring:"Graph unavailable");
+        assert (String.is_substring text ~substring:"16 MiB value budget exceeded"));
+      assert (Int64.equal t.start 0L && Int64.equal (stop t data) 999L))
+;;

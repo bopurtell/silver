@@ -55,8 +55,8 @@ that the whole external-tool dependency graph is audited.
 
 Currently root `(data_only_dirs test)` hides all of `test/`. To make that directory
 a useful suite index while preserving its fixtures, move the data-only declaration
-one level down to `test/dune`, explicitly covering existing `fixtures`, `baselines`
-and `pt8_frontend_review`. Their nested Dune files remain inert fixture/evidence
+one level down to `test/dune`, covering `fixtures` and `baselines`.
+Their nested Dune files remain inert fixture/evidence
 bytes. Add no executable tests inside those data directories.
 
 `test/dune` declares only selectors over existing owned `runtest` actions:

@@ -11,7 +11,7 @@ The new Timing report is unconfirmed and exact-run-specific; retained FS1 accept
 does not establish its cause. Source/naming/display mappings require explicit identity.
 
 Status (2026-10-16): RTL/artifact/provenance, elaborated hierarchy and **FS0 synthesis
-cell count/breakdown with evidence context delivered**. [Acceptance](../fs0_acceptance.md)
+cell count/breakdown with evidence context delivered**. [Acceptance](../archive/delivery/native_and_synthesis_acceptance.md)
 records real 673/685 counts, completed execution and `not_evaluated` acceptance.
 The original synthesis-only stage summary has no timing (`[]`), not zero slack.
 Later FS1 terminal-result import supplies aggregate timing with full provenance;
@@ -28,11 +28,11 @@ explicit read-only finalization-reference import, signed aggregate setup/hold,
 final area/utilization, reported DRC/LVS/antenna verdicts, verified declared-clock
 configuration and full evidence drilldown. Real physical completion, separate
 acceptance pass/fail imports, cache reopening and active-container cancellation
-are verified in [FS1 acceptance](../fs1_acceptance.md). The followup
-[finalization lifecycle and artifact browser](../fs1_lifecycle_and_artifacts.md)
+are verified in [FS1 acceptance](../archive/delivery/asic_evidence_initial_acceptance.md). The followup
+[finalization lifecycle and artifact browser](../finalization_and_artifacts.md)
 adds daemon-owned collection/acceptance, bounded report paging and explicit
 external text opening on the terminal host. The final
-[FS1 investigation slice](../fs1_investigation.md) adds path/corner/group/producer
+[FS1 investigation slice](../asic_evidence_inspection.md) adds path/corner/group/producer
 exploration, measured clock latency/network/check skew, supplied clock headers and
 relationships, stage-specific physical/routing/congestion tables, and exact binary
 external handoff. Real GDS loading by KLayout is verified headlessly. Embedded

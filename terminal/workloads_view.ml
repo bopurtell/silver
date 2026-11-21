@@ -698,7 +698,7 @@ let page_with_targets t ~asic ~filter ~width ~height =
       then
         plain
           [ E.plain
-              "No matching retained results. Import a result, or launch PT.8 in Testing."
+              "No matching retained results. Import a result, or launch a memory workload in Testing."
           ]
       else []
     | Detail ->

@@ -176,10 +176,10 @@ wire/cache compatibility, exact-source navigation and two Overview surfaces.
 
 ## References
 - [Current Timing controls, close command, preloading and acceptance](../../timing_workspace_usability.md)
-- [Usability/preload agent plan](../../timing_usability_preload_plan.md)
+- [Usability/preload agent plan](../../archive/delivery/timing_usability_preload_plan.md)
 - [Executable Timing stage and refreshed deployment](../../executable_timing_stage.md)
-- [Executable-stage implementation plan](../../executable_timing_stage_plan.md)
-- [Implementation plan](../../timing_checklist_overview_plan.md)
+- [Executable-stage implementation plan](../../archive/delivery/executable_timing_stage_plan.md)
+- [Implementation plan](../../archive/delivery/timing_checklist_overview_plan.md)
 - [Checklist projection](../../../terminal/overview_tiles.ml)
 - [Canonical stages](../../../backend/asic_public.ml)
 - [Launch/checklist consistency](../../launch_stage_consistency.md)

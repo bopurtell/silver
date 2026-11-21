@@ -151,7 +151,7 @@ let launch_receipt (t : t) ticket ~floor result =
     }
 ;;
 
-let key selection = List.hd_exn (Plain_rpc.keys (Plan selection) Fs0_fixture.snapshot)
+let key selection = List.hd_exn (Plain_rpc.keys (Plan selection) Asic_snapshot_fixture.snapshot)
 
 let begin_plan t selection =
   let generation = t.generation + 1 in
@@ -808,12 +808,12 @@ let max_scroll m ~detail = Int.max 0 (List.length (rows m ~detail) - 1)
 let%test_unit "local fresh receipt never adopts same-selection replacement and survives \
                legacy preview completion"
   =
-  let first = Fs0_fixture.fresh_intent "first" in
+  let first = Asic_snapshot_fixture.fresh_intent "first" in
   let state, ticket =
     begin_fresh (reset empty ~scope:"owner") ~elaboration_only:false first.selection
   in
   let state = fresh_receipt state ticket ~floor:2 (Ok first) in
-  let snapshot intent = { Fs0_fixture.snapshot with fresh_intent = Some intent } in
+  let snapshot intent = { Asic_snapshot_fixture.snapshot with fresh_intent = Some intent } in
   let ready = receive state ~revision:2 (snapshot first) in
   assert (fresh_launchable ready first);
   List.iter
@@ -862,14 +862,14 @@ let%test_unit "local fresh receipt never adopts same-selection replacement and s
 let%test_unit "rejected or uncertain fresh launch recovers only after exact new staging \
                barrier and absence of old reservation"
   =
-  let first = Fs0_fixture.fresh_intent "first" in
+  let first = Asic_snapshot_fixture.fresh_intent "first" in
   let replacement = { first with id = "recovery" } in
   let state, ticket =
     begin_fresh (reset empty ~scope:"owner") ~elaboration_only:false first.selection
   in
   let state = fresh_receipt state ticket ~floor:1 (Ok first) in
   let snapshot intent workflows =
-    { Fs0_fixture.snapshot with fresh_intent = Some intent; workflows }
+    { Asic_snapshot_fixture.snapshot with fresh_intent = Some intent; workflows }
   in
   let state = receive state ~revision:1 (snapshot first []) in
   let submitted, launch_ticket =
@@ -899,7 +899,7 @@ let%test_unit "rejected or uncertain fresh launch recovers only after exact new 
     launch_receipt recovered launch_ticket ~floor:6 (Error "late old response")
   in
   assert (fresh_launchable late replacement);
-  let reserved = Fs0_fixture.workflow "possibly-submitted" first in
+  let reserved = Asic_snapshot_fixture.workflow "possibly-submitted" first in
   let still_owned = receive restaged ~revision:5 (snapshot replacement [ reserved ]) in
   assert (Option.is_some still_owned.launch_intent);
   assert (not (fresh_launchable still_owned replacement));
@@ -928,14 +928,14 @@ let%test_unit "rejected or uncertain fresh launch recovers only after exact new 
 let%test_unit "fresh staging ignores pinned preview, fences receipts and follows exact \
                workflow before allocation"
   =
-  let intent = Fs0_fixture.fresh_intent "input" in
+  let intent = Asic_snapshot_fixture.fresh_intent "input" in
   let pinned : Asic.Preview.t =
     { selection = intent.selection
     ; plan_identity = "old-pinned-executable"
     ; plan_json = "{}"
     }
   in
-  let base = { Fs0_fixture.snapshot with preview = Some pinned } in
+  let base = { Asic_snapshot_fixture.snapshot with preview = Some pinned } in
   let owner = reset empty ~scope:"daemon/project" in
   let pending, ticket = begin_fresh owner ~elaboration_only:false intent.selection in
   let observed = { base with fresh_intent = Some intent } in
@@ -951,7 +951,7 @@ let%test_unit "fresh staging ignores pinned preview, fences receipts and follows
   assert (not (fresh_launchable submitting intent));
   let unknown = launch_receipt submitting launch_ticket ~floor:6 (Error "timeout") in
   assert (not (fresh_launchable unknown intent));
-  let w = Fs0_fixture.workflow "fresh" intent in
+  let w = Asic_snapshot_fixture.workflow "fresh" intent in
   let accepted = receive unknown ~revision:6 { observed with workflows = [ w ] } in
   assert (equal_launch_status (model accepted).launch.state Submitting);
   assert (Option.is_none (model accepted).launch.run_id);
@@ -959,7 +959,7 @@ let%test_unit "fresh staging ignores pinned preview, fences receipts and follows
   let allocated =
     { w with
       phase = Physical
-    ; run = Some Fs0_fixture.run_a
+    ; run = Some Asic_snapshot_fixture.run_a
     ; elaboration_status = "completed"
     }
   in
@@ -967,7 +967,7 @@ let%test_unit "fresh staging ignores pinned preview, fences receipts and follows
     receive accepted ~revision:7 { observed with workflows = [ allocated ] }
   in
   assert (
-    Option.equal String.equal (model accepted).launch.run_id (Some Fs0_fixture.run_a.id));
+    Option.equal String.equal (model accepted).launch.run_id (Some Asic_snapshot_fixture.run_a.id));
   let next = { intent with id = "next-input" } in
   let pending, ticket = begin_fresh accepted ~elaboration_only:false intent.selection in
   let pending = fresh_receipt pending ticket ~floor:8 (Ok next) in
@@ -1025,7 +1025,7 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
     { key; preview; run_id }
   in
   let snapshot ?(preview = preview) ?(launches = []) ?(ops = []) ?(runs = []) () =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       preview = Some preview
     ; launches
     ; operations = plan :: ops
@@ -1076,19 +1076,19 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
   in
   assert (equal_launch_status (model reserving).launch.state Submitting);
   assert (not (launchable reserving preview));
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let allocated =
     snapshot
       ~launches:[ reference ~run_id:run.id preview ]
       ~ops:[ operation ~run "executing" ]
-      ~runs:[ { (Fs0_fixture.run run) with status = "allocated" } ]
+      ~runs:[ { (Asic_snapshot_fixture.run run) with status = "allocated" } ]
       ()
   in
   let allocated_model = receive confirmed ~revision:11 allocated |> model in
   assert (equal_launch_status allocated_model.launch.state Allocated);
   assert (Option.equal String.equal allocated_model.launch.run_id (Some run.id));
   let observe status =
-    { allocated with runs = [ { (Fs0_fixture.run run) with status } ] }
+    { allocated with runs = [ { (Asic_snapshot_fixture.run run) with status } ] }
   in
   let running = receive confirmed ~revision:12 (observe "observing") in
   assert (equal_launch_status (model running).launch.state Running);
@@ -1133,7 +1133,7 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
   assert (not (launchable unknown preview));
   let unknown = receive unknown ~revision:16 (snapshot ()) in
   assert (not (launchable unknown preview));
-  let next_launch = reference ~key:"next" ~run_id:Fs0_fixture.run_b.id preview in
+  let next_launch = reference ~key:"next" ~run_id:Asic_snapshot_fixture.run_b.id preview in
   let recovered =
     receive
       unknown
@@ -1142,15 +1142,15 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
         launches = [ next_launch; reference preview ]
       ; operations = [ plan ]
       ; runs =
-          [ { (Fs0_fixture.run run) with status = "observing" }
-          ; Fs0_fixture.run Fs0_fixture.run_b
+          [ { (Asic_snapshot_fixture.run run) with status = "observing" }
+          ; Asic_snapshot_fixture.run Asic_snapshot_fixture.run_b
           ]
       }
   in
   assert (launchable recovered preview);
   assert (Option.equal String.equal (model recovered).launch.key (Some "next"));
   assert (
-    Option.equal String.equal (model recovered).launch.run_id (Some Fs0_fixture.run_b.id));
+    Option.equal String.equal (model recovered).launch.run_id (Some Asic_snapshot_fixture.run_b.id));
   let recovered = launch_receipt recovered next_ticket ~floor:18 (Error "late failure") in
   assert (launchable recovered preview);
   (* Newest reservation wins among exact matches only, not newer mismatched preview. *)
@@ -1158,8 +1158,8 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
     snapshot
       ~launches:[ reference ~key:"foreign-other" other; next_launch; reference preview ]
       ~runs:
-        [ { (Fs0_fixture.run run) with status = "failed" }
-        ; Fs0_fixture.run Fs0_fixture.run_b
+        [ { (Asic_snapshot_fixture.run run) with status = "failed" }
+        ; Asic_snapshot_fixture.run Asic_snapshot_fixture.run_b
         ]
       ()
   in
@@ -1225,7 +1225,7 @@ let%test_unit "old ready to local pending, transport failure, retry and new read
     ; activity = Unreported
     }
   in
-  let snap p ops = { Fs0_fixture.snapshot with preview = p; operations = ops } in
+  let snap p ops = { Asic_snapshot_fixture.snapshot with preview = p; operations = ops } in
   let ready =
     receive
       (reset empty ~scope:"daemon/project")
@@ -1295,7 +1295,7 @@ let%test_unit "same-selection retry waits past every pre-receipt poll then ordin
     }
   in
   let completed =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       preview = Some preview
     ; operations = [ operation "completed" ]
     }
@@ -1389,7 +1389,7 @@ let%test_unit "exact raw selection identity and metadata survive display project
     }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with preview = Some preview; operations = [ op ] }
+    { Asic_snapshot_fixture.snapshot with preview = Some preview; operations = [ op ] }
   in
   let ready = receive empty ~revision:1 snapshot in
   assert (launchable ready preview);

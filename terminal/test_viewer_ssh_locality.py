@@ -45,7 +45,7 @@ def load(name, path):
 
 
 handoff = load('ssh_handoff', ROOT / 'terminal/test_waveform_handoff_pty.py')
-native = load('ssh_native', ROOT / 'scripts/test-fs2-native.py')
+native = load('ssh_native', ROOT / 'scripts/test-native-simulation.py')
 
 
 def command(argv, **kwargs):

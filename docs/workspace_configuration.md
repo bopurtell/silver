@@ -11,7 +11,7 @@ example: a run selector and two synthesis tiles, with independent presentation a
 layout keys. Existing tile implementations remain compiled application features;
 configurations compose them without writing OCaml.
 
-The [post-merge audit](workspace_post_merge_audit.md) verifies merged hierarchy,
+The [post-merge audit](archive/delivery/workspace_post_merge_audit.md) verifies merged hierarchy,
 Testing/Timing/Overview and reconnect features against this structure, including
 custom mixed workspaces and preservation of authored layouts during investigation.
 
@@ -57,14 +57,14 @@ checkout. See the [implementation and acceptance record](layout_focus_order_plan
 With the native commands installed:
 
 ```sh
-hardcaml-workbench-workspace config export stock > stock.sexp
-hardcaml-workbench-workspace config export example -id my-desk > my-desk.sexp
-hardcaml-workbench-workspace config validate my-desk.sexp
+silver-workspace config export stock > stock.sexp
+silver-workspace config export example -id my-desk > my-desk.sexp
+silver-workspace config validate my-desk.sexp
 ```
 
 Export and validation are offline. In a source checkout, use
-`_build/default/workspace_cli/main.exe` in place of
-`hardcaml-workbench-workspace` after building with `scripts/with-switch.sh`.
+`_build_workbench/default/workspace_cli/main.exe` in place of `silver-workspace`
+after [building Silver](../README.md#development).
 
 To customize a stock definition:
 

@@ -64,6 +64,6 @@ Default: inspect retained evidence only and label insufficient qualification exp
 No accuracy claim follows merely from successful parsing or numeric availability.
 
 ## References
-- [Current adopted domains](../../fs1_investigation.md)
+- [Current adopted domains](../../asic_evidence_inspection.md)
 - [Inspection evidence model](../../../protocol/asic_inspection.ml)
 - [Hardware inspection requirements](../hardware_inspection.md)

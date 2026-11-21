@@ -59,7 +59,7 @@ and preparation job supervision, rather than introducing a competing scheduler.
   launch) use the daemon chain. No old Run bypass may silently use pinned flow run.
 
 Concrete typed additions and signatures are frozen by backend owner A in
-`docs/unified_fresh_prefix_handoff.md` before dependent UI/test integration. Prefer
+`docs/archive/delivery/unified_fresh_prefix_handoff.md` before dependent UI/test integration. Prefer
 existing ASIC RPC and additive/defaulted fields with historical S-expression
 compatibility. Preserve bounded records; retain full plan once instead of duplicating
 16-MiB receipts into small preview fields. Missing preparation/provider capability
@@ -201,6 +201,11 @@ The new configured provider's `--version --json` succeeds and advertises
 `namedflow1`, `preparation1` and `resource_evidence1`.
 
 ### Restart the app explicitly
+
+For current use, follow the [checkout-backed launcher](../../hardcaml_asic_example/docs/workbench_main.md)
+or [install and open Silver](../README.md#install-and-open-silver). Both client and
+daemon must be current. The commands below describe the original acceptance setup
+and its build paths, not the current launch procedure.
 
 Both daemon and client changed. Exit the old client and stop the old daemon when
 no jobs are active; this implementation has not stopped them for the user. Reuse

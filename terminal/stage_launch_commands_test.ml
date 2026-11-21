@@ -27,7 +27,7 @@ let fixture () =
     { selection; plan_identity = "captured-plan"; plan_json = "{}" }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       flows =
         [ { Asic.Flow.id = "selected"
           ; profiles = [ "balanced" ]
@@ -44,7 +44,7 @@ let fixture () =
     ; preview = Some preview
     ; operations =
         [ { Asic.Pending.key =
-              List.hd_exn (Plain_rpc.keys (Plan selection) Fs0_fixture.snapshot)
+              List.hd_exn (Plain_rpc.keys (Plan selection) Asic_snapshot_fixture.snapshot)
           ; kind = "plan"
           ; state = "completed"
           ; run = None
@@ -53,7 +53,7 @@ let fixture () =
           }
         ]
     ; runs =
-        [ { (Fs0_fixture.run Fs0_fixture.run_a) with
+        [ { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_a) with
             selection = Some selection
           ; stages = List.map [ "synthesis"; "placement"; "routing"; "signoff" ] ~f:stage
           }
@@ -80,7 +80,7 @@ let fixture () =
       contexts =
         List.map registry.contexts ~f:(fun context ->
           if W.Context_id.equal context.id overview.context
-          then { context with selected_run = Some Fs0_fixture.run_a }
+          then { context with selected_run = Some Asic_snapshot_fixture.run_a }
           else context)
     }
   in
@@ -105,7 +105,7 @@ let fixture () =
       checklist.id
       { (H.local host checklist.id) with
         cursor = Some "routing"
-      ; stage_run = Some Fs0_fixture.run_a
+      ; stage_run = Some Asic_snapshot_fixture.run_a
       }
   in
   host, checklist, snapshot, selection
@@ -193,7 +193,7 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
     C.resolve
       ~asic:(Some s)
       ~remembered:(Some evidence)
-      ~run:(Some Fs0_fixture.run_a)
+      ~run:(Some Asic_snapshot_fixture.run_a)
       (Fresh_endpoint "routing")
     |> Result.ok_or_failwith
   in
@@ -219,7 +219,7 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
   in
   assert (not (Planned_run.launchable stale preview));
   assert (Planned_run.equal_status (Planned_run.model stale).status Stale);
-  let intent = { (Fs0_fixture.fresh_intent "captured") with selection } in
+  let intent = { (Asic_snapshot_fixture.fresh_intent "captured") with selection } in
   let s = { s with fresh_intent = Some intent } in
   let before =
     { host with
@@ -247,7 +247,7 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
    | _ -> assert false);
   (* Browsing a different run in the selector does not switch the workspace's
      active run. The explicit retarget action must still use that browsed row. *)
-  let browsed = { inspected with run = Fs0_fixture.run_b; selection = Some selection } in
+  let browsed = { inspected with run = Asic_snapshot_fixture.run_b; selection = Some selection } in
   let from_cursor run =
     C.commands before ~inspected:run ~asic:(Some { s with runs = [ inspected; browsed ] })
       ~remembered:(Some selection)
@@ -698,7 +698,7 @@ let%test_unit "selected shortcut captures checklist from another tile and reject
   (match shortcut.action with
    | Quick_launch_selected (item, run, inputs) ->
      assert (String.equal (Overview_tiles.checklist_id item) "routing");
-     assert (Option.equal Run_ref.equal run (Some Fs0_fixture.run_a));
+     assert (Option.equal Run_ref.equal run (Some Asic_snapshot_fixture.run_a));
      assert (List.is_empty inputs.assignments);
      assert (Result.is_ok (C.validate_selected unfocused ~asic ~item ~run));
      let changed =

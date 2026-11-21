@@ -4,7 +4,7 @@ Updated 2026-10-15. **D1 and D2/D3 FS0 defaults accepted.** The owner explicitly
 approved the bounded defaults in the initial tool question, **Approve scope**.
 Later command grammar, immutable snapshots and retention policy remain unresolved.
 These are product decisions; delivered behavior and gaps are tracked in the
-[construction plan](construction_phase_plan.md) and [acceptance](fs0_acceptance.md).
+[construction plan](construction_phase_plan.md) and [acceptance](archive/delivery/native_and_synthesis_acceptance.md).
 
 ## D1 — Workspace vocabulary and selection ownership
 
@@ -73,7 +73,7 @@ Accepted defaults:
   still match. Navigation or a newer selection must not be overwritten.
 
 Delivered FS0 includes the palette, target revalidation, exact preview launch and
-persisted client-local remembered Plan inputs; see [terminal policy](fs0_terminal.md).
+persisted client-local remembered Plan inputs; see [terminal policy](terminal_controls.md).
 Later policy: numeric flow aliases, richer grammar and shared preference services.
 
 Unlocks F03 registry/context tests and consistent palette/button/automation behavior.
@@ -154,5 +154,5 @@ implement the substantial FS2 delivery.
   failures, targeted reruns, trace handoff, history and a real PDK-free Cyclesim path.
   Embedded waveforms and automatic ASIC acceptance contribution remain separate.
 
-Implemented contract choices and bounds are in [simulation v1](fs2_simulation_contract.md);
-[FS2 acceptance](fs2_acceptance.md) records actual delivery and remaining limits.
+Implemented contract choices and bounds are in [simulation v1](simulation_provider_contract.md);
+[FS2 acceptance](structured_simulation.md) records actual delivery and remaining limits.

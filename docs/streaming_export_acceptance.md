@@ -17,8 +17,9 @@ owner-session configuration change or implicit build occurs.
 Build the Silver binaries explicitly if needed, using the shared build budget:
 
 ```sh
-flock /tmp/opencode/workbench-pt8-build.lock \
-  ./scripts/with-switch.sh dune build -j2 terminal/main.exe daemon/main.exe
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
+  terminal/main.exe daemon/main.exe
 ```
 
 From `silver/`, run each case independently (replace `asic` with `simulation` for
@@ -27,8 +28,8 @@ the 64 MiB case). Paths below select the currently prepared sibling example:
 ```sh
 ./scripts/with-switch.sh python3 -B test/integration/streaming_export.py \
   --case asic \
-  --daemon _build/default/daemon/main.exe \
-  --client _build/default/terminal/main.exe \
+  --daemon _build_workbench/default/daemon/main.exe \
+  --client _build_workbench/default/terminal/main.exe \
   --fifo-provider ../hardcaml_asic_example/_build/default/ip/controlled_fifo/verif/simulation/test_provider.exe \
   --fifo-simulator ../hardcaml_asic_example/_build/default/ip/controlled_fifo/verif/simulation/fifo_sim.exe \
   --asic-manifest ../hardcaml_asic_example/.dev/workbench-real-demo/manifest.json

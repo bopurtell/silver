@@ -13,7 +13,7 @@ copies are prepared. Receipt:
 `receipts/refresh-binaries-573452bea4d94baeb0635f81832ce473/`.
 Once active jobs finish, restart the matching daemon/client pair to adopt them;
 existing processes and state were preserved. Daemon/client alone reopen saved
-state—do not repeat `seed` for this upgrade. See [FS3 integration](fs3_adoption.md)
+state—do not repeat `seed` for this upgrade. See [FS3 integration](existing_project_setup.md)
 for persistent appearance/header controls and template semantics. The historical
 real-evidence measurements below are unchanged; this refresh did not rerun EDA.
 Use **Appearance: Icons Unicode / ASCII / Off** for the new indicators; see
@@ -191,9 +191,13 @@ The launcher intentionally uses verified persistent copies, not whichever `_buil
 executable happens to change. After rebuilding, explicitly refresh those copies:
 
 ```sh
-scripts/with-switch.sh dune build -j 2 \
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
-python3 -B scripts/real-asic-example-demo.py refresh-binaries
+python3 -B scripts/real-asic-example-demo.py refresh-binaries \
+  --daemon _build_workbench/default/daemon/main.exe \
+  --client _build_workbench/default/terminal/main.exe \
+  --preset-export _build_workbench/default/terminal/workspaces/export_presets.exe
 ```
 
 Then restart the demo daemon/client. Refresh performs no build or EDA itself. It

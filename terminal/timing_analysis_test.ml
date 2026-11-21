@@ -5,8 +5,8 @@ module O = Overview_tiles
 module H = Workspace_host
 
 let%test_unit "generic Timing chooses observed stage when no analysis is published" =
-  let asic = Fs0_fixture.snapshot in
-  let run = Fs0_fixture.run_a in
+  let asic = Asic_snapshot_fixture.snapshot in
+  let run = Asic_snapshot_fixture.run_a in
   let legacy, analysis = O.timing_inspection_target ~asic:(Some asic) ~run in
   assert (String.equal legacy "signoff" && Option.is_none analysis);
   let runs =
@@ -112,12 +112,12 @@ let fixture () =
   let host, data, find =
     Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
   in
-  let summary = Option.value_exn (data.Host_view.summary Fs0_fixture.run_a) in
+  let summary = Option.value_exn (data.Host_view.summary Asic_snapshot_fixture.run_a) in
   let summary = { summary with timing_analysis = Some analysis; freshness = Validated } in
   let asic = Option.value_exn data.asic in
   let runs =
     List.map asic.runs ~f:(fun r ->
-      if not (Run_ref.equal r.run Fs0_fixture.run_a)
+      if not (Run_ref.equal r.run Asic_snapshot_fixture.run_a)
       then r
       else
         { r with
@@ -261,7 +261,7 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
          ; run = Some run
          })
   in
-  let registry = choose registry Fs0_fixture.run_a in
+  let registry = choose registry Asic_snapshot_fixture.run_a in
   let host = H.receive H.empty registry in
   let workspace =
     H.builtin_timing_in_window registry ~window:main.window |> Option.value_exn
@@ -275,9 +275,9 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
     { target with stage = "timing"; execution_file = Some "/exact/frozen-source" }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       summaries =
-        [ { (Fs0_fixture.summary Fs0_fixture.run_a 1 []) with
+        [ { (Asic_snapshot_fixture.summary Asic_snapshot_fixture.run_a 1 []) with
             timing_analysis = Some { analysis with target }
           }
         ]
@@ -294,7 +294,7 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
     H.set_timing
       prepared
       tile
-      (Timing_workspace.create ~generation:10 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:10 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
   in
   let recovered = H.reconcile_builtin_timing legacy (Some snapshot) in
   assert (String.equal (Option.value_exn (H.timing recovered tile)).stage "timing");
@@ -315,18 +315,18 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
   let view2 = H.timing changed tile |> Option.value_exn in
   assert (Option.is_none view2.selected && String.is_empty view2.filter);
   assert (view2.generation > view.generation);
-  let switched_registry = choose registry Fs0_fixture.run_b in
+  let switched_registry = choose registry Asic_snapshot_fixture.run_b in
   let switched =
     H.reconcile_builtin_timing (H.receive changed switched_registry) (Some snapshot)
   in
   let switched_view = H.timing switched tile |> Option.value_exn in
-  assert (Run_ref.equal switched_view.run Fs0_fixture.run_b);
+  assert (Run_ref.equal switched_view.run Asic_snapshot_fixture.run_b);
   assert (
     String.equal switched_view.stage "signoff" && Option.is_none switched_view.analysis);
   let pinned_registry =
     mutate
       switched_registry
-      (Set_tile_binding { tile = tile.id; binding = Pin_run Fs0_fixture.run_a })
+      (Set_tile_binding { tile = tile.id; binding = Pin_run Asic_snapshot_fixture.run_a })
   in
   let pinned =
     H.reconcile_builtin_timing (H.receive switched pinned_registry) (Some snapshot)
@@ -334,10 +334,10 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
   assert (Option.equal W.Snapshot.equal pinned.registry (Some pinned_registry));
   assert (
     Option.is_none
-      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Fs0_fixture.run_b));
+      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Asic_snapshot_fixture.run_b));
   assert (
     Option.is_none
-      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Fs0_fixture.run_a))
+      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Asic_snapshot_fixture.run_a))
 ;;
 
 let%test_unit "generic Timing captures complete authoritative identity including legacy" =
@@ -356,7 +356,7 @@ let%test_unit "generic Timing captures complete authoritative identity including
   assert (String.equal stage "timing");
   assert (Option.equal Asic_inspection.Analysis_target.equal captured (Some target));
   let _, other =
-    O.timing_inspection_target ~asic:(Some { asic with summaries }) ~run:Fs0_fixture.run_b
+    O.timing_inspection_target ~asic:(Some { asic with summaries }) ~run:Asic_snapshot_fixture.run_b
   in
   assert (Option.is_none other)
 ;;
@@ -671,8 +671,8 @@ let%test_unit "WB069 projected cursor reaches Timing without physical action inf
   let local =
     H.reconcile_checklist
       (H.local host tile.id)
-      ~run:(Some Fs0_fixture.run_b)
-      ~items:(O.checklist_items ~asic:data.asic ~run:Fs0_fixture.run_b)
+      ~run:(Some Asic_snapshot_fixture.run_b)
+      ~items:(O.checklist_items ~asic:data.asic ~run:Asic_snapshot_fixture.run_b)
   in
   assert (not (Option.equal String.equal local.cursor (Some "analysis:post-pnr-sta")))
 ;;
@@ -741,7 +741,7 @@ let%test_unit "WB069 exact target gates index, refresh, detail, demand and stale
   let _, data, _, _ = fixture () in
   let snapshot = Option.value_exn data.asic in
   let view =
-    Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff"
+    Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff"
     |> fun view -> Timing_workspace.with_analysis view (Some target)
   in
   let index : Asic_inspection.Index.t =
@@ -841,7 +841,7 @@ let%test_unit "WB069 persisted navigation and reuse retain exact analysis rather
   in
   let paths = find "timing-paths" in
   let view =
-    Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff"
+    Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff"
     |> fun view -> Timing_workspace.with_analysis view (Some target)
   in
   let host = H.set_timing host paths { view with filter = "fixture filter" } in

@@ -56,17 +56,52 @@ module Scheme = struct
     | Slate
     | Crimson
     | Neon
-  [@@deriving enumerate, equal, sexp]
+    | Catalog of Theme_catalog.t
 
-  let label = function
-    | Carbon -> "Carbon"
-    | Slate -> "Slate"
-    | Crimson -> "Crimson"
-    | Neon -> "Neon"
+  let entry = function
+    | Carbon -> Theme_catalog.carbon
+    | Slate -> Theme_catalog.slate
+    | Crimson -> Theme_catalog.crimson
+    | Neon -> Theme_catalog.neon
+    | Catalog entry -> entry
   ;;
 
-  let key t = String.lowercase (label t)
-  let of_key key_ = List.find all ~f:(fun t -> String.equal (key t) key_)
+  let of_entry entry =
+    match Theme_catalog.key entry with
+    | "carbon" -> Carbon
+    | "slate" -> Slate
+    | "crimson" -> Crimson
+    | "neon" -> Neon
+    | _ -> Catalog entry
+  ;;
+
+  let all = List.map Theme_catalog.all ~f:of_entry
+  let key t = Theme_catalog.key (entry t)
+  let label t = Theme_catalog.label (entry t)
+  let is_light t = Theme_catalog.is_light (entry t)
+  let palette t = Theme_catalog.palette (entry t)
+  let equal a b = String.equal (key a) (key b)
+  let of_key key = Option.map (Theme_catalog.find key) ~f:of_entry
+  let silver_dark = of_entry Theme_catalog.silver_dark
+  let silver_light = of_entry Theme_catalog.silver_light
+
+  (* Keep the original atom spellings; new palettes persist stable IDs, not labels or RGB
+     values. A missing field still decodes as Carbon in old files. *)
+  let sexp_of_t t =
+    Sexp.Atom
+      (match t with
+       | Carbon | Slate | Crimson | Neon -> label t
+       | Catalog _ -> key t)
+  ;;
+
+  let t_of_sexp sexp =
+    match sexp with
+    | Sexp.Atom key ->
+      (match of_key key with
+       | Some t -> t
+       | None -> Sexplib0.Sexp_conv.of_sexp_error "Unknown color scheme" sexp)
+    | Sexp.List _ -> Sexplib0.Sexp_conv.of_sexp_error "Expected a color scheme ID" sexp
+  ;;
 end
 
 module Icons = struct
@@ -123,7 +158,7 @@ type t =
 let default =
   { preset = Instrument
   ; color = Vivid
-  ; scheme = Carbon
+  ; scheme = Scheme.silver_dark
   ; icons = Unicode
   ; density = Comfortable
   }
@@ -143,32 +178,43 @@ let%test_unit "appearance keys are stable and round trip" =
   assert (Option.is_none (Preset.of_key "unknown"))
 ;;
 
-let%test_unit "legacy appearance defaults to carbon and schemes round trip independently" =
+let%test_unit "fresh appearance is Silver Dark; legacy preferences retain Carbon and old \
+               atoms"
+  =
   let legacy =
     t_of_sexp
       (Sexp.of_string "((preset Studio)(color Restrained)(icons Ascii)(density Compact))")
   in
-  assert (Scheme.equal default.scheme Carbon);
+  assert (String.equal (Scheme.key default.scheme) "silver-dark");
   assert (Scheme.equal legacy.scheme Carbon);
   assert (
     equal
       legacy
-      { default with
-        preset = Studio
+      { preset = Studio
       ; color = Restrained
+      ; scheme = Carbon
       ; icons = Ascii
       ; density = Compact
       });
   List.iter Scheme.all ~f:(fun scheme ->
     let appearance = { legacy with scheme } in
-    assert (equal appearance (t_of_sexp (sexp_of_t appearance)));
-    let explicit =
-      t_of_sexp
-        (Sexp.of_string
-           (sprintf
-              "((preset Studio)(color Restrained)(scheme %s)(icons Ascii)(density \
-               Compact))"
-              (Scheme.label scheme)))
-    in
-    assert (equal explicit appearance))
+    assert (equal appearance (t_of_sexp (sexp_of_t appearance))));
+  List.iter
+    [ "Carbon", Scheme.Carbon; "Slate", Slate; "Crimson", Crimson; "Neon", Neon ]
+    ~f:(fun (atom, scheme) ->
+      let explicit =
+        t_of_sexp
+          (Sexp.of_string
+             (sprintf
+                "((preset Studio)(color Restrained)(scheme %s)(icons Ascii)(density \
+                 Compact))"
+                atom))
+      in
+      assert (equal explicit { legacy with scheme });
+      assert (Sexp.equal (Scheme.sexp_of_t scheme) (Atom atom)));
+  let light = Option.value_exn (Scheme.of_key " Silver_Light ") in
+  assert (Scheme.equal light Scheme.silver_light);
+  assert (Scheme.is_light light);
+  assert (Sexp.equal (Scheme.sexp_of_t light) (Atom "silver-light"));
+  assert (Option.is_none (Scheme.of_key "unknown"))
 ;;

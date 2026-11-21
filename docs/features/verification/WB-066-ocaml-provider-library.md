@@ -59,7 +59,7 @@ Every real provider is Python with its own copy of the codec:
 - `hardcaml_asic_example/simulation/{provider.py,wire.py}` wraps `fifo_sim.exe`.
   `scripts/install-fifo-simulation.py` copies all three into
   `.dev/fifo-simulation/<generation>/`, and the root config runs `/usr/bin/python3.12`.
-- `examples/fs2_cyclesim/provider.py` uses `scripts/fixtures/fs2_wire.py` from the
+- `examples/cyclesim_counter/provider.py` uses `scripts/fixtures/simulation_fixture_wire.py` from the
   Workbench checkout.
 - `demo/synthetic_flow/simulation_{provider,wire}.py` is the synthetic demo provider.
 
@@ -96,14 +96,15 @@ policy. Exact existing mappings and all 64 bits are preserved and tested.
   this library. Update its installer to copy the native provider instead of
   `provider.py`/`wire.py`, and write a config with an empty or simulator-only
   `provider_args`.
-- Port `examples/fs2_cyclesim` the same way, which removes its dependency on the
+- Port `examples/cyclesim_counter` the same way, which removes its dependency on the
   checkout's fixture codec.
-- Update `docs/fs2_simulation_contract.md` and the example READMEs so the library is
+- Update `docs/simulation_provider_contract.md` and the example READMEs so the library is
   the recommended path, and keep the language-neutral contract as normative.
 
 ## Out of scope
 - Changing the FS2 v1 contract, argv, event grammar, limits or daemon reducer rules.
-- Removing the Python fixtures used by `scripts/test-fs2-*.py` or the synthetic
+- Removing the Python fixtures used by `scripts/test-native-simulation.py`,
+  `scripts/test-cyclesim-provider.py`, or the synthetic
   demo. They stay as independent, foreign-language conformance checks.
 - Building or installing providers automatically from discovery or run (still
   [WB-039](../project/WB-039-simulation-setup.md)'s boundary).
@@ -161,9 +162,9 @@ remain release work, not open acceptance gates for this delivery.
   external opam-repository publication is claimed.
 
 ## References
-- [Provider contract](../../fs2_simulation_contract.md)
+- [Provider contract](../../simulation_provider_contract.md)
 - [Wire types](../../../protocol/simulation.ml)
 - [Daemon validators](../../../project_integration/simulation_protocol.ml)
 - [Simulation configuration parser](../../../project_integration/simulation_config.ml)
 - [Testing workspace / FIFO generation](../../testing_workspace.md)
-- [Cyclesim example](../../../examples/fs2_cyclesim/README.md)
+- [Cyclesim example](../../../examples/cyclesim_counter/README.md)

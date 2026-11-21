@@ -33,7 +33,7 @@ let registry () =
        { workspace = timing.id
        ; context = context.id
        ; expected_selection_revision = context.selection_revision
-       ; run = Some Terminal_presentation.Fs0_fixture.run_a
+       ; run = Some Terminal_presentation.Asic_snapshot_fixture.run_a
        })
 ;;
 
@@ -71,7 +71,7 @@ let timing_snapshot ?(digest = "saved-source") run =
     ; times = Evidence_time.Index.empty
     }
   in
-  { Terminal_presentation.Fs0_fixture.snapshot with inspections = [ index ] }
+  { Terminal_presentation.Asic_snapshot_fixture.snapshot with inspections = [ index ] }
 ;;
 
 let expected registry =
@@ -95,7 +95,7 @@ let expected registry =
   let view =
     Timing.create
       ~generation:0
-      ~run:Terminal_presentation.Fs0_fixture.run_a
+      ~run:Terminal_presentation.Asic_snapshot_fixture.run_a
       ~stage:"signoff"
   in
   let host =
@@ -227,7 +227,7 @@ let restoration_regressions () =
     let restored = H.reconcile_navigation_timing restored (Some snapshot) in
     let view = Option.value_exn (H.timing restored tile) in
     assert (Option.is_none view.selected && Option.is_some view.error);
-    assert (Run_ref.equal view.run Terminal_presentation.Fs0_fixture.run_a);
+    assert (Run_ref.equal view.run Terminal_presentation.Asic_snapshot_fixture.run_a);
     (* Ordinary cached attachment cannot silently choose an equal row ID afterward. *)
     let normalized = H.set_timing restored tile (Timing.attach_retained view snapshot) in
     let guarded = H.reconcile_navigation_timing normalized (Some snapshot) in
@@ -241,19 +241,19 @@ let restoration_regressions () =
   in
   check_rejected
     (change_timing (fun timing -> { timing with run = None; source_digest = None }))
-    (timing_snapshot Terminal_presentation.Fs0_fixture.run_a);
+    (timing_snapshot Terminal_presentation.Asic_snapshot_fixture.run_a);
   check_rejected
     (change_timing (fun timing ->
        { timing with
          run =
            Some
              (Sexp.to_string_mach
-                (Run_ref.sexp_of_t Terminal_presentation.Fs0_fixture.run_b))
+                (Run_ref.sexp_of_t Terminal_presentation.Asic_snapshot_fixture.run_b))
        }))
-    (timing_snapshot Terminal_presentation.Fs0_fixture.run_a);
+    (timing_snapshot Terminal_presentation.Asic_snapshot_fixture.run_a);
   check_rejected
     saved
-    (timing_snapshot ~digest:"changed-source" Terminal_presentation.Fs0_fixture.run_a)
+    (timing_snapshot ~digest:"changed-source" Terminal_presentation.Asic_snapshot_fixture.run_a)
 ;;
 
 let suite_artifact_regression () =

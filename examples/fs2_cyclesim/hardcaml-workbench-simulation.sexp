@@ -1,5 +1,0 @@
-((schema_version 1)
- (provider_executable /home/wayne/devel/jane/silver/examples/fs2_cyclesim/_build/default/test_provider.exe)
- (provider_args (--counter /home/wayne/devel/jane/silver/examples/fs2_cyclesim/_build/default/counter.exe))
- (discovery_timeout_seconds 10)
- (run_timeout_seconds 90))

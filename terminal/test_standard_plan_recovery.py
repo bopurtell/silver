@@ -25,8 +25,8 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--real-session', type=Path, required=True)
-    parser.add_argument('--client', type=Path, default=ROOT / '_build_pt8_workbench/default/terminal/main.exe')
-    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_pt8_workbench/default/daemon/main.exe')
+    parser.add_argument('--client', type=Path, default=ROOT / '_build_workbench/default/terminal/main.exe')
+    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_workbench/default/daemon/main.exe')
     args = parser.parse_args()
     recovery = args.real_session.resolve(strict=True)
     manifest = json.loads((recovery / 'manifest.json').read_text())
@@ -40,7 +40,7 @@ def main():
     args.outer_timeout, args.stage_timeout_seconds = 30, None
     # Reuse the native HTTP session/emulator helpers, then select the actual project.
     resources = module('recovery_resources', ROOT / 'scripts/test-resource-inspector.py')
-    dashboard = module('recovery_dashboard', ROOT / 'scripts/test-fs0-dashboard.py')
+    dashboard = module('recovery_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
     fs0, session = resources.native_setup(args, base, recovery / 'provider/project.exe')
     session.root = project
     generation = Path(manifest['generation'])

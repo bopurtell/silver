@@ -12,9 +12,9 @@ The [dependency map](dependencies.md) describes required shared interfaces.
 Status (2026-10-16): **FS0 palette/captured commands and FS1 physical, finalization
 and inspection actions delivered**. Remembered Plan inputs and exact-preview launch
 now cover capability-checked known physical endpoints as well as synthesis.
-[D2](../decisions.md) FS0 defaults are accepted. See [terminal policy](../fs0_terminal.md),
-[finalization lifecycle](../fs1_lifecycle_and_artifacts.md) and
-[investigation controls](../fs1_investigation.md#timing-paths-and-navigation).
+[D2](../decisions.md) FS0 defaults are accepted. See [terminal policy](../terminal_controls.md),
+[finalization lifecycle](../finalization_and_artifacts.md) and
+[investigation controls](../asic_evidence_inspection.md#timing-paths-and-navigation).
 Collect versus accept, explicit five-field acceptance collateral, durable submission
 keys, cancel/read-only reconnect, report browsing and four rich inspectors are
 implemented. The owner confirms Escape works after immediate local invalidation
@@ -69,7 +69,7 @@ preview → run through supported known endpoints, finalization and bounded evid
 inspection. Generic tests retain the existing test action; FS2 structured simulation
 adds explicit discovery/launch/rerun commands over the same supervisor and job
 identities rather than introducing a second runner. The substantial FS2 milestone
-is accepted and closed; see [controls and evidence](../fs2_acceptance.md).
+is accepted and closed; see [controls and evidence](../structured_simulation.md).
 Later: additional endpoints, supported continuation, configurable command aliases
 and external automation adapters.
 No second shell/recipe language is required.

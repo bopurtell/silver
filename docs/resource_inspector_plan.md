@@ -104,7 +104,7 @@ honest. Per-resource timing is sampled and electrical compliance not_assessed.
 | C — acceptance (6 jobs) | New WB native resource inspector scripts/fixtures and retained-run script; example isolated provider capture/acceptance receipts if needed | Public HTTP+PTY and actual SRAM capture display, malformed/stale/failed evidence, cache-only reopen and artifact bytes, no fabricated run or EDA |
 | Coordinator | Plan/status/public operating docs, contract arbitration, review and final binary build | Coordinate cross-repo schema and capability adoption; record actual evidence/limits |
 
-A publishes `docs/resource_inspector_handoff.md` before B/C dependent integration,
+A publishes `docs/archive/delivery/resource_inspector_handoff.md` before B/C dependent integration,
 including exact provider command/envelope, typed operations/records, source identities,
 pagination budgets and binding rules. A may use a new ASIC test subdirectory; ASIC
 shared test registration belongs to A. B owns terminal fixture record defaults;
@@ -170,7 +170,7 @@ where existing provider evidence cannot establish it.
   alone support measured deltas. Older fields default unknown, not invented measured
   facts. Native failed resource evidence stays inspectable with its failed verdict.
 
-Exact signatures/limits/field compatibility: [final r3 handoff](resource_inspector_handoff.md).
+Exact signatures/limits/field compatibility: [final r3 handoff](archive/delivery/resource_inspector_handoff.md).
 
 ### Review findings and corrections
 
@@ -260,7 +260,7 @@ paths/results/timeout and all `current` pointers remain unchanged. The PT.6 curr
 pointer intentionally still names the earlier capture; use the final immutable path.
 
 Matching default app pair is already built. The user's running daemon/client were
-not restarted. [Restart/import controls](resource_inspector.md#start-the-tested-app-pair)
+not restarted. [Historical acceptance app pair](resource_inspector.md#historical-acceptance-app-pair)
 are the user visual-acceptance handoff. Resource inspection remains read-only;
 separate fresh-launch actions can start real implementation as before.
 

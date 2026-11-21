@@ -188,4 +188,4 @@ required. The unwanted catalog was already hidden in live saved state.
 
 No repository staging, commits or pushes were performed. Three agents handled UI
 implementation, real-run evidence and cache research; total worker budget stayed
-within 20. The [follow-up plan](timing_workspace_followup_plan.md) records ownership.
+within 20. The [follow-up plan](archive/delivery/timing_workspace_followup_plan.md) records ownership.

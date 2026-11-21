@@ -1,4 +1,4 @@
-(data_only_dirs fixtures baselines pt8_frontend_review)
+(data_only_dirs fixtures baselines)
 
 (alias
  (name native-smoke)

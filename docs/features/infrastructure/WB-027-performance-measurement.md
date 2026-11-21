@@ -64,5 +64,5 @@ evidence where possible and distinguish synthetic workloads from actual user ses
 
 ## References
 - [Construction coverage/scaling followups](../../construction_phase_plan.md).
-- [FS1 measured interaction followup](../../fs1_investigation.md).
+- [FS1 measured interaction followup](../../asic_evidence_inspection.md).
 - [Cache architecture](../run_summary_cache.md).

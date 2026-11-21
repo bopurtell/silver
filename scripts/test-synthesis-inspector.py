@@ -16,7 +16,7 @@ import tempfile
 import time
 import traceback
 
-spec = importlib.util.spec_from_file_location('dashboard', Path(__file__).with_name('test-fs0-dashboard.py'))
+spec = importlib.util.spec_from_file_location('dashboard', Path(__file__).with_name('test-retained-asic-dashboard.py'))
 dashboard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dashboard)
 fs0 = dashboard.fs0

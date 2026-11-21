@@ -30,8 +30,8 @@ def load(name, path):
     return module
 
 
-harness = load('reconnect_fs3', HERE / 'test-fs3-adoption.py')
-wire = load('reconnect_wire', HERE / 'fixtures/fs2_wire.py')
+harness = load('reconnect_fs3', HERE / 'test-project-adoption.py')
+wire = load('reconnect_wire', HERE / 'fixtures/simulation_fixture_wire.py')
 field, require = harness.field, harness.require
 
 

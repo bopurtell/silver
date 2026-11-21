@@ -314,7 +314,7 @@ def exercise(args, base):
     control.write_text("{}")
     (root / "hardcaml-workbench-simulation.sexp").write_text(sexp([
         ["schema_version", 1], ["provider_executable", sys.executable],
-        ["provider_args", [str(ROOT / "scripts/fixtures/fs2_provider.py"), "--control", str(control),
+        ["provider_args", [str(ROOT / "scripts/fixtures/simulation_fault_provider.py"), "--control", str(control),
                            "--calls", str(base / "simulation-calls")]],
         ["discovery_timeout_seconds", 10], ["run_timeout_seconds", 30]]))
     s = Session(SimpleNamespace(client=args.client, daemon=args.daemon, outer_timeout=20), base, root)

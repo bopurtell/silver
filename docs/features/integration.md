@@ -12,14 +12,14 @@ Status (2026-10-16): **FS0 public ASIC adapter and FS1 adopted-evidence integrat
 delivered**, alongside generic Dune and driver integration. Public named-flow
 launch, durable observation/read/report, capability-checked physical endpoints,
 finalization collect/accept and read-only rich inspection are implemented.
-See [FS0 limits](../fs0_provider_integration.md),
-[FS1 lifecycle](../fs1_lifecycle_and_artifacts.md) and
-[FS1 investigation](../fs1_investigation.md) for exact contracts, installed provider
+See [FS0 limits](../asic_provider_integration.md),
+[FS1 lifecycle](../finalization_and_artifacts.md) and
+[FS1 investigation](../asic_evidence_inspection.md) for exact contracts, installed provider
 generation and evidence. Requirements below remain normative; broader provider-store
 discovery is absent and later F06 graphics/source mapping remain open. FS2's versioned
 project-owned simulation provider/configuration is delivered and its substantial
-milestone accepted; see [FS2 acceptance](../fs2_acceptance.md) and the
-[simulation contract](../fs2_simulation_contract.md).
+milestone accepted; see [FS2 acceptance](../structured_simulation.md) and the
+[simulation contract](../simulation_provider_contract.md).
 
 ## User outcome
 
@@ -56,7 +56,7 @@ recorded installed generation, not the sibling checkout's current HEAD. The FS1
 inspection generation advertises `inspection1=true` and schema 1; its local receipt
 does not supply the absent verified provider source stamp. Provider configuration
 changes require reopening and exact-reference re-registration as documented in
-[deployment notes](../fs1_investigation.md#installed-development-provider-and-deployment-caveat).
+[deployment notes](../asic_evidence_inspection.md#installed-development-provider-and-deployment-caveat).
 
 The initial adapter uses configured public project/provider executables, not sibling
 source paths or private helper binaries. Building the project entry point requires

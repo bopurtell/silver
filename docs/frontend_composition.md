@@ -8,7 +8,7 @@ examples below document the earlier implementation.
 
 Implemented and verified 2026-10-16. This is the frontend follow-on to the
 aesthetics merge and completed FS2 milestone. The shared implementation plan is
-[frontend_composition_plan.md](frontend_composition_plan.md).
+[frontend_composition_plan.md](archive/delivery/frontend_composition_plan.md).
 
 **Subsequent owner-review refinements are delivered:** styled border titles and
 palette, reduced vertical spacing, horizontal stages, compact six-domain Overview,
@@ -176,7 +176,7 @@ chrome across restart. Other tile overrides remain transient. Reset removes the
 explicit header choice rather than freezing the resolved default; polling cannot
 replay old choices. A replacement workspace session clears tile/workspace overrides.
 Layouts and semantic bindings remain in the daemon-owned persisted registry. See
-[current persistence and template semantics](fs3_adoption.md).
+[current persistence and template semantics](existing_project_setup.md).
 
 Precedence is:
 
@@ -231,7 +231,8 @@ The ordinary `_build` daemon/client/exporter were rebuilt and tested together.
 For future edits, from this checkout, with no other build running:
 
 ```sh
-scripts/with-switch.sh dune build -j 2 \
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
 ```
 

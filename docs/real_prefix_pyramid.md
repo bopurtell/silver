@@ -32,17 +32,19 @@ across its independent rungs and consequently costs more than a signoff run alon
 
 ## Run an endpoint
 
-From `hardcaml_workbench`, check the discovered setup without starting applications,
+From the Silver checkout, check the discovered setup without starting applications,
 building example sources, or running EDA:
 
 ```bash
-opam exec --switch=5.2.0+ox -- dune build -j1 @test-real-preflight
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j1 --build-dir _build_workbench @test-real-preflight
 ```
 
 Run one fresh prefix through timing:
 
 ```bash
-opam exec --switch=5.2.0+ox -- dune build -j1 @test-real-timing
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j1 --build-dir _build_workbench @test-real-timing
 ```
 
 No exported JSON path is required. If a previous shell still has

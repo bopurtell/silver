@@ -1,8 +1,29 @@
 # Documentation archive
 
 Historical plans, design snapshots and validation evidence live here. They are
-not active requirements; use the current [architecture](../hardcaml_workbench_architecture.md),
-[plan](../construction_phase_plan.md) and [rendering guide](../rendering.md).
+not active requirements or current launch instructions. Start with the
+[documentation index](../README.md) for current guides.
+
+## Release curation — 2026-11-21
+
+The plans and receipts below record what was proposed or verified at the time.
+Paths, binary hashes and results in a receipt refer to that capture, not a
+current build. For today's build and test commands see the
+[repository README](../../README.md#development) and [test index](../../test/README.md).
+
+The old PT8 review directories, `reviewdocs/`, and their one-off runners and
+generated receipts have been retired. Historical invocations below refer to the
+revision they were recorded against. Maintained regressions are listed in the
+[testing inventory](../testing_inventory.md).
+
+| Record set | Start with | Current guide |
+| --- | --- | --- |
+| Initial terminal, installation and ASIC evidence | [Native and synthesis acceptance](delivery/native_and_synthesis_acceptance.md), [environment inventory](delivery/initial_environment_inventory.md), [installation checks](delivery/initial_installation_checks.md), [initial ASIC evidence acceptance](delivery/asic_evidence_initial_acceptance.md) | [Terminal controls](../terminal_controls.md), [ASIC evidence inspection](../asic_evidence_inspection.md) |
+| Simulation and project adoption | [Structured simulation delivery](delivery/structured_simulation_delivery.md), [project adoption integration](delivery/project_adoption_integration.md), [Testing cluster plan](delivery/testing_cluster_plan.md) | [Testing workspace](../testing_workspace.md), [existing-project setup](../existing_project_setup.md) |
+| ASIC launch, timing and resources | [Checklist launch](delivery/checklist_launch_workflow_plan.md), [launch and stage consistency](delivery/launch_stage_consistency_plan.md), [fresh-prefix handoff](delivery/unified_fresh_prefix_handoff.md), [Timing checklist](delivery/timing_checklist_overview_plan.md), [executable Timing](delivery/executable_timing_stage_plan.md), [Timing workspace and preload](delivery/timing_workspace_followup_plan.md), [Timing usability](delivery/timing_usability_preload_plan.md), [Resources handoff](delivery/resource_inspector_handoff.md) | [Checklist launch](../checklist_launch_workflow.md), [Timing workspace](../timing_workspace_usability.md), [Resources inspector](../resource_inspector.md) |
+| Presentation and demos | [Composition](delivery/frontend_composition_plan.md), [refinement](delivery/frontend_refinement_plan.md), [Overview sidebar](delivery/overview_sidebar_plan.md), [layout restore](delivery/default_layout_restore_plan.md), [post-merge audit](delivery/workspace_post_merge_audit.md), [real-example polish](delivery/real_example_polish_plan.md), [synthetic flow](delivery/synthetic_flow_plan.md), [synthetic Testing](delivery/synthetic_testing_plan.md) | [Workspace configuration](../workspace_configuration.md), [themes](../overview_sidebar.md#live-color-schemes), [synthetic flow](../synthetic_flow.md) |
+| Workloads and waveform integration | [Workloads acceptance](workloads-waveforms/workloads_acceptance.md), [frontend implementation](workloads-waveforms/workloads_frontend_acceptance.md), [integration plan](workloads-waveforms/workloads_integration_plan.md), [waveform recovery plan](workloads-waveforms/waveform_recovery_plan.md), [final waveform acceptance](workloads-waveforms/waveform_acceptance.md), [waveform navigation and rendering](workloads-waveforms/waveform_navigation_acceptance.md) and their linked independent receipts | [Workloads](../workloads.md), [Waveforms](../testing_workspace.md#embedded-waveform-viewer) |
+| Copied example development session | [Session plan](example-development/development_session_plan.md), [backend review](example-development/development_session_backend_review.md), [Git-context review](example-development/development_git_context_independent_review.md), [pre-closeout acceptance plan](example-development/developer_workflow_acceptance_plan.md), [paused handoff](example-development/developer_workflow_acceptance_handoff.md), [resource handoff](example-development/developer_workflow_resource_handoff.md), [endpoint rejection](example-development/developer_workflow_endpoint_rejection.md) | [Superseding acceptance closeout](../developer_workflow_refactored_closeout.md) |
 
 ## 2026-10-12 consolidation
 

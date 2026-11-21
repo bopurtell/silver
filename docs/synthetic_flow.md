@@ -21,8 +21,9 @@ use `scripts/with-switch.sh`, respecting `OPAM_SWITCH` (default `5.2.0+ox`).
 ### Terminal 1 — prepare once and start the daemon
 
 ```sh
-cd /home/wayne/devel/jane/silver
-./scripts/with-switch.sh dune build -j 2 \
+# From the Silver checkout.
+flock /tmp/opencode/workbench-build.lock \
+  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
 
 mkdir -p "$HOME/.local/state/hardcaml-workbench"
@@ -31,6 +32,7 @@ python3 -B scripts/synthetic-flow-demo.py prepare \
   --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
 
 python3 -B scripts/synthetic-flow-demo.py daemon \
+  --daemon _build_workbench/default/daemon/main.exe \
   --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
 ```
 
@@ -40,12 +42,13 @@ in the demo's discovery file; it has its own state directory.
 ### Terminal 2 — populate the daemon and connect
 
 ```sh
-cd /home/wayne/devel/jane/silver
-
+# From the same Silver checkout.
 python3 -B scripts/synthetic-flow-demo.py seed \
+  --preset-export _build_workbench/default/terminal/workspaces/export_presets.exe \
   --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
 
 python3 -B scripts/synthetic-flow-demo.py client \
+  --client _build_workbench/default/terminal/main.exe \
   --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
 ```
 
@@ -55,7 +58,7 @@ arrangements from the same `terminal/workspaces/` definitions used by ordinary
 Workbench; no Apply default layout action is required. The exporter is required at
 seed time. `--preset-export PATH` selects a matching non-default build.
 
-For later sessions, repeat only `daemon` and `client`. `seed` reimports reference
+For later sessions, repeat only the `daemon` and `client` commands above. `seed` reimports reference
 evidence, selects the initial reference on a new demo, adds missing preset tiles
 and explicitly discovers/submits the synthetic tests. Stable keys reuse retained
 attempts on repetition. Existing selected or deliberately cleared contexts, extra
@@ -173,7 +176,7 @@ sets timed playback between 0.01 and 2 seconds per stage.
 - Stage parsing/persistence: `backend/asic_public.ml` and `backend/asic_service.ml`.
 - Checklist projection/input: existing terminal host, with stable stage IDs and
   exact run/pin scope.
-- Build/ownership plan: [synthetic flow implementation plan](synthetic_flow_plan.md).
+- Build/ownership plan: [synthetic flow implementation plan](archive/delivery/synthetic_flow_plan.md).
 
 The synthetic provider implements an optional versioned stage-plan extension.
 Other providers that do not supply it continue to show unreported stage state;

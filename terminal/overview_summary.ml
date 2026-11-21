@@ -395,7 +395,7 @@ let rows
 let%test_unit "typed metrics preserve zero, units, missing and nonfinite without a \
                verdict"
   =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let metric value availability : Asic.Metric.t =
     { key = "setup_slack"
     ; label = "pass is a provider label"
@@ -544,7 +544,7 @@ let%test_unit "typed metrics preserve zero, units, missing and nonfinite without
 ;;
 
 let%test_unit "typed compact facts fence run, availability and acceptance" =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let summary : Asic.Summary.t =
     { run
     ; source_digest = "digest"
@@ -611,7 +611,7 @@ let%test_unit "compact evidence uses actual panel content bounds at accepted ter
             ~attrs:(fun _ -> [])
             ~width:geometry.content_width
             ~height:geometry.content_height
-            (rows ~kind ~run:Fs0_fixture.run_a ~summary:None ~stages:[] ())
+            (rows ~kind ~run:Asic_snapshot_fixture.run_a ~summary:None ~stages:[] ())
         in
         let view =
           Panel.render
@@ -649,7 +649,7 @@ let%test_unit "execution duration never guesses aliases or ambiguous stage ident
       ~now:Time_ns.epoch
       ?stage_id
       ~kind
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~summary:None
       ~stages
       ()

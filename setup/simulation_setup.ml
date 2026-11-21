@@ -49,7 +49,7 @@ let path t = t.path
 let config t = t.config
 let contents t = t.contents
 
-(* One field per line, as in the FS2 contract's example. *)
+(* One field per line, as in the simulation contract's example. *)
 let render config =
   match Config.sexp_of_t config with
   | List fields ->

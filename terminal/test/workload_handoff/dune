@@ -1,0 +1,5 @@
+(test
+ (name test_workload_handoff)
+ (libraries core async core_unix cryptokit yojson terminal_presentation
+  hardcaml_workbench_backend hardcaml_workbench_protocol hardcaml_workbench_workspaces)
+ (preprocess (pps ppx_jane)))

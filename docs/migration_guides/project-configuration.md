@@ -87,8 +87,8 @@ byte limits, identity stability, dry-run, no-clobber, repeat and failure/resume.
 Additional disposable-fixture checks:
 
 ```sh
-python3 -B scripts/test-wb049-config-consumers.py
-python3 -B scripts/test-wb049-config-migration.py --init /path/to/setup/main.exe
+python3 -B scripts/test-config-migration-consumers.py
+python3 -B scripts/test-config-migration.py --init /path/to/setup/main.exe
 ```
 
 Real EDA and live project migration are not part of these tests.

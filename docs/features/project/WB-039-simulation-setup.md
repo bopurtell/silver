@@ -112,9 +112,9 @@ timeout correction. No successful ASIC signoff is required by this ticket.
     `setup/test/test_simulation_cli.py` (dry-run writes and runs nothing, init from a
     subdirectory then check, refusal incl. links, outcome exit statuses, rejected
     inputs, help text) pass.
-  - Manual: init + check with the real `examples/fs2_cyclesim/provider.py` and
+  - Manual: init + check with the real `examples/cyclesim_counter/provider.py` and
     `counter.exe` listed suite `counter` with cases `wrap`, `reset`, `seeded`.
-    `check` in `examples/fs2_cyclesim` showed a real not-built native provider
+    `check` in `examples/cyclesim_counter` showed a real not-built native provider
     failure (`test_provider.exe` absent) and the nested-project report.
   - Full `dune build -j20`, `dune runtest -j20` and `@setup/fmt @setup/lint` pass.
 
@@ -132,5 +132,5 @@ checks passed.
 
 ## References
 - [Simulation configuration parser](../../../project_integration/simulation_config.ml)
-- [Provider contract](../../fs2_simulation_contract.md)
+- [Provider contract](../../simulation_provider_contract.md)
 - [Initializer implementation](../../../setup/initialization.ml)

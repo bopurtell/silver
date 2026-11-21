@@ -1,10 +1,10 @@
-# Native FS2 provider API (WB-066)
+# Native simulation provider API
 
 Public library/package: `hardcaml_workbench_provider`. Only Core, Core_unix and
 ppx_jane are required. Tests remain independent executables; this is adapter plumbing.
 
 The actual public modules are `Hardcaml_workbench_provider.Wire`, `Validation`,
-and `Runner`. Wire exposes the unchanged FS2 types, Limits, Backend_id, Build_ref,
+and `Runner`. Wire exposes the simulation protocol types, Limits, Backend_id, Build_ref,
 Run_ref, Parameter, Case, Suite, Discovery, Asic_input, Selection, Progress,
 Case_status, Outcome and Provider.{Request,Artifact,Event}.
 
@@ -46,25 +46,25 @@ Validation exposes the daemon's existing pure validators (same signatures).
 No generic seed-to-PRNG mapping is imposed. Projects must preserve their existing
 full uint64 interpretation; do not convert through a signed OCaml int or float.
 
-Development verification uses `/tmp/opencode/native-provider-library` and a private
-installation prefix `/tmp/opencode/native-provider-prefix`. A reusable SDK is also
-installed persistently at
-`/home/wayne/devel/jane/hardcaml_asic_example/.dev/workbench-provider-sdk`.
-Set `OCAMLPATH=<prefix>/lib` when building an external adapter. No global opam
-switch installation was performed. These local prefixes are development installs,
-not a claim that the package has been published to an opam repository.
+The [Silver installer](../README.md#install-and-open-silver) installs the provider
+library alongside the application. When building an external adapter, set
+`OCAMLPATH` to include the installation's `lib` directory. The commands below
+also let you build and install just the library into a private prefix, without
+changing the opam switch or installing the application.
 
 ## Building and checking
 
-From the Workbench checkout (the parent `/tmp/opencode` must already exist):
+From the Silver checkout, use the selected OCaml switch and a private prefix:
 
 ```sh
-scripts/with-switch.sh dune build \
-  --build-dir /tmp/opencode/native-provider-library -j 6 \
+switch="${OPAM_SWITCH:-5.2.0+ox}"
+sdk="$(mktemp -d)"
+opam exec --switch="$switch" -- dune build \
+  --build-dir "$sdk/build" -j 6 \
   --only-packages hardcaml_workbench_provider @install @provider/test/runtest
-scripts/with-switch.sh dune install \
-  --build-dir /tmp/opencode/native-provider-library \
-  --prefix /tmp/opencode/native-provider-prefix hardcaml_workbench_provider
+opam exec --switch="$switch" -- dune install \
+  --build-dir "$sdk/build" --prefix "$sdk" hardcaml_workbench_provider
+export OCAMLPATH="$sdk/lib${OCAMLPATH:+:$OCAMLPATH}"
 ```
 
 The package's generated opam build uses the focused provider test alias, so
@@ -83,8 +83,8 @@ separately enforce compile-time identity of daemon/provider types.
 Define the catalog and translate requests/results in a project-owned
 `test_provider.ml`. The adapter may launch any project test executable through its
 existing CLI with `Runner.run_child`. The executable does not need Workbench types,
-events or assertions. Inspect `../examples/fs2_cyclesim/test_provider.ml` for a
-complete native adapter around a separate simulator. The actual ASIC example uses
+events or assertions. The [Cyclesim counter adapter](../examples/cyclesim_counter/test_provider.ml)
+is a complete example using a separate simulator. The ASIC example uses
 the same pattern around its unchanged `fifo_sim.exe`.
 
 Seed interpretation is deliberately project-local, not imposed by this library.

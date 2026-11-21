@@ -42,8 +42,8 @@ off-screen indicators. 1,773 acceptance checks passed; see
 The first slice verifies and parses a complete VCD of at most 8 MiB, with bounded
 sparse conversion/rendering windows. Lazy file indexing remains outstanding, so the
 ticket is partial against its original broader scope. X/Z/uninitialized values are
-preserved and inspectable as text; graphical windows containing them report an
-explicit limitation of the installed two-state renderer. Surver remains proposed.
+preserved and inspectable as text; affected lanes report a graphical limitation
+without hiding known lanes. Surfer remains proposed.
 
 ## Request
 View and investigate waveforms inside Workbench, beyond exporting a trace or

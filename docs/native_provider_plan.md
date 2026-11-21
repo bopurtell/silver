@@ -36,7 +36,7 @@ No staging, commits, resets, pushes or other mutative Git operations.
   sibling README and installer tests. Own `hardcaml_asic_example` changes; keep the
   actual simulator and independent checker unchanged. Use library A's public API.
 - C: native migration/equivalence acceptance and independent counter example port.
-  Own `examples/fs2_cyclesim/` and new focused acceptance script(s), coordinating
+  Own `examples/cyclesim_counter/` and new focused acceptance script(s), coordinating
   against the published library API. Existing Python reference providers stay.
 - Coordinator: this plan, guides/ticket reconciliation, interface coordination,
   review, serial final checks and explicit persistent provider adoption.

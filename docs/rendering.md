@@ -4,7 +4,7 @@
 default, with independent-context and per-tile reference options (D1/F10). Palette
 defaults (D2) are approved for FS0; immutable-snapshot detail (D3) remains later.
 The new host now delivers a provisional shelf layout and palette, preserving the
-legacy RTL/hierarchy inspectors. See [FS0 controls](fs0_terminal.md) and the delivery
+legacy RTL/hierarchy inspectors. See [FS0 controls](terminal_controls.md) and the delivery
 plan for implemented behavior; the complete appearance/gallery design remains pending.
 
 **Appearance sources:** the newer [candidate gallery handoff](design/tui_candidate_gallery_handoff.md)
@@ -154,7 +154,7 @@ Ctrl-C is the global client-exit escape route and precedes all modal/paste captu
 Local navigation and deferred completion now explicitly invalidate the view;
 Escape does not wait for the 100 ms display clock. Domain refresh is still polled.
 Terminal-multiplexer Escape waits remain separate; the
-[measured tmux followup](fs1_investigation.md#escape-responsiveness-in-tmux--2026-10-16-followup)
+[measured tmux followup](asic_evidence_inspection.md#escape-responsiveness-in-tmux--2026-10-16-followup)
 documents the owner's 500 ms setting and explicit opt-in tuning.
 Raw terminal mode disables keyboard-generated OS signals, so checking it only in
 a fallback keymap is insufficient. Filters and unfinished paste capture remain

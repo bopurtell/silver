@@ -745,7 +745,7 @@ class ConfigureTests(unittest.TestCase):
         self.assertEqual(config["build_lock"], str(self.root.parent / ".workbench-example-build.lock"))
         self.assertEqual(config["outer_build_lock"], str(self.root.parent / ".workbench-build.lock"))
         self.assertEqual(config["serialization_lock"], str(self.root.parent / ".workbench-pyramid-execution.lock"))
-        self.assertNotEqual(config["build_lock"], "/tmp/opencode/workbench-pt8-build.lock")
+        self.assertNotEqual(config["build_lock"], "/tmp/opencode/workbench-build.lock")
         self.assertEqual(config["environment"]["OCAMLPATH"], str(self.generation / "lib") + ":" + str(self.sdk / "lib"))
         self.assertEqual(config["environment"]["OPAM_SWITCH_PREFIX"], "/installed/switch")
         for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "HARDCAML_ASIC_SYNTHESIS_TASK_LIMIT", "TMPDIR", "PT8_SESSION"):

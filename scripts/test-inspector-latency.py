@@ -40,7 +40,7 @@ import unicodedata
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location(
-    'investigation', Path(__file__).with_name('test-fs1-investigation.py'))
+    'investigation', Path(__file__).with_name('test-retained-asic-investigation.py'))
 investigation = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(investigation)
 metrics, fs0 = investigation.metrics, investigation.fs0

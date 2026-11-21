@@ -6,6 +6,12 @@ selectors and bounded local-suite execution. The tables below retain the origina
 pre-extraction inventory; the waveform-handoff script is now registered under the
 opt-in native-smoke selector and FS0/FS2 use shared support.
 
+**Release test naming update:** `terminal/test/waveform_handoff/` and
+`terminal/test/workload_handoff/` contain the current Dune handoff regressions.
+Older review tool paths and Dune line references below describe the recorded
+inventory, not commands to run now. Use the [test index](../test/README.md)
+for current selectors.
+
 2026-11-10. Source-only research slice. Paths below are relative to the Workbench
 checkout unless explicitly identified as external. This is a representative
 catalogue, not an exhaustive test count or a new execution/implementation queue.
@@ -62,7 +68,7 @@ zero subprocesses, zero native dependencies or zero build cost.
 | Adapter: `adapters/test/test_dune_adapter.ml` | **Yes — inline**, `adapters/test/dune:3–12` | Invocation construction/identity. Expected argv strings containing `dune ... -j20` are assertions, not permission to run a 20-job build |
 | Project integration: `project_integration/test/test_project_integration.ml` | **Yes — inline**, `project_integration/test/dune:1–11` | Project/config/driver contracts; WB-only candidate |
 | Setup: `setup/test/test_initialization.ml`, `setup/test/test_project_discovery.ml`, `setup/test/test_simulation_setup.ml` | **Yes — inline**, explicit modules in `setup/test/dune:1–12` | Local initialization/discovery; keep tests with setup |
-| Backend service/simulation/preparation: `backend/test/test_service.ml`, `backend/test/test_simulation.ml`, `backend/test/test_preparation.ml` | **Yes — tests**, `backend/test/dune:1–50`; `fs2_provider.py` and `fresh_provider.py` declared as dependencies | Controlled process/state/preparation lifecycles. Preparation source injects shell build/emission behavior; it is not evidence of example synthesis |
+| Backend service/simulation/preparation: `backend/test/test_service.ml`, `backend/test/test_simulation.ml`, `backend/test/test_preparation.ml` | **Yes — tests**, `backend/test/dune:1–50`; `simulation_provider_fixture.py` and `fresh_provider.py` declared as dependencies | Controlled process/state/preparation lifecycles. Preparation source injects shell build/emission behavior; it is not evidence of example synthesis |
 | Backend ASIC/catalog: `backend/test/asic/test_asic.ml`, `backend/test/asic/test_catalog.ml`, `backend/test/asic/fake_provider.py`, `backend/test/asic/production_flow_list.json` | **Yes — tests**, `backend/test/asic/dune:1–32` | Fake-provider orchestration and recorded catalog contracts, not actual execution of every production endpoint |
 | Backend readers/state: `backend/test/execution/test_execution.ml`, `backend/test/stage_normalization/test_stage_normalization.ml`, `backend/test/asic_artifacts/test_asic_artifacts.ml`, `backend/test/workspace/test_workspace.ml` | **Yes — tests**, each matching directory's `dune` contains its named `(test ...)` | WB-owned execution normalization, artifacts and workspace state; local fixtures |
 | Backend inspectors: `backend/test/inspection/test_inspection.ml`, `backend/test/inspection/test_timing_analysis.ml`, `backend/test/resources/test_resources.ml` | **Yes — tests**, `backend/test/inspection/dune:1–34` and `backend/test/resources/dune:1–6`; local Python providers declared | Controlled inspection/cache/failure and resource behavior; WB-only integration candidate |
@@ -87,7 +93,7 @@ registration and test locality should not be inferred from `_test.ml` names alon
 | `terminal/test_navigation_hydration_restart.py`, `terminal/test_presentation_preferences_restart.py` | **Yes — runtest actions**, `terminal/dune:137–153` passes `navigation_hydration_probe.exe` / `presentation_preferences_probe.exe` | Registered restart/preferences tests. The helper executable stanzas alone would not provide that registration |
 | `terminal/test_endpoint_prompt_native.py`, `terminal/test_standard_plan_recovery.py`, `terminal/test_workloads_native.py` | **No — opt-in**; `terminal/dune` registers the OCaml prompt/handoff tests and two restart Python actions, not these scripts | Actual private HTTP/PTY UI integration. Endpoint script permits catalog/version reads only, with no source execution/physical launch; keep near terminal composition |
 | `terminal/test_waveform_handoff_pty.py` | **No — opt-in**; absent from terminal test actions | Private real daemon/client with a generated synthetic JSON/VCD provider. WB-only PTY candidate, not actual PT.8 simulation |
-| `scripts/test-frontend-composition.py`, `scripts/test-frontend-refinement.py`, `scripts/test-synthetic-testing.py`, `scripts/test-testing-workspace.py` | **No — opt-in**; no source Dune test action references these entrypoints | Cross-process HTTP/PTY acceptance using prebuilt apps and controlled WB providers; plausible WB-only native suite candidates after per-mode dependency/cost admission. Testing-workspace config points to `scripts/fixtures/fs2_provider.py`; importing native helpers does not run their main hardware acceptance |
+| `scripts/test-frontend-composition.py`, `scripts/test-frontend-refinement.py`, `scripts/test-synthetic-testing.py`, `scripts/test-testing-workspace.py` | **No — opt-in**; no source Dune test action references these entrypoints | Cross-process HTTP/PTY acceptance using prebuilt apps and controlled WB providers; plausible WB-only native suite candidates after per-mode dependency/cost admission. Testing-workspace config points to `scripts/fixtures/simulation_fault_provider.py`; importing native helpers does not run their main hardware acceptance |
 | `scripts/test-native-application.sh` | **No — opt-in**; no Dune action invokes it | Install/initializer/client/daemon/driver composition using copied WB root fixtures and private HOME/XDG state. Cross-app/package suite candidate, explicitly build-bearing |
 | `scripts/test-unified-fresh-prefix.py` | **No — opt-in**; no Dune action invokes it | Actual native UI and source-preparation orchestration with synthetic EDA providers. WB-owned inputs, but nested fixture Dune builds and a `-j6`-checking wrapper: not an immediately admitted `-j2` smoke |
 
@@ -105,20 +111,20 @@ WB Dune declarations. Hardware providers have their own contracts and costs.
 
 | Representative exact paths | WB-visible dependency evidence | Disposition |
 | --- | --- | --- |
-| `scripts/test-fs2-provider.py` | Invokes `examples/fs2_cyclesim/provider.py` with explicit prebuilt `--counter`; checks real simulation outputs, deterministic signal bodies and injected failure | Small WB-owned hardware/provider candidate; requires the independently built specimen, not the sibling example. `examples/fs2_cyclesim/dune:1–13` declares `counter` and `test_provider` as **executables only**, not test actions |
-| `scripts/test-fs2-native.py` | Requires prebuilt daemon/client/counter; combines controlled provider negatives with real counter Cyclesim and actual PTY launch/rerun/artifact checks | WB-owned hardware plus app integration candidate, not a wholly fake-provider smoke. Its `Session`/`Terminal` are also imported independently by controlled-provider scripts |
+| `scripts/test-cyclesim-provider.py` | Invokes `examples/cyclesim_counter/provider.py` with explicit prebuilt `--counter`; checks real simulation outputs, deterministic signal bodies and injected failure | Small WB-owned hardware/provider candidate; requires the independently built specimen, not the sibling example. `examples/cyclesim_counter/dune:1–13` declares `counter` and `test_provider` as **executables only**, not test actions |
+| `scripts/test-native-simulation.py` | Requires prebuilt daemon/client/counter; combines controlled provider negatives with real counter Cyclesim and actual PTY launch/rerun/artifact checks | WB-owned hardware plus app integration candidate, not a wholly fake-provider smoke. Its `Session`/`Terminal` are also imported independently by controlled-provider scripts |
 | `scripts/test-native-provider.py` | `--only counter` selects WB counter adapters; FIFO route references `--fifo-root/simulation/provider.py` and explicit `--fifo-provider` / `--fifo-simulator`. `--fifo-root` defaults to the sibling example | Split candidate by route, not filename. FIFO deferred. Even counter-only currently resolves every supplied/default path including `fifo_root` with `strict=True`: do not advertise the entire entrypoint as example-independent without addressing that coupling |
 | `scripts/test-fifo-testing.py` | Defaults `--root` to sibling example, copies `simulation/` and `scripts/install-fifo-simulation.py`, uses a real simulator | FIFO hardware route deferred; it also supplies terminal support to the combined development-session harness |
 | `scripts/test-development-session.py` | Imports native/FIFO harnesses; default launcher is sibling `scripts/workbench_dev.py`; requires prepared private store/root and runs combined FIFO/PT.8 native forms | Example-sensitive app/provider integration; defer fresh runs during refactor, or later use explicitly approved immutable capture and exact private store identities |
 | `scripts/test-development-prepare.py`, `scripts/test-development-capture-smoke.py`, `scripts/test-development-provider.py` | First two reference sibling `scripts/workbench_dev.py`; provider test consumes a private store manifest's `provider_command` and compares real child discovery | Deferred example-sensitive preparation/router checks, even when no simulation/EDA is performed. Prepare/refresh can build and deliberately edits private copied source |
 | `scripts/test-developer-workflow.py` | Imports `scripts/test-development-session.py`; pins `OWNER_GENERATION` and `ASIC_GENERATION`, consumes captured SDK/apps and same-store phase receipts; optional preparation builds apps with shared lock and `-j2` | Example-sensitive phased acceptance, explicitly gated as described below; not a WB-only fast suite |
-| `scripts/test-fs0.py`, `scripts/test-fs0-dashboard.py`, `scripts/test-fs1-investigation.py` | WB scripts contain sibling-example defaults/path references; native helper consumers import these files too | Whole-script runs deferred unless a specific synthetic mode's complete input closure is established. Helper import does not itself prove that the example is executed |
+| `scripts/test-native-execution.py`, `scripts/test-retained-asic-dashboard.py`, `scripts/test-retained-asic-investigation.py` | WB scripts contain sibling-example defaults/path references; native helper consumers import these files too | Whole-script runs deferred unless a specific synthetic mode's complete input closure is established. Helper import does not itself prove that the example is executed |
 | `scripts/test-real-asic-example.py`, `scripts/real-asic-example-demo.py` | Test imports demo and composition oracle; demo sets `EXAMPLE = REPO.parent / 'hardcaml_asic_example'`; test consumes prepared persistent manifest/provider/project paths | Retained real-provider app integration, not fresh EDA. Still example-sensitive and deferred; “no build/EDA” is not “WB-only” |
-| `scripts/run-fs1-physical.py`, `scripts/run-fs1-finalization-acceptance.py` | Literal external example/project/tool paths; historical thread environment values of 20; real physical or external acceptance producers | Expensive explicit qualification utilities. Deferred, no execution authorization from their presence or historical successful evidence |
+| `scripts/run-asic-physical.py`, `scripts/run-asic-finalization-acceptance.py` | Literal external example/project/tool paths; historical thread environment values of 20; real physical or external acceptance producers | Expensive explicit qualification utilities. Deferred, no execution authorization from their presence or historical successful evidence |
 
 ### Current developer-workflow gate: simulation pass is not synthesis pass
 
-The [acceptance handoff](developer_workflow_acceptance_handoff.md) records
+The [acceptance handoff](archive/example-development/developer_workflow_acceptance_handoff.md) records
 `scripts/test-developer-workflow.py --phase simulations` as passed, including real
 FIFO/PT.8 forms, waveform/report transport, simulation restart and source Plan
 readiness. Its final phase-1 receipt is
@@ -133,7 +139,7 @@ coordinator resource activation and runtime-owner evidence. Do not launch them.
 Enabled Launch-and-view, successful source prewarm, denied-allocation negative
 controls, or old synthesis records do not close this gate.
 
-The [resource handoff](developer_workflow_resource_handoff.md) separately reports
+The [resource handoff](archive/example-development/developer_workflow_resource_handoff.md) separately reports
 synthetic resource-policy tests and metadata observations; its observer has not
 yet been attached to the actual acceptance flow. Neither quota declarations nor
 those tests prove observed native-worker bounds. This inventory uses EDA0 and
@@ -148,45 +154,38 @@ mutable `current` pointers/default sibling paths do not supply that identity.
 | `test/fixtures/example_project/lib/counter.ml`, `test/fixtures/example_project/test/test_counter.ml`, `test/fixtures/example_project/workbench/project_driver.ml` | **No WB registration:** now preserved by `test/dune`'s data-only `fixtures` boundary (previously root `data_only_dirs test`). The copied fixture has its own `dune-project`, a `(test ...)` in `test/fixtures/example_project/test/dune`, and fixture-root `runtest` / `workbench-test` aliases. These become executable when used as a separate project, not WB root test discovery |
 | `scripts/test-fixture.sh` | **No — opt-in** fixture build/test/driver integration. Copies the fixture to an external temp root; source currently hardcodes `-j20` in several Dune calls. Requires a later bounded-cost adaptation/admission, not immediate execution under this slice |
 | `test/baselines/terminal/dashboard.120x40.txt`, `test/baselines/terminal/dashboard.120x40.ansi`, `test/baselines/terminal/artifact-output.80x24.txt` | **No — data**, root data-only subtree. `test/baselines/terminal/README.md` describes generated captures; `scripts/capture-terminal-baseline.sh --check` is a standalone check, not a registered Dune action. Captures are not live PTY acceptance |
-| `scripts/fixtures/fs2_wire.py`, `scripts/fixtures/fs2_provider.py`, `scripts/fixtures/fresh_frontend.py`, `scripts/fixtures/unified_fresh_prefix.py` | Support/controlled producers, not standalone registered tests by location. Actual consumption/declarations decide dependency tracking |
+| `scripts/fixtures/simulation_fixture_wire.py`, `scripts/fixtures/simulation_fault_provider.py`, `scripts/fixtures/fresh_frontend.py`, `scripts/fixtures/unified_fresh_prefix.py` | Support/controlled producers, not standalone registered tests by location. Actual consumption/declarations decide dependency tracking |
 | `scripts/fixtures/resource-inspector/`, `scripts/test-resource-inspector.py`, `scripts/test-resource-inspector-retained.py` | **No — opt-in/data.** Inspector groundwork can copy/verify external evidence; its default example/protected-history reads mean even a synthetic-looking wrapper can depend on example state. Retained test fences allowed provider reads. Defer external replay until explicit immutable inputs are agreed |
 | `terminal/test_waveform_mixed_rows_pty.py`, `terminal/test_development_waveform_pty.py` | **No — opt-in** real-PTY replay using explicit `--vcd` bytes; latter imports former. No new simulation, but external retained VCD is still an input. Candidate for offline app integration only with a pinned self-contained fixture and explicit binary paths |
-| `review_pt8_endpoint_defaults/review.ml`, `review_pt8_endpoint_defaults/grammar.ml` | **Build only**, corresponding `dune:1–11` has two executable stanzas, no test/runtest action |
-| `review_pt8_waveform_frontend/review.ml`, `review_pt8_waveform_frontend/async_review.ml` | **Build only**, corresponding `dune:1–11`, not automatic regression registration |
-| `review_pt8_workloads_backend/probe.ml`, `review_pt8_workloads_backend/schema2/cases.ml` | **Build only**: root review `dune` declares `probe`; `schema2/dune` generates `recheck.ml` using `generate.py`, `cases.ml`, `../probe.ml`, then declares an executable. Generation/build is not test execution |
-| `reviewdocs/tests/development_waveform_probe.ml`, `reviewdocs/backend_review/cancellation_prefix_probe.ml` | **Build only**, each directory's `dune` declares an executable, no test action. Nearby Python review runners and Markdown reviews are opt-in utilities/retained review records |
-| `backend/test/frontend_review/review_frontend.ml`, `backend/test/frontend_review/review_frontend_corrected.ml` | Historical original **build only**; corrected harness **Yes — test**, proved by `backend/test/frontend_review/dune:1–15`. Dune comment records the original F2 fixture's repaired-precondition incompatibility; do not turn it into a passing current oracle silently |
-| `terminal/frontend_review_recheck.py` | **Yes — generated test dependency**, `terminal/dune:103–116` generates and registers `frontend_review_recheck.ml` from the historical frontend source. A review-derived regression actually registered with Dune, unlike the review executables above |
+| `terminal/endpoint_prompt_test.ml`, `terminal/test/waveform_handoff/`, `terminal/test/workload_handoff/` | **Yes — presentation tests.** Cover catalog selection/grammar, waveform identity and host actions, and the corrected workload handoff fixture with no generated sources |
+| `terminal/simulation_export.ml`, `terminal/waveform_view.ml` | **Yes — inline tests.** Cover exact byte publication and stale-owner rejection, rendering, and time and projection boundaries |
+| `backend/test/workloads/`, `backend/test/test_simulation.ml` | **Yes — backend tests.** Cover workload reader/cancellation, durable cache binding and descriptor lifetime, and simulation cancellation prefixes |
 | `scripts/developer-workflow-resources.py`, `scripts/test-developer-workflow-resources.py` | **No — opt-in** observer/manual runtime utility versus synthetic policy unit-test script. The latter dynamically imports the former. Neither is a passing actual synthesis/runtime acceptance gate |
 | `scripts/synthetic-flow-demo.py`, `scripts/real-asic-example-demo.py`, `scripts/run-resource-inspector-regressions.py` | **No — opt-in** demo/recorder utilities. Synthetic demo prepares private providers; real demo consumes example captures. Regression recorder includes external protected-evidence reads, six-job builds and an `asic-full` sibling-library branch: not a generic WB-only launcher |
 
-The inspected listings of `review_pt6_resource_probe/` and
-`test/pt8_frontend_review/` were empty. No active suite or evidence payload is
-inferred from those directory names. Historical reviews/handoffs should retain
-their original producer and failure disposition rather than being relabelled as
-current regression success.
+Historical review commands and receipts are not current test entry points.
 
 ## 5. Shared helpers are scattered imports, not yet a test-support boundary
 
 Representative observed import edges:
 
-- `scripts/test-fs2-native.py` → `scripts/fixtures/fs2_wire.py`,
-  `scripts/test-fs0.py`, `scripts/test-fs0-dashboard.py`; its `Session` extends the
+- `scripts/test-native-simulation.py` → `scripts/fixtures/simulation_fixture_wire.py`,
+  `scripts/test-native-execution.py`, `scripts/test-retained-asic-dashboard.py`; its `Session` extends the
   FS0 session and its `Terminal` extends the dashboard PTY driver.
 - `scripts/test-frontend-composition.py` → `scripts/synthetic-flow-demo.py` →
   `demo/synthetic_flow/http_client.py`, `provider.py`, `simulation_provider.py`.
   The demo mutates `sys.path`; composition then imports `http_client` by name.
   `Screen`, wait/status normalization and PTY/cell-oracle code live in the test
   entrypoint and are reused by other tests.
-- `scripts/test-development-session.py` → `scripts/test-fs2-native.py` and
+- `scripts/test-development-session.py` → `scripts/test-native-simulation.py` and
   `scripts/test-fifo-testing.py`; the new workflow script imports that session
   harness. FIFO also imports `scripts/test-synthetic-testing.py` for terminal support.
 - `terminal/test_endpoint_prompt_native.py` →
   `scripts/test-resource-inspector.py` (`native_setup`) and
-  `scripts/test-fs0-dashboard.py`; `terminal/test_standard_plan_recovery.py`
+  `scripts/test-retained-asic-dashboard.py`; `terminal/test_standard_plan_recovery.py`
   imports the endpoint module's `ROOT`/loader.
 - `terminal/test_waveform_handoff_pty.py` and
-  `terminal/test_waveform_mixed_rows_pty.py` → `scripts/fixtures/fs2_wire.py`;
+  `terminal/test_waveform_mixed_rows_pty.py` → `scripts/fixtures/simulation_fixture_wire.py`;
   `terminal/test_development_waveform_pty.py` imports mixed-row replay and native
   harness support.
 

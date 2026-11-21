@@ -23,7 +23,7 @@ def load(name, path):
     return module
 
 
-OLD = load('executable_timing_legacy', HERE / 'test-wb069-timing.py')
+OLD = load('executable_timing_legacy', HERE / 'test-timing-checklist.py')
 
 
 def provider(base, args):

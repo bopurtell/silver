@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('overview_composition', HERE / 'test-frontend-composition.py')
 C = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(C)
-spec = importlib.util.spec_from_file_location('overview_fs0', HERE / 'test-fs0.py')
+spec = importlib.util.spec_from_file_location('overview_fs0', HERE / 'test-native-execution.py')
 F = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(F)
 from http_client import Client, field, sexp, parse

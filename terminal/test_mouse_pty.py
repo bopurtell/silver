@@ -60,7 +60,7 @@ def quit_client(term):
 
 
 def run(args, tmp):
-    native = runpy.run_path(str(ROOT / 'scripts/test-fs2-native.py'))
+    native = runpy.run_path(str(ROOT / 'scripts/test-native-simulation.py'))
     demo = runpy.run_path(str(ROOT / 'scripts/synthetic-flow-demo.py'))
     base = demo['prepare'](tmp / 'fixture', manual=True)
     session = native['Session'](args, base, base / 'project')

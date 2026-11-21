@@ -165,7 +165,7 @@ let%test_unit "ASIC identity, missing/changed pages and declared limits" =
   let open Hardcaml_workbench_protocol in
   let reference : Asic_artifact.Reference.t =
     { id = "image"
-    ; run = Fs0_fixture.run_a
+    ; run = Asic_snapshot_fixture.run_a
     ; terminal_attempt = "original"
     ; label = "image"
     ; path = "/provider/image.png"
@@ -287,7 +287,7 @@ let%test_unit "ASIC streaming adapter launches only exact verified local publica
     let bytes = "\137PNG\000\255\r\n" in
     let reference : Asic_artifact.Reference.t =
       { id = "image"
-      ; run = Fs0_fixture.run_a
+      ; run = Asic_snapshot_fixture.run_a
       ; terminal_attempt = "original"
       ; label = "image"
       ; path = "/provider/image.png"

@@ -10,7 +10,7 @@ explicit requirements. D1 and the bounded D2/D3 FS0 defaults are accepted in the
 for independent inspection; immutable snapshot support remains later scope.
 Provider reviews below are historical; the adopted public named-flow and durable
 observation boundary is implemented. Current FS1 evidence and the exact installed
-inspection provider are recorded in [FS1 investigation](fs1_investigation.md), not
+inspection provider are recorded in [FS1 investigation](asic_evidence_inspection.md), not
 in the October 12 source review.
 The [construction plan](construction_phase_plan.md) owns phase order and evidence;
 [rendering](rendering.md) owns visual and interaction conventions;
@@ -57,8 +57,8 @@ PTY and two-profile real synthesis acceptance is in the [plan](construction_phas
 FS1's functional adopted-evidence scope is complete: capability-checked physical
 endpoints, collect/accept finalization lifecycle, bounded reports/artifacts, rich
 timing paths, measured clocks, stage-attributed physical/routing inspection and
-byte-exact external binary handoff. See [lifecycle](fs1_lifecycle_and_artifacts.md)
-and [investigation](fs1_investigation.md) for evidence, limits and provider identity.
+byte-exact external binary handoff. See [lifecycle](finalization_and_artifacts.md)
+and [investigation](asic_evidence_inspection.md) for evidence, limits and provider identity.
 The owner also confirms Escape works after the local-redraw/tmux followup.
 Local input and deferred/poll completion invalidate the view immediately; domain
 refresh remains polled at 500 ms, with a 100 ms clock for time-dependent content.
@@ -230,9 +230,9 @@ with project tests and regression commands.
 
 The next three subsections preserve the October 12 review and proposed contract,
 not a current upstream work queue. The adopted public observation/read/report
-integration is delivered; see [FS0 integration](fs0_provider_integration.md),
-[FS1 lifecycle](fs1_lifecycle_and_artifacts.md) and the current
-[inspection contract/provider generation](fs1_investigation.md#source-and-provider-boundary).
+integration is delivered; see [FS0 integration](asic_provider_integration.md),
+[FS1 lifecycle](finalization_and_artifacts.md) and the current
+[inspection contract/provider generation](asic_evidence_inspection.md#source-and-provider-boundary).
 Old Python source paths and missing-interface claims below describe that review's
 baseline, not the installed implementation used for current acceptance.
 

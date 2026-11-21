@@ -19,7 +19,7 @@ import traceback
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'fixtures'))
-from fs2_wire import parse, record, sexp
+from simulation_fixture_wire import parse, record, sexp
 
 
 def require(ok, message):
@@ -95,7 +95,7 @@ def selection(kind, cases=None, seed='42', failure=False):
     fifo = kind == 'fifo'
     return [('suite', 'controlled-fifo' if fifo else 'counter'),
             ('cases', cases or (['directed', 'seeded'] if fifo else ['wrap', 'reset', 'seeded'])),
-            ('seed', seed), ('parameters', [('cycles', '64'), ('checker', 'mismatch' if failure else 'normal')]
+            ('seed', seed), ('parameters', [('cycles', '64'), ('checker', 'mismatch' if failure else 'normal'), ('trace_mib', '1')]
              if fifo else [('cycles', '64'), ('step', '3'), ('inject_failure', 'true' if failure else 'false')]),
             ('asic_inputs', [])]
 
@@ -114,6 +114,8 @@ def equivalent(kind, commands, evidence):
                  ('zero', selection(kind, seed='0')),
                  ('failure', selection(kind, seed=str(2**64 - 1), failure=True))]
     scenarios += [(case, selection(kind, cases=[case])) for case in cases]
+    if kind == 'fifo':
+        scenarios.append(('export-stress', selection(kind, cases=['export-stress'])))
     runs = {}
     for label, selected in scenarios:
         outputs = {name: run_provider(command, selected, directory / (label + '-' + name))
@@ -126,6 +128,8 @@ def equivalent(kind, commands, evidence):
         for name in py[1]:
             require(stable_bytes(name, py[1][name]) == stable_bytes(name, native[1][name]),
                     kind + '/' + label + ' artifact byte equality: ' + name)
+        if label == 'export-stress':
+            require(len(native[1]['export-stress.vcd']) == 1024 * 1024, 'exact 1 MiB FIFO trace')
         labels = {field(field(e, 'payload')[1], 'label'): field(field(e, 'payload')[1], 'path')
                   for e in native[0] if isinstance(field(e, 'payload'), list)
                   and field(e, 'payload')[0] == 'Artifact'}
@@ -153,11 +157,16 @@ def equivalent(kind, commands, evidence):
                                       for k, v in selected['parameters']]
             run_provider(commands['native'], list(selected.items()),
                          directory / ('invalid-cycles-' + cycles), valid=False)
+    else:
+        selected = dict(selection(kind, cases=['export-stress']))
+        selected['parameters'] = list(dict(selected['parameters'], trace_mib='2').items())
+        run_provider(commands['native'], list(selected.items()),
+                     directory / 'invalid-trace-size', valid=False)
     return runs
 
 
 def daemon_acceptance(args, commands, expected, evidence):
-    spec = importlib.util.spec_from_file_location('native_http', HERE / 'test-fs2-native.py')
+    spec = importlib.util.spec_from_file_location('native_http', HERE / 'test-native-simulation.py')
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
     for kind in commands:
@@ -252,11 +261,11 @@ def main():
     commands = {}
     if args.only in (None, 'counter'):
         commands['counter'] = {
-            'python': [sys.executable, str(HERE.parent / 'examples/fs2_cyclesim/provider.py'), '--counter', str(args.counter)],
+            'python': [sys.executable, str(HERE.parent / 'examples/cyclesim_counter/provider.py'), '--counter', str(args.counter)],
             'native': [str(args.counter_provider), '--counter', str(args.counter)]}
     if args.only in (None, 'fifo'):
         commands['fifo'] = {
-            'python': [sys.executable, str(args.fifo_root / 'simulation/provider.py'), '--simulator', str(args.fifo_simulator)],
+            'python': [sys.executable, str(args.fifo_root / 'ip/controlled_fifo/verif/simulation/provider.py'), '--simulator', str(args.fifo_simulator)],
             'native': [str(args.fifo_provider), '--simulator', str(args.fifo_simulator)]}
     result = dict(status='failed', http=bool(args.daemon))
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('600s acceptance budget')))

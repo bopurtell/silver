@@ -32,7 +32,7 @@ def load(name, path):
     return module
 
 
-native = load('fifo_native_support', HERE / 'test-fs2-native.py')
+native = load('fifo_native_support', HERE / 'test-native-simulation.py')
 support = load('fifo_terminal_support', HERE / 'test-synthetic-testing.py')
 field, require = native.field, native.require
 sexp, parse = support.sexp, support.parse

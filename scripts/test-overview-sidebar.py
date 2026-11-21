@@ -123,9 +123,9 @@ def acceptance(t, check, http, runs, presets):
         geometry = None
         selections = None
         for scheme in ('Carbon', 'Slate', 'Crimson', 'Neon'):
-            t.choose_color_scheme(scheme, active_capture=
-                                  'sidebar-' + workspace + '-' + scheme.lower() + '-active')
-            shot = t.capture('sidebar-' + workspace + '-' + scheme.lower(), titles)
+            label = 'sidebar-' + workspace + '-' + scheme.lower()
+            t.choose_color_scheme(scheme, active_capture=label + '-active')
+            shot = t.capture(label, titles)
             rects = [pane_rect(shot, title) for title in titles]
             if geometry is None:
                 geometry = rects

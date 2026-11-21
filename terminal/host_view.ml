@@ -28,154 +28,49 @@ module Role = struct
 
   let rgb r g b = Attr.Color.rgb ~r ~g ~b
 
-  type palette =
-    { background : Attr.Color.t
-    ; foreground : Attr.Color.t
-    ; surface : Attr.Color.t
-    ; card : Attr.Color.t
-    ; muted : Attr.Color.t
-    ; border : Attr.Color.t
-    ; accent : Attr.Color.t
-    ; selective : Attr.Color.t
-    ; metric : Attr.Color.t
-    ; success : Attr.Color.t
-    ; warning : Attr.Color.t
-    ; failure : Attr.Color.t
-    }
-
-  let palette (appearance : Appearance.t) =
-    let make
-      background
-      foreground
-      surface
-      card
-      muted
-      border
-      accent
-      selective
-      metric
-      success
-      warning
-      failure
-      =
-      let c (r, g, b) = rgb r g b in
-      { background = c background
-      ; foreground = c foreground
-      ; surface = c surface
-      ; card = c card
-      ; muted = c muted
-      ; border = c border
-      ; accent = c accent
-      ; selective = c selective
-      ; metric = c metric
-      ; success = c success
-      ; warning = c warning
-      ; failure = c failure
-      }
-    in
-    match appearance.scheme with
-    | Carbon ->
-      make
-        (0, 0, 0)
-        (216, 216, 220)
-        (35, 35, 35)
-        (17, 17, 17)
-        (153, 153, 163)
-        (91, 91, 104)
-        (151, 177, 226)
-        (151, 169, 198)
-        (220, 196, 147)
-        (151, 198, 151)
-        (225, 185, 116)
-        (235, 139, 151)
-    | Slate ->
-      make
-        (28, 31, 36)
-        (218, 221, 226)
-        (49, 55, 64)
-        (34, 38, 44)
-        (157, 165, 177)
-        (100, 112, 128)
-        (153, 184, 213)
-        (157, 178, 195)
-        (214, 197, 157)
-        (155, 197, 168)
-        (224, 188, 130)
-        (226, 144, 154)
-    (* Adapted from read-only Ches ui/theme.ml Crimson: warm ground and rose accent. Lift
-       muted/border/error luminance for small evidence text and status contrast. *)
-    | Crimson ->
-      make
-        (12, 10, 10)
-        (224, 210, 210)
-        (53, 35, 40)
-        (19, 16, 16)
-        (167, 139, 145)
-        (112, 83, 92)
-        (232, 93, 117)
-        (208, 140, 154)
-        (255, 203, 107)
-        (158, 206, 106)
-        (255, 184, 108)
-        (255, 112, 136)
-    | Neon ->
-      make
-        (17, 22, 35)
-        (224, 233, 249)
-        (43, 55, 83)
-        (25, 34, 53)
-        (153, 173, 202)
-        (132, 151, 236)
-        (99, 218, 255)
-        (117, 202, 221)
-        (255, 207, 102)
-        (115, 231, 167)
-        (255, 202, 105)
-        (255, 116, 144)
+  let color n =
+    let r, g, b = Theme_catalog.channels n in
+    rgb r g b
   ;;
 
   let backdrop (appearance : Appearance.t) role =
-    let p = palette appearance in
-    match role with
-    | Selection | Active_tab ->
-      (match appearance.scheme with
-       | Carbon -> rgb 48 48 56
-       | Slate -> rgb 64 75 88
-       | Crimson -> rgb 76 39 49
-       | Neon -> rgb 43 55 83)
-    | Surface | Matched -> p.surface
-    | Foreground ->
-      (match appearance.preset with
-       | Studio | Structured_studio -> p.card
+    let p = Appearance.Scheme.palette appearance.scheme in
+    color
+      (match role with
+       | Selection | Active_tab -> p.selection
+       | Surface | Matched -> p.surface
+       | Foreground ->
+         (match appearance.preset with
+          | Studio | Structured_studio -> p.card
+          | _ -> p.background)
        | _ -> p.background)
-    | _ -> p.background
   ;;
 
   let foreground (appearance : Appearance.t) role =
-    let p = palette appearance in
+    let p = Appearance.Scheme.palette appearance.scheme in
     let accent =
       match appearance.color with
       | Restrained -> p.foreground
       | Selective -> p.selective
       | Vivid -> p.accent
     in
-    match role with
-    | Muted | Inactive_tab -> p.muted
-    | Border ->
-      (match appearance.color with
-       | Vivid -> p.border
-       | _ -> p.muted)
-    | Focus | Selection | Active_tab -> accent
-    | Metric | Matched ->
-      (match appearance.color with
-       | Vivid -> p.metric
+    color
+      (match role with
+       | Muted | Inactive_tab -> p.muted
+       | Border ->
+         (match appearance.color with
+          | Vivid -> p.border
+          | _ -> p.muted)
+       | Focus | Selection | Active_tab | Running -> accent
+       | Metric | Matched ->
+         (match appearance.color with
+          | Vivid -> p.metric
+          | _ -> p.foreground)
+       | Success -> p.success
+       | Warning -> p.warning
+       | Failure -> p.failure
+       | Heading -> p.heading
        | _ -> p.foreground)
-    | Success -> p.success
-    | Warning -> p.warning
-    | Failure -> p.failure
-    | Running -> accent
-    | Heading -> rgb 255 255 255
-    | _ -> p.foreground
   ;;
 
   let attrs (appearance : Appearance.t) role =
@@ -206,7 +101,7 @@ let box ~width ~height view =
 
 let colored appearance role view =
   let bg = Role.backdrop appearance role in
-  View.with_colors ~fill_backdrop:true view ~fg:(Role.palette appearance).foreground ~bg
+  View.with_colors ~fill_backdrop:true view ~fg:(Role.foreground appearance Foreground) ~bg
 ;;
 
 let lines ?(appearance = Appearance.default) ?(role = Role.Foreground) ~width ~height rows
@@ -542,7 +437,7 @@ let%test_unit "single-line selectors reserve distinct tokens after final width f
       let rendered =
         List.map ids ~f:(fun id ->
           let run =
-            { Fs0_fixture.run_a with
+            { Asic_snapshot_fixture.run_a with
               id
             ; label =
                 Some "A human provider label whose shared prefix must not hide identity"
@@ -4001,6 +3896,8 @@ let palette_controls host (p : H.palette) =
       || (match c.action with Edit_run _ -> true | _ -> false)) ->
     [ input "Cancel" Escape ]
   | None -> []
+  | Some (Theme_picker _) ->
+    submit "Apply" (Option.is_some (List.nth (H.matches p) p.index))
   | Some (Starter_name _) -> submit "Preview" nonblank
   | Some (Flow_field _) -> submit "Next" nonblank
   | Some (Starter_wait _) -> [ input "Dismiss" Escape ]
@@ -4034,7 +3931,8 @@ let palette_page host dimensions =
   match host.H.palette with
   | None -> None
   | Some p ->
-    let appearance = host.appearance in
+    let appearance = H.effective_appearance host in
+    let theme = H.theme_picker p in
     let bounds =
       Palette_view.bounds ~width:dimensions.Dimensions.width ~height:dimensions.height
     in
@@ -4070,6 +3968,7 @@ let palette_page host dimensions =
     in
     let heading =
       match p.argument with
+      | Some (H.Theme_picker _) -> "Choose theme"
       | Some (H.Plan_endpoint _) ->
         "PLAN ENDPOINT — "
         ^ Launch_preferences.chip_label p.capture.chip_target
@@ -4236,7 +4135,7 @@ let palette_page host dimensions =
       @ List.map help ~f:text
     in
     let shown = Int.max 0 (body_height - List.length header) in
-    let ranked = if Option.is_some p.argument then [] else H.ranked_matches p in
+    let ranked = if H.palette_has_results p then H.ranked_matches p else [] in
     let start = Int.max 0 (p.index - shown + 1) in
     let commands =
       List.drop ranked start
@@ -4250,7 +4149,14 @@ let palette_page host dimensions =
         let match_attrs =
           Role.attrs appearance Matched @ [ Attr.bg (Role.backdrop appearance role) ]
         in
+        let suffix =
+          match theme, result.Palette_search.item.action with
+          | Some picker, H.Set_scheme scheme
+            when Appearance.Scheme.equal picker.original scheme -> " [active]"
+          | _ -> ""
+        in
         let image = Palette_view.result_row
+          ~suffix
           ~attrs
           ~match_attrs
           ~marker_attrs:(Role.attrs appearance role)
@@ -4265,8 +4171,10 @@ let palette_page host dimensions =
         { Palette_view.image; spans })
     in
     let commands =
-      if Option.is_none p.argument && List.is_empty ranked && shown > 0
-      then [ Palette_view.inert (text ~role:Muted "No matching commands") ]
+      if H.palette_has_results p && List.is_empty ranked && shown > 0
+      then (
+        let empty = if Option.is_some theme then "No matching themes" else "No matching commands" in
+        [ Palette_view.inert (text ~role:Muted empty) ])
       else commands
     in
     let footer =
@@ -4274,6 +4182,11 @@ let palette_page host dimensions =
       then host.notice
       else if (match p.argument with Some (H.Starter_wait _ | H.Starter_preview _ | H.Starter_result _) -> true | _ -> false)
       then heading
+      else if Option.is_some theme
+      then
+        (if List.is_empty ranked
+         then "Edit search · Esc cancel"
+         else "Tab/↑/↓ or Ctrl-N/P preview · Enter apply · Esc cancel")
       else if Option.is_some p.argument
       then "Enter accepts input · Esc return · Ctrl-BS/Ctrl-W word · Ctrl-C exits"
       else
@@ -4292,7 +4205,7 @@ let palette_page host dimensions =
     in
     let scroll_limit =
       if scrolling_help && help_height > 0 then Some help_limit
-      else if Option.is_none p.argument && shown > 0 then Some (Int.max 0 (List.length ranked - 1))
+      else if H.palette_has_results p && shown > 0 then Some (Int.max 0 (List.length ranked - 1))
       else None
     in
     Some (bounds, geometry, heading, rows, scroll_limit)
@@ -4321,7 +4234,7 @@ let render_palette host dimensions background =
   match palette_page host dimensions with
   | None -> background
   | Some (bounds, geometry, heading, rows, _) ->
-    let appearance = host.H.appearance in
+    let appearance = H.effective_appearance host in
     let panel =
       List.map rows ~f:(fun row -> row.Palette_view.image)
       |> View.vcat
@@ -4465,6 +4378,8 @@ let render_menu host dimensions background =
 (* A focused explorer covers the workspace. Do not construct the obscured tile images:
    those have different widths and would wrap the same large source a second time. *)
 let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dimensions =
+  let host = H.dismiss_stale_theme_picker host in
+  let appearance = H.effective_appearance host in
   let inspection_tile =
     match host.H.inspection_paste with
     | None -> H.focused host
@@ -4482,7 +4397,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dime
           view
       in
       let icon =
-        indicator_view ?indicator_frames host.appearance (indicator_role kind) kind
+        indicator_view ?indicator_frames appearance (indicator_role kind) kind
       in
       let rows =
         Inspection_view.rows view ~width ~height
@@ -4490,11 +4405,12 @@ let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dime
       in
       let rows =
         List.mapi rows ~f:(fun i row ->
-          let text = View.text ~attrs:(Role.attrs host.appearance Surface) row in
+          let text = View.text ~attrs:(Role.attrs appearance Surface) row in
           (if i = 0 then View.hcat [ icon; text ] else text) |> box ~width ~height:1)
       in
-      View.vcat rows |> colored host.appearance Surface |> box ~width ~height
-    | None -> render_workspace ~now ?indicator_frames ?render_pane host data dimensions
+      View.vcat rows |> colored appearance Surface |> box ~width ~height
+    | None ->
+      render_workspace ~now ?indicator_frames ?render_pane { host with appearance } data dimensions
   in
   render_palette host dimensions (render_menu host dimensions background)
 ;;
@@ -4536,7 +4452,7 @@ let refinement_fixture (definition : P.Definition.t) =
          { workspace = workspace.id
          ; context = workspace.context
          ; expected_selection_revision = 0
-         ; run = Some Fs0_fixture.run_a
+         ; run = Some Asic_snapshot_fixture.run_a
          })
   in
   let stages =
@@ -4553,8 +4469,8 @@ let refinement_fixture (definition : P.Definition.t) =
         })
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
-      runs = List.map Fs0_fixture.snapshot.runs ~f:(fun run -> { run with stages })
+    { Asic_snapshot_fixture.snapshot with
+      runs = List.map Asic_snapshot_fixture.snapshot.runs ~f:(fun run -> { run with stages })
     }
   in
   let data =
@@ -4853,7 +4769,7 @@ let%test_unit "Session and Runs render effective global workspace and tile compr
   let host, data, find = refinement_fixture P.Overview.definition in
   let session = find "live-status" in
   let selector = find "run-selector" in
-  let run = { Fs0_fixture.run_a with id = "opaque00000000000000tail" } in
+  let run = { Asic_snapshot_fixture.run_a with id = "opaque00000000000000tail" } in
   let registry = Option.value_exn host.registry in
   let workspace =
     List.find_exn registry.workspaces ~f:(fun w ->
@@ -5026,7 +4942,7 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
   let error = "Final observation unavailable: exact checkpoint read timed out" in
   let runs =
     List.map snapshot.runs ~f:(fun execution ->
-      if Run_ref.equal execution.run Fs0_fixture.run_a
+      if Run_ref.equal execution.run Asic_snapshot_fixture.run_a
       then
         { execution with
           error = Some error
@@ -5089,7 +5005,7 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
           }
     }
   in
-  let failed = operation "observe" "failed" Fs0_fixture.run_a (Some "reader lost") in
+  let failed = operation "observe" "failed" Asic_snapshot_fixture.run_a (Some "reader lost") in
   let cancelled = { failed with state = "cancelled" } in
   List.iter
     [ failed; cancelled; { failed with kind = "run" } ]
@@ -5098,10 +5014,10 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
   List.iter
     [ with_state []
     ; with_state [ { failed with kind = "refresh" } ]
-    ; with_state [ { failed with run = Some Fs0_fixture.run_b } ]
+    ; with_state [ { failed with run = Some Asic_snapshot_fixture.run_b } ]
     ; with_state
         [ { failed with
-            run = Some { Fs0_fixture.run_a with backend = Backend_id.of_string "other" }
+            run = Some { Asic_snapshot_fixture.run_a with backend = Backend_id.of_string "other" }
           }
         ]
     ; with_state ~error:(Some "unrelated provider error") []
@@ -5118,7 +5034,7 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
         [ failed ]
     ]
     ~f:(fun data -> assert (not (contains (render host data tile) observation_qualifier)));
-  let pinned = { tile with binding = Pin_run Fs0_fixture.run_b } in
+  let pinned = { tile with binding = Pin_run Asic_snapshot_fixture.run_b } in
   let pinned_host =
     H.receive
       host
@@ -5129,13 +5045,13 @@ let%test_unit "stopped exact-run observation qualifies actual checklist layouts"
       }
   in
   assert (not (contains (render pinned_host data pinned) observation_qualifier));
-  let retained = { tile with binding = Pin_run Fs0_fixture.run_a } in
+  let retained = { tile with binding = Pin_run Asic_snapshot_fixture.run_a } in
   let selected_elsewhere =
     W.apply
       registry
       (Mutate
          { expected_revision = registry.revision
-         ; mutation = Option.value_exn (H.select_run host (Some Fs0_fixture.run_b))
+         ; mutation = Option.value_exn (H.select_run host (Some Asic_snapshot_fixture.run_b))
          })
     |> Result.ok
     |> Option.value_exn
@@ -5205,10 +5121,10 @@ let%test_unit "Waveforms callback renders bounded independent bodies beneath hos
   let host, data, find = refinement_fixture P.Waveforms.definition in
   let signals = find "waveform-signals" in
   assert (
-    Option.is_none (tile_run host { signals with binding = Pin_run Fs0_fixture.run_a }));
+    Option.is_none (tile_run host { signals with binding = Pin_run Asic_snapshot_fixture.run_a }));
   assert (
     T.Binding.equal
-      (H.binding_kind { signals with binding = Pin_run Fs0_fixture.run_a })
+      (H.binding_kind { signals with binding = Pin_run Asic_snapshot_fixture.run_a })
       Project);
   let rendered = ref [] in
   let render_pane (tile : W.Tile.t) ~width ~height =
@@ -5367,10 +5283,10 @@ let%test_unit "WB-002 host context labels respect icon policy without duplicatin
         in
         assert (
           String.is_substring screen ~substring:(indicator_label icons kind label ^ ": ")));
-    let tile = { (find "synthesis") with binding = Pin_run Fs0_fixture.run_a } in
+    let tile = { (find "synthesis") with binding = Pin_run Asic_snapshot_fixture.run_a } in
     let host = { host with appearance = { host.appearance with icons } } in
     let screen = tile_view host data tile ~width:100 ~height:16 |> plain_text in
-    let label = indicator_label icons Pin ("PIN " ^ run_label Fs0_fixture.run_a) in
+    let label = indicator_label icons Pin ("PIN " ^ run_label Asic_snapshot_fixture.run_a) in
     assert (String.is_substring screen ~substring:label);
     assert (
       List.length (String.substr_index_all screen ~pattern:label ~may_overlap:false) = 1))
@@ -5379,7 +5295,7 @@ let%test_unit "WB-002 host context labels respect icon policy without duplicatin
 let%test_unit "WB-002 host freshness uses typed state and preserves fallback payloads" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let tile = find "timing" in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let fallback = [ "Freshness: running"; "Linked: pass"; "CACHED UNVERIFIED" ] in
   let terminal : Asic.Terminal_result.t =
     { attempt = "attempt"
@@ -5406,7 +5322,7 @@ let%test_unit "WB-002 host freshness uses typed state and preserves fallback pay
         fallback
         (terminal_content host fallback_data tile ~run |> List.map ~f:E.text));
     let mismatched =
-      { fallback_data with summary = (fun _ -> data.summary Fs0_fixture.run_b) }
+      { fallback_data with summary = (fun _ -> data.summary Asic_snapshot_fixture.run_b) }
     in
     assert (
       List.equal
@@ -5452,7 +5368,7 @@ let%test_unit "WB-002 host freshness uses typed state and preserves fallback pay
     ; { operation with state = "completed" }, false
     ; { operation with state = "failed"; error = Some "running" }, false
     ; { operation with state = "cancelled" }, false
-    ; { operation with run = Some Fs0_fixture.run_b }, false
+    ; { operation with run = Some Asic_snapshot_fixture.run_b }, false
     ]
     ~f:(fun (operation, expected) ->
       let data = { data with asic = Some { snapshot with operations = [ operation ] } } in
@@ -5476,7 +5392,7 @@ let%test_unit "WB-002 inspector frames stop for terminal, cache-only and unavail
   =
   let host, data, find = refinement_fixture P.Overview.definition in
   let tile = find "timing" in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let view =
     Inspection_view.create ~scope:run ~run ~domain:"timing" ~stage:"signoff" ()
   in
@@ -5598,7 +5514,7 @@ let%test_unit "cooperative Testing renderer keeps project scope and bounded pane
   let catalog = find "simulation-catalog" in
   assert (
     T.Binding.equal
-      (H.binding_kind { catalog with binding = Pin_run Fs0_fixture.run_a })
+      (H.binding_kind { catalog with binding = Pin_run Asic_snapshot_fixture.run_a })
       Project);
   let host = H.set_filter host catalog.id "directed" in
   assert (
@@ -5631,7 +5547,7 @@ let%test_unit "cooperative Testing renderer keeps project scope and bounded pane
       in
       assert (String.equal (plain_text a) (plain_text b));
       assert (
-        not (String.is_substring (plain_text a) ~substring:(run_label Fs0_fixture.run_a))));
+        not (String.is_substring (plain_text a) ~substring:(run_label Asic_snapshot_fixture.run_a))));
   let text =
     tile_view host data (find "project-tests") ~width:24 ~height:8 |> plain_text
   in
@@ -6381,7 +6297,7 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
     { key = "run:exact"
     ; kind = "run"
     ; state = "executing"
-    ; run = Some Fs0_fixture.run_a
+    ; run = Some Asic_snapshot_fixture.run_a
     ; error = None
     ; activity = Unreported
     }
@@ -6399,10 +6315,10 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
     }
   in
   let data =
-    { data with asic = Some snapshot; runs = [ Fs0_fixture.run_a, "observing" ] }
+    { data with asic = Some snapshot; runs = [ Asic_snapshot_fixture.run_a, "observing" ] }
   in
-  assert (run_has_producer data Fs0_fixture.run_a);
-  assert (not (run_has_producer data Fs0_fixture.run_b));
+  assert (run_has_producer data Asic_snapshot_fixture.run_a);
+  assert (not (run_has_producer data Asic_snapshot_fixture.run_b));
   let frames glyph : Indicator.frames =
     { dot = View.text glyph; line = View.text glyph }
   in
@@ -6416,12 +6332,12 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
     assert (Bool.equal (not (String.equal a b)) (not (Appearance.Icons.equal icons None_)));
     List.iter
       [ []
-      ; [ { operation with run = Some Fs0_fixture.run_b } ]
+      ; [ { operation with run = Some Asic_snapshot_fixture.run_b } ]
       ; [ { operation with state = "detached" } ]
       ]
       ~f:(fun operations ->
         let data = { data with asic = Some { snapshot with operations } } in
-        assert (not (run_has_producer data Fs0_fixture.run_a));
+        assert (not (run_has_producer data Asic_snapshot_fixture.run_a));
         assert (
           String.equal
             (render data stage_tile "A" 100 16 |> plain_text)
@@ -6438,7 +6354,7 @@ let%test_unit "shared host frames follow exact producers and leave tile layout u
                 }
           }
         in
-        assert (not (run_has_producer data Fs0_fixture.run_a)));
+        assert (not (run_has_producer data Asic_snapshot_fixture.run_a)));
     let selection : Asic.Selection.t =
       { chip_target = None
       ; flow = "flow"
@@ -6854,8 +6770,8 @@ let%test_unit "physical detail without finalization retains stages independently
           { missing with
             summary =
               (fun _ ->
-                Option.map (summary Fs0_fixture.run_a) ~f:(fun s ->
-                  { s with run = Fs0_fixture.run_b; source_digest = "wrong-run-source" }))
+                Option.map (summary Asic_snapshot_fixture.run_a) ~f:(fun s ->
+                  { s with run = Asic_snapshot_fixture.run_b; source_digest = "wrong-run-source" }))
           }
         in
         let text = render host mismatched |> plain_text in
@@ -6912,7 +6828,7 @@ let%test_unit "two-row compact facts retain stages and stale warnings with fresh
       { H.default_local with
         utility_detail = true
       ; cursor = Some "synthesis"
-      ; stage_run = Some Fs0_fixture.run_a
+      ; stage_run = Some Asic_snapshot_fixture.run_a
       }
   in
   let details =
@@ -6999,8 +6915,8 @@ let%test_unit "shallow plan always shows readiness and endpoint; detail retains 
   let launched_snapshot =
     { snapshot with
       launches =
-        [ { key = "rendered-launch"; preview; run_id = Some Fs0_fixture.run_b.id } ]
-    ; runs = [ Fs0_fixture.run Fs0_fixture.run_b ]
+        [ { key = "rendered-launch"; preview; run_id = Some Asic_snapshot_fixture.run_b.id } ]
+    ; runs = [ Asic_snapshot_fixture.run Asic_snapshot_fixture.run_b ]
     }
   in
   let launched_host =
@@ -7034,16 +6950,7 @@ let%test_unit "live schemes change semantic paint without geometry registry or q
   let plain = render host data dimensions |> plain_text in
   List.iter Appearance.Scheme.all ~f:(fun scheme ->
     let appearance = { host.H.appearance with scheme } in
-    let command =
-      List.find_exn (H.appearance_commands host) ~f:(fun c ->
-        String.equal c.H.id ("appearance.scheme." ^ Appearance.Scheme.key scheme))
-    in
-    (* A local Set_appearance action carries no request/query payload. *)
-    let changed =
-      match command.action with
-      | Set_appearance selected -> H.set_appearance host selected
-      | _ -> failwith "scheme action must be client-local"
-    in
+    let changed = H.set_scheme host scheme in
     assert (phys_equal changed.registry host.registry);
     assert (phys_equal changed.locals host.locals);
     assert (phys_equal changed.focus host.focus);
@@ -7062,17 +6969,50 @@ let%test_unit "live schemes change semantic paint without geometry registry or q
         not
           (Poly.equal
              (Role.backdrop appearance Selection)
-             (Role.backdrop appearance Foreground))));
-    List.iter Appearance.Scheme.all ~f:(fun other ->
-      if not (Appearance.Scheme.equal scheme other)
-      then (
-        let other = { appearance with scheme = other } in
-        assert (
-          not
-            (Poly.equal
-               (Role.backdrop appearance Background)
-               (Role.backdrop other Background)));
-        assert (not (Poly.equal (Role.attrs appearance Focus) (Role.attrs other Focus))))))
+             (Role.backdrop appearance Foreground)))))
+;;
+
+let%test_unit "theme picker paints the live workspace and restores committed paint on cancel" =
+  let host, data, _ = refinement_fixture P.Overview.definition in
+  let host = H.set_scheme host Carbon in
+  let dimensions = { Dimensions.width = 120; height = 40 } in
+  let now = Time_ns.epoch in
+  let draw host = render ~now host data dimensions in
+  let top_row view =
+    let buffer = Buffer.create 512 in
+    Notty.Render.to_buffer
+      buffer
+      Notty.Cap.ansi
+      (0, 0)
+      (dimensions.width, 1)
+      (View.Private.notty_image view);
+    Buffer.contents buffer
+  in
+  let step host key =
+    match H.input host key ~commands:[] with
+    | host, No_effect -> host
+    | _ -> failwith "preview emitted an action"
+  in
+  let original = top_row (draw host) in
+  let opened = H.open_theme_picker host (Option.value_exn (H.capture host)) in
+  let screen = draw opened |> plain_text in
+  List.iter [ "Choose theme"; "Carbon [active]"; "Enter apply"; "Esc cancel" ] ~f:(fun text ->
+    assert (String.is_substring screen ~substring:text));
+  assert (String.equal original (top_row (draw opened)));
+  let preview = step opened (Text "crimson") in
+  let live = top_row (draw preview) in
+  assert (not (String.equal live original));
+  assert (String.equal live (top_row (draw (H.set_scheme host Crimson))));
+  assert (Appearance.equal preview.appearance host.appearance);
+  let no_match = step preview (Text "zzzzzz") in
+  let screen = draw no_match |> plain_text in
+  assert (String.is_substring screen ~substring:"No matching themes");
+  assert (not (String.is_substring screen ~substring:"[Apply]"));
+  assert (String.equal live (top_row (draw no_match)));
+  assert (String.equal original (top_row (draw (step no_match Escape))));
+  List.iter [ 80, 24; 30, 9; 12, 4 ] ~f:(fun (width, height) ->
+    let image = render ~now preview data { Dimensions.width; height } in
+    assert (View.width image = width && View.height image = height))
 ;;
 
 let%test_unit "host vertical stages preserve exact selected identity and detail" =
@@ -7082,7 +7022,7 @@ let%test_unit "host vertical stages preserve exact selected identity and detail"
     H.set_local
       host
       tile.id
-      { H.default_local with cursor = Some "signoff"; stage_run = Some Fs0_fixture.run_a }
+      { H.default_local with cursor = Some "signoff"; stage_run = Some Asic_snapshot_fixture.run_a }
   in
   List.iter
     [ 120, 5; 40, 10; 12, 4 ]
@@ -7145,7 +7085,7 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
       })
   in
   let index : Asic_inspection.Index.t =
-    { run = Fs0_fixture.run_a
+    { run = Asic_snapshot_fixture.run_a
     ; domain = "timing"
     ; stage = "signoff"
     ; source_digest = "exact-source-digest"
@@ -7162,7 +7102,7 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
   let snapshot = { (Option.value_exn data.asic) with inspections = [ index ] } in
   let state =
     Inspection_view.reconcile
-      (Timing_workspace.create ~generation:1 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
       snapshot
   in
   let state = { state with selected = Some "29" } in
@@ -7364,7 +7304,7 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
       tiles =
         List.map registry.tiles ~f:(fun t ->
           if W.Tile_id.equal t.id paths.id
-          then { t with binding = Pin_run Fs0_fixture.run_b }
+          then { t with binding = Pin_run Asic_snapshot_fixture.run_b }
           else t)
     }
   in
@@ -7607,7 +7547,7 @@ let%test_unit "Timing Session connected uses shared success theme attributes" =
 
 let%test_unit "selector width budget preserves useful IDs and aligns compact status" =
   let run =
-    { Fs0_fixture.run_a with id = "long-distinguishable-selected-run-abcdefghijklmnop" }
+    { Asic_snapshot_fixture.run_a with id = "long-distinguishable-selected-run-abcdefghijklmnop" }
   in
   let wide =
     run_selector_row
@@ -7711,7 +7651,7 @@ let%test_unit "actual utility and selector token images carry independent attrib
     Overview_tiles.Stage_strip.model
       ~appearance:stage_appearance
       ~width:80
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~selected_id:(Some stage.id)
       [ stage ]
   in
@@ -7749,7 +7689,7 @@ let%test_unit "actual utility and selector token images carry independent attrib
     String.equal
       (slice detail ~x:(prefix_width + cell_width label) ~width:9)
       (expected Success "completed"));
-  let run = { Fs0_fixture.run_a with id = "failed-running-identity" } in
+  let run = { Asic_snapshot_fixture.run_a with id = "failed-running-identity" } in
   List.iter
     [ "completed", Role.Success
     ; "failed", Failure
@@ -7812,8 +7752,7 @@ let%test_unit "actual utility and selector token images carry independent attrib
   assert (String.equal (slice clipped ~x:17 ~width:3) (token Success "com"))
 ;;
 
-let%test_unit "default Carbon ground is black and actual tile headers are neutral white" =
-  assert (Appearance.Scheme.equal Appearance.default.scheme Carbon);
+let%test_unit "actual tile headers use legible ink on fresh, light, and legacy grounds" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let ansi view =
     let buffer = Buffer.create 200 in
@@ -7825,41 +7764,48 @@ let%test_unit "default Carbon ground is black and actual tile headers are neutra
       (View.Private.notty_image view);
     Buffer.contents buffer
   in
-  let expected =
-    View.text
-      ~attrs:[ Attr.fg (Role.rgb 255 255 255); Attr.bg (Role.rgb 0 0 0); Attr.bold ]
-      "session"
-  in
   let tile = find "live-status" in
-  List.iter Appearance.Preset.all ~f:(fun preset ->
-    List.iter [ false; true ] ~f:(fun focused ->
-      let appearance = { Appearance.default with preset } in
-      let host =
-        { host with H.appearance; focus = (if focused then Some tile.id else None) }
+  List.iter
+    [ Appearance.default.scheme, 0xe0e5e9, 0x191d22
+    ; Appearance.Scheme.silver_light, 0x293540, 0xf5f7f9
+    ; Appearance.Scheme.Carbon, 0xffffff, 0x000000
+    ]
+    ~f:(fun (scheme, fg, bg) ->
+      let expected =
+        View.text
+          ~attrs:[ Attr.fg (Role.color fg); Attr.bg (Role.color bg); Attr.bold ]
+          "session"
       in
-      let image = tile_view host data tile ~width:60 ~height:8 in
-      let y, line =
-        plain_text image
-        |> String.split_lines
-        |> List.findi_exn ~f:(fun _ line -> String.is_substring line ~substring:"session")
-      in
-      let prefix =
-        String.substr_index_exn line ~pattern:"session" |> String.prefix line
-      in
-      let header =
-        View.crop ~l:(cell_width prefix) ~t:y image |> box ~width:7 ~height:1
-      in
-      assert (String.equal (ansi header) (ansi expected));
-      let geometry = panel_geometry host tile ~width:60 ~height:8 in
-      if geometry.border > 0
-      then (
-        let corner = if Appearance.Preset.equal preset Instrument then "╭" else "┌" in
-        let expected =
-          View.text
-            ~attrs:(Role.attrs appearance (if focused then Focus else Border))
-            corner
-        in
-        assert (String.equal (ansi (box ~width:1 ~height:1 image)) (ansi expected)))))
+      List.iter Appearance.Preset.all ~f:(fun preset ->
+        List.iter [ false; true ] ~f:(fun focused ->
+          let appearance = { Appearance.default with preset; scheme } in
+          let host =
+            { host with H.appearance; focus = (if focused then Some tile.id else None) }
+          in
+          let image = tile_view host data tile ~width:60 ~height:8 in
+          let y, line =
+            plain_text image
+            |> String.split_lines
+            |> List.findi_exn ~f:(fun _ line ->
+              String.is_substring line ~substring:"session")
+          in
+          let prefix =
+            String.substr_index_exn line ~pattern:"session" |> String.prefix line
+          in
+          let header =
+            View.crop ~l:(cell_width prefix) ~t:y image |> box ~width:7 ~height:1
+          in
+          assert (String.equal (ansi header) (ansi expected));
+          let geometry = panel_geometry host tile ~width:60 ~height:8 in
+          if geometry.border > 0
+          then (
+            let corner = if Appearance.Preset.equal preset Instrument then "╭" else "┌" in
+            let expected =
+              View.text
+                ~attrs:(Role.attrs appearance (if focused then Focus else Border))
+                corner
+            in
+            assert (String.equal (ansi (box ~width:1 ~height:1 image)) (ansi expected))))))
 ;;
 
 let%test_unit "palette prompt caret and fuzzy spans have independent typed attributes" =
@@ -8008,7 +7954,7 @@ let%test_unit "form overlay keeps query tail visible without changing captured f
     ; commands = []
     ; query
     ; index = 0
-    ; argument = Some (Acceptance (Fs0_fixture.run_a, "/exact/execution", "captured-key"))
+    ; argument = Some (Acceptance (Asic_snapshot_fixture.run_a, "/exact/execution", "captured-key"))
     }
   in
   let host = { host with palette = Some palette } in
@@ -8125,7 +8071,7 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
          { workspace = workspace.id
          ; context = context.id
          ; expected_selection_revision = context.selection_revision
-         ; run = Some Fs0_fixture.run_a
+         ; run = Some Asic_snapshot_fixture.run_a
          })
   in
   let find kind =
@@ -8140,17 +8086,17 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
     ; jobs = []
     ; runs =
         List.init 12 ~f:(fun i ->
-          { Fs0_fixture.run_a with id = sprintf "run-%02d" i }, sprintf "candidate-%02d" i)
+          { Asic_snapshot_fixture.run_a with id = sprintf "run-%02d" i }, sprintf "candidate-%02d" i)
     ; log_lines = (fun _ -> [])
     ; run_lines = (fun _ _ -> [])
     ; run_context = (fun _ -> [])
     ; summary =
         (fun run ->
-          List.find Fs0_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
+          List.find Asic_snapshot_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "fixture"
     ; environment = "fixture"
     ; asic_lines = []
-    ; asic = Some Fs0_fixture.snapshot
+    ; asic = Some Asic_snapshot_fixture.snapshot
     }
   in
   let host = H.receive H.empty registry in
@@ -8158,12 +8104,12 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
   let normal = image host synthesis in
   assert (not (String.is_substring normal ~substring:"follow"));
   assert (
-    not (String.is_substring normal ~substring:("Run: " ^ run_label Fs0_fixture.run_a)));
+    not (String.is_substring normal ~substring:("Run: " ^ run_label Asic_snapshot_fixture.run_a)));
   assert (String.is_substring normal ~substring:"Evidence: cached/unverified");
   let pin_registry =
     apply
       registry
-      (Set_tile_binding { tile = synthesis.id; binding = Pin_run Fs0_fixture.run_a })
+      (Set_tile_binding { tile = synthesis.id; binding = Pin_run Asic_snapshot_fixture.run_a })
   in
   let pinned = W.tile pin_registry synthesis.id in
   let pin_host = H.receive host pin_registry in
@@ -8176,7 +8122,7 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
       }
   in
   let pinned_text = image pin_host pinned in
-  assert (String.is_substring pinned_text ~substring:("PIN " ^ run_label Fs0_fixture.run_a));
+  assert (String.is_substring pinned_text ~substring:("PIN " ^ run_label Asic_snapshot_fixture.run_a));
   let titled_pin =
     H.set_local
       pin_host
@@ -8184,7 +8130,7 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
       { H.default_local with presentation = { T.inherit_ with header = Some true } }
   in
   let narrow_pin = tile_view titled_pin data pinned ~width:32 ~height:6 |> plain_text in
-  assert (String.is_substring narrow_pin ~substring:("PIN " ^ run_label Fs0_fixture.run_a));
+  assert (String.is_substring narrow_pin ~substring:("PIN " ^ run_label Asic_snapshot_fixture.run_a));
   assert (String.is_substring pinned_text ~substring:"Evidence: cached/unverified");
   assert (String.is_substring pinned_text ~substring:"Reported cells (agg.): 50");
   let hidden =
@@ -8276,7 +8222,7 @@ let%test_unit "host semantic terminal rows preserve failure and raw evidence whe
   let timing =
     List.find_exn registry.tiles ~f:(fun t -> String.equal t.W.Tile.kind "timing")
   in
-  let timing = { timing with binding = Pin_run Fs0_fixture.run_a } in
+  let timing = { timing with binding = Pin_run Asic_snapshot_fixture.run_a } in
   let registry =
     { registry with
       tiles =
@@ -8306,8 +8252,8 @@ let%test_unit "host semantic terminal rows preserve failure and raw evidence whe
     }
   in
   let summary =
-    { (List.hd_exn Fs0_fixture.snapshot.summaries) with
-      run = Fs0_fixture.run_a
+    { (List.hd_exn Asic_snapshot_fixture.snapshot.summaries) with
+      run = Asic_snapshot_fixture.run_a
     ; freshness = Validated
     ; terminal = Some terminal
     ; timing_analysis = None
@@ -8334,7 +8280,7 @@ let%test_unit "host semantic terminal rows preserve failure and raw evidence whe
         Terminal_result_view.State.inspect
           (Terminal_result_view.State.reconcile
              Terminal_result_view.State.empty
-             ~run:Fs0_fixture.run_a
+             ~run:Asic_snapshot_fixture.run_a
              ~summary:(Some summary))
     }
   in
@@ -8497,7 +8443,7 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
   let registry =
     apply
       registry
-      (Set_tile_binding { tile = pinned.id; binding = Pin_run Fs0_fixture.run_a })
+      (Set_tile_binding { tile = pinned.id; binding = Pin_run Asic_snapshot_fixture.run_a })
   in
   let stage id status reason : Asic.Stage.t =
     { id
@@ -8530,9 +8476,9 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
     }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       summaries =
-        List.map Fs0_fixture.snapshot.summaries ~f:(fun s ->
+        List.map Asic_snapshot_fixture.snapshot.summaries ~f:(fun s ->
           { s with terminal = Some terminal })
     ; preview =
         Some
@@ -8547,13 +8493,13 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
           ; plan_json = "{}"
           }
     ; runs =
-        [ { (Fs0_fixture.run Fs0_fixture.run_a) with
+        [ { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_a) with
             stages =
               [ stage "placement" Completed None
               ; stage "routing" Failed (Some "route reason")
               ]
           }
-        ; { (Fs0_fixture.run Fs0_fixture.run_b) with
+        ; { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_b) with
             stages = [ stage "placement" Running None ]
           }
         ]
@@ -8578,9 +8524,9 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
     let mutation = H.select_run host (Some run) |> Option.value_exn in
     H.receive host (apply (Option.value_exn host.H.registry) mutation)
   in
-  let host = select (H.receive H.empty registry) Fs0_fixture.run_a in
-  let stages = Overview_tiles.observed_stages ~asic:data.asic ~run:Fs0_fixture.run_a in
-  let host = H.browse_stages host following.id ~run:Fs0_fixture.run_a ~stages ~delta:1 in
+  let host = select (H.receive H.empty registry) Asic_snapshot_fixture.run_a in
+  let stages = Overview_tiles.observed_stages ~asic:data.asic ~run:Asic_snapshot_fixture.run_a in
+  let host = H.browse_stages host following.id ~run:Asic_snapshot_fixture.run_a ~stages ~delta:1 in
   let host =
     H.set_local
       host
@@ -8606,7 +8552,7 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
     ~f:(fun text -> assert (String.is_substring detail ~substring:text));
   assert (not (String.is_substring detail ~substring:"Matching project preview"));
   assert (not (String.is_substring detail ~substring:"placement: completed"));
-  let host = select host Fs0_fixture.run_b in
+  let host = select host Asic_snapshot_fixture.run_b in
   let projected tile =
     utility_rows host data tile
     |> Option.value_exn
@@ -8651,12 +8597,12 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
     { snapshot with
       runs =
         List.map snapshot.runs ~f:(fun run ->
-          if Run_ref.equal run.run Fs0_fixture.run_b then { run with stages } else run)
+          if Run_ref.equal run.run Asic_snapshot_fixture.run_b then { run with stages } else run)
     }
   in
   let data = { data with asic = Some snapshot } in
   let host =
-    H.browse_stages compact_host following.id ~run:Fs0_fixture.run_b ~stages ~delta:5
+    H.browse_stages compact_host following.id ~run:Asic_snapshot_fixture.run_b ~stages ~delta:5
   in
   let key = List.hd_exn (Plain_rpc.keys (Plan selection) snapshot) in
   let snapshot =
@@ -8691,7 +8637,7 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
           String.is_substring line ~substring:"stage-5:"
           && String.is_substring line ~substring:"pending"))));
   let top =
-    H.browse_stages host following.id ~run:Fs0_fixture.run_b ~stages ~delta:(-5)
+    H.browse_stages host following.id ~run:Asic_snapshot_fixture.run_b ~stages ~delta:(-5)
   in
   let top =
     H.set_local top following.id { (H.local top following.id) with scroll = 99 }
@@ -8860,9 +8806,9 @@ let%test_unit "fit geometry fills tracks, keeps thirteen tiles visible, and fall
 
 let%test_unit "stage evidence is scoped honestly and never borrows synthesis counts" =
   let known =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       runs =
-        List.map Fs0_fixture.snapshot.runs ~f:(fun execution ->
+        List.map Asic_snapshot_fixture.snapshot.runs ~f:(fun execution ->
           { execution with
             selection =
               Some
@@ -8876,7 +8822,7 @@ let%test_unit "stage evidence is scoped honestly and never borrows synthesis cou
     }
   in
   let text snapshot kind =
-    run_lines (Some snapshot) Fs0_fixture.run_a kind |> String.concat ~sep:"\n"
+    run_lines (Some snapshot) Asic_snapshot_fixture.run_a kind |> String.concat ~sep:"\n"
   in
   List.iter [ "placement"; "cts"; "routing" ] ~f:(fun kind ->
     let requested = text known kind in
@@ -8885,7 +8831,7 @@ let%test_unit "stage evidence is scoped honestly and never borrows synthesis cou
         requested
         ~substring:"No terminal result imported; inspect exact finalization reference");
     assert (String.is_substring requested ~substring:"Request endpoint: synthesis");
-    let unknown = text Fs0_fixture.snapshot kind in
+    let unknown = text Asic_snapshot_fixture.snapshot kind in
     assert (String.is_substring unknown ~substring:"Request scope: unknown");
     assert (String.is_substring unknown ~substring:"No terminal result imported"));
   let physical =
@@ -8981,13 +8927,13 @@ let%test_unit "imported clock configuration retains explicit known or unknown re
     }
   in
   let snapshot =
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       summaries =
-        List.map Fs0_fixture.snapshot.summaries ~f:(fun summary ->
+        List.map Asic_snapshot_fixture.snapshot.summaries ~f:(fun summary ->
           { summary with terminal = Some terminal })
     }
   in
-  let output = run_lines (Some snapshot) Fs0_fixture.run_a "cts" in
+  let output = run_lines (Some snapshot) Asic_snapshot_fixture.run_a "cts" in
   assert (
     List.mem output "Declared clock clk_i period: 10 ns [available]" ~equal:String.equal);
   assert (
@@ -9010,7 +8956,7 @@ let%test_unit "imported clock configuration retains explicit known or unknown re
   in
   assert (
     List.mem
-      (run_lines (Some snapshot) Fs0_fixture.run_a "cts")
+      (run_lines (Some snapshot) Asic_snapshot_fixture.run_a "cts")
       "Request endpoint: physical"
       ~equal:String.equal);
   let summary = List.hd_exn snapshot.summaries in
@@ -9183,10 +9129,10 @@ let%test_unit "artifact overlay cannot render retained page after tile binding c
     |> Result.ok
     |> Option.value_exn
   in
-  let snapshot = bind snapshot Fs0_fixture.run_a in
+  let snapshot = bind snapshot Asic_snapshot_fixture.run_a in
   let reference : Asic_artifact.Reference.t =
     { id = "report"
-    ; run = Fs0_fixture.run_a
+    ; run = Asic_snapshot_fixture.run_a
     ; terminal_attempt = "attempt-a"
     ; label = "Report"
     ; path = "/daemon/report"
@@ -9238,7 +9184,7 @@ let%test_unit "artifact overlay cannot render retained page after tile binding c
   let frame host = render host data { width = 100; height = 30 } |> plain_text in
   assert (String.is_substring (frame host) ~substring:page.text);
   (* Deliberately retain old local state: the renderer independently checks binding. *)
-  let changed = { host with registry = Some (bind snapshot Fs0_fixture.run_b) } in
+  let changed = { host with registry = Some (bind snapshot Asic_snapshot_fixture.run_b) } in
   assert (Option.is_none (artifact_inspector changed tile));
   assert (not (String.is_substring (frame changed) ~substring:page.text))
 ;;
@@ -9248,7 +9194,7 @@ let%test_unit "inspection overlay and input share full viewport and visibly reve
   =
   let snapshot = W.initial ~session_id:(W.Session_id.of_string "inspection-viewport") in
   let tile = List.hd_exn snapshot.tiles in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let bind snapshot run =
     W.apply
       snapshot
@@ -9366,7 +9312,7 @@ let%test_unit "inspection overlay and input share full viewport and visibly reve
           (plain_text (render returned data dimensions))
           (plain_text (frame bottom)));
       let stale =
-        { (host_for bottom) with registry = Some (bind snapshot Fs0_fixture.run_b) }
+        { (host_for bottom) with registry = Some (bind snapshot Asic_snapshot_fixture.run_b) }
       in
       assert (Option.is_none (inspection_explorer stale tile)))
 ;;
@@ -9380,7 +9326,7 @@ let%test_unit "unterminated inspection paste keeps query and rejection visible w
   in
   let tile = List.hd_exn registry.tiles in
   let inspector =
-    { (Inspection_view.create ~run:Fs0_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
+    { (Inspection_view.create ~run:Asic_snapshot_fixture.run_a ~domain:"timing" ~stage:"signoff" ()) with
       editing = true
     }
   in
@@ -9473,7 +9419,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
   let s = apply s (Create_tile { workspace; kind = "synthesis"; geometry }) in
   let pinned = (List.last_exn s.tiles).id in
   let s =
-    apply s (Set_tile_binding { tile = pinned; binding = Pin_run Fs0_fixture.run_a })
+    apply s (Set_tile_binding { tile = pinned; binding = Pin_run Asic_snapshot_fixture.run_a })
   in
   let select host run =
     let s = Option.value_exn host.H.registry in
@@ -9483,17 +9429,17 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
   let data =
     { project = None
     ; jobs = []
-    ; runs = List.map Fs0_fixture.snapshot.runs ~f:(fun run -> run.run, run.status)
+    ; runs = List.map Asic_snapshot_fixture.snapshot.runs ~f:(fun run -> run.run, run.status)
     ; log_lines = (fun _ -> [])
-    ; run_lines = run_lines (Some Fs0_fixture.snapshot)
-    ; run_context = request_context (Some Fs0_fixture.snapshot)
+    ; run_lines = run_lines (Some Asic_snapshot_fixture.snapshot)
+    ; run_context = request_context (Some Asic_snapshot_fixture.snapshot)
     ; summary =
         (fun run ->
-          List.find Fs0_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
+          List.find Asic_snapshot_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "SYNTHETIC FIXTURE"
     ; environment = "fixture"
     ; asic_lines = []
-    ; asic = Some Fs0_fixture.snapshot
+    ; asic = Some Asic_snapshot_fixture.snapshot
     }
   in
   let frame host width height =
@@ -9508,7 +9454,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
     Buffer.contents buffer
   in
   let has frame text = String.is_substring frame ~substring:text in
-  let host = select (H.receive H.empty s) Fs0_fixture.run_a in
+  let host = select (H.receive H.empty s) Asic_snapshot_fixture.run_a in
   let host = { host with focus = Some following } in
   (* Overview is compact by default. Counts and provenance survive a run switch; cell
      tables remain an explicit Cells mode instead of consuming summary rows. *)
@@ -9517,7 +9463,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
   assert (has before "Evidence: cached/unver");
   assert (has before "Cell breakdown: 2 reported");
   assert (not (has before "/explicit/synthetic"));
-  let host = select host Fs0_fixture.run_b in
+  let host = select host Asic_snapshot_fixture.run_b in
   let registry_before = Option.value_exn host.registry |> W.Snapshot.sexp_of_t in
   List.iter appearance_cases ~f:(fun appearance ->
     let host = { host with appearance } in
@@ -9547,7 +9493,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
     Asic_intents.plan
       Asic_intents.empty
       ~now:Time_ns.epoch
-      Fs0_fixture.snapshot
+      Asic_snapshot_fixture.snapshot
       ~visible:(H.evidence_runs host)
   in
   assert (List.is_empty intents);
@@ -9581,7 +9527,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
       Synthesis_view.Mode.equal
         (Synthesis_view.State.mode (H.local resized pinned).synthesis)
         Summary));
-  let host = select host Fs0_fixture.run_a in
+  let host = select host Asic_snapshot_fixture.run_a in
   assert (has (frame host 32 8) "Reported cells (agg.): 50")
 ;;
 
@@ -9849,7 +9795,7 @@ let wb054_index rows =
   let index =
     Asic_inspection.Index.t_of_sexp
       (Sexp.List
-         [ field "run" (Run_ref.sexp_of_t Fs0_fixture.run_a)
+         [ field "run" (Run_ref.sexp_of_t Asic_snapshot_fixture.run_a)
          ; field "execution_file" (Atom "/exact/execution")
          ; field "execution_sha256" (Atom "exact-sha")
          ; field "domain" (Atom "timing")
@@ -9885,7 +9831,7 @@ let wb054_timing () =
   let snapshot = { (Option.value_exn data.asic) with inspections = [ wb054_index 3 ] } in
   let state =
     Inspection_view.reconcile
-      (Timing_workspace.create ~generation:4 ~run:Fs0_fixture.run_a ~stage:"signoff")
+      (Timing_workspace.create ~generation:4 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
       snapshot
   in
   let paths = find "timing-paths" in
@@ -10067,7 +10013,7 @@ let%test_unit "WB-054 close inspector returns focus predictably and keeps select
             (Inspection_view.create
                ?scope
                ~generation:3
-               ~run:Fs0_fixture.run_a
+               ~run:Asic_snapshot_fixture.run_a
                ~domain:"clocks"
                ~stage:"signoff"
                ())
@@ -10087,7 +10033,7 @@ let%test_unit "WB-054 close inspector returns focus predictably and keeps select
       overview
       tile.id
       { (H.local overview tile.id) with
-        artifacts = Some (Artifact_view.create ?scope ~generation:2 Fs0_fixture.run_a)
+        artifacts = Some (Artifact_view.create ?scope ~generation:2 Asic_snapshot_fixture.run_a)
       }
   in
   let closed, _ = H.close_inspector browser |> Result.ok |> Option.value_exn in
@@ -10101,7 +10047,7 @@ let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow i
   let paths = find "timing-paths" in
   let host = H.set_timing host paths { state with selected = Some "2" } in
   let workspace = Option.value_exn (H.active host) in
-  let run = display_run Fs0_fixture.run_a in
+  let run = display_run Asic_snapshot_fixture.run_a in
   List.iter Appearance.Icons.all ~f:(fun icons ->
     let host = { host with appearance = { host.appearance with icons } } in
     let sep =
@@ -10137,7 +10083,7 @@ let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow i
   let cleared = wb054_without_run host in
   List.iter (breadcrumbs cleared) ~f:(fun crumb ->
     assert (not (String.is_substring crumb ~substring:"(signoff)"));
-    assert (not (String.is_substring crumb ~substring:Fs0_fixture.run_a.id)));
+    assert (not (String.is_substring crumb ~substring:Asic_snapshot_fixture.run_a.id)));
   (* An open inspector names itself and its stage. *)
   let overview, _, _ = refinement_fixture P.Overview.definition in
   let tile =
@@ -10154,7 +10100,7 @@ let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow i
           Some
             (Inspection_view.create
                ?scope:(tile_run overview tile)
-               ~run:Fs0_fixture.run_a
+               ~run:Asic_snapshot_fixture.run_a
                ~domain:"clocks"
                ~stage:"signoff"
                ())
@@ -10177,12 +10123,12 @@ let%test_unit "WB-054 full-area inspector renders breadcrumbs without losing con
   let explorer =
     Inspection_view.create
       ?scope
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~domain:"clocks"
       ~stage:"signoff"
       ()
   in
-  let browser = Artifact_view.create ?scope Fs0_fixture.run_a in
+  let browser = Artifact_view.create ?scope Asic_snapshot_fixture.run_a in
   List.iter Appearance.Icons.all ~f:(fun icons ->
     let host = { host with appearance = { host.appearance with icons } } in
     List.iter

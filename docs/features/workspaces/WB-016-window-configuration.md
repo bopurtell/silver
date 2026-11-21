@@ -69,5 +69,5 @@ Configuration is declarative composition, not a second authoritative live regist
 ## References
 - [User-composable windows/workspaces: implementation plan](../../workspace_configuration_plan.md)
 - [Window vocabulary and ownership](../workspaces_and_layouts.md)
-- [Existing template exclusions](../../fs3_adoption.md#workspace-templates)
+- [Existing template exclusions](../../existing_project_setup.md#workspace-templates)
 - [Protocol registry](../../../protocol/workspace.ml)

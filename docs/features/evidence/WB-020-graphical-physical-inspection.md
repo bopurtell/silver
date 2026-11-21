@@ -64,6 +64,6 @@ Default: read-only retained evidence and explicit mapping, no heuristic geometry
 Re-estimate after the spike if the selected producer cannot supply usable coordinates.
 
 ## References
-- [Physical evidence and external-handoff limits](../../fs1_investigation.md)
+- [Physical evidence and external-handoff limits](../../asic_evidence_inspection.md)
 - [Binary export foundation](../../../terminal/artifact_binary_export.ml)
 - [Hardware inspection requirements](../hardware_inspection.md)

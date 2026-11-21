@@ -48,7 +48,7 @@ let index : R.Index.t =
 
 let asic ?(details = []) ?(artifacts = []) ?(bytes = []) ?(index = index) source =
   Some
-    { Fs0_fixture.snapshot with
+    { Asic_snapshot_fixture.snapshot with
       resources =
         Some
           { R.Snapshot.sources = [ source ]
@@ -64,7 +64,7 @@ let imported () =
   let target = R.Target.Coarse_run "/exact/capture" in
   let snapshot = asic (source target) in
   let view = V.select_target V.empty (Some target) in
-  V.reconcile view ~run:(Some Fs0_fixture.run_a) ~filter:"" snapshot, snapshot
+  V.reconcile view ~run:(Some Asic_snapshot_fixture.run_a) ~filter:"" snapshot, snapshot
 ;;
 
 let text view snapshot =
@@ -319,12 +319,12 @@ let%test_unit "production tile uses saved source chip rather than current planni
   in
   let host, data, find = Host_view.refinement_fixture definition in
   let tile = find "resources" in
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let selected : Asic.Chip_target.t = { chip = "saved-chip"; variant = "SRAM" } in
   let selection =
-    { (Fs0_fixture.fresh_intent "selected").selection with chip_target = Some selected }
+    { (Asic_snapshot_fixture.fresh_intent "selected").selection with chip_target = Some selected }
   in
-  let execution = { (Fs0_fixture.run run) with selection = Some selection } in
+  let execution = { (Asic_snapshot_fixture.run run) with selection = Some selection } in
   let render target =
     let snap = Option.value_exn (asic (source target)) in
     let asic =
@@ -525,16 +525,16 @@ let%test_unit "explicit source survives Main and filter changes; run-follow neve
   assert (Option.is_none op);
   assert (Option.equal String.equal view.selected (Some "data"));
   let filtered =
-    V.reconcile view ~run:(Some Fs0_fixture.run_b) ~filter:"program" snapshot
+    V.reconcile view ~run:(Some Asic_snapshot_fixture.run_b) ~filter:"program" snapshot
   in
   assert (Option.equal String.equal filtered.selected (Some "data"));
   assert (Option.equal R.Target.equal view.target filtered.target);
   let following =
     V.select_target filtered None
-    |> fun t -> V.reconcile t ~run:(Some Fs0_fixture.run_b) ~filter:"" snapshot
+    |> fun t -> V.reconcile t ~run:(Some Asic_snapshot_fixture.run_b) ~filter:"" snapshot
   in
   assert (Option.is_none following.index);
-  assert (Option.equal R.Target.equal following.target (Some (Run Fs0_fixture.run_b)))
+  assert (Option.equal R.Target.equal following.target (Some (Run Asic_snapshot_fixture.run_b)))
 ;;
 
 let%test_unit "detail uses exact resource/section/digest and changing digest invalidates \
@@ -1039,16 +1039,16 @@ let%test_unit "resource host scopes invalidate A-B-A reads while explicit import
     |> Result.ok
     |> Option.value_exn
   in
-  let registry = select registry Fs0_fixture.run_a in
+  let registry = select registry Asic_snapshot_fixture.run_a in
   let resources_only = { registry with tiles = [ tile ] } in
   assert (List.is_empty (H.evidence_runs (H.receive H.empty resources_only)));
   let host = H.receive H.empty registry in
   let view = { V.empty with generation = 23; pending = Some "old read" } in
   let local = H.local host tile.id in
   let host = H.set_local host tile.id { local with resources = view } in
-  let b = select registry Fs0_fixture.run_b in
+  let b = select registry Asic_snapshot_fixture.run_b in
   let host = H.receive host b in
-  let host = H.receive host (select b Fs0_fixture.run_a) in
+  let host = H.receive host (select b Asic_snapshot_fixture.run_a) in
   let current = (H.local host tile.id).resources in
   assert (current.generation > 23 && Option.is_none current.pending);
   let imported, _ = imported () in
@@ -1056,7 +1056,7 @@ let%test_unit "resource host scopes invalidate A-B-A reads while explicit import
     H.set_local host tile.id { (H.local host tile.id) with resources = imported }
   in
   let registry = Option.value_exn host.registry in
-  let host = H.receive host (select registry Fs0_fixture.run_b) in
+  let host = H.receive host (select registry Asic_snapshot_fixture.run_b) in
   assert (
     Option.equal
       R.Target.equal

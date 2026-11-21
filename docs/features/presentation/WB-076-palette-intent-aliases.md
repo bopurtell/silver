@@ -3,7 +3,7 @@ id: WB-076
 title: Predictable palette launch aliases
 category: presentation
 feature_sets: [FS0, FS5]
-status: delivered
+status: closed
 kind: enhancement
 priority: P1
 severity: n/a
@@ -19,6 +19,8 @@ related: [WB-054, WB-079]
 ---
 
 # WB-076 — Predictable palette launch aliases
+
+Owner accepted and closed this ticket on 2026-11-21.
 
 ## Request
 Make the first Enter on a common query predictable, even as more commands are added.

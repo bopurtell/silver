@@ -49,7 +49,7 @@ Creating and connecting are different operations. For example, a newly created f
 
 ## Where to find a flow
 
-**Today, in the FIFO example:** `fifo_chip.ml` supplies the base LibreLane hardening flow. [`flow_catalog.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_catalog.ml) constructs the named `standard` methodology and registers profiles from [`flow_profiles.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_profiles.ml), including `balanced` and `synth_delay`. The [chip CLI](../../hardcaml_asic_example/asics/fifo_demo/cli/chip.ml) exposes that catalog. No magic `flow.ml` filename is scanned.
+**In the FIFO example:** `fifo_chip.ml` supplies the base LibreLane hardening flow. See [`flow_catalog.ml`](../../hardcaml_asic_example/asics/fifo_demo/project/flow_catalog.ml) for catalog wiring and [`standard_profiles.ml`](../../hardcaml_asic_example/asics/fifo_demo/flows/standard_profiles.ml) for the `standard` profiles, including `balanced` and `synth_delay`. The [chip CLI](../../hardcaml_asic_example/asics/fifo_demo/cli/chip.ml) exposes that catalog.
 
 **Preferred organization:** someone asking “where is flow 2 defined?” should be able to open one obvious module. Let each named flow supply one complete catalog entry: methodology, supported endpoints and parameters, available profiles, and default profile. The chip's flow catalog collects those entries and chooses a default. For example:
 

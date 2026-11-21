@@ -18,11 +18,11 @@ These extend delivered preset/templates/registry behavior; file configuration,
 interactive geometry and live surface attachment have distinct acceptance gates.
 
 Status (2026-10-15): **FS0 named workspace/tile host and autosaved session restoration
-delivered** with Main/independent contexts and pins. See [terminal](../fs0_terminal.md)
-and [acceptance](../fs0_acceptance.md). Requirements below remain normative: current
+delivered** with Main/independent contexts and pins. See [terminal](../terminal_controls.md)
+and [acceptance](../archive/delivery/native_and_synthesis_acceptance.md). Requirements below remain normative: current
 geometry is shelf-based and multi-monitor adoption acceptance remains later.
 FS3 now provides CLI template export/import/clone and persistent local chrome/header
-preferences; see [adoption guide](../fs3_adoption.md).
+preferences; see [adoption guide](../existing_project_setup.md).
 The post-merge integration retains stable preset identity through template
 roundtrips, uses one atomic bootstrap for fresh registries, and preserves client
 browsing across same-session reconnect while fencing stale responses. Generic Fit

@@ -76,5 +76,5 @@ project owner. Preserve failure evidence without introducing a permanent design 
 
 ## References
 - [FS2-F01 FIFO adoption](../../backlog/fs2_followups.md#fs2-f01--fifo-project-adoption).
-- [Provider contract](../../fs2_simulation_contract.md).
+- [Provider contract](../../simulation_provider_contract.md).
 - [F09 accepted foundation](../simulation_and_tests.md).

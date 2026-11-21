@@ -64,7 +64,7 @@ as a clearly labeled observation; it must never masquerade as production evidenc
 ## References
 - [Inspection index](../../../protocol/asic_inspection.ml)
 - [Existing evidence service](../../../backend/asic_inspection.ml)
-- [Attribution/freshness contract](../../fs1_investigation.md)
+- [Attribution/freshness contract](../../asic_evidence_inspection.md)
 
 ## Owner closure — 2026-10-25
 

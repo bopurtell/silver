@@ -64,5 +64,5 @@ the policy and which inputs/results satisfy it before choosing acceptance semant
 
 ## References
 - [FS2-F11 acceptance bridge](../../backlog/fs2_followups.md#fs2-f11--asic-acceptance-evidence-bridge).
-- [FS1 acceptance lifecycle](../../fs1_lifecycle_and_artifacts.md).
+- [FS1 acceptance lifecycle](../../finalization_and_artifacts.md).
 - [Explicit input associations](../../../protocol/simulation.ml).

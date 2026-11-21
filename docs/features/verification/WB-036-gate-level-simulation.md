@@ -64,5 +64,5 @@ Document unsupported annotation or model modes explicitly; do not overstate cove
 
 ## References
 - [FS2-F07 adapters](../../backlog/fs2_followups.md#fs2-f07--generated-rtl-and-gate-level-adapters).
-- [FS1 lifecycle and artifacts](../../fs1_lifecycle_and_artifacts.md).
+- [FS1 lifecycle and artifacts](../../finalization_and_artifacts.md).
 - [Input provenance contract](../../../protocol/simulation.ml).

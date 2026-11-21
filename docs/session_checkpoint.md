@@ -1,7 +1,7 @@
 # Session recovery checkpoint — ASIC PT.0–PT.8 and Workbench
 
 **Normal Protemu adoption closeout, 2026-11-12:**
-[operational guide/evidence](../../hardcaml_protemu/docs/adoption-release.md) and
+[operational guide/evidence](../../electrum/docs/adoption-release.md) and
 [Workbench scope](protemu_installed_adoption.md). Selected tools generation
 `f88b8d44e7524aa3862fc163d2e2baec`, simulation `64971bc2ad2945ecbd1994ccb955d41f`.
 Normal installation, flows/preparation/Resources, seven actual simulation cases,
@@ -15,12 +15,12 @@ plain base revisions do not reproduce it. Owner Git publication remains separate
 
 **PT.3 continuation:** Protemu PT.3a is now verified: public-API adoption, private
 recorded ASIC dependency and explicit Flops/Exact `program` variants with deterministic
-emission/resource proof. See [consumer evidence](../../hardcaml_protemu/docs/pt3a-adoption.md).
+emission/resource proof. See [consumer evidence](../../electrum/docs/pt3a-adoption.md).
 PT.3b vendor-functional loader/core/system regression is also verified; see
-[functional evidence](../../hardcaml_protemu/docs/pt3b-verification.md). Next is PT.3c
+[functional evidence](../../electrum/docs/pt3b-verification.md). Next is PT.3c
 physical and final-netlist acceptance. No physical EDA was run for PT.3a/b.
 
-**PT.3c first physical attempt:** [actual-loader results and triage](../../hardcaml_protemu/docs/pt3c-physical-attempt.md).
+**PT.3c first physical attempt:** [actual-loader results and triage](../../electrum/docs/pt3c-physical-attempt.md).
 The routed netlist passes independent functional replay, but physical acceptance
 remains blocked by slow-corner setup (−4.0586 ns) and nine unresolved Magic markers.
 The original failed run is preserved and all owned execution resources are stopped.
@@ -56,8 +56,8 @@ flow, rebuild the example or refresh a running owner's provider.
 4. [Test-refactor continuation](migration_guides/workbench-test-refactor.md): next
    Workbench-only restructuring, independent of the example's current refactor.
 5. [Stable development session](development_session.md): operating model and paths.
-6. [Paused developer acceptance handoff](developer_workflow_acceptance_handoff.md)
-   and [resource handoff](developer_workflow_resource_handoff.md) if resuming real
+6. [Paused developer acceptance handoff](archive/example-development/developer_workflow_acceptance_handoff.md)
+   and [resource handoff](archive/example-development/developer_workflow_resource_handoff.md) if resuming real
    synthesis acceptance, not merely documentation/test organization.
 
 Repositories in scope: `hardcaml_asic`, `hardcaml_workbench`, and, only when authorized
@@ -136,7 +136,7 @@ waveform strokes**; don't silently reopen that presentation task or blame Ghostt
   hardware failure can be a passing Workbench tool test.
 
 Canonical explanation: [ASIC workload guide](../../hardcaml_asic/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite),
-[Workbench workload guide](pt8_workloads.md), [FS2 contract](fs2_simulation_contract.md).
+[Workbench workload guide](workloads.md), [FS2 contract](simulation_provider_contract.md).
 
 ## 5. Recent concrete defects and disposition
 
@@ -152,7 +152,7 @@ Canonical explanation: [ASIC workload guide](../../hardcaml_asic/docs/guides/var
 The Git-context fix passes independent installed preparation and public metadata
 preflight, including genuine wrong-revision negatives. **That is not proof of a
 completed synthesis flow.** Read [Git recovery](development_git_context_recovery.md)
-and [independent review](development_git_context_independent_review.md) for exact
+and [independent review](archive/example-development/development_git_context_independent_review.md) for exact
 receipts. Original failed bundles/operations/captures were never relabelled.
 
 ## 6. Current pause: ordinary developer end-to-end acceptance

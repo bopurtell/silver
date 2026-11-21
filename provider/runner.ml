@@ -205,7 +205,7 @@ let execute ~argv ~discovery ~validate_selection ~run =
       run { request; artifact_dir; emit } |> Or_error.ok_exn;
       Validation.check (not !poisoned) "Emitter failed";
       Validation.check !finished "Provider returned without Finished")
-  | _ -> failwith "Expected discover/run --protocol-version 1 with exact FS2 arguments"
+  | _ -> failwith "Expected discover/run --protocol-version 1 with the simulation protocol arguments"
 ;;
 
 let main ?(argv = Sys.get_argv ()) ~discovery ~validate_selection ~run () =

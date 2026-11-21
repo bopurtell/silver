@@ -74,7 +74,7 @@ works wonderfully. Closed at the owner's request on 2026-11-15.
 Merge integration adapted stepping to the full-range original-event cell mapping;
 the original integer-raster implementation and measurements below are historical.
 The connected scalar rails and bus outlines retain dense-transition and unknown-state
-handling. See [the updated waveform handoff](../../development_waveform_handoff.md)
+handling. See [waveform navigation acceptance](../../archive/workloads-waveforms/waveform_navigation_acceptance.md)
 for the follow-up implementation and verification. Historical measurement limits and
 the incomplete fixture-dependent regression below remain unchanged.
 
@@ -142,8 +142,8 @@ Passed:
 ```sh
 scripts/with-switch.sh dune build -j5 terminal/main.exe terminal/waveform_probe.exe daemon/main.exe
 scripts/with-switch.sh dune runtest -j5 terminal
-scripts/with-switch.sh python3 scripts/probe-wb068-repeat.py --step-mode column --samples 8 --rates 30 120
-scripts/with-switch.sh python3 scripts/probe-wb068-repeat.py --step-mode tick --sizes large --samples 8 --rates 30 120
+scripts/with-switch.sh python3 scripts/probe-waveform-key-repeat.py --step-mode column --samples 8 --rates 30 120
+scripts/with-switch.sh python3 scripts/probe-waveform-key-repeat.py --step-mode tick --sizes large --samples 8 --rates 30 120
 git diff --check
 ```
 

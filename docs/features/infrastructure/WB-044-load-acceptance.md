@@ -65,4 +65,4 @@ can exercise large event volumes without requiring the separate sweep feature fi
 ## References
 - [FS2-F06 load acceptance](../../backlog/fs2_followups.md#fs2-f06--multi-clientload-acceptance-and-usability).
 - [Construction coverage followups](../../construction_phase_plan.md).
-- [Current FS2 acceptance](../../fs2_acceptance.md).
+- [Current FS2 acceptance](../../structured_simulation.md).

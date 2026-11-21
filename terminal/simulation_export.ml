@@ -342,3 +342,63 @@ let%test_unit "multi-page export publishes exact host bytes and launches only af
     in
     assert (Or_error.is_error result))
 ;;
+
+let%test_unit "embedded waveform byte reply cannot publish after its owner changes" =
+  Thread_safe.block_on_async_exn (fun () ->
+    let artifact : S.Artifact.t =
+      { id = "trace"
+      ; attempt_id = "attempt-original"
+      ; case_id = Some "case"
+      ; label = "Waveform"
+      ; kind = "waveform"
+      ; media_type = "text/vcd"
+      ; size = Some 3
+      ; sha256 = Some (Plain_rpc.digest "abc")
+      ; availability = Available
+      }
+    in
+    let page : S.Byte_page.t =
+      { attempt_id = artifact.attempt_id
+      ; artifact_id = artifact.id
+      ; sha256 = Option.value_exn artifact.sha256
+      ; offset = 0
+      ; next_offset = 3
+      ; total_size = 3
+      ; eof = true
+      ; bytes_hex = "616263"
+      }
+    in
+    let requested = Ivar.create ()
+    and reply = Ivar.create () in
+    let current = ref true
+    and published = ref 0 in
+    let run ~current ~fetch =
+      run_embedded
+        ~artifact
+        ~fetch
+        ~current
+        ~publish:(fun actual chunks ->
+          assert (S.Artifact.equal actual artifact);
+          assert (String.equal (String.concat chunks) "abc");
+          incr published;
+          return (Ok "verified"))
+        ~viewer:None
+        ~launch:(fun ~prog:_ ~args:_ -> assert false)
+    in
+    let pending =
+      run
+        ~current:(fun () -> !current)
+        ~fetch:(fun ~offset:_ ~limit:_ ->
+          Ivar.fill_exn requested ();
+          Ivar.read reply)
+    in
+    let%bind () = Ivar.read requested in
+    current := false;
+    Ivar.fill_exn reply (Ok page);
+    let%bind result = pending in
+    assert (Or_error.is_error result && !published = 0);
+    let%map result =
+      run ~current:(fun () -> true) ~fetch:(fun ~offset:_ ~limit:_ -> return (Ok page))
+    in
+    assert (Or_error.is_ok result && !published = 1))
+;;

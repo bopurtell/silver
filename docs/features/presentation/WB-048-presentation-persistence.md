@@ -76,7 +76,7 @@ This is implementation/automated-validation sign-off, not an interactive visual 
 
 ## References
 - [Subsequent Timing preference extension](../../timing_workspace_usability.md)
-- [Persistent presentation baseline](../../fs3_adoption.md#persistent-presentation-preferences)
+- [Persistent presentation baseline](../../existing_project_setup.md#persistent-presentation-preferences)
 - [Preference schema](../../../terminal/presentation_preferences.ml)
 - [Override fields](../../../terminal/tile_presentation.mli)
 
@@ -124,5 +124,5 @@ triggers a save. The split lives in `Tile_presentation.persisted`, which also dr
   _build/default/terminal/presentation_preferences_probe.exe`: fresh-process round-trip of
   every field via the catalog, reset across restart, v2 and v1 legacy reads, v3 missing
   structure rejected.
-- `scripts/test-fs3-adoption.py` (schema check updated to 3) and
+- `scripts/test-project-adoption.py` (schema check updated to 3) and
   `scripts/test-default-layout-restore.py` pass.

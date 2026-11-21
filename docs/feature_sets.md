@@ -35,7 +35,7 @@ place it after FS4. A complete gallery is not an FS0 exit criterion.
 **Current status:** Demos A–C delivered. The lists below describe the intended
 slices, not unchecked implementation tasks. The [active plan](construction_phase_plan.md)
 splits completed conditions from remaining gaps and consolidates exact candidate
-paths/hashes and [acceptance](fs0_acceptance.md) / [installed-check](fs0_install_checks.md)
+paths/hashes and [acceptance](archive/delivery/native_and_synthesis_acceptance.md) / [installed-check](archive/delivery/initial_installation_checks.md)
 evidence. FS0 does not complete the full normative specs.
 
 ### FS0a: provider-independent shell
@@ -108,15 +108,15 @@ large-detail indexes can follow measured need in later feature-set slices.
 
 **Delivered for the adopted evidence interfaces, with explicit limits:** first F06 slice is the [cached synthesis inspector](synthesis_inspection.md):
 cell table sorting/filtering, row detail and evidence drilldown. It consumes FS0
-summaries without invoking tools. Subsequent [FS1 delivery](fs1_acceptance.md) adds
+summaries without invoking tools. Subsequent [FS1 delivery](archive/delivery/asic_evidence_initial_acceptance.md) adds
 synthesis area/diagnostic metrics, explicit finalization import, aggregate signed
 timing, physical resources, reported DRC/LVS/antenna verdicts, declared-clock
 configuration and full evidence inspection. Real physical completion, separate
 external acceptance pass/fail import and owned-container cancellation are exercised.
 Workbench-owned collect/accept lifecycle, cancellation/reconnect and bounded text
 report/artifact viewing with explicit terminal-host export are also delivered;
-see [lifecycle evidence](fs1_lifecycle_and_artifacts.md). The final
-[investigation slice](fs1_investigation.md) delivers retained setup/hold paths,
+see [lifecycle evidence](finalization_and_artifacts.md). The final
+[investigation slice](asic_evidence_inspection.md) delivers retained setup/hold paths,
 corner/group/producer/stage navigation, measured clock latency/skew and supplied
 relationships, stage-specific placement/routing/congestion tables, and byte-exact
 external GDS handoff verified by headless KLayout loading. Provider-owned parsing,
@@ -145,8 +145,8 @@ intermediate snapshots and fine-grained progress may depend on further ASIC work
 
 Status: **milestone closed — structured project-scoped simulation delivered and
 accepted**, 2026-10-16; see
-[controls and acceptance](fs2_acceptance.md) and the
-[versioned provider/RPC contract](fs2_simulation_contract.md). Structured suites,
+[controls and acceptance](structured_simulation.md) and the
+[versioned provider/RPC contract](simulation_provider_contract.md). Structured suites,
 cases, seeds/parameters, live progress/outcomes, targeted reruns, durable history,
 failure reports and byte-exact trace export are implemented over the existing
 supervisor. Actual Cyclesim, native HTTP and terminal PTY acceptance passed.
@@ -185,7 +185,7 @@ manifest, portable CLI workspace templates (export/import/clone and starters), a
 persistent local presentation choices. The 2026-10-17 integration preserves preset
 identity in templates, initializes defaults atomically, restores sparse preferences
 without poll replay, and supports successful driverless manifest reload. See
-[guide and verification](fs3_adoption.md).
+[guide and verification](existing_project_setup.md).
 Configuration-location migration subsequently shipped in WB-049. Multi-monitor
 acceptance is separate.
 

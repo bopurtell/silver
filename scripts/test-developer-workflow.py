@@ -81,8 +81,8 @@ def prepare(args, evidence):
         asic_generation=str(asic), asic_receipt_sha256=sha(asic / 'receipt.json'),
         sdk_prefix=str(sdk), sdk_files={str(p.relative_to(sdk)): sha(p)
             for p in (sdk / 'lib').rglob('*') if p.is_file()}))
-    build = HERE.parent / '_build_pt8_workbench'
-    command(evidence, 'build-app-pair', ['flock', '/tmp/opencode/workbench-pt8-build.lock',
+    build = HERE.parent / '_build_workbench'
+    command(evidence, 'build-app-pair', ['flock', '/tmp/opencode/workbench-build.lock',
         'opam', 'exec', '--switch=5.2.0+ox', '--', 'dune', 'build', '--root', str(HERE.parent),
         '--build-dir', str(build), '-j2', 'daemon/main.exe', 'terminal/main.exe'], timeout=1800)
     extra = ['--synthesis-task-limit', str(args.synthesis_task_limit)] if args.synthesis_task_limit else []
@@ -1099,7 +1099,7 @@ def main():
             source_files=manifest['source_files'], apps=manifest['apps'], inputs=manifest['inputs'],
             helper_sha256={str(p): sha(p) for p in
                 (Path(__file__), HERE / 'test-development-session.py', HERE / 'developer-workflow-resources.py',
-                 HERE / 'developer_workflow_recovery.py')})
+                 HERE / 'developer_workflow_recovery.py', HERE / 'fixtures/memory_workload_oracle.py')})
         # A separate lifetime lock prevents concurrent acceptance phases on this store.
         with (args.store / 'acceptance.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

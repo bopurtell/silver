@@ -1,5 +1,10 @@
 # One example development session: FIFO, PT.8, ASIC and waveforms
 
+**Historical captured session.** For normal example development, use the
+[checkout-backed launcher](../../hardcaml_asic_example/docs/workbench_main.md).
+This page describes the earlier independent source copy and preserves its
+commands and evidence.
+
 **Post-refactor update, 2026-11-10:** use the example's
 [ownership-v1 continuation](../../hardcaml_asic_example/docs/migration_plans/workbench_continuation.md)
 for current source layout/new-store preparation. The old store is not automatically
@@ -8,9 +13,8 @@ now records actual synthesis, collection, report/check inspection and restart on
 new private capture. Launch commands/generations below describe the earlier session.
 
 2026-11-05. **Implemented and independently accepted in the bounded development
-scope.** This is the recommended everyday example entry point. It replaces the
-need to create another numbered demo session for each feature; all earlier
-sessions, configurations and evidence remain intact.
+scope.** This combined session replaced earlier numbered demo sessions at the
+time; those configurations and evidence remain intact.
 
 ## Roadmap orientation
 
@@ -98,7 +102,7 @@ work persists at the same project/state identity.
 ## What is available together
 
 For the distinction between stimulus, workload, test/case, suite and attempt, see
-[PT.8 terminology](pt8_workloads.md#what-workload-means-here). Workload requirements
+[PT.8 terminology](workloads.md#what-workload-means-here). Workload requirements
 include checking/measurement semantics beyond raw stimulus; existing Testing cases
 execute them through the same FS2 runner. This session adds no arbitrary workload
 composition API.
@@ -227,13 +231,14 @@ Actual native evidence:
   real native Discover/Plan and ordinary private test/asic_test/timing tests.
 
 Independent lifecycle review passes38 original checks plus24 migration controls:
-[backend review](development_session_backend_review.md). Its source-closure finding
+[backend review](archive/example-development/development_session_backend_review.md). Its source-closure finding
 is corrected: ordinary authored test/timing sources and the four required acceptance
 harness files are included; retained snapshots/tools/builds remain excluded.
 The example's12 direct/lifecycle tests cover catalog parity, genuine FIFO and PT.8
 execution, cancellation, source drift, config rollback/recovery, edit preservation,
-active-lock refusal and ordinary private Dune tests. See the example handoff and
-`reviewdocs/tests/development-session-final-c.md` for exact invocation records.
+active-lock refusal and ordinary private Dune tests. See the example handoff for
+invocation records. Workbench's maintained checks are in
+`backend/test/test_simulation.ml` and `scripts/test-development-session.py`.
 
 Initial tests found and corrected a config symlink incompatible with FS2 nofollow
 admission, the FIFO `text/x-vcd` MIME omission, a clipped-default cycle-label error,

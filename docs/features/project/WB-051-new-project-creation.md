@@ -64,4 +64,4 @@ The first provider is `hardcaml_asic`. Its `hardcaml-asic-starter render --name 
 ## References
 - [Existing initializer](../../../setup/initialization.ml)
 - [Provider ownership requirements](../project_setup.md)
-- [Delivered setup/layout distinction](../../fs3_adoption.md)
+- [Delivered setup/layout distinction](../../existing_project_setup.md)

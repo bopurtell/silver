@@ -1530,7 +1530,7 @@ let%test_unit "horizontal stages wrap long duplicate labels without changing \
     Stage_strip.model
       ~appearance
       ~width:80
-      ~run:Fs0_fixture.run_a
+      ~run:Asic_snapshot_fixture.run_a
       ~selected_id:(Some "4")
       stages
   in
@@ -1561,7 +1561,7 @@ let%test_unit "stage outcomes preserve request and observation distinctions" =
 ;;
 
 let%test_unit "ASIC stage projection preserves every explicit status and full action" =
-  let run = Fs0_fixture.run_a in
+  let run = Asic_snapshot_fixture.run_a in
   let action : Asic.Selection.t =
     { chip_target = None
     ; flow = "ordinary"
@@ -1781,7 +1781,7 @@ let%test_unit "navigation retains registry identities and missing destinations a
 
 let%test_unit "Session labels use actual cells and retain distinguishable hash suffixes" =
   let run =
-    { Fs0_fixture.run_a with
+    { Asic_snapshot_fixture.run_a with
       label = Some "Placement customer design"
     ; id = "opaque0123456789abcdef0123456789abcdef"
     }
@@ -1834,7 +1834,7 @@ let plain_lines view =
 ;;
 
 let%test_unit "summary freshness markers are typed, static and never stage verdicts" =
-  let summary = List.hd_exn Fs0_fixture.snapshot.summaries in
+  let summary = List.hd_exn Asic_snapshot_fixture.snapshot.summaries in
   List.iter
     [ Asic.Summary.Freshness.Validated, Indicator.Completed, "validated"
     ; Cached_unverified, Cached, "cached/unverified"

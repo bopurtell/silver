@@ -61,8 +61,8 @@ print('unsupported synthetic operation',file=sys.stderr);sys.exit(2)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--client', type=Path, default=ROOT / '_build_pt8_workbench/default/terminal/main.exe')
-    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_pt8_workbench/default/daemon/main.exe')
+    parser.add_argument('--client', type=Path, default=ROOT / '_build_workbench/default/terminal/main.exe')
+    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_workbench/default/daemon/main.exe')
     parser.add_argument('--outer-timeout', type=int, default=60)
     args = parser.parse_args()
     args.client, args.daemon = args.client.resolve(), args.daemon.resolve()
@@ -76,7 +76,7 @@ def main():
     for name in ('workload-inspect', 'compare'):
         (base / ('hardcaml-asic-experimental-' + name)).write_text('synthetic companion identity')
     resources = module('pt8_ui_resources', ROOT / 'scripts/test-resource-inspector.py')
-    dashboard = module('pt8_ui_dashboard', ROOT / 'scripts/test-fs0-dashboard.py')
+    dashboard = module('pt8_ui_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
     fs0, session = resources.native_setup(args, base, provider)
     checks = []
 

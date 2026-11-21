@@ -62,6 +62,6 @@ Default: extend the read-only typed contract without adding automatic tool execu
 Re-estimate if the selected family needs a substantially different data model.
 
 ## References
-- [Delivered provider boundary](../../fs1_investigation.md)
+- [Delivered provider boundary](../../asic_evidence_inspection.md)
 - [Inspection protocol](../../../protocol/asic_inspection.ml)
 - [ASIC adapter](../../../adapters/asic_adapter.ml)

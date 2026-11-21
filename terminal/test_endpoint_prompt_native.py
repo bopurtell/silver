@@ -26,8 +26,8 @@ def module(name, path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--client', type=Path, default=ROOT / '_build_pt8_workbench/default/terminal/main.exe')
-    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_pt8_workbench/default/daemon/main.exe')
+    parser.add_argument('--client', type=Path, default=ROOT / '_build_workbench/default/terminal/main.exe')
+    parser.add_argument('--daemon', type=Path, default=ROOT / '_build_workbench/default/daemon/main.exe')
     args = parser.parse_args()
     args.client, args.daemon = args.client.resolve(), args.daemon.resolve()
     base = Path(tempfile.mkdtemp(prefix='endpoint-prompt-', dir='/tmp/opencode'))
@@ -42,7 +42,7 @@ print(json.dumps({'cli_contract':{'version':4,'capabilities':{'namedflow1':True}
 ''')
     provider.chmod(0o700)
     resources = module('endpoint_resources', ROOT / 'scripts/test-resource-inspector.py')
-    dashboard = module('endpoint_dashboard', ROOT / 'scripts/test-fs0-dashboard.py')
+    dashboard = module('endpoint_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
     fs0, session = resources.native_setup(args, base, provider)
     catalog = (ROOT / 'backend/test/asic/production_flow_list.json').read_text()
     driver = base / 'no-project-execution'

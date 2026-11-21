@@ -99,5 +99,5 @@ Preserve FS2 milestone closure; no requirement to finish every simulation follow
 
 ## References
 - [Existing usability backlog](../../backlog/fs2_followups.md#fs2-f06--multi-clientload-acceptance-and-usability)
-- [Closed FS2 acceptance](../../fs2_acceptance.md)
-- [Testing template baseline](../../fs3_adoption.md#workspace-templates)
+- [Closed FS2 acceptance](../../structured_simulation.md)
+- [Testing template baseline](../../existing_project_setup.md#workspace-templates)

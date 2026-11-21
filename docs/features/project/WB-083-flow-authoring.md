@@ -3,7 +3,7 @@ id: WB-083
 title: Flow-owned profiles and explicit authoring commands
 category: project
 feature_sets: [FS0, FS3]
-status: delivered
+status: closed
 design_status: designed
 kind: feature
 priority: P2
@@ -21,7 +21,7 @@ related: [WB-077, WB-082]
 
 # WB-083 — Flow-owned profiles and explicit authoring commands
 
-Delivered in the provider, Silver CLI and native Project menu.
+Delivered in the provider, Silver CLI and native Project menu. Owner accepted and closed this ticket on 2026-11-21.
 
 ## Request
 Give each named flow an obvious source home, and distinguish creating a methodology, duplicating a settings variant and running an existing selection.

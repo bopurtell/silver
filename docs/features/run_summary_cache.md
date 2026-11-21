@@ -11,12 +11,12 @@ client-visible freshness remain independent of storage/presentation optimization
 
 Status (2026-10-16): **FS0 bounded summary L1/L2 and FS1 bounded inspection caches,
 coalesced reads, observation invalidation and explicit Refresh implemented**.
-[Provider integration](../fs0_provider_integration.md)
-defines numerical budgets/freshness. [Acceptance](../fs0_acceptance.md) proves fixture
+[Provider integration](../asic_provider_integration.md)
+defines numerical budgets/freshness. [Acceptance](../archive/delivery/native_and_synthesis_acceptance.md) proves fixture
 report calls 2→2 and exact real warm/restart identities with `Cached_unverified`.
 Requirements below remain normative: no cheap provider revision query exists,
 ordinary switching is not perpetual validation, and performance/size benchmarks
-remain open. [FS1 investigation](../fs1_investigation.md#bounds-caches-and-responsiveness)
+remain open. [FS1 investigation](../asic_evidence_inspection.md#bounds-caches-and-responsiveness)
 proves provider-free warm/restart inspection and local browsing; local input now
 invalidates the view immediately while domain delivery remains polled. The owner
 confirms Escape works. Canonical evidence and retention remain provider-owned.

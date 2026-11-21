@@ -25,7 +25,7 @@ def load(name, path):
     return module
 
 
-wire = load('handoff_wire', ROOT / 'scripts/fixtures/fs2_wire.py')
+wire = load('handoff_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
 
 
 def provider():
@@ -61,7 +61,7 @@ def provider():
 
 def run(args, evidence):
     print('Evidence: ' + str(evidence), flush=True)
-    native = load('handoff_native', ROOT / 'scripts/test-fs2-native.py')
+    native = load('handoff_native', ROOT / 'scripts/test-native-simulation.py')
     embedded = load('handoff_embedded', ROOT / 'scripts/test-embedded-waveform.py')
     field = native.field
     for name in ('project', 'state', 'home', 'config', 'tmp'):

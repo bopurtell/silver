@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Disposable public-CLI fixture; all mutations stay in the test's temp root."""
 import json
+import os
 import pathlib
 import sys
 import time
@@ -10,6 +11,9 @@ args = sys.argv[1:]
 with (root / 'calls').open('a') as out:
     out.write(json.dumps(args) + '\n')
 if args == ['--version', '--json']:
+    if (root / 'metadata-oversize').exists():
+        sys.stdout.write(' ' * (1024 * 1024 + 1))
+        sys.exit(0)
     supported = not (root / 'unsupported').exists()
     print(json.dumps({'cli_contract': {'version': 4, 'capabilities': {
         'namedflow1': True,
@@ -18,7 +22,7 @@ if args == ['--version', '--json']:
         'workload_comparison1': {'schema_version': 1, 'read_only': supported}}}}))
     sys.exit(0)
 if (root / 'hold').exists():
-    (root / 'entered').touch()
+    (root / 'entered').write_text(str(os.getpid()))
     end = time.monotonic() + 5
     while (root / 'hold').exists() and time.monotonic() < end:
         time.sleep(.005)
@@ -44,4 +48,12 @@ else:
             if flag in args:
                 response[side]['workload']['provenance']['sources'] = [
                     {'path': str(pathlib.Path(args[args.index(flag) + 1]).resolve())}]
-    sys.stdout.write(json.dumps(response))
+    encoded = json.dumps(response)
+    if (root / 'line-pressure').exists():
+        sys.stdout.write((' ' * 1024 + '\n') * 1030)
+    elif (root / 'byte-limit').exists():
+        sys.stdout.write(encoded.ljust(1024 * 1024))
+    else:
+        if (root / 'stderr-pressure').exists():
+            sys.stderr.write('!' * (2 * 1024 * 1024))
+        sys.stdout.write(encoded)

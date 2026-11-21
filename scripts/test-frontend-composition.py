@@ -58,6 +58,33 @@ def wait(predicate, label, timeout=20):
         time.sleep(.05)
 
 
+def choose_color_scheme(terminal, command, scheme, *, active_capture=None):
+    """Commit a theme through the real picker, optionally capturing it as active."""
+    picker = 'Choose theme'
+    label = 'theme-' + scheme.lower() + '-' + str(time.time_ns())
+
+    def open_picker():
+        command('Choose theme…')
+        terminal.capture(label + '-open', [picker], absent=['COMMAND PALETTE'])
+
+    open_picker()
+    # Send the label in lower case so a case-sensitive check can distinguish
+    # the highlighted result from the picker prompt.
+    terminal.key(scheme.lower().encode())
+    shot = terminal.capture(label + '-preview', [picker, scheme.lower() + '▏'],
+                            absent=['No matching themes'])
+    text = shot if isinstance(shot, str) else shot.text()
+    require('> ' + scheme in text, f'Expected selected theme row for {scheme}:\n{text}')
+    terminal.key(b'\r')
+    terminal.capture(label + '-applied', absent=[picker])
+
+    if active_capture:
+        open_picker()
+        terminal.capture(active_capture, [picker, scheme + ' [active]'])
+        terminal.key(b'\x1b')
+        terminal.capture(label + '-closed', absent=[picker])
+
+
 class Screen:
     """Small ANSI cell/SGR oracle, including Notty cursor moves and erasures."""
     def __init__(self, data, width, height):
@@ -238,6 +265,9 @@ class Terminal:
         # below so no navigation can conceal a query-selection regression.
         self.key(b'\x1b[A' * 100)
         self.key(b'\r')
+
+    def choose_color_scheme(self, scheme, *, active_capture=None):
+        choose_color_scheme(self, self.command, scheme, active_capture=active_capture)
 
     def type_action(self, query, selected_title, label):
         """Real per-character PTY input, including a displaced selection before an edit."""

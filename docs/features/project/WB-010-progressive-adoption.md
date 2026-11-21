@@ -64,4 +64,4 @@ belong to a later provider contract; they are not included in this estimate.
 ## References
 - [Integration levels](../../../protocol/project_integration.ml)
 - [Current root validation](../../../backend/service.ml)
-- [Delivered adoption](../../fs3_adoption.md)
+- [Delivered adoption](../../existing_project_setup.md)

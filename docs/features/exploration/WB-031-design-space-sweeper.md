@@ -71,7 +71,7 @@ Select initial design parameters, recipe and measurement endpoints. Decide accep
 missing PPA dimensions and resume policy; test parameters that rebuild hardware belong here.
 
 ## References
-- [Execution foundations](../../fs0_execution_module.md).
+- [Execution foundations](../../execution_module.md).
 - [ASIC operation boundary](../../../backend/asic_service.mli).
 - [Existing supervisor](../../../backend/service.ml).
 - [Hardware evidence architecture](../hardware_inspection.md).

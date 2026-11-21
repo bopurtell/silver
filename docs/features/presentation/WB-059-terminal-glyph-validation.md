@@ -63,4 +63,4 @@ Separate renderer-measured width from actual font appearance in all conclusions.
 ## References
 - [Current native indicator evidence](../../terminal_indicators_plan.md)
 - [Gallery terminal requirements](../appearance.md#candidates-and-gallery-fs5)
-- [FS3 adoption](../../fs3_adoption.md)
+- [FS3 adoption](../../existing_project_setup.md)
