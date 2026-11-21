@@ -67,6 +67,10 @@ or path, then click the displayed controls to preview, apply, or cancel.
 **Enter** also advances each step. **Esc** dismisses setup without creating
 anything or quitting Silver; **p** reopens it.
 
+[Empty-directory synthesis acceptance](docs/authoring_acceptance.md) exercises
+this starter with installed tools, then rebuilds it in a clean clone and checks
+the CLI synthesis result against Silver's.
+
 With a local project already open, click **Project ▾ → New Project…** to
 create a separate Dune project with its first chip target. **Open Project…**
 opens an existing Dune root instead. To create another chip *inside the current

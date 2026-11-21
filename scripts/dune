@@ -1,0 +1,12 @@
+; Fast WB-084 checks. The real two-run journey is deliberately opt-in.
+(rule
+ (alias runtest)
+ (deps
+  run-authoring-acceptance.py authoring_first_run.py authoring_acceptance_replay.py
+  ../test/support/__init__.py ../test/support/terminal.py ../test/support/screen.py
+  test-authoring-acceptance.py test_authoring_first_run.py test_authoring_acceptance_replay.py)
+ (action
+  (progn
+   (run python3 -B test-authoring-acceptance.py)
+   (run python3 -B test_authoring_first_run.py)
+   (run python3 -B test_authoring_acceptance_replay.py))))
