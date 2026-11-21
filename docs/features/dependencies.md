@@ -8,6 +8,11 @@ described in ticket bodies, not reintroduced as unfinished tickets.
 
 ## Required additional ticket interfaces
 
+For the [Cobalt editor roadmap](../cobalt_editor_roadmap.md), WB-087 → WB-088
+delivers the test-declaration demo. WB-087 + WB-089 → WB-090 delivers the
+embedded ToggleTerm handoff. WB-091 informs the producer choice for WB-021;
+neither hardware ticket gates the editor or terminal demos.
+
 For the [project authoring intake](../project_authoring_and_command_design.md), WB-051, WB-078, WB-079, WB-080 and WB-085 are closed. Palette ordering (WB-076), menu interaction (WB-077) and the management-surface comparison (WB-086) are independent. Main handoffs:
 
 - WB-051 + WB-085 → WB-078: provider starter plus daemon preview/apply for first open.

@@ -72,6 +72,11 @@ let starter_recipe = function
   | Chip _ -> Authoring.chip_recipe
 ;;
 
+type workspace_deletion =
+  { name : string
+  ; intent : unit ref
+  }
+
 type action =
   | New_flow of string option
   | Duplicate_profile of (string * string * string) option
@@ -159,6 +164,10 @@ type action =
   | Restore_default_layout_unavailable
   | Create_testing_workspace
   | Create_blank_workspace
+  | Request_workspace_deletion
+  | Confirm_workspace_deletion of workspace_deletion
+  | Close_workspace of W.Workspace_id.t
+  | Reopen_workspace of W.Workspace_id.t
   | Local_headers
   | Set_presentation of W.Tile_id.t * T.overrides
   | Set_global_compression of bool option
@@ -225,6 +234,7 @@ type theme_picker =
 
 type argument =
   | Theme_picker of theme_picker
+  | Delete_workspace_confirmation of workspace_deletion
   | Flow_field of Flow_authoring.field
   | Plan_endpoint of string * string
   | Run_endpoint of string * string
@@ -1136,7 +1146,23 @@ let%test_unit "stage planning uses only advertised selection and never resumes a
 let active t =
   Option.bind t.registry ~f:(fun s ->
     Option.bind t.active ~f:(fun id ->
-      List.find s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id id)))
+      if W.is_workspace_open s id then Some (W.workspace s id) else None))
+;;
+
+let workspace_at_index t index =
+  Option.bind t.registry ~f:(fun s -> List.nth (W.open_workspaces s) index)
+;;
+
+let open_preset_in_window s ~window ~preset =
+  List.find (W.open_workspaces s) ~f:(fun w ->
+    W.Window_id.equal w.window window && Option.equal String.equal w.preset (Some preset))
+;;
+
+let has_closed_preset ?window (s : W.Snapshot.t) ~preset =
+  List.exists s.workspaces ~f:(fun w ->
+    Option.value_map window ~default:true ~f:(W.Window_id.equal w.window)
+    && Option.equal String.equal w.preset (Some preset)
+    && not (W.is_workspace_open s w.id))
 ;;
 
 let tiles t =
@@ -1218,6 +1244,21 @@ let route_resource_input t tile ~asic input =
     { t with focus }, owner, operation)
 ;;
 
+let workspace_window (s : W.Snapshot.t) id =
+  List.find s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id id)
+  |> Option.map ~f:(fun w -> w.window)
+;;
+
+let fallback_workspace s window =
+  let open_workspaces = W.open_workspaces s in
+  let same_window =
+    Option.bind window ~f:(fun window ->
+      List.find open_workspaces ~f:(fun w -> W.Window_id.equal w.window window))
+  in
+  Option.first_some same_window (List.hd open_workspaces)
+  |> Option.map ~f:(fun w -> w.id)
+;;
+
 let receive t (s : W.Snapshot.t) =
   match t.registry with
   | Some previous
@@ -1247,10 +1288,16 @@ let receive t (s : W.Snapshot.t) =
       | _ -> t
     in
     let active =
-      Option.filter t.active ~f:(fun id ->
-        List.exists s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id id))
-      |> fun selected ->
-      Option.first_some selected (Option.map (List.hd s.workspaces) ~f:(fun w -> w.id))
+      match t.active with
+      | Some id when W.is_workspace_open s id -> Some id
+      | _ ->
+        let window =
+          Option.bind t.active ~f:(fun id ->
+            Option.first_some
+              (workspace_window s id)
+              (Option.bind t.registry ~f:(fun previous -> workspace_window previous id)))
+        in
+        fallback_workspace s window
     in
     (* Tile IDs may be reused by a replacement registry session. Drop old local state on
        replacement and prune removed/retyped tiles on ordinary refresh. *)
@@ -1331,8 +1378,20 @@ let receive t (s : W.Snapshot.t) =
       List.exists s.workspaces ~f:(fun workspace ->
         String.equal id (W.Workspace_id.to_string workspace.id))
     in
+    let active_changed = not (Option.equal W.Workspace_id.equal active t.active) in
     let workspace_focus =
-      List.filter_map t.workspace_focus ~f:(fun (workspace, focus) ->
+      let previous_focus =
+        if not active_changed
+        then t.workspace_focus
+        else
+          Option.value_map t.active ~default:t.workspace_focus ~f:(fun id ->
+            List.Assoc.add
+              t.workspace_focus
+              ~equal:String.equal
+              (W.Workspace_id.to_string id)
+              t.focus)
+      in
+      List.filter_map previous_focus ~f:(fun (workspace, focus) ->
         if not (workspace_exists workspace)
         then None
         else
@@ -1346,14 +1405,27 @@ let receive t (s : W.Snapshot.t) =
     let workspace_presentation =
       List.filter t.workspace_presentation ~f:(fun (id, _) -> workspace_exists id)
     in
+    let focus =
+      if active_changed
+      then
+        Option.bind active ~f:(fun id ->
+          List.Assoc.find workspace_focus ~equal:String.equal (W.Workspace_id.to_string id)
+          |> Option.join)
+      else t.focus
+    in
     let t =
       { t with
         registry = Some s
-      ; layout_intent =
-          (if Option.equal W.Workspace_id.equal active t.active
-           then t.layout_intent
-           else ref ())
+      ; layout_intent = (if active_changed then ref () else t.layout_intent)
       ; active
+      ; focus
+      ; editing_filter = t.editing_filter && not active_changed
+      ; menu = (if active_changed then None else t.menu)
+      ; stage_generation = (t.stage_generation + if active_changed then 1 else 0)
+      ; stage_preparation =
+          (if active_changed && Option.is_some t.stage_preparation
+           then Some "Stage preparation context changed; press r again"
+           else t.stage_preparation)
       ; locals
       ; notice
       ; timing
@@ -1778,9 +1850,7 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
 ;;
 
 let switch t id =
-  if not
-       (Option.exists t.registry ~f:(fun s ->
-          List.exists s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id id)))
+  if not (Option.exists t.registry ~f:(fun s -> W.is_workspace_open s id))
   then t
   else (
     let workspace_focus =
@@ -1844,7 +1914,7 @@ let created_workspace ~(before : W.Snapshot.t) ~(after : W.Snapshot.t) =
   then None
   else (
     match
-      List.filter after.workspaces ~f:(fun w ->
+      List.filter (W.open_workspaces after) ~f:(fun w ->
         not
           (List.exists before.workspaces ~f:(fun old -> W.Workspace_id.equal old.id w.id)))
     with
@@ -1864,7 +1934,7 @@ let navigation_members registry workspace =
 let navigation_preferences ~project_key t =
   Option.map t.registry ~f:(fun registry ->
     let workspaces =
-      List.map registry.workspaces ~f:(fun workspace ->
+      List.map (W.open_workspaces registry) ~f:(fun workspace ->
         let id = W.Workspace_id.to_string workspace.id in
         let focus =
           if Option.equal W.Workspace_id.equal t.active (Some workspace.id)
@@ -1914,8 +1984,13 @@ let navigation_preferences ~project_key t =
       Navigation_preferences.create
         ~project_key
         ~session:(W.Session_id.to_string registry.session_id)
-        ~active:(Option.map t.active ~f:W.Workspace_id.to_string)
+        ~active:(Option.map (active t) ~f:(fun w -> W.Workspace_id.to_string w.id))
         ~workspaces
+    in
+    let saved =
+      { saved with
+        active_window = Option.map (active t) ~f:(fun w -> W.Window_id.to_string w.window)
+      }
     in
     let saved =
       Navigation_preferences.with_testing_artifacts
@@ -1929,7 +2004,7 @@ let navigation_preferences ~project_key t =
     Navigation_preferences.with_workloads
       saved
       (List.filter_map registry.tiles ~f:(fun tile ->
-         if String.equal tile.kind "workloads"
+          if String.equal tile.kind "workloads" && W.is_workspace_open registry tile.workspace
          then
            Some
              ( W.Tile_id.to_string tile.id
@@ -1943,7 +2018,7 @@ let valid_navigation_workspaces (saved : Navigation_preferences.t) t =
     then []
     else
       List.filter saved.workspaces ~f:(fun pref ->
-        List.exists registry.workspaces ~f:(fun workspace ->
+        List.exists (W.open_workspaces registry) ~f:(fun workspace ->
           String.equal pref.id (W.Workspace_id.to_string workspace.id)
           && List.equal
                (fun a b ->
@@ -1967,9 +2042,26 @@ let restore_navigation_focus ?(restore_active = true) ?(preserve_focus = []) sav
           (Option.map pref.focus ~f:W.Tile_id.of_string))
   in
   let t = { t with workspace_focus } in
-  match if restore_active then saved.Navigation_preferences.active else None with
-  | Some id when List.exists valid ~f:(fun pref -> String.equal pref.id id) ->
-    switch { t with focus = None; active = None } (W.Workspace_id.of_string id)
+  match (if restore_active then saved.Navigation_preferences.active else None), t.registry with
+  | Some id, Some registry
+    when String.equal saved.session (W.Session_id.to_string registry.session_id) ->
+    let workspace = W.Workspace_id.of_string id in
+    if List.exists valid ~f:(fun pref -> String.equal pref.id id)
+    then switch { t with focus = None; active = None } workspace
+    else if not (W.is_workspace_open registry workspace)
+    then (
+      let window =
+        Option.first_some
+          (workspace_window registry workspace)
+          (Option.map saved.active_window ~f:W.Window_id.of_string)
+      in
+      Option.value_map window ~default:t ~f:(fun window ->
+        Option.value_map (fallback_workspace registry (Some window)) ~default:t ~f:(fun id ->
+          let clear_active =
+            not (List.mem preserve_focus (W.Workspace_id.to_string id) ~equal:String.equal)
+          in
+          switch (if clear_active then { t with focus = None; active = None } else t) id)))
+    else t
   | _ -> t
 ;;
 
@@ -2295,7 +2387,7 @@ let%test_unit "Timing reconnect keeps investigation until pane or session identi
 let workspace_choices t id =
   let filter = String.lowercase (local t id).filter in
   Option.value_map t.registry ~default:[] ~f:(fun s ->
-    List.filter s.workspaces ~f:(fun w ->
+    List.filter (W.open_workspaces s) ~f:(fun w ->
       String.is_substring
         (String.lowercase (w.name ^ " " ^ W.Workspace_id.to_string w.id))
         ~substring:filter))
@@ -2342,6 +2434,70 @@ let current t (c : capture) =
 
 let command ?unavailable ?(exact_only = false) id title aliases action =
   { id; title; aliases; exact_queries = []; exact_only; action; unavailable }
+;;
+
+let workspace_deletion_unavailable (registry : W.Snapshot.t) (workspace : W.Arrangement.t) =
+  if W.is_separate_investigation workspace
+  then Some "Use Close separate investigation for a separate Timing investigation"
+  else if Option.is_some workspace.preset
+  then Some "Cannot delete a preset workspace"
+  else if not (workspace.closed || W.has_other_open_workspace registry workspace)
+  then Some "Cannot delete the last open workspace in a window"
+  else None
+;;
+
+let open_workspace_deletion t capture =
+  if not (current t capture)
+  then { t with notice = "Workspace changed; reopen Delete current workspace" }
+  else (
+    let registry = Option.value_exn t.registry in
+    let workspace = W.workspace registry capture.workspace in
+    match workspace_deletion_unavailable registry workspace with
+    | Some notice -> { t with notice }
+    | None ->
+      { t with
+        notice = ""
+      ; palette =
+          Some
+            { capture
+            ; commands = []
+            ; query = ""
+            ; index = 0
+            ; viewport = `Follow 0
+            ; argument =
+                Some
+                  (Delete_workspace_confirmation
+                     { name = workspace.name; intent = t.layout_intent })
+            }
+      })
+;;
+
+let workspace_deletion_current t capture (deletion : workspace_deletion) =
+  current t capture && phys_equal t.layout_intent deletion.intent
+;;
+
+let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrangement.t) =
+  let close =
+    command
+      ?unavailable:
+        (if workspace.closed
+         then Some "Workspace is already closed"
+         else if not (W.has_other_open_workspace registry workspace)
+         then Some "Cannot close the last open workspace in a window"
+         else None)
+      "workspace.close-current"
+      "Close current workspace"
+      "hide workspace tab retain layout"
+      (Close_workspace workspace.id)
+  in
+  close
+  :: List.filter_map registry.workspaces ~f:(fun w ->
+    Option.some_if w.closed
+      (command
+         ("workspace.reopen." ^ W.Workspace_id.to_string w.id)
+         ("Reopen workspace: " ^ Artifact_view.safe w.name)
+         "show closed workspace tab"
+         (Reopen_workspace w.id)))
 ;;
 
 let project_entry_commands =
@@ -3162,7 +3318,7 @@ let%test_unit "restore capture rejects revision and workspace changes without \
 ;;
 
 let matching_timing ?workspace:expected_workspace (registry : W.Snapshot.t) ~run =
-  List.find registry.workspaces ~f:(fun workspace ->
+  List.find (W.open_workspaces registry) ~f:(fun workspace ->
     Option.value_map
       expected_workspace
       ~default:true
@@ -3188,7 +3344,7 @@ let matching_timing ?workspace:expected_workspace (registry : W.Snapshot.t) ~run
 ;;
 
 let matching_timing_analysis t registry ~run ~analysis =
-  List.find_map registry.W.Snapshot.workspaces ~f:(fun workspace ->
+  List.find_map (W.open_workspaces registry) ~f:(fun workspace ->
     matching_timing ~workspace:workspace.id registry ~run
     |> Option.filter ~f:(fun w ->
       Option.equal
@@ -3200,7 +3356,7 @@ let matching_timing_analysis t registry ~run ~analysis =
 
 (** Config identity survives renaming. Legacy saved stock workspaces have no mapping. *)
 let builtin_timing_workspaces (registry : W.Snapshot.t) =
-  List.filter registry.workspaces ~f:(fun workspace ->
+  List.filter (W.open_workspaces registry) ~f:(fun workspace ->
     List.exists registry.config_workspaces ~f:(fun origin ->
       W.Workspace_id.equal origin.workspace workspace.id
       && String.equal origin.config_id "stock"
@@ -4058,7 +4214,14 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
           "Create blank workspace"
           "new empty workspace window tmux"
           Create_blank_workspace
+      ; command
+          ?unavailable:(workspace_deletion_unavailable s w)
+          "workspace.delete-current"
+          "Delete current workspace"
+          "remove workspace arrangement"
+          Request_workspace_deletion
       ]
+    @ workspace_lifecycle_commands s w
     @ restore_commands w
     @ (match w.preset with
        | Some "resources" ->
@@ -4068,7 +4231,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
              "split vertical rows orientation layout" (Orient_resources Stacked)
          ]
        | _ -> [])
-    @ (if String.is_prefix w.name ~prefix:"Timing · captured "
+    @ (if W.is_separate_investigation w
        then
          [ mutation
              "workspace.close-separate-timing"
@@ -4084,13 +4247,14 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
            { window = w.window
            ; template = (P.Presets.builtins d.id |> Or_error.ok_exn).template
            }))
-    @ List.map s.workspaces ~f:(fun w ->
+     @ List.map (W.open_workspaces s) ~f:(fun w ->
       command
         ("workspace." ^ W.Workspace_id.to_string w.id)
         ("Switch to " ^ w.name)
         "workspace navigation tabs"
         (Switch w.id))
-    @ (if List.exists s.tiles ~f:(fun tile -> Testing_workspace.is_pane tile.kind)
+     @ (if has_closed_preset s ~preset:"testing"
+           || List.exists s.tiles ~f:(fun tile -> Testing_workspace.is_pane tile.kind)
        then []
        else
          [ command
@@ -4188,10 +4352,11 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
       then None
       else
         Some
-          (mutation
-             ("tile.restore." ^ W.Tile_id.to_string tile.id)
-             ("Restore " ^ tile.kind ^ " " ^ W.Tile_id.to_string tile.id)
-             (Set_tile_hidden { tile = tile.id; hidden = false })))
+           (command
+              ("tile.restore." ^ W.Tile_id.to_string tile.id)
+              ("Restore " ^ tile.kind ^ " " ^ W.Tile_id.to_string tile.id)
+              ("reopen closed tile " ^ tile.kind)
+              (Registry (Set_tile_hidden { tile = tile.id; hidden = false }))))
     @ Option.value_map (focused t) ~default:[] ~f:(fun tile ->
       let id = tile.id in
       let g = tile.requested_geometry in
@@ -4210,10 +4375,11 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
              (Hierarchy_detail id)
          ]
        else [])
-      @ [ mutation
-            "tile.hide"
-            "Hide focused tile"
-            (Set_tile_hidden { tile = id; hidden = true })
+       @ [ command
+             "tile.hide"
+             "Close focused tile"
+             "Hide focused tile close tile workspace layout"
+             (Registry (Set_tile_hidden { tile = id; hidden = true }))
         ; mutation
             "tile.zoom"
             "Zoom focused tile"
@@ -4434,7 +4600,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
                ("Synthesis: Sort " ^ title)
                "cells table order"
                (Synthesis_sort sort)))
-      @ List.filter_map s.workspaces ~f:(fun destination ->
+       @ List.filter_map (W.open_workspaces s) ~f:(fun destination ->
         if W.Workspace_id.equal destination.id w.id
         then None
         else
@@ -5936,6 +6102,14 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
          update { p with index; viewport }
        in
        (match p.argument, event with
+        | Some (Delete_workspace_confirmation _), Escape ->
+          { t with palette = None; prefix = 0 }, No_effect
+        | Some (Delete_workspace_confirmation deletion), Enter ->
+          let t = { t with palette = None; prefix = 0 } in
+          if workspace_deletion_current t p.capture deletion
+          then t, Execute (p.capture, Confirm_workspace_deletion deletion)
+          else { t with notice = "Workspace changed; reopen Delete current workspace" }, No_effect
+        | Some (Delete_workspace_confirmation _), _ -> t, No_effect
           | Some (Starter_preview (_, Asic_starter)), Enter ->
             t, No_effect
           | Some (Starter_preview (preview, Chip (source, register))), Character 'r'
@@ -5969,7 +6143,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                    | Acceptance _
                     | Simulation_selection _
                     | Catalog_configuration _ ) -> String.length p.query >= 4096
-                | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
+                 | None | Some (Delete_workspace_confirmation _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
           { t with notice = "Finalization reference is limited to 4096 bytes" }, No_effect
         | Character ch ->
           ( { t with palette = Some (palette_query p (p.query ^ String.of_char ch)) }
@@ -6024,7 +6198,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                        | Simulation_selection _
                        | Catalog_configuration _ ) ->
                     String.length p.query > reference_limit t
-                   | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
+                    | None | Some (Delete_workspace_confirmation _ | Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
           then
             ( { t with notice = "Finalization reference is limited to 4096 bytes" }
             , No_effect )
@@ -6037,7 +6211,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
-                   | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
+                    | Delete_workspace_confirmation _ | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Catalog_configuration _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
                   | Flow_field field -> Flow_step (Flow_authoring.accept field p.query)
@@ -7458,6 +7632,108 @@ let%test_unit "palette similar commands capture Tab arrows aliases stable identi
   assert (Option.is_none (step opened Escape).palette)
 ;;
 
+let%test_unit "closed workspace reconciliation and saved navigation stay in the same window" =
+  let apply s mutation =
+    W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "closed-navigation") in
+  let main = List.hd_exn initial.workspaces in
+  let registry = apply initial (Create_window { name = "Secondary" }) in
+  let window = (List.last_exn registry.windows).id in
+  let registry = apply registry (blank_workspace_mutation registry ~window) in
+  let selected = List.last_exn registry.workspaces in
+  let registry = apply registry (blank_workspace_mutation registry ~window) in
+  let fallback = List.last_exn registry.workspaces in
+  let registry =
+    apply registry
+      (Create_tile
+         { workspace = fallback.id
+         ; kind = "run-selector"
+         ; geometry = { x = 0; y = 1; width = 20; height = 5 }
+         })
+  in
+  let fallback_focus = (List.last_exn registry.tiles).id in
+  let client = receive empty registry in
+  let focused_fallback = switch client fallback.id in
+  assert (not (Option.equal W.Tile_id.equal focused_fallback.focus (Some fallback_focus)));
+  let focused_fallback = { focused_fallback with focus = Some fallback_focus } in
+  let host = switch focused_fallback selected.id in
+  let saved = navigation_preferences ~project_key:"test" host |> Option.value_exn in
+  let saved =
+    Navigation_preferences.decode ~project_key:"test" (Navigation_preferences.encode saved)
+  in
+  assert (Option.equal String.equal saved.active_window (Some (W.Window_id.to_string window)));
+  let assert_fallback host =
+    assert (Option.equal W.Workspace_id.equal host.active (Some fallback.id));
+    assert (Option.equal W.Tile_id.equal host.focus (Some fallback_focus))
+  in
+  let closed = apply registry (Close_workspace selected.id) in
+  let deleted = apply registry (Delete_workspace selected.id) in
+  List.iter [ closed; deleted ] ~f:(fun snapshot ->
+    assert_fallback (receive host snapshot);
+    let second_client = receive (switch client selected.id) snapshot in
+    assert (Option.equal W.Workspace_id.equal second_client.active (Some fallback.id));
+    assert (W.Workspace_id.equal (Option.value_exn (focused second_client)).workspace fallback.id);
+    let fresh = receive empty snapshot in
+    assert (Option.equal W.Workspace_id.equal fresh.active (Some main.id));
+    assert_fallback (restore_navigation_focus saved fresh);
+    let unmodified = restore_navigation_focus saved fresh ~restore_active:false in
+    assert (Option.equal W.Workspace_id.equal unmodified.active fresh.active));
+  (* Legacy sidecars can recover a closed workspace's original window from its descriptor. *)
+  assert_fallback
+    (restore_navigation_focus { saved with active_window = None } (receive empty closed));
+  let host = receive host closed in
+  assert (phys_equal (switch host selected.id) host);
+  assert (Option.is_none (active { host with active = Some selected.id }));
+  let selected_id = W.Workspace_id.to_string selected.id in
+  assert (
+    not (List.exists (valid_navigation_workspaces saved host) ~f:(fun p ->
+      String.equal p.id selected_id)));
+  let saved_closed = navigation_preferences ~project_key:"test" host |> Option.value_exn in
+  assert (not (List.exists saved_closed.workspaces ~f:(fun p -> String.equal p.id selected_id)));
+  let commands = catalog host ~project:None ~jobs:[] in
+  List.iter [ "workspace."; "tile.move." ] ~f:(fun prefix ->
+    assert (not (List.exists commands ~f:(fun c -> String.equal c.id (prefix ^ selected_id)))));
+  let digit = workspace_at_index host (List.length initial.workspaces) |> Option.value_exn in
+  assert (W.Workspace_id.equal digit.id fallback.id);
+  let reopened = apply closed (Reopen_workspace selected.id) in
+  let host = receive host reopened in
+  assert_fallback host;
+  assert (Option.equal W.Workspace_id.equal (switch host selected.id).active (Some selected.id))
+;;
+
+let%test_unit "closed Waveforms and Testing stock instances are not handoff destinations" =
+  let apply s mutation =
+    W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "closed-handoffs") in
+  let window = (List.hd_exn initial.windows).id in
+  let waveforms = apply initial (P.Waveforms.create ~window) in
+  let workspace = List.last_exn waveforms.workspaces in
+  let closed = apply waveforms (Close_workspace workspace.id) in
+  assert (Option.is_none (P.Waveforms.find closed));
+  assert (match P.Waveforms.handoff closed with `Closed -> true | _ -> false);
+  assert (Option.is_none (P.Waveforms.created ~before:initial ~after:closed));
+  let testing =
+    apply
+      closed
+      (Instantiate_template
+         { window; template = (P.Presets.builtins "testing" |> Or_error.ok_exn).template })
+  in
+  let workspace = List.last_exn testing.workspaces in
+  let find registry = open_preset_in_window registry ~window ~preset:"testing" in
+  assert (Option.is_some (find testing));
+  let closed = apply testing (Close_workspace workspace.id) in
+  assert (Option.is_none (find closed));
+  assert (has_closed_preset closed ~preset:"testing");
+  let reopened = apply closed (Reopen_workspace workspace.id) in
+  assert (W.Workspace_id.equal (Option.value_exn (find reopened)).id workspace.id)
+;;
+
 let%test_unit "workspace tabs browse registry IDs and switch without mutating contexts" =
   let s = W.initial ~session_id:(W.Session_id.of_string "workspace-tabs") in
   let overview = List.hd_exn s.workspaces
@@ -8042,7 +8318,7 @@ let launch_target t =
 
 let selection_after_allocation (s : W.Snapshot.t) target run =
   let w =
-    List.find s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id target.workspace_id)
+    List.find (W.open_workspaces s) ~f:(fun w -> W.Workspace_id.equal w.id target.workspace_id)
   in
   let c = List.find s.contexts ~f:(fun c -> W.Context_id.equal c.id target.context_id) in
   match w, c with
@@ -8183,6 +8459,151 @@ let%test_unit "selectors and project-scoped tiles do not acquire ASIC evidence i
   assert (List.is_empty (evidence_runs (receive empty s)))
 ;;
 
+let%test_unit "workspace lifecycle palette closes presets and reopens exact closed IDs"
+  =
+  let apply s mutation =
+    W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let registry = W.initial ~session_id:(W.Session_id.of_string "workspace-lifecycle") in
+  let overview, timing =
+    match registry.workspaces with
+    | [ overview; timing ] -> overview, timing
+    | _ -> assert false
+  in
+  let host = receive empty registry in
+  let commands host = catalog host ~project:None ~jobs:[] in
+  let find host id = List.find_exn (commands host) ~f:(fun c -> String.equal c.id id) in
+  let close = find host "workspace.close-current" in
+  assert (Option.is_none close.unavailable);
+  (match close.action with
+   | Close_workspace id -> assert (W.Workspace_id.equal id overview.id)
+   | _ -> assert false);
+  let closed = apply registry (W.Mutation.Close_workspace overview.id) in
+  let fallback = receive host closed in
+  assert (Option.equal W.Workspace_id.equal fallback.active (Some timing.id));
+  assert (not (List.exists (commands fallback) ~f:(fun c ->
+    String.equal c.title ("Switch to " ^ overview.name))));
+  let reopen_id id = "workspace.reopen." ^ W.Workspace_id.to_string id in
+  let reopen = find fallback (reopen_id overview.id) in
+  assert (String.equal reopen.title ("Reopen workspace: " ^ overview.name));
+  assert (Option.is_none reopen.unavailable);
+  (match reopen.action with
+   | Reopen_workspace id -> assert (W.Workspace_id.equal id overview.id)
+   | _ -> assert false);
+  assert (not (List.exists (commands fallback) ~f:(fun c -> String.equal c.id (reopen_id timing.id))));
+  let last = switch fallback timing.id in
+  let close_last = find last "workspace.close-current" in
+  assert (Option.exists close_last.unavailable ~f:(fun reason ->
+    String.is_substring reason ~substring:"last open workspace"));
+  let reopened = apply closed (W.Mutation.Reopen_workspace overview.id) in
+  assert (W.Arrangement.equal (W.workspace reopened overview.id) overview);
+  assert (List.equal W.Tile.equal reopened.tiles registry.tiles);
+  let visible = switch (receive last reopened) overview.id in
+  assert (Option.is_none (find visible "workspace.restore-default-layout").unavailable);
+  assert (not (List.exists (commands visible) ~f:(fun c ->
+    String.is_prefix c.id ~prefix:"workspace.reopen.")))
+;;
+
+let%test_unit "workspace deletion confirms the named ID and fences stale intent"
+  =
+  let apply s mutation =
+    W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "workspace-deletion") in
+  let stock = List.hd_exn initial.workspaces in
+  let registry = apply initial (Create_window { name = "Secondary" }) in
+  let window = (List.last_exn registry.windows).id in
+  let registry = apply registry (blank_workspace_mutation registry ~window) in
+  let first = List.last_exn registry.workspaces in
+  let registry = apply registry (blank_workspace_mutation registry ~window) in
+  let second = List.last_exn registry.workspaces in
+  let registry = apply registry (Rename_workspace { workspace = second.id; name = first.name }) in
+  let host = switch (receive empty registry) first.id in
+  let delete_command t =
+    List.find_exn (catalog t ~project:None ~jobs:[]) ~f:(fun c ->
+      String.equal c.id "workspace.delete-current")
+  in
+  let press t event = input t event ~commands:[] in
+  let invoke t =
+    let captured = Option.value_exn (capture t) in
+    let palette =
+      { capture = captured; commands = [ delete_command t ]; query = ""; index = 0
+      ; viewport = `Follow 0; argument = None }
+    in
+    press { t with palette = Some palette } Enter
+  in
+  let _, effect = invoke host in
+  (match effect with
+   | Execute (captured, Request_workspace_deletion) ->
+     assert (W.Workspace_id.equal captured.workspace first.id)
+   | _ -> assert false);
+  let captured = Option.value_exn (capture host) in
+  let confirmation = open_workspace_deletion host captured in
+  (match (Option.value_exn confirmation.palette).argument with
+   | Some (Delete_workspace_confirmation deletion) ->
+     assert (String.equal deletion.name first.name)
+   | _ -> assert false);
+  let unchanged t =
+    assert (W.Snapshot.equal (Option.value_exn t.registry) registry);
+    assert (Option.equal W.Workspace_id.equal t.active (Some first.id))
+  in
+  (match press confirmation Escape with
+   | cancelled, No_effect ->
+     unchanged cancelled;
+     assert (Option.is_none cancelled.palette)
+   | _ -> assert false);
+  (match press (fst (press confirmation Paste_start)) Enter with
+   | still_open, No_effect -> assert (Option.is_some still_open.palette); unchanged still_open
+   | _ -> assert false);
+  let renamed = apply registry (Rename_workspace { workspace = first.id; name = "Renamed" }) in
+  List.iter
+    [ receive confirmation renamed
+    ; switch confirmation second.id
+    ; switch (switch confirmation second.id) first.id
+    ]
+    ~f:(fun stale ->
+      match press stale Enter with
+      | rejected, No_effect ->
+        assert (Option.is_none rejected.palette);
+        assert (String.is_substring rejected.notice ~substring:"Workspace changed")
+      | _ -> assert false);
+  (match press confirmation Enter with
+   | pending, Execute (capture, Confirm_workspace_deletion deletion) ->
+     unchanged pending;
+     assert (workspace_deletion_current pending capture deletion);
+     assert (not (workspace_deletion_current (reconnect pending ~replacement:false) capture deletion));
+     assert (W.Workspace_id.equal capture.workspace first.id);
+     let after = apply registry (Delete_workspace capture.workspace) in
+     let completed = receive pending after in
+     assert (Option.equal W.Workspace_id.equal completed.active (Some second.id));
+     assert (String.equal (Option.value_exn (active completed)).name first.name);
+     assert (W.Workspace_id.equal (Option.value_exn (focused completed)).workspace second.id);
+     let navigated = receive (switch pending stock.id) after in
+     assert (Option.equal W.Workspace_id.equal navigated.active (Some stock.id));
+     let last, effect = invoke completed in
+     (match effect with
+      | No_effect -> assert (String.is_substring last.notice ~substring:"last open workspace")
+      | _ -> assert false)
+   | _ -> assert false);
+  let stock_host = switch host stock.id in
+  let protected, effect = invoke stock_host in
+  (match effect with
+   | No_effect -> assert (String.is_substring protected.notice ~substring:"preset workspace")
+   | _ -> assert false);
+  let registry =
+    apply registry (Rename_workspace { workspace = first.id; name = "Timing · captured fixture" })
+  in
+  let timing = receive host registry in
+  match invoke timing with
+  | protected, No_effect ->
+    assert (String.is_substring protected.notice ~substring:"Close separate investigation")
+  | _ -> assert false
+;;
+
 let%test_unit "blank workspaces start with one navigation tile and accept more tiles"
   =
   let apply s mutation =
@@ -8261,6 +8682,21 @@ let%test_unit "blank workspaces start with one navigation tile and accept more t
   let host, _ = input host Focus ~commands in
   let tile = Option.value_exn (focused host) in
   assert (String.equal tile.kind "logs" && W.Binding.equal tile.binding Follow);
+  let close_or_restore host snapshot title =
+    match invoke host title with
+    | _, Execute (_, Registry (Set_tile_hidden { tile = target; _ } as mutation))
+      when W.Tile_id.equal target tile.id -> apply snapshot mutation
+    | _ -> assert false
+  in
+  let hidden = close_or_restore host populated "Close focused tile" in
+  assert ((W.tile hidden tile.id).hidden);
+  let restored =
+    close_or_restore
+      (receive host hidden)
+      hidden
+      ("Restore logs " ^ W.Tile_id.to_string tile.id)
+  in
+  assert (W.Tile.equal tile (W.tile restored tile.id));
   let second =
     apply populated (blank_workspace_mutation populated ~window:original.window)
   in

@@ -44,6 +44,9 @@ type t =
   ; project_key : string
   ; session : string
   ; active : string option
+  (** Hint for a same-window fallback when the saved active workspace was deleted.
+      Older sidecars lack this field. *)
+  ; active_window : string option
   ; workspaces : workspace list
   ; workloads : (string * Workloads_view.saved) list
   ; testing_artifacts : (string * Hardcaml_workbench_protocol.Simulation.Artifact.t) list

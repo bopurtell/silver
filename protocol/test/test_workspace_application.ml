@@ -24,6 +24,7 @@ let%test_unit "targeted reorder and guarded separate close preserve remaining us
          })
   in
   let separate = List.last_exn s.workspaces in
+  let s = mutate s (Apply_preset { workspace = separate.id; preset = "timing"; tiles = [] }) in
   let close s =
     W.apply
       s
@@ -34,6 +35,29 @@ let%test_unit "targeted reorder and guarded separate close preserve remaining us
   in
   assert (Result.is_error (close s));
   let s = mutate s (Make_independent separate.id) in
+  assert (
+    match
+      W.apply
+        s
+        (Mutate { expected_revision = s.revision; mutation = Delete_workspace separate.id })
+    with
+    | Error { kind = Invalid_request; _ } -> true
+    | _ -> false);
+  let independent = (W.workspace s separate.id).context in
+  let shared = mutate s (Link_context { workspace = main.id; context = independent }) in
+  assert (Result.is_error (close shared));
+  let renamed =
+    mutate s (Rename_workspace { workspace = main.id; name = "Timing · captured stock" })
+  in
+  let renamed = mutate renamed (Make_independent main.id) in
+  assert (
+    Result.is_error
+      (W.apply
+         renamed
+         (Mutate
+            { expected_revision = renamed.revision
+            ; mutation = Close_separate_investigation main.id
+            })));
   let s =
     mutate
       s
@@ -109,6 +133,112 @@ let initialize s c = W.apply s (Initialize_config c) |> ok
 
 let mutate (s : W.Snapshot.t) mutation =
   W.apply s (Mutate { expected_revision = s.revision; mutation }) |> ok
+;;
+
+let%test_unit "close and delete count only open siblings in the same window" =
+  let s = initial () in
+  let overview = List.hd_exn s.workspaces in
+  let timing = List.last_exn s.workspaces in
+  let custom (s : W.Snapshot.t) window =
+    mutate s (Create_workspace { window; name = "Desk"; context = s.main_context })
+  in
+  let s = custom s overview.window in
+  let desk = List.last_exn s.workspaces in
+  let s = mutate s (Create_window { name = "Other window" }) in
+  let s = custom s (List.last_exn s.windows).id in
+  let s = mutate s (Close_workspace overview.id) in
+  let s = mutate s (Close_workspace timing.id) in
+  let check_rejected (s : W.Snapshot.t) mutation =
+    match W.apply s (Mutate { expected_revision = s.revision; mutation }) with
+    | Error { kind = Invalid_request; _ } -> ()
+    | _ -> assert false
+  in
+  check_rejected s (Close_workspace desk.id);
+  check_rejected s (Delete_workspace desk.id);
+  check_rejected s (Delete_workspace overview.id);
+  check_rejected s (Close_workspace overview.id);
+  check_rejected s (Reopen_workspace desk.id);
+  let reopened = mutate s (Reopen_workspace timing.id) in
+  assert (W.is_workspace_open reopened timing.id);
+  assert (not (W.is_workspace_open reopened overview.id));
+  let s = mutate reopened (Close_workspace desk.id) in
+  let s = mutate s (Delete_workspace desk.id) in
+  assert (not (List.exists s.workspaces ~f:(fun w -> W.Workspace_id.equal w.id desk.id)));
+  check_rejected s (Close_workspace timing.id)
+;;
+
+let%test_unit "deletion is by ID, not name, and keeps even an unshared context" =
+  let s = initial () in
+  let preset = List.hd_exn s.workspaces in
+  let s = mutate s (Rename_workspace { workspace = preset.id; name = "Same name" }) in
+  let s =
+    mutate
+      s
+      (Create_workspace
+         { window = preset.window; name = "Same name"; context = s.main_context })
+  in
+  let custom = List.last_exn s.workspaces in
+  let s = mutate s (Make_independent custom.id) in
+  let delete id =
+    W.apply s (Mutate { expected_revision = s.revision; mutation = Delete_workspace id })
+  in
+  assert (
+    match delete preset.id with
+    | Error { kind = Invalid_request; _ } -> true
+    | _ -> false);
+  let after = delete custom.id |> ok in
+  assert (String.equal (W.workspace after preset.id).name "Same name");
+  assert (List.equal W.Context.equal s.contexts after.contexts)
+;;
+
+let%test_unit "deletion follows live tile ownership, not authoring origin" =
+  let c = config [ "logs"; "logs" ] in
+  let s = initialize (initial ()) c in
+  let left = List.hd_exn s.config_workspaces in
+  let right = List.last_exn s.config_workspaces in
+  let left_window = (W.workspace s left.workspace).window in
+  let right_window = (W.workspace s right.workspace).window in
+  let delete (s : W.Snapshot.t) id =
+    W.apply s (Mutate { expected_revision = s.revision; mutation = Delete_workspace id })
+  in
+  assert (
+    match delete s left.workspace with
+    | Error { kind = Invalid_request; _ } -> true
+    | _ -> false);
+  let moves_out = snd (List.hd_exn left.tiles) in
+  let stays_inside = snd (List.last_exn left.tiles) in
+  let moves_in = snd (List.hd_exn right.tiles) in
+  let survives = List.last_exn right.tiles in
+  let s = mutate s (Move_tile { tile = moves_out; workspace = right.workspace }) in
+  let s = mutate s (Move_tile { tile = moves_in; workspace = left.workspace }) in
+  let s =
+    mutate s (Move_workspace { workspace = left.workspace; window = right_window })
+  in
+  let after = delete s left.workspace |> ok in
+  assert (List.equal W.Window.equal s.windows after.windows);
+  assert (List.equal W.Config_window.equal s.config_windows after.config_windows);
+  assert (
+    List.equal
+      W.Tile_id.equal
+      (List.map after.tiles ~f:(fun t -> t.id))
+      [ moves_out; snd survives ]);
+  let remaining = List.hd_exn after.config_workspaces in
+  assert (List.length after.config_workspaces = 1);
+  assert (List.equal [%equal: string * W.Tile_id.t] remaining.tiles [ survives ]);
+  assert (Option.is_none remaining.definition.layout);
+  let reapplied = mutate after (Apply_config c) in
+  let restored_left =
+    List.find_exn reapplied.config_workspaces ~f:(fun p -> String.equal p.window_key "left")
+  in
+  assert (not (W.Workspace_id.equal restored_left.workspace left.workspace));
+  assert (W.Window_id.equal (W.workspace reapplied restored_left.workspace).window left_window);
+  let restored_right =
+    List.find_exn reapplied.config_workspaces ~f:(fun p -> String.equal p.window_key "right")
+  in
+  assert (W.Workspace_id.equal restored_right.workspace right.workspace);
+  assert (List.mem restored_right.tiles survives ~equal:[%equal: string * W.Tile_id.t]);
+  List.iter [ stays_inside; moves_in ] ~f:(fun id ->
+    assert (not (List.exists reapplied.tiles ~f:(fun t -> W.Tile_id.equal t.id id))))
 ;;
 
 let%test_unit "initialize replaces only placeholders and persists complete keyed policy" =

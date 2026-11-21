@@ -1,5 +1,9 @@
 # Feature ticket catalog
 
+**Cobalt integration intake (2026-11-21):** [Editor workspace, shared ToggleTerm,
+and timing navigation — recommended order](../cobalt_editor_roadmap.md). WB-087–091
+are proposed tickets; WB-021 remains the ticket for hardware source mapping.
+
 Updated 2026-10-17 from the owner's feature intake and current delivery records.
 **Cataloging a ticket does not authorize implementation.** Delivery is claimed only
 where its status and linked acceptance record explicitly say so.

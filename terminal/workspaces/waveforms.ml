@@ -72,15 +72,21 @@ let create ~window =
 ;;
 
 let find (registry : W.Snapshot.t) =
-  List.find registry.workspaces ~f:(fun workspace ->
+  List.find (W.open_workspaces registry) ~f:(fun workspace ->
     Option.equal String.equal workspace.preset (Some definition.id))
+;;
+
+let has_closed (registry : W.Snapshot.t) =
+  List.exists registry.workspaces ~f:(fun workspace ->
+    Option.equal String.equal workspace.preset (Some definition.id)
+    && not (W.is_workspace_open registry workspace.id))
 ;;
 
 let created ~(before : W.Snapshot.t) ~(after : W.Snapshot.t) =
   if not (W.Session_id.equal before.session_id after.session_id)
   then None
   else
-    List.filter after.workspaces ~f:(fun workspace ->
+    List.filter (W.open_workspaces after) ~f:(fun workspace ->
       Option.equal String.equal workspace.preset (Some definition.id)
       && not
            (List.exists before.workspaces ~f:(fun old ->
@@ -88,6 +94,15 @@ let created ~(before : W.Snapshot.t) ~(after : W.Snapshot.t) =
     |> function
     | [ workspace ] -> Some workspace
     | _ -> None
+;;
+
+(* A closed Waveforms workspace must be reopened explicitly rather than replaced
+   by an implicit duplicate on artifact handoff. *)
+let handoff registry =
+  match find registry with
+  | Some workspace -> `Existing workspace
+  | None when has_closed registry -> `Closed
+  | None -> `Create
 ;;
 
 (** Membership is identity-bearing, including hidden coordinated panes. Session is

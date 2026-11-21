@@ -45,6 +45,7 @@ type t =
   ; project_key : string
   ; session : string
   ; active : string option
+  ; active_window : string option [@sexp.option]
   ; workspaces : workspace list
   ; workloads : (string * Workloads_view.saved) list
        [@sexp.default []] [@sexp_drop_default.equal]
@@ -72,6 +73,7 @@ let validate (t : t) =
   check_string t.project_key;
   check_string t.session;
   check_optional t.active;
+  check_optional t.active_window;
   if List.length t.workspaces > 256 then fail "workspace count limit exceeded";
   let workspace_ids = List.map t.workspaces ~f:(fun w -> w.id) in
   unique workspace_ids;
@@ -158,6 +160,7 @@ let create ~project_key ~session ~active ~workspaces =
     ; project_key
     ; session
     ; active
+    ; active_window = None
     ; workspaces
     ; workloads = []
     ; testing_artifacts = []

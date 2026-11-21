@@ -17,4 +17,9 @@
 (install
  (package hardcaml_workbench)
  (section bin)
- (files (main.exe as hardcaml-workbench-workspace)))
+  (files (main.exe as hardcaml-workbench-workspace)))
+
+(rule
+ (alias runtest)
+ (deps test_add_workspace.py)
+ (action (run python3 -B %{dep:test_add_workspace.py} %{exe:main.exe})))

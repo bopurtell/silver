@@ -456,7 +456,7 @@ let composition_persistence () =
         "Failed additive apply published composition")
 ;;
 
-let blank_workspace_persistence () =
+let workspace_lifecycle_persistence () =
   let state_dir = Filename_unix.temp_dir "blank-workspace-" "" in
   Monitor.protect
     ~finally:(fun () -> In_thread.run (fun () -> remove_tree state_dir))
@@ -465,6 +465,24 @@ let blank_workspace_persistence () =
       let handle service operation = Service.handle service ~project_key operation in
       let service = Service.create ~state_dir in
       let%bind before = handle service Get >>| ok in
+      (* Reproduce an on-disk registry written before arrangements had a closed flag. *)
+      let%bind () =
+        In_thread.run (fun () ->
+          let path = Service.snapshot_path service ~project_key in
+          let rec strip_closed = function
+            | Sexp.List fields ->
+              Sexp.List
+                (List.filter_map fields ~f:(function
+                  | Sexp.List [ Sexp.Atom "closed"; _ ] -> None
+                  | field -> Some (strip_closed field)))
+            | atom -> atom
+          in
+          let legacy = In_channel.read_all path |> Sexp.of_string |> strip_closed in
+          Out_channel.write_all path ~data:(Sexp.to_string legacy))
+      in
+      let service = Service.create ~state_dir in
+      let%bind legacy = handle service Get >>| ok in
+      require (W.Snapshot.equal before legacy) "Legacy workspaces did not default to open";
       let window = (List.hd_exn before.workspaces).window in
       let operation : W.Operation.t =
         Mutate
@@ -512,20 +530,102 @@ let blank_workspace_persistence () =
              })
         >>| ok
       in
-      let%map restored = handle (Service.create ~state_dir) Get >>| ok in
+      let service = Service.create ~state_dir in
+      let%bind restored = handle service Get >>| ok in
       require (W.Snapshot.equal with_selection restored) "Restart lost populated workspace";
+      let owned = List.last_exn restored.tiles in
       require
         (Option.equal
            Run_ref.equal
-           (selected restored (List.last_exn restored.tiles).id)
+           (selected restored owned.id)
            (Some (run "shared")))
-        "Added tile does not follow shared selection")
+        "Added tile does not follow shared selection";
+      let edit (s : W.Snapshot.t) mutation =
+        handle service (Mutate { expected_revision = s.revision; mutation }) >>| ok
+      in
+      let%bind pinned =
+        edit restored (Set_tile_binding { tile = owned.id; binding = Pin_run (run "pin") })
+      in
+      let%bind zoomed = edit pinned (Set_zoom { workspace = blank.id; tile = Some owned.id }) in
+      let stock = List.hd_exn restored.workspaces in
+      let%bind protected =
+        handle
+          service
+          (Mutate { expected_revision = zoomed.revision; mutation = Delete_workspace stock.id })
+      in
+      expect_error Invalid_request protected;
+      let%bind unchanged = handle service Get >>| ok in
+      require (W.Snapshot.equal zoomed unchanged) "Rejected deletion changed the registry";
+      let close : W.Operation.t =
+        Mutate { expected_revision = zoomed.revision; mutation = Close_workspace blank.id }
+      in
+      let first = handle service close in
+      let second = handle service close in
+      let%bind closed = first >>| ok in
+      let%bind stale = second in
+      expect_error Conflict stale;
+      require (not (W.is_workspace_open closed blank.id)) "Closed workspace is still open";
+      require
+        (List.equal W.Arrangement.equal before.workspaces (W.open_workspaces closed))
+        "Closing changed the other open workspaces";
+      require
+        (List.equal W.Tile.equal zoomed.tiles closed.tiles
+         && List.equal W.Context.equal zoomed.contexts closed.contexts)
+        "Closing changed persistent tiles or contexts";
+      let service = Service.create ~state_dir in
+      let%bind restored_closed = handle service Get >>| ok in
+      require (W.Snapshot.equal closed restored_closed) "Restart reopened a closed workspace";
+      let%bind reopened =
+        handle
+          service
+          (Mutate
+             { expected_revision = restored_closed.revision
+             ; mutation = Reopen_workspace blank.id
+             })
+        >>| ok
+      in
+      require
+        (W.Snapshot.equal { zoomed with revision = zoomed.revision + 2 } reopened)
+        "Reopening did not restore the exact arrangement and registry";
+      let service = Service.create ~state_dir in
+      let%bind restored_open = handle service Get >>| ok in
+      require (W.Snapshot.equal reopened restored_open) "Restart lost the reopened workspace";
+      let operation : W.Operation.t =
+        Mutate { expected_revision = reopened.revision; mutation = Delete_workspace blank.id }
+      in
+      let first = handle service operation in
+      let second = handle service operation in
+      let%bind deleted = first >>| ok in
+      let%bind stale = second in
+      expect_error Conflict stale;
+      require
+        (W.Snapshot.equal
+           { reopened with
+             revision = reopened.revision + 1
+           ; workspaces = before.workspaces
+           ; tiles = before.tiles
+           }
+           deleted)
+        "Delete changed unrelated state or retained owned state";
+      let service = Service.create ~state_dir in
+      let%bind restored = handle service Get >>| ok in
+      require (W.Snapshot.equal deleted restored) "Restart resurrected the deleted workspace";
+      require
+        (Option.equal Run_ref.equal (selected restored (List.hd_exn restored.tiles).id)
+           (Some (run "shared")))
+        "Deleting a workspace lost shared selection";
+      let%map missing =
+        handle
+          service
+          (Mutate { expected_revision = restored.revision; mutation = Delete_workspace blank.id })
+      in
+      expect_error Not_found missing)
 ;;
 
 let run_tests () =
   pure_transitions ();
   let%bind () = persistence () in
-  let%bind () = blank_workspace_persistence () in
+  let%bind () = workspace_lifecycle_persistence () in
   composition_persistence ()
 ;;
 

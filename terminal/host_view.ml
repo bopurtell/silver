@@ -2249,7 +2249,7 @@ let workspace_page host tile ~width ~height rows =
     List.mapi rows ~f:(fun i row ->
       let i =
         Option.bind host.H.registry ~f:(fun registry ->
-          List.findi registry.workspaces ~f:(fun _ w ->
+           List.findi (W.open_workspaces registry) ~f:(fun _ w ->
             Option.equal W.Workspace_id.equal row.Overview_tiles.workspace (Some w.id)))
         |> Option.value_map ~default:i ~f:fst
       in
@@ -4005,6 +4005,8 @@ let palette_controls host (p : H.palette) =
       || (match c.action with Edit_run _ -> true | _ -> false)) ->
     [ input "Cancel" Escape ]
   | None -> []
+  | Some (Delete_workspace_confirmation deletion) ->
+    submit "Confirm delete" (H.workspace_deletion_current host p.capture deletion)
   | Some (Theme_picker _) ->
     submit "Apply" (Option.is_some (List.nth (H.matches p) p.index))
   | Some (Starter_name _) -> submit "Preview" nonblank
@@ -4097,6 +4099,7 @@ let palette_page host dimensions =
     in
     let heading =
       match p.argument with
+      | Some (H.Delete_workspace_confirmation _) -> "Confirm workspace deletion"
       | Some (H.Theme_picker _) -> "Choose theme"
       | Some (H.Plan_endpoint _) ->
         "PLAN ENDPOINT — "
@@ -4191,6 +4194,14 @@ let palette_page host dimensions =
     in
     let help =
       match p.argument with
+      | Some (H.Delete_workspace_confirmation deletion) ->
+        let question = "Delete workspace: " ^ Artifact_view.safe deletion.name in
+        let instruction =
+          if H.workspace_deletion_current host p.capture deletion
+          then "Enter confirms · Esc cancels"
+          else "Workspace changed; reopen Delete current workspace"
+        in
+        List.concat_map [ question; instruction ] ~f:(wrap_cells ~width)
       | Some (H.Starter_name starter) ->
         (match starter with
          | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
@@ -4235,8 +4246,14 @@ let palette_page host dimensions =
         ]
       | _ -> []
     in
+    let promptless_form =
+      match p.argument with
+      | Some (H.Delete_workspace_confirmation _ | H.Starter_wait _ | H.Starter_preview _
+             | H.Starter_result _) -> true
+      | _ -> false
+    in
     let prompt =
-      if (match p.argument with Some (H.Starter_wait _ | H.Starter_preview _ | H.Starter_result _) -> true | _ -> false)
+      if promptless_form
       then []
       else if List.is_empty query
       then
@@ -4316,7 +4333,7 @@ let palette_page host dimensions =
     let footer =
       if not (String.is_empty host.notice)
       then host.notice
-      else if (match p.argument with Some (H.Starter_wait _ | H.Starter_preview _ | H.Starter_result _) -> true | _ -> false)
+      else if promptless_form
       then heading
       else if Option.is_some theme
       then
@@ -5082,7 +5099,8 @@ let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
   let registry = Option.value_exn host.registry in
   let w = List.hd_exn registry.workspaces in
   let other = { w with id = W.Workspace_id.of_string "second"; name = "Second" } in
-  let host = { host with registry = Some { registry with workspaces = [ w; other ] } } in
+  let closed = { w with id = W.Workspace_id.of_string "closed"; name = "Closed"; closed = true } in
+  let host = { host with registry = Some { registry with workspaces = [ w; closed; other ] } } in
   let click ~width ~row ~column =
     workspace_tab_at host data tile ~width ~height:3 ~row ~column
   in
@@ -5098,6 +5116,8 @@ let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
     | `Strip chips -> chips
     | `Rows _ -> assert false
   in
+  assert (List.length chips = 2);
+  assert (String.is_substring (plain_text (fst (List.last_exn chips))) ~substring:"2 Second");
   let boundary = View.width (project_prefix host.appearance ~width:120)
                  + View.width (fst (List.hd_exn chips)) in
   assert (Option.is_none (click ~width:120 ~row:0 ~column:0));
@@ -8441,6 +8461,34 @@ let%test_unit "palette hit tests use visible row IDs and exact rendered form but
   check ~width:100 ~height:32 result "[Select target]" (Some (`Input (Character 's')));
   assert (not (List.Assoc.mem (palette_controls base (form (Starter_result ([], None))))
                  "Select target" ~equal:String.equal))
+;;
+
+let%test_unit "workspace deletion overlay names the target and only confirms while current"
+  =
+  let initial = W.initial ~session_id:(W.Session_id.of_string "delete-workspace-overlay") in
+  let original = List.hd_exn initial.workspaces in
+  let registry =
+    W.apply initial
+      (Mutate
+         { expected_revision = initial.revision
+         ; mutation = H.blank_workspace_mutation initial ~window:original.window
+         })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let workspace = List.last_exn registry.workspaces in
+  let host = H.switch (H.receive H.empty registry) workspace.id in
+  let confirmation = H.open_workspace_deletion host (Option.value_exn (H.capture host)) in
+  let dimensions = { Dimensions.width = 100; height = 32 } in
+  let text =
+    render_palette confirmation dimensions (View.rectangle ~width:100 ~height:32 ())
+    |> plain_text
+  in
+  List.iter [ "Delete workspace: " ^ workspace.name; "[Confirm delete]"; "[Cancel]" ]
+    ~f:(fun substring -> assert (String.is_substring text ~substring));
+  let stale = H.switch confirmation original.id in
+  assert (Poly.equal (palette_controls stale (Option.value_exn stale.palette))
+            [ "Cancel", `Input H.Escape ])
 ;;
 
 let%test_unit "form overlay keeps query tail visible without changing captured form state"

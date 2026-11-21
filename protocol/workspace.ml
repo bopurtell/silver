@@ -79,6 +79,7 @@ module Arrangement = struct
     ; binding_revision : int
     ; zoomed_tile : Tile_id.t option
     ; preset : string option [@sexp.default None]
+    ; closed : bool [@sexp.default false]
     }
   [@@deriving bin_io, compare, equal, sexp]
 
@@ -260,6 +261,12 @@ module Mutation = struct
         }
     | Close_separate_investigation of Workspace_id.t
     | Detach_with_target of Workspace_id.t * Asic.Chip_target.t
+    (** Delete a custom arrangement and its currently owned tiles. Contexts and
+        provider data are not owned by an arrangement. *)
+    | Delete_workspace of Workspace_id.t
+    (** Hide/restore an arrangement without changing ownership, order or bindings. *)
+    | Close_workspace of Workspace_id.t
+    | Reopen_workspace of Workspace_id.t
   [@@deriving bin_io, compare, equal, sexp]
 end
 
@@ -318,6 +325,16 @@ let context (s : Snapshot.t) id =
 
 let workspace (s : Snapshot.t) id =
   find s.workspaces ~f:(fun w -> Workspace_id.equal w.Arrangement.id id) "workspace"
+;;
+
+(** Open arrangements in registry order across all windows. *)
+let open_workspaces (s : Snapshot.t) =
+  List.filter s.workspaces ~f:(fun w -> not w.closed)
+;;
+
+(** Missing and closed IDs are both unavailable for open-workspace navigation. *)
+let is_workspace_open (s : Snapshot.t) id =
+  List.exists s.workspaces ~f:(fun w -> Workspace_id.equal w.id id && not w.closed)
 ;;
 
 let window (s : Snapshot.t) id =
@@ -474,6 +491,7 @@ let initial ~session_id : Snapshot.t =
     ; binding_revision = 0
     ; zoomed_tile = None
     ; preset = Some (String.lowercase name)
+    ; closed = false
     }
   in
   let selector id workspace width height : Tile.t =
@@ -644,6 +662,7 @@ let apply_config (s : Snapshot.t) (config : Workspace_config.Resolved.t) =
                     ; binding_revision = s.revision
                     ; zoomed_tile = None
                     ; preset = definition.template.preset
+                    ; closed = false
                     }
                   ]
             } )
@@ -711,6 +730,76 @@ let apply_config (s : Snapshot.t) (config : Workspace_config.Resolved.t) =
                then provenance
                else p))
       }))
+;;
+
+let has_other_open_workspace (s : Snapshot.t) (w : Arrangement.t) =
+  List.exists s.workspaces ~f:(fun other ->
+    (not other.closed)
+    && Window_id.equal other.window w.window
+    && not (Workspace_id.equal other.id w.id))
+;;
+
+let is_separate_investigation (w : Arrangement.t) =
+  String.is_prefix w.name ~prefix:"Timing · captured "
+;;
+
+let remove_workspace (s : Snapshot.t) id =
+  let owns (tile : Tile.t) = Workspace_id.equal tile.workspace id in
+  let removed =
+    List.filter_map s.tiles ~f:(fun tile -> Option.some_if (owns tile) tile.id)
+    |> Tile_id.Set.of_list
+  in
+  { s with
+    workspaces = List.filter s.workspaces ~f:(fun w -> not (Workspace_id.equal w.id id))
+  ; tiles = List.filter s.tiles ~f:(fun tile -> not (owns tile))
+  ; config_workspaces =
+      List.filter_map s.config_workspaces ~f:(fun origin ->
+        if Workspace_id.equal origin.workspace id
+        then None
+        else if not (List.exists origin.tiles ~f:(fun (_, id) -> Set.mem removed id))
+        then Some origin
+        else (
+          (* An authored tile may have been moved here from another arrangement.
+             Remove its live mapping and its frozen definition entry together. *)
+          let tiles =
+            List.filter origin.tiles ~f:(fun (_, id) -> not (Set.mem removed id))
+          in
+          let keep = String.Set.of_list (List.map tiles ~f:fst) in
+          let definition = origin.definition in
+          let definition_tiles, views =
+            List.zip_exn definition.tiles definition.template.views
+            |> List.filter ~f:(fun (tile, _) -> Set.mem keep tile.Workspace_config.Tile.key)
+            |> List.unzip
+          in
+          let rec prune (tree : Workspace_config.Tree.t) =
+            let open Workspace_config.Tree in
+            let group children ~f =
+              Option.some_if (not (List.is_empty children)) (f children)
+            in
+            match tree with
+            | Leaf { tile; _ } -> Option.some_if (Set.mem keep tile) tree
+            | Stack children ->
+              group (List.filter_map children ~f:prune) ~f:(fun ts -> Stack ts)
+            | Columns children ->
+              group (List.filter_map children ~f:prune) ~f:(fun ts -> Columns ts)
+            | Weighted_columns children ->
+              group
+                (List.filter_map children ~f:(fun (weight, t) ->
+                   Option.map (prune t) ~f:(fun t -> weight, t)))
+                ~f:(fun ts -> Weighted_columns ts)
+            | Narrow t -> Option.map (prune t) ~f:(fun t -> Narrow t)
+          in
+          Some
+            { origin with
+              tiles
+            ; definition =
+                { definition with
+                  tiles = definition_tiles
+                ; template = { definition.template with views }
+                ; layout = Option.bind definition.layout ~f:prune
+                }
+            }))
+  }
 ;;
 
 let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
@@ -784,8 +873,9 @@ let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
             ; window = window_id
             ; context = context_id
             ; binding_revision = s.revision
-            ; zoomed_tile = None
-            ; preset = None
+             ; zoomed_tile = None
+             ; preset = None
+             ; closed = false
             }
           ]
     }
@@ -812,31 +902,53 @@ let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
       | next :: rest -> next :: insert rest
     in
     { s with workspaces = insert remaining }
+  | Close_workspace id ->
+    let w = workspace s id in
+    require (not w.closed) "Workspace is already closed";
+    require (has_other_open_workspace s w) "Cannot close the last open workspace in a window";
+    update_workspace s id ~f:(fun w -> { w with closed = true })
+  | Reopen_workspace id ->
+    let w = workspace s id in
+    require w.closed "Workspace is already open";
+    update_workspace s id ~f:(fun w -> { w with closed = false })
+  | Delete_workspace id ->
+    let w = workspace s id in
+    require
+      (not (is_separate_investigation w))
+      "Use Close_separate_investigation for a separate Timing investigation";
+    require (Option.is_none w.preset) "Cannot delete a preset workspace";
+    require
+      (w.closed || has_other_open_workspace s w)
+      "Cannot delete the last open workspace in a window";
+    remove_workspace s id
   | Close_separate_investigation id ->
     let w = workspace s id in
     require
-      (String.is_prefix w.name ~prefix:"Timing · captured ")
+      (is_separate_investigation w)
       "Only an explicitly separate Timing investigation can be closed";
+    (* The legacy startup presets have no configuration origin. Renaming one to
+       the investigation prefix must not bypass its protection. *)
+    require
+      (not
+         (List.exists (initial ~session_id:s.session_id).workspaces ~f:(fun original ->
+            Workspace_id.equal original.id id)))
+      "Cannot close a stock workspace as a separate investigation";
     require (not (Context_id.equal w.context s.main_context)) "Cannot close Main context";
     require
       (List.count s.workspaces ~f:(fun other -> Context_id.equal other.context w.context)
        = 1)
       "Investigation context is shared; unlink explicitly before closing";
     require
-      (List.exists s.workspaces ~f:(fun other ->
-         Window_id.equal other.window w.window && not (Workspace_id.equal other.id id)))
-      "Cannot close the last workspace in a window";
+      (w.closed || has_other_open_workspace s w)
+      "Cannot close the last open workspace in a window";
     require
       (not
          (List.exists s.config_workspaces ~f:(fun origin ->
             Workspace_id.equal origin.workspace id)))
       "Cannot close a configured workspace as a separate investigation";
+    let s = remove_workspace s id in
     { s with
-      workspaces = List.filter s.workspaces ~f:(fun w -> not (Workspace_id.equal w.id id))
-    ; tiles =
-        List.filter s.tiles ~f:(fun tile -> not (Workspace_id.equal tile.workspace id))
-    ; contexts =
-        List.filter s.contexts ~f:(fun c -> not (Context_id.equal c.id w.context))
+      contexts = List.filter s.contexts ~f:(fun c -> not (Context_id.equal c.id w.context))
     }
   | Create_tile { workspace = workspace_id; kind; geometry } ->
     ignore (workspace s workspace_id : Arrangement.t);
@@ -904,8 +1016,9 @@ let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
               ; name = template.name
               ; context = s.main_context
               ; binding_revision = s.revision
-              ; zoomed_tile = None
-              ; preset = template.preset
+               ; zoomed_tile = None
+               ; preset = template.preset
+               ; closed = false
               }
             ]
       }

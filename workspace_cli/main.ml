@@ -54,9 +54,10 @@ let list =
            if W.Window_id.equal workspace.window window.id
            then
              printf
-               "  workspace\t%s\t%S\n"
+               "  workspace\t%s\t%S%s\n"
                (W.Workspace_id.to_string workspace.id)
-               workspace.name)))
+               workspace.name
+               (if W.is_workspace_open snapshot workspace.id then "" else "\tclosed"))))
 ;;
 
 let export =
@@ -69,6 +70,25 @@ let export =
        let open Deferred.Let_syntax in
        let%map snapshot, _ = connect connection in
        W.export_template snapshot (W.Workspace_id.of_string source) |> protocol_ok |> emit)
+;;
+
+let lifecycle ~summary ~receipt mutation =
+  Command.async
+    ~summary
+    (let open Command.Let_syntax in
+     let%map_open connection
+     and id = anon ("WORKSPACE-ID" %: string) in
+     fun () ->
+       let open Deferred.Let_syntax in
+       let%bind snapshot, request = connect connection in
+       let%map (_ : W.Snapshot.t) =
+         request
+           (Mutate
+              { expected_revision = snapshot.revision
+              ; mutation = mutation (W.Workspace_id.of_string id)
+              })
+       in
+       printf "%s workspace %s\n" receipt id)
 ;;
 
 let instantiate
@@ -181,6 +201,66 @@ let apply_config (snapshot : W.Snapshot.t) request config =
     output retains the complete reserved catalog, including uninstantiated definitions.
     [Presets.decode] checks their identity when reading it back. *)
 let config_commands =
+  let add_workspace =
+    Command.async
+      ~summary:
+        "Append a portable workspace template to a startup composition; write config to \
+         stdout"
+      (let open Command.Let_syntax in
+       let%map_open template_file = anon ("TEMPLATE.sexp" %: string)
+       and key =
+         flag "-key" (required string) ~doc:"KEY New custom definition and instance key"
+       and window_key =
+         flag
+           "-window-key"
+           (optional_with_default "main" string)
+           ~doc:"KEY Destination window key"
+       and base =
+         flag "-base" (optional string) ~doc:"FILE Existing config (default: stock)"
+       in
+       config_action (fun () ->
+         let open Deferred.Let_syntax in
+         let%bind config =
+           match base with
+           | None ->
+             return
+               (Presets.export_config ()
+                |> Or_error.bind ~f:Presets.decode
+                |> Or_error.ok_exn)
+           | Some path ->
+             let%map text =
+               read_bounded_file
+                 ~max_bytes:C.max_encoded_bytes
+                 ~description:"Workspace configuration"
+                 path
+             in
+             Presets.decode text |> Or_error.ok_exn
+         in
+         let%map text = read_template_file template_file in
+         let layout = T.decode text |> Or_error.ok_exn in
+         let template = { layout with preset = None } in
+         let tiles =
+           List.mapi template.views ~f:(fun i _ ->
+             { C.Tile.key = sprintf "tile-%d" (i + 1); presentation = None })
+         in
+         let definition = { C.Definition.key; template; tiles; layout = None } in
+         let instance =
+           { C.Instance.key; name = template.name; definition = Custom key }
+         in
+         if not (List.exists config.windows ~f:(fun w -> String.equal w.key window_key))
+         then failwith ("Unknown destination window key: " ^ window_key);
+         let windows =
+           List.map config.windows ~f:(fun w ->
+             if String.equal w.key window_key
+             then { w with workspaces = w.workspaces @ [ instance ] }
+             else w)
+         in
+         let next =
+           { config with definitions = config.definitions @ [ definition ]; windows }
+         in
+         ignore (Presets.resolve next |> Or_error.ok_exn : C.Resolved.t);
+         Writer.write (Lazy.force Writer.stdout) (C.encode next |> Or_error.ok_exn)))
+  in
   let validate =
     Command.async
       ~summary:"Validate a composition and resolve built-ins (offline)"
@@ -256,7 +336,11 @@ let config_commands =
     ~summary:
       "Versioned window/workspace compositions; offline authoring and explicit additive \
        apply"
-    [ "validate", validate; "export", export; "apply", apply_command ]
+    [ "validate", validate
+    ; "export", export
+    ; "apply", apply_command
+    ; "add-workspace", add_workspace
+    ]
 ;;
 
 let import =
@@ -300,9 +384,9 @@ let starter =
      fun () ->
        emit
          (match kind with
-           | "generic" -> T.generic
-           | "asic" -> T.asic
-           | id -> (Presets.builtins id |> Or_error.ok_exn).template);
+          | "generic" -> T.generic
+          | "asic" -> T.asic
+          | id -> (Presets.builtins id |> Or_error.ok_exn).template);
        Deferred.unit)
 ;;
 
@@ -314,6 +398,19 @@ let () =
        ; "export", export
        ; "import", import
        ; "clone", clone
+       ; ( "close"
+         , lifecycle
+             ~summary:"Close a workspace, keeping its layout"
+             ~receipt:"Closed"
+             (fun id -> W.Mutation.Close_workspace id) )
+       ; ( "reopen"
+         , lifecycle ~summary:"Reopen a saved workspace" ~receipt:"Reopened" (fun id ->
+             W.Mutation.Reopen_workspace id) )
+       ; ( "delete"
+         , lifecycle
+             ~summary:"Permanently remove a custom workspace and its tiles"
+             ~receipt:"Deleted"
+             (fun id -> W.Mutation.Delete_workspace id) )
        ; "starter", starter
        ; "config", config_commands
        ])

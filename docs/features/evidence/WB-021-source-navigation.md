@@ -20,6 +20,17 @@ related: []
 
 # WB-021 — Navigate real source mappings
 
+**Cobalt integration ownership:** If opening a retained artifact needs a new
+read-only buffer or range-selection hook in Cobalt, track that change and its
+verification here alongside Silver's navigation action.
+
+**Cobalt delivery slice:** use the [retained-path trace](WB-091-timing-origin-trace.md)
+to select one producer and the [generic editor action](../workspaces/WB-087-cobalt-editor.md)
+to open its result. For a whole path, offer launch/capture rather than silently
+choosing an endpoint. Open retained RTL read-only when that is the last proven hop;
+label ambiguous or stale origins explicitly. Back restores the exact Timing
+selection. An RTL-only jump is useful incremental delivery, not closure of this ticket.
+
 ## Request
 Original size: **Large Feature**. Navigate from hardware evidence into generated
 RTL and original OCaml through actual mapping provenance.

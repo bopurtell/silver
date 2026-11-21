@@ -827,7 +827,7 @@ let stage_rows ?(expected_stages = default_stages) ~selected_run ~asic ~observat
     no [workspace] target; the parent can disable input or offer creation. *)
 let navigation_rows ~(snapshot : Workspace.Snapshot.t) ~active_workspace =
   let existing =
-    List.map snapshot.workspaces ~f:(fun w ->
+    List.map (Workspace.open_workspaces snapshot) ~f:(fun w ->
       let active =
         Option.value_map
           active_workspace
@@ -874,7 +874,8 @@ let status_rows
   =
   let arrangement =
     Option.bind active_workspace ~f:(fun id ->
-      List.find snapshot.workspaces ~f:(fun w -> Workspace.Workspace_id.equal w.id id))
+      List.find (Workspace.open_workspaces snapshot) ~f:(fun w ->
+        Workspace.Workspace_id.equal w.id id))
   in
   let linkage =
     match arrangement with

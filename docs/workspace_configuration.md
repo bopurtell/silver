@@ -19,8 +19,10 @@ custom mixed workspaces and preservation of authored layouts during investigatio
 
 Open **Space c c**, choose **Create blank workspace**, and press Enter. Workbench
 creates and switches to `Workspace N` using the next available name. Its first
-tile lists the workspaces in the current window: use `j` / `k` to highlight
-a workspace and Enter to switch to it.
+tile is the same borderless, one-line workspace strip used in Overview.
+In Fit mode it stays at the top, leaving the space below for tiles such as
+Hierarchy. With the strip focused, use `j` / `k` to highlight a workspace
+and Enter to switch to it.
 It belongs to the current window, follows Main context, and persists in the daemon
 registry. Switching occurs only after successful creation.
 
@@ -28,6 +30,35 @@ To add other tiles, open **Space c c** again and choose
 an **Add … tile** command, such as **Add run-selector tile**, **Add live-status
 tile**, **Add synthesis tile**, or **Add logs tile**. Tile contents depend on the
 project's available evidence. Names are automatic; this command has no naming prompt.
+
+## Close, reopen, or delete
+
+To keep a workspace for later, just switch to another one. The active workspace
+is a client choice; switching does not remove its saved layout. To remove it
+from the workspace list for everyone using this project, choose **Close current
+workspace**. **Reopen workspace: NAME** brings the saved workspace back, with
+the same tile IDs, bindings and layout. This works for built-in workspaces such
+as Overview, Testing and Timing. Closing a view is not a job or service command.
+
+For just one tile, choose **Close focused tile**. To bring it back, search the
+palette for **Restore** and its tile kind. To return a built-in workspace to
+the shipped layout, choose **Restore default layout (current preset; hide extras)**.
+This is useful after experimenting with tiles; reopening alone preserves your edits.
+The built-in presets themselves remain available. You can close Overview,
+Timing, or Testing and reopen them later, but you cannot permanently delete a
+preset workspace or close the last open workspace in a window.
+
+To permanently remove a custom workspace, switch to it, open **Space c c**,
+choose **Delete current workspace**, and confirm the named workspace. Its layout
+and tiles disappear from the project's workspace list, including after restart.
+Simulation runs, artifacts, and project files are not deleted.
+
+From a script, use `silver-workspace list -endpoint URL -project PROJECT-ID`
+to find the workspace ID, then
+`silver-workspace delete -endpoint URL -project PROJECT-ID WORKSPACE-ID`.
+The CLI also accepts `close` and `reopen` with the same arguments. `list` marks
+closed entries. These commands act by ID, not by display name or the terminal's
+current selection.
 
 ## Keyboard navigation and layout modes
 
@@ -63,6 +94,24 @@ silver-workspace config export stock > stock.sexp
 silver-workspace config export example -id my-desk > my-desk.sexp
 silver-workspace config validate my-desk.sexp
 ```
+
+For example, to keep a custom hierarchy workspace alongside the usual stock
+workspaces in a reusable startup layout:
+
+```sh
+silver-workspace export -endpoint "$URL" -project "$PROJECT_ID" "$WORKSPACE_ID" > hierarchy.sexp
+silver-workspace config add-workspace -key hierarchy-desk hierarchy.sexp > my-desk.sexp
+silver-workspace config validate my-desk.sexp
+silver --project-root /path/to/project --workspace-config my-desk.sexp
+```
+
+`add-workspace` starts from stock unless you pass `-base existing.sexp`. It
+writes the resulting composition to stdout. Use a new output filename; do not
+redirect over the input file. The template copies tile kinds, order, visibility
+and requested sizes, not run selections. For an existing session use explicit
+**config apply** as described below; startup configuration initializes new sessions.
+The new config entry gets its own workspace ID when first applied; it does not
+take ownership of the live scratch workspace you exported.
 
 Export and validation are offline. In a source checkout, use
 `_build_workbench/default/workspace_cli/main.exe` in place of `silver-workspace`

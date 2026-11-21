@@ -1393,7 +1393,7 @@ let change_synthesis session f =
       session.host <- Host.set_local session.host tile.id next))
 ;;
 
-let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
+let workspace_request ?(poll = false) ?(on_snapshot = fun _ -> ()) session operation =
   match current_project session with
   | None -> return ()
   | Some project ->
@@ -1409,10 +1409,12 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
          Project_id.equal p.id project.id)
     then (
       match response with
-      | Error message ->
-        session.host <- { session.host with notice = "Workspace: " ^ message }
-      | Ok snapshot ->
-        if Option.exists session.host.registry ~f:(fun previous ->
+       | Error message ->
+         if not poll
+         then session.host <- { session.host with notice = "Workspace: " ^ message }
+       | Ok snapshot ->
+         let previous = session.host in
+         if Option.exists session.host.registry ~f:(fun previous ->
              not (Workspace.Session_id.equal previous.session_id snapshot.session_id))
          then (
            clear_waveform_transients session;
@@ -1433,9 +1435,20 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
             session.presentation_preferences
             session.host
              snapshot
-         in
-         clear_waveform_on_navigation session host;
-         session.host <- host;
+          in
+          clear_waveform_on_navigation session host;
+          if not (Option.equal Workspace.Workspace_id.equal previous.active host.active)
+          then (
+            session.timing_demand <- None;
+            session.waveform_visible <- false;
+            session.waveform_generation <- session.waveform_generation + 1);
+          let unchanged =
+            Option.exists previous.registry ~f:(fun registry ->
+              Workspace.Session_id.equal registry.session_id snapshot.session_id
+              && registry.revision >= snapshot.revision)
+          in
+          session.host
+          <- (if poll && unchanged then { host with notice = previous.notice } else host);
         reconcile_launch_context session project;
         session.presentation_preferences <- pending;
         apply_waveform_preferences session;
@@ -1443,7 +1456,7 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
         on_snapshot snapshot)
 ;;
 
-let mutate_workspace ?on_snapshot session mutation =
+let mutate_workspace ?on_snapshot ?(current = fun () -> true) session mutation =
   match session.host.registry with
   | None -> return ()
   | Some snapshot ->
@@ -1491,9 +1504,13 @@ let mutate_workspace ?on_snapshot session mutation =
           return ())
         (fun () ->
           let%bind () =
-            let%bind captured = capture_mutation () in
-            match captured with
-            | Error notice -> session.host <- { session.host with notice }; return ()
+             let%bind captured = capture_mutation () in
+             match captured with
+             | Error notice -> session.host <- { session.host with notice }; return ()
+             | Ok _ when not (current ()) ->
+               session.host
+               <- { session.host with notice = "Workspace changed before dispatch; reopen palette" };
+               return ()
             | Ok mutation -> workspace_request
               ?on_snapshot
               session
@@ -2630,7 +2647,7 @@ let hydrate_retained ?(reschedule = false) session =
              let%bind () = load_navigation_preferences session in
              let%bind () =
                if phys_equal client session.client
-               then workspace_request session Get
+                then workspace_request ~poll:true session Get
                else return ()
              in
              if not (phys_equal client session.client)
@@ -2644,25 +2661,27 @@ let hydrate_retained ?(reschedule = false) session =
 ;;
 
 let activate_workspace session id =
-  clear_waveform_transients session;
-  session.navigation_revision <- session.navigation_revision + 1;
-  session.timing_demand <- None;
-  session.waveform_visible <- false;
-  session.waveform_generation <- session.waveform_generation + 1;
-  session.host <- Host.switch session.host id;
-  Option.iter (current_project session) ~f:(reconcile_launch_context session);
-  reconcile_synthesis session;
-  Option.iter session.asic ~f:(fun snapshot ->
-    List.iter (Host.tiles session.host) ~f:(fun tile ->
-      Option.iter (Host.timing session.host tile) ~f:(fun view ->
-        session.host
-        <- Host.set_timing
-             session.host
-             tile
-             (Timing_workspace.attach_retained view snapshot))));
-  session.host <- Host.reconcile_navigation_timing session.host session.asic;
-  don't_wait_for (refresh_simulation session);
-  don't_wait_for (hydrate_retained ~reschedule:true session)
+  if Option.exists session.host.registry ~f:(fun s -> Workspace.is_workspace_open s id)
+  then (
+    clear_waveform_transients session;
+    session.navigation_revision <- session.navigation_revision + 1;
+    session.timing_demand <- None;
+    session.waveform_visible <- false;
+    session.waveform_generation <- session.waveform_generation + 1;
+    session.host <- Host.switch session.host id;
+    Option.iter (current_project session) ~f:(reconcile_launch_context session);
+    reconcile_synthesis session;
+    Option.iter session.asic ~f:(fun snapshot ->
+      List.iter (Host.tiles session.host) ~f:(fun tile ->
+        Option.iter (Host.timing session.host tile) ~f:(fun view ->
+          session.host
+          <- Host.set_timing
+               session.host
+               tile
+               (Timing_workspace.attach_retained view snapshot))));
+    session.host <- Host.reconcile_navigation_timing session.host session.asic;
+    don't_wait_for (refresh_simulation session);
+    don't_wait_for (hydrate_retained ~reschedule:true session))
 ;;
 
 let new_waveform_runtime pin token previous =
@@ -5479,7 +5498,7 @@ let open_timing_workspace ?analysis ?(separate = false) session ~(run : Run_ref.
           | None -> return None
           | Some current ->
             (match
-               List.find current.workspaces ~f:(fun w ->
+               List.find (Workspace.open_workspaces current) ~f:(fun w ->
                  String.equal w.name name
                  && not
                       (List.exists initial.workspaces ~f:(fun old ->
@@ -5493,10 +5512,8 @@ let open_timing_workspace ?analysis ?(separate = false) session ~(run : Run_ref.
                else (
                  match session.host.registry with
                  | None -> return None
-                 | Some registry ->
-                   if not
-                        (List.exists registry.workspaces ~f:(fun current ->
-                           Workspace.Workspace_id.equal current.id workspace.id))
+                  | Some registry ->
+                    if not (Workspace.is_workspace_open registry workspace.id)
                    then return None
                    else (
                      let workspace = Workspace.workspace registry workspace.id in
@@ -5857,19 +5874,24 @@ let open_waveform_workspace session artifact =
       else (
         let before = Option.value session.host.registry ~default:before in
         let%bind target =
-          match Waveforms.find before with
-          | Some workspace -> return (Some workspace)
-          | None ->
+          match Waveforms.handoff before with
+          | `Existing workspace -> return (`Target (Some workspace))
+          | `Closed -> return `Closed
+          | `Create ->
             let%map () =
               mutate_workspace session (Waveforms.create ~window:active.window)
             in
-            Option.bind session.host.registry ~f:(fun after ->
-              Waveforms.created ~before ~after)
+            `Target
+              (Option.bind session.host.registry ~f:(fun after ->
+                 Waveforms.created ~before ~after))
         in
-         match target with
-         | Some workspace when current () ->
-           clear_waveform_transients session;
-           session.timing_demand <- None;
+        match target with
+        | `Target (Some workspace)
+          when current ()
+               && Option.exists session.host.registry ~f:(fun s ->
+                 Workspace.is_workspace_open s workspace.id) ->
+          clear_waveform_transients session;
+          session.timing_demand <- None;
           session.host <- Host.set_waveform_pin session.host workspace.id pin;
           session.waveform_preferences_failed <- false;
           session.host <- Host.switch session.host workspace.id;
@@ -5893,6 +5915,12 @@ let open_waveform_workspace session artifact =
           reconcile_waveform_workspaces session;
           let%bind () = save_waveform_preferences session in
           refresh_waveforms session
+        | `Closed ->
+          session.host
+          <- { session.host with
+               notice = "Waveforms workspace is closed; reopen it from the palette"
+             };
+          return ()
         | _ ->
           session.host
           <- { session.host with
@@ -6019,57 +6047,64 @@ let resource_tile ?(kind = "resources") session ~current =
            Workspace.Workspace_id.equal w.id active.id)
        in
        let existing registry =
-         if String.equal kind "testing" && Option.is_some (Host.active_testing_catalog session.host)
-         then Some active
-         else
-           List.find registry.Workspace.Snapshot.workspaces ~f:(fun w ->
-             Workspace.Window_id.equal w.window active.window
-             && Option.equal String.equal w.preset (Some kind))
-       in
-       let%bind () =
-         if Option.is_some (existing initial)
-         then return ()
-         else
-           mutate_workspace
-             session
-             (Instantiate_template
-                { window = active.window
-                ; template =
-                    (Hardcaml_workbench_workspaces.Presets.builtins kind
-                     |> Or_error.ok_exn)
-                      .template
-                })
-       in
-       if not (valid ())
-       then return None
-       else (
-         match Option.bind session.host.registry ~f:existing with
-         | None -> return None
-         | Some workspace ->
-           let tile =
-             Option.bind session.host.registry ~f:(fun registry ->
-               List.find registry.tiles ~f:(fun tile ->
-                 Workspace.Workspace_id.equal tile.workspace workspace.id
-                 && String.equal tile.kind tile_kind
-                 && (not tile.hidden)
-                 && Option.value_map
-                      workspace.zoomed_tile
-                      ~default:true
-                      ~f:(Workspace.Tile_id.equal tile.id)))
+          if String.equal kind "testing" && Option.is_some (Host.active_testing_catalog session.host)
+          then Some active
+          else
+            Host.open_preset_in_window registry ~window:active.window ~preset:kind
+        in
+        let window = Option.some_if (not (String.equal kind "testing")) active.window in
+        if Option.is_none (existing initial) && Host.has_closed_preset ?window initial ~preset:kind
+        then (
+          session.host
+          <- { session.host with
+               notice = String.capitalize kind ^ " workspace is closed; reopen it from the palette"
+             };
+          return None)
+         else (
+           let%bind () =
+             if Option.is_some (existing initial)
+             then return ()
+             else
+               mutate_workspace
+                 session
+                 (Instantiate_template
+                    { window = active.window
+                    ; template =
+                        (Hardcaml_workbench_workspaces.Presets.builtins kind
+                         |> Or_error.ok_exn)
+                          .template
+                    })
            in
-           Option.iter tile ~f:(fun tile ->
-             if not (String.equal kind "testing" && Workspace.Workspace_id.equal active.id workspace.id)
-             then activate_workspace session workspace.id;
-             session.host <- { session.host with focus = Some tile.id });
-           if Option.is_none tile
-           then
-             session.host
-             <- { session.host with
-                  notice =
-                    String.capitalize kind
-                    ^ " tile hidden/zoomed out; restore it explicitly from the palette"
-                };
-           return tile)
+           if not (valid ())
+           then return None
+           else (
+             match Option.bind session.host.registry ~f:existing with
+             | None -> return None
+             | Some workspace ->
+               let tile =
+                 Option.bind session.host.registry ~f:(fun registry ->
+                   List.find registry.tiles ~f:(fun tile ->
+                     Workspace.Workspace_id.equal tile.workspace workspace.id
+                     && String.equal tile.kind tile_kind
+                     && (not tile.hidden)
+                     && Option.value_map
+                          workspace.zoomed_tile
+                          ~default:true
+                          ~f:(Workspace.Tile_id.equal tile.id)))
+               in
+               Option.iter tile ~f:(fun tile ->
+                 if not (String.equal kind "testing" && Workspace.Workspace_id.equal active.id workspace.id)
+                 then activate_workspace session workspace.id;
+                 session.host <- { session.host with focus = Some tile.id });
+               if Option.is_none tile
+               then
+                 session.host
+                 <- { session.host with
+                      notice =
+                        String.capitalize kind
+                        ^ " tile hidden/zoomed out; restore it explicitly from the palette"
+                    };
+               return tile))
      | _ -> return None)
 ;;
 
@@ -6209,6 +6244,38 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                  ~default:"Command target changed before dispatch; reopen palette"
            };
         return ()))
+  in
+  let workspace_lifecycle ~intent_current mutation ~on_snapshot =
+    let instance = session.hello.instance_id in
+    let navigation_revision = session.navigation_revision in
+    let current () =
+      V1.Daemon_instance_id.equal instance session.hello.instance_id
+      && phys_equal captured_client session.client
+      && Option.equal Project_id.equal captured_project
+           (Option.map (current_project session) ~f:(fun p -> p.id))
+      && Host.current session.host captured
+      && Result.is_ok (validate ())
+      && intent_current ()
+    in
+    async (fun () ->
+      match session.host.registry with
+      | None -> return ()
+      | Some before ->
+        mutate_workspace ~current session mutation ~on_snapshot:(fun snapshot ->
+          if navigation_revision = session.navigation_revision
+             && Workspace.Session_id.equal captured.session snapshot.session_id
+             && snapshot.revision > captured.revision
+          then on_snapshot ~before snapshot))
+  in
+  let focus_workspace_fallback ~before snapshot notice =
+    (* [receive] has already selected the surviving workspace. Do not override
+       navigation the user performed while the RPC was in flight. *)
+    let window = Host.workspace_window before captured.workspace in
+    Option.iter (Host.fallback_workspace snapshot window) ~f:(fun fallback ->
+      if Option.equal Workspace.Workspace_id.equal session.host.active (Some fallback)
+      then (
+        activate_workspace session fallback;
+        session.host <- { session.host with notice }))
   in
   let launch_fresh ~current ~target ~view (intent : Asic.Fresh.Intent.t) =
     if (not (current ()))
@@ -6724,6 +6791,42 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
         then restore_default_layout session captured ticket workspace definition
         else return ())
     | Restore_default_layout_unavailable -> Effect.Ignore
+    | Request_workspace_deletion ->
+      session.host <- Host.open_workspace_deletion session.host captured;
+      Effect.Ignore
+    | Confirm_workspace_deletion deletion ->
+      workspace_lifecycle
+        ~intent_current:(fun () -> Host.workspace_deletion_current session.host captured deletion)
+        (Workspace.Mutation.Delete_workspace captured.workspace)
+        ~on_snapshot:(fun ~before snapshot ->
+          if not (List.exists snapshot.workspaces ~f:(fun w ->
+                    Workspace.Workspace_id.equal w.id captured.workspace))
+          then focus_workspace_fallback ~before snapshot
+                 ("Deleted workspace: " ^ Artifact_view.safe deletion.name))
+    | Close_workspace id ->
+      let intent = session.host.layout_intent in
+      workspace_lifecycle
+        ~intent_current:(fun () ->
+          Workspace.Workspace_id.equal id captured.workspace
+          && phys_equal session.host.layout_intent intent)
+        (Workspace.Mutation.Close_workspace id)
+        ~on_snapshot:(fun ~before snapshot ->
+          Option.iter
+            (List.find snapshot.workspaces ~f:(fun w ->
+               Workspace.Workspace_id.equal w.id id && w.closed))
+            ~f:(fun w ->
+              focus_workspace_fallback ~before snapshot
+                ("Closed workspace: " ^ Artifact_view.safe w.name)))
+    | Reopen_workspace id ->
+      let intent = session.host.layout_intent in
+      workspace_lifecycle
+        ~intent_current:(fun () -> phys_equal session.host.layout_intent intent)
+        (Workspace.Mutation.Reopen_workspace id)
+        ~on_snapshot:(fun ~before:_ snapshot ->
+          if Workspace.is_workspace_open snapshot id
+             && Option.exists session.host.registry ~f:(fun current ->
+                  Workspace.is_workspace_open current id)
+           then activate_workspace session id)
     | Switch id ->
       activate_workspace session id;
       Effect.Ignore
@@ -6739,9 +6842,13 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 (Host.created_workspace ~before:registry ~after:snapshot)
                 ~f:(activate_workspace session))
         | _ -> return ())
-    | Create_testing_workspace ->
-      async (fun () ->
-        match session.host.registry, Host.active session.host with
+     | Create_testing_workspace ->
+       async (fun () ->
+         match session.host.registry, Host.active session.host with
+         | Some registry, _ when Host.has_closed_preset registry ~preset:"testing" ->
+           session.host
+           <- { session.host with notice = "Testing workspace is closed; reopen it from the palette" };
+           return ()
         | Some registry, Some active
           when not
                  (List.exists registry.tiles ~f:(fun tile ->
@@ -6761,7 +6868,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            | Some current
              when Workspace.Session_id.equal current.session_id registry.session_id ->
              (match
-                List.find current.workspaces ~f:(fun w ->
+                 List.find (Workspace.open_workspaces current) ~f:(fun w ->
                   Option.equal String.equal w.preset (Some "testing")
                   && not
                        (List.exists registry.workspaces ~f:(fun old ->
@@ -8678,7 +8785,7 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
        Some Effect.Ignore
      | Some (Character ('1' .. '9' as ch)) ->
        let index = Char.to_int ch - Char.to_int '1' in
-       Option.bind session.host.registry ~f:(fun s -> List.nth s.workspaces index)
+        Host.workspace_at_index session.host index
        |> Option.iter ~f:(fun w -> activate_workspace session w.id);
        Some Effect.Ignore
      | Some (Character (('[' | ']') as ch)) ->
