@@ -4000,8 +4000,13 @@ let palette_controls host (p : H.palette) =
     (if current && valid then [ input label H.Enter ] else []) @ [ input "Cancel" H.Escape ]
   in
   match p.argument with
+  | None when List.exists p.commands ~f:(fun c ->
+      String.is_prefix c.id ~prefix:"flow.choice."
+      || (match c.action with Edit_run _ -> true | _ -> false)) ->
+    [ input "Cancel" Escape ]
   | None -> []
   | Some (Starter_name _) -> submit "Preview" nonblank
+  | Some (Flow_field _) -> submit "Next" nonblank
   | Some (Starter_wait _) -> [ input "Dismiss" Escape ]
   | Some (Starter_preview (_, starter)) ->
     (if current then [ input "Apply" (H.Character 'a') ] else [])
@@ -4025,6 +4030,8 @@ let palette_controls host (p : H.palette) =
      | Error _ -> submit "Next" false)
   | Some (Preparation_inputs (flow, profile) | Plan_endpoint (flow, profile)) ->
     submit "Accept" (Result.is_ok (Launch_preferences.Prompt.selection p.query ~flow ~profile))
+  | Some (Run_endpoint (flow, profile)) ->
+    submit "Launch" (Result.is_ok (Launch_preferences.Prompt.selection p.query ~flow ~profile))
 ;;
 
 let palette_page host dimensions =
@@ -4071,6 +4078,8 @@ let palette_page host dimensions =
         "PLAN ENDPOINT — "
         ^ Launch_preferences.chip_label p.capture.chip_target
         ^ "; Enter stages inputs; Esc closes"
+      | Some (H.Run_endpoint (flow, profile)) ->
+        "Run " ^ flow ^ "/" ^ profile ^ " · enter endpoint · Enter launches"
       | Some (H.Preparation_inputs _) ->
         "PREPARATION INPUTS — "
         ^ Launch_preferences.chip_label p.capture.chip_target
@@ -4082,6 +4091,11 @@ let palette_page host dimensions =
         "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
       | Some H.Design_executable -> "IMPORT EXISTING ASIC DESIGN — existing project executable"
       | Some (H.Starter_name Asic_starter) -> "ADD ASIC STARTER — enter starter name"
+      | Some (H.Flow_field field) -> Flow_authoring.field_prompt field
+      | Some (H.Starter_name (Flow_entry draft)) ->
+        Flow_authoring.kind draft ^ " — enter new ID"
+      | Some (H.Starter_preview (_, Flow_entry draft)) ->
+        Flow_authoring.kind draft ^ " preview · Enter applies · Esc cancels"
       | Some (H.Starter_name (Chip _)) -> "NEW CHIP TARGET — enter target name"
       | Some H.Chip_directory -> "FROM IP LIBRARY — enter project-relative library directory"
       | Some (H.Chip_mapping _) -> "FROM IP LIBRARY — enter explicit pin mapping"
@@ -4122,11 +4136,15 @@ let palette_page host dimensions =
         "SELECTED LIBRARY — choose action"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "setup.add") ->
         "SET UP PROJECT — choose how to configure this project"
-      | None -> "COMMAND PALETTE · captured target"
+      | None ->
+        (match List.hd p.commands with
+         | Some c when String.is_prefix c.id ~prefix:"flow.choice." -> c.aliases
+         | Some { action = Edit_run _; _ } -> "Run Flow · select existing flow/profile"
+         | _ -> "COMMAND PALETTE · captured target")
     in
     let query =
       match p.argument with
-      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
+      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
         let input =
           "> "
           ^ p.query
@@ -4150,6 +4168,7 @@ let palette_page host dimensions =
       | Some (H.Starter_name starter) ->
         (match starter with
          | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
+         | Flow_entry draft -> [ "Owner chip: " ^ Flow_authoring.owner draft ]
          | Sample_ip -> [ "Template: sample behavior" ]
           | Empty_ip -> [ "Template: empty" ]
           | Chip (source, _) -> H.chip_assumptions source
@@ -4167,6 +4186,8 @@ let palette_page host dimensions =
         let rows =
           match p.argument with
           | Some (H.Starter_preview (preview, Chip (source, _))) -> H.starter_preview_lines ~source preview
+          | Some (H.Starter_preview (preview, Flow_entry draft)) ->
+            H.starter_preview_lines preview @ Flow_authoring.summary draft
           | Some (H.Starter_preview (preview, _)) -> H.starter_preview_lines preview
           | Some (H.Starter_result (rows, _)) -> rows
           | _ -> assert false
@@ -4325,6 +4346,16 @@ let render_palette host dimensions background =
 
 (* This page is the single source of terminal coordinates for menu rendering and
    dispatch. Separators and query/status text never acquire command identities. *)
+let menu_footer (menu : H.menu) : (Role.t * string) option =
+  match List.nth (H.menu_matches menu) menu.index with
+  | Some { command = { unavailable = Some text; _ }; _ } ->
+    Some (Warning, " Unavailable: " ^ text)
+  | _ ->
+    (match menu.kind with
+     | Project_menu -> None
+     | Actions_menu -> Some (Muted, " ↑↓ or j/k browse · Enter choose · Esc back"))
+;;
+
 let menu_page (dimensions : Dimensions.t) (menu : H.menu) =
   let left = 0 and top = if dimensions.height >= 6 then 1 else 0 in
   let width = Int.min 64 dimensions.width in
@@ -4339,8 +4370,9 @@ let menu_page (dimensions : Dimensions.t) (menu : H.menu) =
       Some entry.group, `Choice (i, entry) :: output)
   in
   let entries = if List.is_empty entries then [ `Empty ] else List.rev entries in
-  let height = Int.min (4 + List.length entries) (Int.max 0 (dimensions.height - top)) in
-  let capacity = Int.max 0 (height - 4) in
+  let chrome = 3 + Bool.to_int (Option.is_some (menu_footer menu)) in
+  let height = Int.min (chrome + List.length entries) (Int.max 0 (dimensions.height - top)) in
+  let capacity = Int.max 0 (height - chrome) in
   let selected =
     List.findi entries ~f:(fun _ -> function `Choice (i, _) -> i = menu.index | _ -> false)
     |> Option.value_map ~default:0 ~f:fst
@@ -4400,10 +4432,6 @@ let render_menu host dimensions background =
       else
         line Muted (if menu.count > 0 then sprintf " Count: %d" menu.count else " / filter")
     in
-    let reason =
-      List.nth (H.menu_matches menu) menu.index
-      |> Option.bind ~f:(fun entry -> entry.command.unavailable)
-    in
     let body =
       filter
       :: List.map page ~f:(function
@@ -4418,9 +4446,7 @@ let render_menu host dimensions background =
           in
           line (if selected then Selection else if disabled then Muted else Foreground)
             ((if selected then "› " else "  ") ^ label ^ suffix))
-      @ [ (match reason with
-           | None -> line Muted " ↑↓ or j/k browse · Enter choose · Esc back"
-           | Some text -> line Warning (" Unavailable: " ^ text)) ]
+      @ List.map (Option.to_list (menu_footer menu)) ~f:(fun (role, text) -> line role text)
       |> View.vcat
     in
     let title =

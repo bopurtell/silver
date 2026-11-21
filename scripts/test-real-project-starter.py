@@ -6,6 +6,7 @@ activate the provider's OCaml libraries before running this script.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import selectors
 import shutil
@@ -16,7 +17,7 @@ import urllib.request
 from fixtures.fs2_wire import parse, sexp
 
 
-def exercise(endpoint, dest, author):
+def exercise(endpoint, dest, author, flow_recipe=None):
     with urllib.request.urlopen(endpoint + "/api/hello", timeout=10) as response:
         instance = dict(parse(response.read().decode()))["instance_id"]
 
@@ -92,6 +93,60 @@ def exercise(endpoint, dest, author):
             *(t["executable"] for t in catalog()["targets"]))
         run("dune", "runtest", "--root", str(dest), "-j", "1")
         assert not dict(rpc("snapshot"))["jobs"], "authoring unexpectedly submitted a job"
+        if flow_recipe:
+            exercise_flows(dest, publish, catalog(), flow_recipe)
+
+
+def exercise_flows(project, publish, catalog, recipe):
+    """Only new source files may change; rebuild B and A away from all Silver state."""
+    def source_files(root):
+        contents = {}
+        for directory, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ("_build", "_flow_results")]
+            for filename in files:
+                p = Path(directory) / filename
+                contents[p.relative_to(root)] = p.read_bytes()
+        return contents
+
+    def single_add(before, after, suffix):
+        added = after.keys() - before.keys()
+        assert len(added) == 1 and next(iter(added)).as_posix().endswith(suffix), added
+        assert all(after[p] == data for p, data in before.items())
+
+    before = source_files(project)
+    flow = ["new-flow", "explore", "--chip", "chip_b", "--recipe", recipe]
+    publish(*flow)
+    assert source_files(project) == before, "preview wrote source"
+    publish(*flow, "--apply")
+    with_flow = source_files(project)
+    single_add(before, with_flow, "/flow_explore.ml")
+    publish("duplicate-profile", "timing_trial", "--chip", "chip_b",
+            "--flow", "standard", "--from", "balanced", "--apply")
+    with_profile = source_files(project)
+    single_add(with_flow, with_profile, "/flows/standard/profiles/timing_trial.ml")
+
+    # Copy authored source only, not .workbench, cached executables, or session data.
+    with tempfile.TemporaryDirectory(prefix="silver-flow-clean-") as tmp:
+        clean = Path(tmp)
+        for path, content in with_profile.items():
+            if path.parts[0].startswith("."):
+                continue
+            out = clean / path
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(content)
+        executables = {e["id"]: e["executable"] for e in catalog["targets"]}
+        subprocess.run(["dune", "build", "--root", str(clean), "-j", "1",
+                        *executables.values()], cwd=clean, check=True)
+        for chip in ("chip_b", "sample"):
+            exe = clean / "_build/default" / executables[chip]
+            declaration = json.loads(subprocess.check_output(
+                [exe, "flow", "list", "--json"], cwd=clean))["declaration"]
+            flows = {e["methodology"]["id"]: e for e in declaration["entries"]}
+            assert ("explore" in flows) == (chip == "chip_b"), (chip, flows.keys())
+            profiles = {p["id"] for p in flows["standard"]["profiles"]}
+            assert ("timing_trial" in profiles) == (chip == "chip_b"), (chip, profiles)
+            assert declaration["default"] == dict(flow="standard", profile="balanced")
+        print("Clean Dune build verified chip-local flow/profile additions and unchanged defaults.")
 
 
 def main():
@@ -99,7 +154,10 @@ def main():
     parser.add_argument("--daemon", type=Path, default=Path(__file__).resolve().parents[1]
                         / "_build/default/daemon/main.exe")
     parser.add_argument("--author", type=Path, help="Also verify adding registered and unlisted chips via this silver-author")
+    parser.add_argument("--flow-recipe", help="With --author, test chip-scoped flow authoring and a clean source-only rebuild")
     args = parser.parse_args()
+    if args.flow_recipe and not args.author:
+        parser.error("--flow-recipe requires --author")
     if not shutil.which("hardcaml-asic-starter"):
         parser.error("matching hardcaml-asic-starter must be on PATH")
     with tempfile.TemporaryDirectory(prefix="silver-starter-") as tmp:
@@ -115,7 +173,7 @@ def main():
                     assert selector.select(20), "daemon did not announce endpoint"
                 line = daemon.stdout.readline().strip()
                 assert line.startswith("silver-daemon listening on "), line
-                exercise(line.split()[-1], dest, args.author and args.author.resolve())
+                exercise(line.split()[-1], dest, args.author and args.author.resolve(), args.flow_recipe)
             finally:
                 daemon.terminate()
     print("Real starter preview, cancel, create, open, and Dune tests passed.")

@@ -118,48 +118,49 @@ let library_arguments snapshot ~directory ~mapping =
   [ "--library"; name; "--mapping"; mapping ]
 ;;
 
-let catalog_plan snapshot ~register ~name ~target =
-  let entry = `Assoc [ "id", `String name; "executable", `String target ] in
+let recognized_catalog text =
   let string = function
     | `String s -> s
     | _ -> failwith "Expected string"
   in
-  let recognized text =
-    Option.try_with (fun () ->
-      let field =
-        fields [ "schema_version"; "default_target"; "targets" ] (parse_object text)
-      in
-      if not (Poly.equal (field "schema_version") (`Int 1)) then failwith "version";
-      let default = string (field "default_target") in
-      let entries =
-        match field "targets" with
-        | `List xs -> xs
-        | _ -> failwith "targets"
-      in
-      let ids =
-        List.map entries ~f:(fun item ->
-          let get = fields [ "id"; "executable" ] item in
-          let id = string (get "id")
-          and path = string (get "executable") in
-          if not
-               (valid_name id
-                && String.is_suffix path ~suffix:".exe"
-                && String.for_all path ~f:(fun c ->
-                  Char.to_int c >= 32 && Char.to_int c <> 127 && not (Char.equal c '\\'))
-                && List.for_all (String.split path ~on:'/') ~f:(fun p ->
-                  not (List.mem [ ""; "."; ".."; "_build" ] p ~equal:String.equal)))
-          then failwith "entry";
-          id, path)
-      in
-      if List.contains_dup (List.map ids ~f:fst) ~compare:String.compare
-         || not (List.Assoc.mem ids default ~equal:String.equal)
-      then failwith "default/ids";
-      default, entries, ids)
-  in
+  Option.try_with (fun () ->
+    let field =
+      fields [ "schema_version"; "default_target"; "targets" ] (parse_object text)
+    in
+    if not (Poly.equal (field "schema_version") (`Int 1)) then failwith "version";
+    let default = string (field "default_target") in
+    let entries =
+      match field "targets" with
+      | `List xs -> xs
+      | _ -> failwith "targets"
+    in
+    let ids =
+      List.map entries ~f:(fun item ->
+        let get = fields [ "id"; "executable" ] item in
+        let id = string (get "id")
+        and path = string (get "executable") in
+        if not
+             (valid_name id
+              && String.is_suffix path ~suffix:".exe"
+              && String.for_all path ~f:(fun c ->
+                Char.to_int c >= 32 && Char.to_int c <> 127 && not (Char.equal c '\\'))
+              && List.for_all (String.split path ~on:'/') ~f:(fun p ->
+                not (List.mem [ ""; "."; ".."; "_build" ] p ~equal:String.equal)))
+        then failwith "entry";
+        id, path)
+    in
+    if List.contains_dup (List.map ids ~f:fst) ~compare:String.compare
+       || not (List.Assoc.mem ids default ~equal:String.equal)
+    then failwith "default/ids";
+    default, entries, ids)
+;;
+
+let catalog_plan snapshot ~register ~name ~target =
+  let entry = `Assoc [ "id", `String name; "executable", `String target ] in
   let state =
     match D.catalog_text snapshot with
     | None -> Some (name, [], [])
-    | Some text -> recognized text
+    | Some text -> recognized_catalog text
   in
   Option.iter state ~f:(fun (_, _, ids) ->
     if List.exists ids ~f:(fun (id, path) ->

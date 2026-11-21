@@ -8,7 +8,7 @@ let invalid reason = failwith ("Invalid starter descriptor: " ^ reason)
 
 (* Run on the blocking authoring worker. Drain both pipes with a single deadline
    (including child exit after EOF); always close the pipes and reap the child. *)
-let run program arguments =
+let run ?working_dir program arguments =
   let with_fd fd f = Exn.protect ~f:(fun () -> f fd) ~finally:(fun () -> U.close fd) in
   let pipe f =
     let r, w = U.pipe ~cloexec:true () in
@@ -33,12 +33,17 @@ let run program arguments =
             with_fd
               (U.openfile "/dev/null" [ O_RDONLY; O_CLOEXEC ] 0)
               (fun stdin ->
-                U.create_process
-                  program
-                  (Array.of_list (program :: arguments))
-                  stdin
-                  out_w
-                  err_w))
+                let p =
+                  Core_unix.create_process_with_fds
+                    ?working_dir
+                    ~prog:program
+                    ~args:arguments
+                    ~stdin:(Use_this stdin)
+                    ~stdout:(Use_this out_w)
+                    ~stderr:(Use_this err_w)
+                    ()
+                in
+                Pid.to_int p.pid))
       in
       let reaped = ref false in
       let now () =

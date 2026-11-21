@@ -13,7 +13,12 @@ val select : root list -> string -> root * string list
 type addition =
   | Ip of string
   | Module of string list * string
+  | Flow of
+      { inputs : string list list
+      ; output : string list option
+      }
 
+val input_text : snapshot -> string list -> string option
 val module_directory : string -> string list
 val manual_modules : snapshot -> bool
 
@@ -32,6 +37,7 @@ val design_dir : string -> string
 val catalog_text : snapshot -> string option
 val configs_absent : snapshot -> bool
 val matches_project : snapshot -> int * int -> bool
+val project_identity : snapshot -> int * int
 val library_text : snapshot -> string list
 val publish_catalog : dir -> snapshot -> string -> on_create:(string -> unit) -> unit
 val materialize : on_mkdir:(string -> unit) -> dir -> snapshot -> (dir -> 'a) -> 'a

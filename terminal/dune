@@ -44,11 +44,13 @@
   state
   hierarchy_view
   workspace_host
+  flow_authoring
   evidence_activity
   palette_search
   text_edit
   text_edit_test
-  palette_view
+   palette_view
+   project_browser
   host_view
   evidence_session_test
   execution_duration_test
@@ -246,6 +248,21 @@
 (alias
  (name runtest)
  (deps (alias test-project-menus-pty)))
+
+(rule
+ (alias test-flow-authoring-pty)
+ (deps test_flow_authoring_pty.py test_project_menus_pty.py test_ip_authoring_pty.py
+       test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-fs0.py
+       ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py
+       ../scripts/fixtures/fs2_provider.py ../scripts/fixtures/fs2_wire.py
+       ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
+       ../scripts/fixtures/unified_fresh_prefix.py)
+ (action (run python3 -B %{dep:test_flow_authoring_pty.py}
+          --client %{exe:main.exe} --daemon %{exe:../daemon/main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-flow-authoring-pty)))
 
 ; Pass a renderer path to the same PTY driver for installed-provider coverage.
 (rule

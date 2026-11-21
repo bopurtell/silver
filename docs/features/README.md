@@ -233,7 +233,9 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 
 ## Project adoption and design scope
 
-[WB-077](presentation/WB-077-project-action-menu.md) is **delivered**. Open **Project ▾ / F2** from any workspace. Right-click a run for its actions, or press **F3** on the highlighted run.
+[WB-083](project/WB-083-flow-authoring.md) is **delivered**: create flows and duplicate profiles for a chosen chip without retargeting launch. [WB-086](workspaces/WB-086-management-surface.md) is **partial**: both [management browser hosts](workspaces/WB-086-owner-trial.md) are available for comparison; owner feedback is pending.
+
+[WB-077](presentation/WB-077-project-action-menu.md) is **closed**. Open **Project ▾ / F2** from any workspace. Right-click a run for its actions, or press **F3** on the highlighted run.
 
 [WB-081](project/WB-081-chip-target-selection.md) is **closed**. Linked workspaces share Main's launch target; detached ones retain their own. Installed-binary acceptance verified the actual chip/profile dispatched from each context, stale-plan rejection, and exact or missing-variant restore.
 

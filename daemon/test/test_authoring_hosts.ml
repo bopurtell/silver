@@ -218,6 +218,77 @@ let chip_integration ~endpoint ~parent =
       refreshed (attempts - 1))
   in
   let%bind () = refreshed 200 in
+  let owner : Authoring.Owner.t = { project; destination = root; chip = "second" } in
+  let describe owner =
+    match%map call (Describe_owner owner) with
+    | Ok (Owner_described info) -> info
+    | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+  in
+  let%bind second = describe owner in
+  let create name : Authoring.Request.t =
+    New_flow
+      { owner
+      ; name
+      ; recipe = List.hd_exn second.recipes
+      ; endpoints = [ "synthesis" ]
+      ; initial_profile = "balanced"
+      }
+  in
+  let duplicate ?(source = "balanced") ?(edits = []) name : Authoring.Request.t =
+    Duplicate_profile { owner; name; flow = "second_only"; source; edits }
+  in
+  let new_path = "asic_second/flows/flow_second_only.ml" in
+  let%bind receipt = preview (create "second_only") in
+  assert (List.equal String.equal receipt.new_files [ new_path ]);
+  let%bind cancelled = call (Cancel { preview_id = receipt.preview_id }) in
+  assert (Poly.equal cancelled (Ok Authoring.Response.Cancelled));
+  assert (not (Sys_unix.file_exists_exn (Filename.concat root new_path)));
+  let%bind receipt = preview (create "second_only") in
+  edit new_path "(* occupied by the owner *)\n";
+  let%bind stale = call (Apply { preview_id = receipt.preview_id }) in
+  assert (
+    match stale with
+    | Ok (Failed { kind = Stale_preview; created_files = []; _ }) -> true
+    | _ -> false);
+  assert (String.equal (read new_path) "(* occupied by the owner *)\n");
+  Core_unix.unlink (Filename.concat root new_path);
+  let%bind _ = apply (create "second_only") in
+  let build_owner () = dune [ "build"; "--root"; "."; "asic_second/project.exe" ] in
+  let%bind () = build_owner () in
+  let buffering = "SYNTH_ABC_BUFFERING" in
+  let%bind _ = apply (duplicate ~edits:[ buffering, "false" ] "tuned") in
+  let%bind () = build_owner () in
+  let%bind _ = apply (duplicate ~source:"tuned" "timing_trial") in
+  let path = "asic_second/flows/second_only/profiles/timing_trial.ml" in
+  let source = read path in
+  let%bind () = build_owner () in
+  let%bind actual = describe owner in
+  let flow = List.find_exn actual.flows ~f:(fun f -> String.equal f.id "second_only") in
+  assert (
+    Poly.equal
+      (List.Assoc.find_exn flow.profiles "timing_trial" ~equal:String.equal)
+      [ buffering, "false" ]);
+  List.iter [ "balanced"; "timing_trial" ] ~f:(fun id ->
+    assert (List.Assoc.mem flow.profiles id ~equal:String.equal));
+  let%bind first = describe { owner with chip = "first" } in
+  assert (not (List.exists first.flows ~f:(fun f -> String.equal f.id "second_only")));
+  let rejected op =
+    match%map call op with
+    | Ok (Failed { created_files = []; _ }) -> ()
+    | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+  in
+  let%bind () = rejected (duplicate "balanced") in
+  let%bind () = rejected (duplicate "timing_trial") in
+  assert (String.equal source (read path));
+  let%bind state = asic Get in
+  assert (Option.equal Asic.Chip_target.equal state.chip_target (Some first_active));
+  assert (
+    String.equal
+      (member
+         "default_target"
+         (Yojson.Basic.from_string (read "hardcaml-asic-targets.json"))
+       |> to_string)
+      "first");
   Core_unix.rename ~src:root ~dst:(root ^ "-moved");
   Core_unix.mkdir root;
   edit "dune-project" "(lang dune 3.17)\n";

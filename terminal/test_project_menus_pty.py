@@ -52,7 +52,8 @@ def project(t):
     author, select = "Author in this project", "Select or browse"
     screen = t.capture("flat-project", ["─ " + author, ip, module, chip, "─ " + select,
                                        target, "[2 Testing]"], absent=[NEW, OPEN])
-    indexes = [screen.index(label) for label in (author, ip, module, chip, select, target)]
+    indexes = [screen.index(label) for label in
+               (author, ip, module, chip, "New Flow", "Duplicate Profile", select, "Run Flow", target)]
     assert indexes == sorted(indexes), screen
 
     def highlighted(label, row):
@@ -61,7 +62,7 @@ def project(t):
         assert re.search(r"[>›▸▶]\s*" + re.escape(row), line), screen
 
     for key, row in [(b"j", module), (b"k", ip), (b"\x1b[B", module),
-                     (b"\x1b[A", ip), (b"10j", target), (b"2k", module)]:
+                     (b"\x1b[A", ip), (b"10j", "Manage This Project"), (b"6k", module)]:
         send(t, key)
         highlighted("movement-" + key.hex(), row)
     send(t, b"/j")

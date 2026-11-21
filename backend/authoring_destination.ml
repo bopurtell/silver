@@ -101,6 +101,7 @@ type snapshot =
   ; library_inputs : ((int * int) * Time_ns.t * string) list
   ; directories : (string * (int * int)) list
   ; dune : ((int * int) * Time_ns.t * string) option
+  ; flow_inputs : (string list * ((int * int) * Time_ns.t * string) option) list
   }
 [@@deriving equal, sexp_of]
 
@@ -110,6 +111,7 @@ let catalog = "hardcaml-asic-targets.json"
 let catalog_text s = Option.map s.catalog_state ~f:(fun (_, _, text) -> text)
 let configs_absent s = s.configs_absent
 let matches_project s identity = List.is_empty s.missing && Poly.equal s.ancestor identity
+let project_identity s = s.ancestor
 let design_dir name = "asic_" ^ name
 
 (* Open only bounded regular files beneath the pinned directory and bind the bytes (not
@@ -200,6 +202,10 @@ let existing_project dir name ~configs_required =
 type addition =
   | Ip of string
   | Module of string list * string
+  | Flow of
+      { inputs : string list list
+      ; output : string list option
+      }
 
 let module_directory path =
   if String.equal path "."
@@ -243,8 +249,38 @@ let addition_project dir addition =
            walk d ((String.concat ~sep:"/" rel, id s) :: dirs) rel rest finish)
        | _ -> invalid ("Expected plain directory: " ^ path))
   in
+  let flow_inputs = ref [] in
   let directories, dune =
     match addition with
+    | Flow { inputs; output } ->
+      let dirs = String.Table.create () in
+      let rec probe dir prefix parts finish =
+        match parts with
+        | [] -> invalid "Empty flow path"
+        | [ name ] -> finish dir name
+        | p :: rest ->
+          let path, via = child dir p in
+          (match inspect via with
+           | None -> None
+           | Some s when Poly.equal s.st_kind S_DIR ->
+             let prefix = prefix @ [ p ] in
+             Hashtbl.set dirs ~key:(String.concat ~sep:"/" prefix) ~data:(id s);
+             with_dir ~path ~via ~identity:(id s) (fun d _ -> probe d prefix rest finish)
+           | _ -> invalid ("Expected plain directory: " ^ path))
+      in
+      flow_inputs
+      := List.map inputs ~f:(fun parts ->
+           ( parts
+           , probe dir [] parts (fun d n ->
+               Option.map (inspect (snd (child d n))) ~f:(fun _ -> read_regular d n)) ));
+      Option.iter output ~f:(fun parts ->
+        ignore
+          (probe dir [] parts (fun d n ->
+             absent d n;
+             None)
+           : unit option));
+      ( List.sort (Hashtbl.to_alist dirs) ~compare:(Comparable.lift String.compare ~f:fst)
+      , None )
     | Ip name ->
       if Option.is_none (inspect (snd (child dir "ip")))
       then [], None
@@ -257,7 +293,12 @@ let addition_project dir addition =
         absent d (name ^ ".ml");
         dirs, Some (read_regular ~limit:65536 d "dune"))
   in
-  Some marker, directories, dune
+  Some marker, directories, dune, !flow_inputs
+;;
+
+let input_text s parts =
+  List.Assoc.find_exn s.flow_inputs parts ~equal:(List.equal String.equal)
+  |> Option.map ~f:(fun (_, _, text) -> text)
 ;;
 
 let manual_modules snapshot =
@@ -307,19 +348,19 @@ let visit ?existing ?addition ?library ?(configs_required = true) (root : root) 
   let rec walk dir dh parts =
     match parts with
     | [] ->
-      let marker, common, catalog_state, configs_absent, directories, dune =
+      let marker, common, catalog_state, configs_absent, directories, dune, flow_inputs =
         match addition, existing with
         | Some addition, _ ->
-          let marker, directories, dune = addition_project dir addition in
-          marker, None, None, false, directories, dune
+          let marker, directories, dune, flow_inputs = addition_project dir addition in
+          marker, None, None, false, directories, dune, flow_inputs
         | None, None ->
           require_empty dh;
-          None, None, None, true, [], None
+          None, None, None, true, [], None, []
         | None, Some name ->
           let marker, common, catalog, configs_absent =
             existing_project dir name ~configs_required
           in
-          marker, common, catalog, configs_absent, [], None
+          marker, common, catalog, configs_absent, [], None, []
       in
       let stat = Core_unix.Ns_precision.fstat (Core_unix.dirfd dh) in
       f
@@ -334,6 +375,7 @@ let visit ?existing ?addition ?library ?(configs_required = true) (root : root) 
         ; library_inputs = Option.value_map library ~default:[] ~f:(library_inputs dir)
         ; directories
         ; dune
+        ; flow_inputs
         }
     | name :: rest ->
       let path, via = child dir name in
@@ -353,6 +395,7 @@ let visit ?existing ?addition ?library ?(configs_required = true) (root : root) 
            ; library_inputs = []
            ; directories = []
            ; dune = None
+           ; flow_inputs = []
            }
        | Some s when Poly.equal s.st_kind S_DIR ->
          with_dir ~path ~via ~identity:(id s) (fun d h -> walk d h rest)

@@ -8,7 +8,7 @@
 
 (rule
  (alias runtest)
- (deps test_cli.py ../terminal/ip_starter_fixture.py)
+ (deps test_cli.py test_flow_renderer.py ../terminal/ip_starter_fixture.py)
  (action
   (run python3 -B %{dep:test_cli.py} %{exe:main.exe} %{exe:../daemon/main.exe}
    %{dep:../terminal/ip_starter_fixture.py})))

@@ -55,6 +55,7 @@ type testing_launch =
   }
 
 type starter =
+  | Flow_entry of Flow_authoring.draft
   | Asic_starter
   | Empty_ip
   | Sample_ip
@@ -62,6 +63,8 @@ type starter =
   | Chip of Authoring.Chip_source.t * bool
 
 let starter_recipe = function
+  | Flow_entry (Methodology _) -> Authoring.new_flow_recipe
+  | Flow_entry (Profile _) -> Authoring.duplicate_profile_recipe
   | Asic_starter -> Authoring.add_to_project_recipe
   | Empty_ip -> Authoring.ip_empty_recipe
   | Sample_ip -> Authoring.ip_sample_recipe
@@ -70,6 +73,12 @@ let starter_recipe = function
 ;;
 
 type action =
+  | New_flow of string option
+  | Duplicate_profile of (string * string * string) option
+  | Flow_step of Flow_authoring.step
+  | Run_flow
+  | Edit_run of string * string
+  | Run_existing of Asic.Selection.t
   | Registry of W.Mutation.t
   | Switch of W.Workspace_id.t
   | Build
@@ -77,6 +86,8 @@ type action =
   | Cancel of Job_id.t
   | Refresh_integration
   | Project_entry of [ `New | `Open ]
+  | Manage_project
+  | Browse_chip_profiles of string
   | Setup_project
   | Setup_asic
   | Choose_ip_template
@@ -199,7 +210,9 @@ type capture =
   }
 
 type argument =
+  | Flow_field of Flow_authoring.field
   | Plan_endpoint of string * string
+  | Run_endpoint of string * string
   | Preparation_inputs of string * string
   | Finalization_attempt of Run_ref.t
   | Resource_path of bool
@@ -1238,7 +1251,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-      | Some { argument = Some (Simulation_selection _ | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
+      | Some { argument = Some (Simulation_selection _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -2289,6 +2302,14 @@ let command ?unavailable id title aliases action =
 let project_entry_commands =
   [ command "project.new" "New Project…" "create local dune project" (Project_entry `New)
   ; command "project.open" "Open Project…" "open existing local dune root" (Project_entry `Open)
+  ]
+;;
+
+let library_authoring_commands dir =
+  [ command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
+      "new module" (Name_starter (Module_in dir))
+  ; command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
+      "from IP library" (Map_chip dir)
   ]
 ;;
 
@@ -4712,13 +4733,19 @@ let chip_assumptions (source : Authoring.Chip_source.t) =
 ;;
 
 let starter_preview_lines ?source (p : Authoring.Preview.t) =
-  [ "Recipe: " ^ p.operation.recipe
+  let flow = List.mem [ Authoring.new_flow_recipe; Authoring.duplicate_profile_recipe ]
+      p.operation.recipe ~equal:String.equal in
+  (if flow then [ "Owner chip: " ^ Option.value p.operation.target.object_id ~default:"unknown"
+                ; (if Option.exists p.registration ~f:(fun edit -> edit.manual)
+                   then "Manual registration required; no source will be written."
+                   else "This module registers on successful build.") ] else [])
+  @ [ "Recipe: " ^ p.operation.recipe
   ; "Provider: " ^ p.provider ^ " " ^ p.version
   ; "Name: " ^ p.operation.name
   ; "Destination: " ^ p.operation.target.destination
   ]
   @ Option.value_map p.operation.target.object_id ~default:[] ~f:(fun dir ->
-    [ "Library: " ^ dir ])
+    if flow then [] else [ "Library: " ^ dir ])
   @ Option.value_map source ~default:[] ~f:chip_assumptions
   @ (if String.equal p.operation.recipe Authoring.chip_recipe
      then [ if Option.is_some p.registration then "Catalog registration: on"
@@ -4731,6 +4758,7 @@ let starter_preview_lines ?source (p : Authoring.Preview.t) =
       if String.equal p.operation.recipe Authoring.module_recipe
       then "Manual Dune edit: "
       else if edit.manual then "Manual catalog entry (paste into): "
+      else if flow then "Build registration: "
       else "Proposed registration: "
     in
     (label ^ edit.path) :: String.split_lines edit.snippet)
@@ -4867,6 +4895,7 @@ let finalization_form t =
         | Resource_path _
         | Design_executable
         | Starter_name _
+        | Flow_field _
         | Chip_directory | Chip_mapping _ | Module_directory
         | Workload_path
         | Workload_bundle _
@@ -5213,7 +5242,11 @@ let project_menu_rows commands =
     ; "Author in this project", "project.new-ip", "New IP Library…"
     ; "Author in this project", "project.new-module", "New Module…"
     ; "Author in this project", "project.new-chip", "New Chip Target…"
+    ; "Author in this project", "project.new-flow", "New Flow…"
+    ; "Author in this project", "project.duplicate-profile", "Duplicate Profile…"
+    ; "Select or browse", "project.run-flow", "Run Flow…"
     ; "Select or browse", "asic.pick-chip", "Select Launch Target…"
+    ; "Select or browse", "project.manage", "Manage This Project…"
     ]
     ~f:(fun (group, id, label) ->
       List.find commands ~f:(fun c -> String.equal c.id id)
@@ -5398,12 +5431,12 @@ let input t event ~commands : t * effect =
                | Some
                    ( Finalization_attempt _
                     | Resource_path _
-                    | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                    | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
                    | Simulation_selection _ ) -> String.length p.query >= 4096
-               | None | Some (Plan_endpoint _ | Preparation_inputs _) -> false ->
+               | None | Some (Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
           { t with notice = "Finalization reference is limited to 4096 bytes" }, No_effect
         | Character ch ->
           ( { t with palette = Some (palette_query p (p.query ^ String.of_char ch)) }
@@ -5439,7 +5472,7 @@ let input t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                          | Simulation_selection _ | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
+                          | Simulation_selection _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
                          | _ -> false))
           then
             ( { t with
@@ -5450,13 +5483,13 @@ let input t event ~commands : t * effect =
                   | Some
                       ( Finalization_attempt _
                        | Resource_path _
-                        | Design_executable | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                        | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
                       | Simulation_selection _ ) ->
                     String.length p.query > reference_limit t
-                  | None | Some (Plan_endpoint _ | Preparation_inputs _) -> false
+                  | None | Some (Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
           then
             ( { t with notice = "Finalization reference is limited to 4096 bytes" }
             , No_effect )
@@ -5467,6 +5500,7 @@ let input t event ~commands : t * effect =
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
                  | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
+                  | Flow_field field -> Flow_step (Flow_authoring.accept field p.query)
                   | Chip_directory ->
                     if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
                     then failwith "Enter a project-relative library directory";
@@ -5500,7 +5534,7 @@ let input t event ~commands : t * effect =
                    | `Launch selection ->
                      Simulation
                        (tile, Launch { submission_key; discovery_digest; selection }))
-                | (Plan_endpoint (flow, profile) | Preparation_inputs (flow, profile)) as
+                | (Run_endpoint (flow, profile) | Plan_endpoint (flow, profile) | Preparation_inputs (flow, profile)) as
                   argument ->
                   let selection =
                     Launch_preferences.Prompt.selection p.query ~flow ~profile
@@ -5511,6 +5545,7 @@ let input t event ~commands : t * effect =
                   in
                   (match argument with
                    | Preparation_inputs _ -> Select_preparation selection
+                   | Run_endpoint _ -> Run_existing selection
                    | _ -> Asic (Asic.Operation.Plan selection)))
             in
             match operation with

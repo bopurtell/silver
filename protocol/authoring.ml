@@ -45,13 +45,62 @@ module Chip_request = struct
   [@@deriving bin_io, compare, equal, sexp]
 end
 
+module Owner = struct
+  type t =
+    { project : Project_id.t
+    ; destination : string
+    ; chip : string
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+module Flow_info = struct
+  type t =
+    { id : string
+    ; profiles : (string * (string * string) list) list
+    ; parameters : (string * string list) list
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+module Owner_description = struct
+  type t =
+    { recipes : string list
+    ; endpoints : string list
+    ; flows : Flow_info.t list
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
 module Request = struct
   type t =
     | Preview of Operation.t
     | Apply of { preview_id : string }
     | Cancel of { preview_id : string }
     | Preview_chip of Chip_request.t
+    | Describe_owner of Owner.t
+    | Bind_owner_project of { destination : string }
+    | New_flow of
+        { owner : Owner.t
+        ; name : string
+        ; recipe : string
+        ; endpoints : string list
+        ; initial_profile : string
+        }
+    | Duplicate_profile of
+        { owner : Owner.t
+        ; name : string
+        ; flow : string
+        ; source : string
+        ; edits : (string * string) list
+        }
   [@@deriving bin_io, compare, equal, sexp]
+
+  let owner = function
+    | Describe_owner owner | New_flow { owner; _ } | Duplicate_profile { owner; _ } ->
+      Some owner
+    | _ -> None
+  ;;
 end
 
 module Registration = struct
@@ -77,6 +126,8 @@ let add_to_project_recipe = "hardcaml-asic-add-to-project-v1"
 let ip_empty_recipe = "hardcaml-ip-empty-v1"
 let ip_sample_recipe = "hardcaml-ip-sample-v1"
 let module_recipe = "hardcaml-module-v1"
+let new_flow_recipe = "hardcaml-asic-new-flow-v1"
+let duplicate_profile_recipe = "hardcaml-asic-duplicate-profile-v1"
 
 let targets_project_root recipe =
   List.mem
@@ -139,5 +190,7 @@ module Response = struct
         }
     | Cancelled
     | Failed of Failure.t
+    | Owner_described of Owner_description.t
+    | Owner_project_bound of Project_id.t
   [@@deriving bin_io, compare, equal, sexp]
 end

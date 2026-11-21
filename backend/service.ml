@@ -242,8 +242,12 @@ let check_authoring_project t (operation : Authoring.Request.t) =
   match operation with
   | Preview_chip { target = { project = None; _ }; _ } ->
     error Invalid_request "A new chip target requires an open project"
+  | Describe_owner { project; destination; _ }
+  | New_flow { owner = { project; destination; _ }; _ }
+  | Duplicate_profile { owner = { project; destination; _ }; _ }
   | Preview_chip { target = { project = Some project; destination; _ }; _ } ->
     (match Hashtbl.find t.projects project with
+     | None when Option.is_some (Authoring.Request.owner operation) -> Ok () (* checked against authoring-only bindings by the worker *)
      | None -> error Not_found "unknown authoring project"
      | Some session when String.equal session.root destination -> Ok ()
      | Some _ -> error Invalid_request "Chip destination must be the open project root")
@@ -259,7 +263,7 @@ let check_authoring_project t (operation : Authoring.Request.t) =
                && String.is_prefix destination ~prefix)
        then Ok ()
        else error Invalid_request "destination is outside the selected project")
-  | Preview _ | Apply _ | Cancel _ -> Ok ()
+  | Bind_owner_project _ | Preview _ | Apply _ | Cancel _ -> Ok ()
 ;;
 
 let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
@@ -268,8 +272,11 @@ let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
   | Ok () ->
     let project_identity =
       match operation with
+      | Describe_owner { project; _ }
+      | New_flow { owner = { project; _ }; _ }
+      | Duplicate_profile { owner = { project; _ }; _ }
       | Preview_chip { target = { project = Some project; _ }; _ } ->
-        Some (Hashtbl.find_exn t.projects project).root_identity
+        Option.map (Hashtbl.find t.projects project) ~f:(fun s -> s.root_identity)
       | _ -> None
     in
     Throttle.enqueue t.authoring_queue (fun () ->

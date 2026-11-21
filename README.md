@@ -81,6 +81,10 @@ files to this project and keeps its `dune-project` and existing sources.
 reference. Creating or adding a starter requires `hardcaml-asic-starter` on
 `PATH`; importing a design does not. None of these actions launches EDA.
 
+**Project browser trial:** Choose **Project ▾ → Manage This Project…** to browse
+libraries, chip targets and profiles without changing the launch target. **Try
+window** keeps the current inspection visible. [Controls and comparison](docs/features/workspaces/WB-086-owner-trial.md).
+
 **Reusable IP:** Click **Project ▾ → New IP Library…**, or type **`new ip`**
 in the palette and press **Enter**. Click the empty or sample template, type a
 name, then click **Preview**. Review the paths under `ip/<name>/` and click
@@ -123,6 +127,25 @@ clock or reset. The IP library and its tests stay in their original directory.
 This first mapping requires the updated sample starter's `chip-interface.json`
 and a matching `Block.create` type. A library created before that declaration
 was introduced is not automatically treated as compatible.
+
+**Flows and profiles:** Choose **Project ▾ → New Flow…** to add a methodology
+to a chip. Check the **Owner** before choosing a recipe: you can author a flow
+for chip B while chip A remains selected for launch. **Duplicate Profile…**
+copies the source profile's explicit settings; unspecified settings still come
+from the methodology. Both commands preview their source changes. Neither
+starts a run or changes the default. Build the owner's chip executable before
+discovering and running the new selection.
+
+```sh
+silver-author new-flow explore --chip chip_b --recipe librelane_classic_v1 --apply
+silver-author duplicate-profile timing_trial --chip chip_b --flow standard --from balanced --apply
+```
+
+Omit `--apply` to preview. New chip starters and the migrated FIFO example
+register those files on build. For a hand-written catalog that hasn't opted
+into this convention, Silver gives you a registration snippet instead of
+rewriting your OCaml. See the [management browser trial](docs/features/workspaces/WB-086-owner-trial.md)
+to compare browsing these objects in a workspace and in a side window.
 
 Standalone command-line submissions (`--plain --action`, `--refresh-integration`
 and `--asic-operation`) wait for the operation; use `--connect` to submit

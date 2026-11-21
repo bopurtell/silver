@@ -3,7 +3,7 @@ id: WB-086
 title: Project management window versus workspace prototype
 category: workspaces
 feature_sets: [FS3, FS5]
-status: needs-design
+status: partial
 kind: research
 priority: P2
 severity: n/a
@@ -20,7 +20,7 @@ related: [WB-077, WB-085]
 
 # WB-086 — Project management window versus workspace prototype
 
-**Ready to prototype.** The browser's purpose and entry point are settled; its permanent host is deliberately undecided.
+**Ready for owner trial.** Both presentations are available from the same browser; its permanent host is deliberately undecided. See the [controls and PTY comparison](WB-086-owner-trial.md).
 
 ## Request
 Try keeping the larger set of authoring controls outside Overview: compare a separate management window with a dedicated Project workspace.
@@ -43,9 +43,9 @@ The hierarchy belongs in the browser, not a cascading Project menu. Highlighting
 Shipping both UIs, choosing a permanent layout before trying them, or duplicating provider or daemon work.
 
 ## Acceptance criteria
-- [ ] Try the same tasks in both: from Testing find New IP Library by mouse; from a selected library create a module by keyboard; preview then cancel a chip creation and resume the original inspection.
-- [ ] At 80 columns compare discoverability, visible destination, keyboard travel and focus restoration. Confirm neither requires a crowded Overview toolbar.
-- [ ] In both hosts, with FIFO the launch target, browse a different chip and invoke New Flow. Assert the wizard receives that chip while FIFO and its staged plan remain unchanged. Compare whether an ongoing run stays visible during management and what it takes to resume inspection.
+- [x] Try the same tasks in both: from Testing find New IP Library by mouse; from a selected library create a module by keyboard; preview then cancel a chip creation and resume the original inspection.
+- [x] At 80 columns compare discoverability, visible destination, keyboard travel and focus restoration. Confirm neither requires a crowded Overview toolbar.
+- [x] In both hosts, with FIFO the launch target, browse a different chip and invoke New Flow. Assert the wizard receives that chip while FIFO and its staged plan remain unchanged. Compare whether an ongoing run stays visible during management and what it takes to resume inspection.
 - [ ] Record owner feedback and recommend window, workspace, both or neither, with a reason. Keep the palette path available regardless of the outcome.
 
 ## Dependencies

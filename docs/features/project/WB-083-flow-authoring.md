@@ -3,7 +3,7 @@ id: WB-083
 title: Flow-owned profiles and explicit authoring commands
 category: project
 feature_sets: [FS0, FS3]
-status: proposed
+status: delivered
 design_status: designed
 kind: feature
 priority: P2
@@ -21,12 +21,12 @@ related: [WB-077, WB-082]
 
 # WB-083 — Flow-owned profiles and explicit authoring commands
 
-**Designed — ready for implementation.**
+Delivered in the provider, Silver CLI and native Project menu.
 
 ## Request
 Give each named flow an obvious source home, and distinguish creating a methodology, duplicating a settings variant and running an existing selection.
 
-## Current baseline
+## Baseline before this ticket
 FIFO's project declares a base flow; its catalog constructs `standard`, registers profiles from `flow_profiles.ml` and is exposed by the chip CLI. A new file alone registers nothing.
 
 ## Scope
@@ -46,11 +46,11 @@ Generate deterministic catalog wiring under `_build/`, calling each entry's comm
 Requiring inline or custom profiles to move into separate files, migrating every custom catalog, or changing declared defaults when selecting a flow.
 
 ## Acceptance criteria
-- [ ] From the headless authoring CLI create a flow for B while A is the default. Only a new flow source is tracked. Build in a clean checkout without Silver running; B's CLI lists it and A's does not. Silver sees the same entries without changing the active target.
-- [ ] On the migrated FIFO example verify the existing selections/default and resolved settings. Add and remove an entry without touching the stanza; an ordinary helper is ignored and duplicate IDs give an actionable error.
-- [ ] Duplicate `standard/balanced` as `timing_trial`. The only tracked change is `flows/standard/profiles/timing_trial.ml`. Build and verify both profiles are listed under `standard`, the default remains `balanced`, and later changes to `balanced`'s explicit assignments do not change the copy.
-- [ ] Reject ID collisions with inline or additional profiles and refuse to overwrite an occupied path. For a custom flow without directory registration, return a declaration snippet and report manual registration required; leave its source unchanged.
-- [ ] Running the new selection creates an attempt without editing source; the prior profile remains runnable.
+- [x] From the headless authoring CLI create a flow for B while A is the default. Only a new flow source is tracked. Build in a clean checkout without Silver running; B's CLI lists it and A's does not. Silver sees the same entries without changing the active target.
+- [x] On the migrated FIFO example verify the existing selections/default and resolved settings. Add and remove an entry without touching the stanza; an ordinary helper is ignored and duplicate IDs give an actionable error.
+- [x] Duplicate `standard/balanced` as `timing_trial`. The only tracked change is `flows/standard/profiles/timing_trial.ml`. Build and verify both profiles are listed under `standard`, the default remains `balanced`, and later changes to `balanced`'s explicit assignments do not change the copy.
+- [x] Reject ID collisions with inline or additional profiles and refuse to overwrite an occupied path. For a custom flow without directory registration, return a declaration snippet and report manual registration required; leave its source unchanged.
+- [x] Running the new selection creates an attempt without editing source; the prior profile remains runnable.
 
 ## Dependencies
 [WB-085](WB-085-authoring-service.md) supplies preview/apply. Coordinate the starter layout with [WB-082](WB-082-chip-target-starter.md); registering a chip in the project catalog is distinct from compiling a chip's flow collection.
@@ -65,3 +65,19 @@ Implementation and verification work: validate the Dune rule, module linkage and
 
 ## References
 [Design: where to find a flow](../../project_authoring_and_command_design.md#where-to-find-a-flow).
+
+## Verification
+With matching provider libraries and tools installed, run:
+
+```sh
+python3 -B scripts/test-real-project-starter.py \
+  --daemon "$(command -v silver-daemon)" --author "$(command -v silver-author)" \
+  --flow-recipe librelane_classic_v1
+```
+
+The test adds `explore` and duplicates `standard/balanced` as `timing_trial`
+for chip B while A is the project default. Each apply must add exactly one
+source module. It then rebuilds both chips from a source-only copy without
+Silver state and checks that B alone lists the additions and both defaults
+are unchanged. `scripts/test_flow_collection.py` in `hardcaml_asic_example`
+exercises the migrated FIFO and verifies the original and copied profiles.

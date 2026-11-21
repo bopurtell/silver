@@ -24,7 +24,7 @@ let flags =
   root, endpoint, apply
 ;;
 
-let connect ~bound root = function
+let connect ~bound ~authoring_only root = function
   | None ->
     let root =
       match root with
@@ -55,9 +55,22 @@ let connect ~bound root = function
     in
     let client = Client.create endpoint in
     let%bind hello = Client.hello client >>| Or_error.ok_exn in
+    let call operation =
+      match%map
+        Client.authoring client { instance_id = hello.instance_id; operation }
+        >>| Or_error.ok_exn
+      with
+      | Ok r -> r
+      | Error e -> raise_s [%sexp (e : V1.Error.t)]
+    in
     let%map root, project =
       if not bound
       then return (root, None)
+      else if authoring_only
+      then (
+        match%map call (Bind_owner_project { destination = root }) with
+        | Owner_project_bound id -> root, Some id
+        | r -> raise_s [%sexp (r : A.Response.t)])
       else (
         match%map
           Client.open_project
@@ -68,15 +81,7 @@ let connect ~bound root = function
         | Ok p -> Project_root.to_absolute_path p.project.root, Some p.project.id
         | Error e -> raise_s [%sexp (e : V1.Error.t)])
     in
-    ( root
-    , project
-    , fun operation ->
-        (match%map
-           Client.authoring client { instance_id = hello.instance_id; operation }
-           >>| Or_error.ok_exn
-         with
-         | Ok response -> response
-         | Error e -> raise_s [%sexp (e : V1.Error.t)]) )
+    root, project, call
 ;;
 
 let unexpected = function
@@ -84,12 +89,22 @@ let unexpected = function
   | r -> raise_s [%sexp "Unexpected authoring reply", (r : A.Response.t)]
 ;;
 
-let publish ~bound (root, endpoint, apply) ~request =
-  let%bind destination, project, call = connect ~bound root endpoint in
+let publish ?(authoring_only = false) ~bound (root, endpoint, apply) ~request =
+  let%bind destination, project, call = connect ~bound ~authoring_only root endpoint in
   match%bind call (request destination project) with
   | Previewed p ->
     printf "Project: %s\nProvider: %s %s\n" destination p.provider p.version;
+    let flow_authoring =
+      List.mem
+        [ A.new_flow_recipe; A.duplicate_profile_recipe ]
+        p.operation.recipe
+        ~equal:String.equal
+    in
+    if flow_authoring
+    then printf "Owner chip: %s\n" (Option.value_exn p.operation.target.object_id);
     List.iter p.new_files ~f:(printf "  %s\n");
+    if flow_authoring && not apply
+    then List.iter p.files ~f:(fun f -> printf "\n--- %s ---\n%s\n" f.path f.contents);
     Option.iter p.registration ~f:(fun edit ->
       printf
         "%s: %s\n%s\n"
@@ -101,6 +116,10 @@ let publish ~bound (root, endpoint, apply) ~request =
      | Cancelled -> printf "Preview only; no files created.\n"
      | Applied { created_files; registration } ->
        printf "Created %d file(s).\n" (List.length created_files);
+       if flow_authoring && not (List.is_empty created_files)
+       then
+         printf
+           "Source created. Build the owner chip and rediscover to verify it is runnable.\n";
        (match registration with
         | Skipped { path; reason } -> printf "Manual edit: %s: %s\n" path reason
         | Registered path -> printf "Registered: %s\n" path
@@ -182,9 +201,77 @@ let new_module =
      fun () -> run flags ~recipe:A.module_recipe ~name ~library:(Some library))
 ;;
 
+let owner destination project chip : A.Owner.t =
+  { destination; project = Option.value_exn project; chip }
+;;
+
+let new_flow =
+  Command.async
+    ~summary:"Create a methodology and initial profile on a registered chip"
+    (let open Command.Let_syntax in
+     let%map_open flags
+     and chip = flag "--chip" (required string) ~doc:"ID Owning chip catalog entry"
+     and recipe =
+       flag
+         "--recipe"
+         (optional_with_default "librelane_classic_v1" string)
+         ~doc:"ID Provider recipe"
+     and endpoints =
+       flag
+         "--endpoint-stage"
+         (listed string)
+         ~doc:"STAGE Declared endpoint (repeatable; default: recipe endpoints)"
+     and initial_profile =
+       flag
+         "--initial-profile"
+         (optional_with_default "balanced" string)
+         ~doc:"ID Initial profile"
+     and name = anon ("FLOW" %: string) in
+     fun () ->
+       publish ~authoring_only:true ~bound:true flags ~request:(fun destination project ->
+         New_flow
+           { owner = owner destination project chip
+           ; name
+           ; recipe
+           ; endpoints
+           ; initial_profile
+           }))
+;;
+
+let duplicate_profile =
+  Command.async
+    ~summary:"Copy a profile's explicit assignments within its owning methodology"
+    (let open Command.Let_syntax in
+     let%map_open flags
+     and chip = flag "--chip" (required string) ~doc:"ID Owning chip catalog entry"
+     and flow = flag "--flow" (required string) ~doc:"ID Owning methodology"
+     and source = flag "--from" (required string) ~doc:"ID Source profile"
+     and edits =
+       flag
+         "--set"
+         (listed string)
+         ~doc:"KEY=VALUE Override an advertised assignment (KEY= removes it)"
+     and name = anon ("PROFILE" %: string) in
+     fun () ->
+       let edits =
+         List.map edits ~f:(fun edit ->
+           String.lsplit2 edit ~on:'='
+           |> Option.value_or_thunk ~default:(fun () ->
+             failwith "--set requires KEY=VALUE"))
+       in
+       publish ~authoring_only:true ~bound:true flags ~request:(fun destination project ->
+         Duplicate_profile
+           { owner = owner destination project chip; flow; source; name; edits }))
+;;
+
 let () =
   Command.group
     ~summary:"Preview or apply Silver project authoring operations"
-    [ "new-chip", new_chip; "new-ip", new_ip; "new-module", new_module ]
+    [ "new-chip", new_chip
+    ; "new-ip", new_ip
+    ; "new-module", new_module
+    ; "new-flow", new_flow
+    ; "duplicate-profile", duplicate_profile
+    ]
   |> Command_unix.run
 ;;

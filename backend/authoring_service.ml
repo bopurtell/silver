@@ -1,6 +1,7 @@
 module Lock = Mutex
 open! Core
 module Authoring = Hardcaml_workbench_protocol.Authoring
+module Project_id = Hardcaml_workbench_protocol.Project_id
 module D = Authoring_destination
 open Authoring
 
@@ -10,6 +11,8 @@ type plan =
   { preview : Preview.t
   ; root : D.root
   ; components : string list
+  ; addition : D.addition option
+  ; recheck : unit -> unit
   ; snapshot : D.snapshot
   ; library : string list option
   ; catalog_contents : string option
@@ -19,10 +22,21 @@ type t =
   { roots : D.root list
   ; mutex : Lock.t
   ; mutable pending : plan list
+  ; mutable bindings : (Project_id.t * (string * (int * int))) list
   }
 
 let create ~permitted_roots =
-  { roots = List.map permitted_roots ~f:D.root; mutex = Lock.create (); pending = [] }
+  { roots = List.map permitted_roots ~f:D.root
+  ; mutex = Lock.create ()
+  ; pending = []
+  ; bindings = []
+  }
+;;
+
+let nonce () =
+  Cryptokit.transform_string
+    (Cryptokit.Hexa.encode ())
+    (Cryptokit.Random.string Cryptokit.Random.secure_rng 32)
 ;;
 
 exception Rejected of Failure.kind * string
@@ -104,6 +118,39 @@ let integrate (op : Operation.t) snapshot files ~register =
   , contents )
 ;;
 
+let store
+  t
+  ~root
+  ~components
+  ~snapshot
+  ~addition
+  ~recheck
+  ~library
+  ~catalog_contents
+  ~op
+  ~provider
+  ~version
+  ~files
+  ~registration
+  =
+  (* One-use receipt for the frozen in-memory plan. *)
+  let preview_id = nonce () in
+  let preview =
+    { Preview.preview_id
+    ; operation = op
+    ; new_files = List.map files ~f:(fun file -> file.File.path)
+    ; provider
+    ; version
+    ; files
+    ; registration
+    }
+  in
+  t.pending
+  <- { preview; root; components; snapshot; library; catalog_contents; addition; recheck }
+     :: List.take t.pending 127;
+  Response.Previewed preview
+;;
+
 let preview ?chip ?project_identity t (op : Operation.t) =
   let controlled = String.equal controlled_recipe op.recipe in
   let existing = existing_name op in
@@ -180,6 +227,7 @@ let preview ?chip ?project_identity t (op : Operation.t) =
       try
         let command, arguments =
           match addition with
+          | Some (Flow _) -> assert false
           | Some (Ip _) ->
             ( "render-ip"
             , [ "--template"
@@ -206,6 +254,7 @@ let preview ?chip ?project_identity t (op : Operation.t) =
         in
         let files, registration, catalog_contents =
           match addition with
+          | Some (Flow _) -> assert false
           | Some (Ip name) ->
             let prefix = "ip/" ^ name ^ "/" in
             if not
@@ -243,23 +292,20 @@ let preview ?chip ?project_identity t (op : Operation.t) =
            installation and PATH"
       | exn -> reject Provider_failure (Exn.to_string exn))
   in
-  (* One-use receipt for the frozen in-memory plan. *)
-  let nonce = Cryptokit.Random.string Cryptokit.Random.secure_rng 32 in
-  let preview_id = Cryptokit.transform_string (Cryptokit.Hexa.encode ()) nonce in
-  let preview =
-    { Preview.preview_id
-    ; operation = op
-    ; new_files = List.map files ~f:(fun file -> file.File.path)
-    ; provider
-    ; version
-    ; files
-    ; registration
-    }
-  in
-  t.pending
-  <- { preview; root; components; snapshot; library; catalog_contents }
-     :: List.take t.pending 127;
-  Response.Previewed preview
+  store
+    t
+    ~root
+    ~components
+    ~snapshot
+    ~addition
+    ~recheck:ignore
+    ~library
+    ~catalog_contents
+    ~op
+    ~provider
+    ~version
+    ~files
+    ~registration
 ;;
 
 let take t id =
@@ -288,11 +334,59 @@ let handle_locked ?project_identity t request =
   in
   let location_error =
     match (request : Request.t) with
-    | Preview _ | Preview_chip _ -> Failure.Destination_denied
+    | Bind_owner_project _
+    | Describe_owner _
+    | New_flow _
+    | Duplicate_profile _
+    | Preview _
+    | Preview_chip _ -> Failure.Destination_denied
     | Apply _ | Cancel _ -> Stale_preview
   in
   try
     match request with
+    | Bind_owner_project { destination } ->
+      (* Headless authoring does not open a launch workspace: normal open-project may
+         enqueue driver discovery and evaluate the project's Dune rules. *)
+      let root, parts = D.select t.roots destination in
+      let id =
+        D.visit
+          ~addition:(Flow { inputs = []; output = None })
+          root
+          parts
+          (fun _ s -> D.project_identity s)
+      in
+      let project = Project_id.of_string ("authoring-" ^ nonce ()) in
+      t.bindings <- (project, (destination, id)) :: List.take t.bindings 127;
+      Response.Owner_project_bound project
+    | (Describe_owner _ | New_flow _ | Duplicate_profile _) as request ->
+      let owner = Option.value_exn (Request.owner request) in
+      let project_identity =
+        Option.value_or_thunk project_identity ~default:(fun () ->
+          match List.Assoc.find t.bindings owner.project ~equal:Project_id.equal with
+          | Some (destination, id) when String.equal owner.destination destination -> id
+          | _ -> reject Destination_denied "Expected a bound owner project")
+      in
+      let c = Authoring_flow.load ~project_identity t.roots owner in
+      (match request with
+       | Describe_owner _ -> Response.Owner_described (Authoring_flow.describe c)
+       | _ ->
+         let op, addition, snapshot, files, registration, provider, version =
+           Authoring_flow.plan c request
+         in
+         store
+           t
+           ~root:c.root
+           ~components:c.components
+           ~snapshot
+           ~addition:(Some addition)
+           ~recheck:c.recheck
+           ~library:None
+           ~catalog_contents:None
+           ~op
+           ~provider
+           ~version
+           ~files
+           ~registration:(Some registration))
     | Preview op -> preview t op
     | Preview_chip chip ->
       preview
@@ -307,12 +401,13 @@ let handle_locked ?project_identity t request =
       let p = take t preview_id in
       D.visit
         ?existing:(existing_name p.preview.operation)
-        ?addition:(addition p.preview.operation)
+        ?addition:p.addition
         ?library:p.library
         ~configs_required:(not (String.equal p.preview.operation.recipe chip_recipe))
         p.root
         p.components
         (fun dir snapshot ->
+          p.recheck ();
           if not (D.equal_snapshot p.snapshot snapshot)
           then reject Stale_preview "Destination changed since preview";
           let on_mkdir path = if Option.is_none !first_dir then first_dir := Some path in
@@ -325,6 +420,7 @@ let handle_locked ?project_identity t request =
         match p.preview.registration with
         | None -> Registration_result.Not_requested
         | Some edit when Option.is_some p.catalog_contents -> Registered edit.path
+        | Some edit when not edit.manual -> Not_requested
         | Some edit ->
           Skipped
             { path = edit.path; reason = "Manual registration; use the preview snippet" }
@@ -337,6 +433,7 @@ let handle_locked ?project_identity t request =
       Applied { created_files; registration }
   with
   | Rejected (kind, message) -> failed kind message
+  | Authoring_flow.Invalid_operation message -> failed Invalid_operation message
   | D.Invalid message | D.Changed message -> failed location_error message
   | Core_unix.Unix_error ((ENOENT | EEXIST | ENOTDIR | ELOOP), _, _) ->
     failed location_error "Destination unavailable or changed"

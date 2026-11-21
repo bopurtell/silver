@@ -3,7 +3,7 @@ id: WB-077
 title: Keyboard-first Project and contextual menus
 category: presentation
 feature_sets: [FS3, FS5]
-status: delivered
+status: closed
 design_status: designed
 kind: feature
 priority: P2

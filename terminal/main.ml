@@ -6,7 +6,9 @@ module Baseline_fixture = Terminal_presentation.Baseline_fixture
 module Presentation = Terminal_presentation.Presentation
 module State = Terminal_presentation.State
 module Host = Terminal_presentation.Workspace_host
+module Flow_authoring = Terminal_presentation.Flow_authoring
 module Host_view = Terminal_presentation.Host_view
+module Browser = Terminal_presentation.Project_browser
 module Appearance = Terminal_presentation.Appearance
 module Indicator = Terminal_presentation.Indicator
 module Synthesis_view = Terminal_presentation.Synthesis_view
@@ -133,6 +135,8 @@ type session =
   ; mutable reconnect_delay_ms : int
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
   ; mutable painted_palette : Host.t option
+  ; mutable browser : Browser.t option
+  ; mutable painted_browser : Browser.t option
   ; mutable show_connection_details : bool
   ; mutable connection_details_scroll : int
   ; mutable host : Host.t
@@ -348,6 +352,8 @@ let create_session
       ; reconnect_delay_ms = 250
       ; last_dimensions = None
       ; painted_palette = None
+      ; browser = None
+      ; painted_browser = None
       ; show_connection_details = false
       ; connection_details_scroll = 0
       ; host = Host.empty
@@ -4618,6 +4624,7 @@ let select_pointer_row session (tile : Workspace.Tile.t) dimensions ~column ~row
 
 let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   session.painted_palette <- None;
+  session.painted_browser <- None;
   let remember_palette (host : Host.t) =
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
     host
@@ -4639,6 +4646,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
       data
       dimensions
   in
+  let background =
   match session.waveform_visible, session.waveform with
   | _ when session.show_connection_details -> render_legacy session dimensions
   | true, Some view ->
@@ -4678,6 +4686,12 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
             || Option.is_some session.artifact_view
             || session.show_connection_details -> render_legacy session dimensions
      | Some _ -> render_host ())
+  in
+  match session.browser with
+  | None -> background
+  | Some browser ->
+    session.painted_browser <- Some browser;
+    Browser.render browser session.host.appearance dimensions background
 ;;
 
 (* Baseline capture.
@@ -4726,6 +4740,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; reconnect_delay_ms = 250
     ; last_dimensions = None
     ; painted_palette = None
+    ; browser = None
+    ; painted_browser = None
     ; show_connection_details = fixture.show_connection_details
     ; connection_details_scroll = 0
     ; host = Host.empty
@@ -4909,7 +4925,11 @@ let host_catalog_base session =
      [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
      ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
      ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
+     ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
+     ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
      ]
+     @ Option.to_list (Option.map (Browser.trial ()) ~f:(fun _ ->
+         Host.command "project.manage" "Manage This Project…" "project browser" Manage_project))
      @ library_commands session ~f:(fun label dir ->
        Host.command ("project.library." ^ label ^ ":" ^ dir)
          (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
@@ -5092,7 +5112,9 @@ let host_catalog_base session =
       ~view_pending:(Option.is_some session.view_on_allocation)
   @ Option.value_map session.asic ~default:[] ~f:(fun asic ->
     List.filter_opt
-      [ Option.some_if (List.exists asic.chips ~f:(fun chip -> not (List.is_empty chip.variants)))
+      [ Option.some_if (not (List.is_empty asic.flows))
+          (Host.command "project.run-flow" "Run Flow…" "existing flow profile endpoint" Run_flow)
+      ; Option.some_if (List.exists asic.chips ~f:(fun chip -> not (List.is_empty chip.variants)))
           (Host.command "asic.pick-chip" "Select Launch Target…" "select chip target project launch chip variant" Pick_chip_target) ]
     @ Terminal_presentation.Stage_launch_commands.chip_commands asic
     @ List.concat_map asic.flows ~f:(fun flow ->
@@ -6563,11 +6585,45 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           | Ok payload ->
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
+    | Manage_project ->
+      Option.iter (Browser.trial ()) ~f:(fun surface ->
+        let ip = List.find_exn (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip") in
+        let libraries = library_commands session ~f:(fun label dir -> label,dir) in
+        session.browser <- Some (Browser.create surface captured
+          (Browser.catalog ~ip ~libraries session.asic)));
+      Effect.Ignore
+    | Browse_chip_profiles chip ->
+      (match session.browser, session.opened with
+       | Some browser, Some opened ->
+         let selected = Browser.selected browser in
+         session.browser <- Some { browser with message = "Reading " ^ Artifact_view.safe chip ^ "…" };
+         async (fun () ->
+           let owner : Authoring.Owner.t =
+             { project = opened.project.id; destination = Project_root.to_absolute_path opened.project.root; chip } in
+           let%map reply = request session.diagnostics_file (fun () ->
+             Http.Client.authoring captured_client
+               { instance_id = session.hello.instance_id; operation = Describe_owner owner }) in
+           match session.browser, selected with
+           | Some current, Some selected when Host.current session.host captured
+             && phys_equal current.lifetime browser.lifetime ->
+             session.browser <- Some (Browser.receive_owner current ~chip ~parent:selected reply)
+           | _ -> ())
+       | _ -> Effect.Ignore)
     | Project_entry entry ->
       if session.local_project_files && Option.is_some session.opened
       then session.project_entry <- Some entry;
       Effect.Ignore
+    | Run_flow ->
+      let commands = Option.value_map session.asic ~default:[] ~f:(fun s ->
+        List.concat_map s.flows ~f:(fun flow -> List.map flow.profiles ~f:(fun profile ->
+          Host.command ("run." ^ flow.id ^ "/" ^ profile)
+            (Artifact_view.safe (flow.id ^ "/" ^ profile)) "choose endpoint"
+            (Edit_run (flow.id, profile))))) in
+      session.host <- { session.host with palette = Some
+        { capture = captured; commands; query = ""; index = 0; argument = None } };
+      Effect.Ignore
     | (Setup_project | Choose_ip_template | Choose_module_directory | Library_actions _
+      | New_flow _ | Duplicate_profile _ | Flow_step _
       | Choose_chip_source | Choose_chip_library | Enter_chip_directory | Map_chip _
       | Toggle_chip _ | Select_created_chip _ | Name_starter _ | Preview_starter _ | Finish_starter _
       | Setup_asic | Adopt_asic _) as action ->
@@ -6591,7 +6647,49 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            request session.diagnostics_file (fun () ->
              Http.Client.authoring captured_client { instance_id; operation })
          in
+         let flow_choices (heading, choices) =
+           let commands = List.mapi choices ~f:(fun i (title, step) ->
+             Host.command ("flow.choice." ^ Int.to_string i) (Artifact_view.safe title)
+               (Artifact_view.safe heading) (Flow_step step)) in
+           if List.is_empty commands then
+             form (Some (Starter_result ([heading; "No supported choices advertised."], None)))
+           else form None ~commands
+         in
          (match action with
+          | New_flow _ | Duplicate_profile None ->
+            let preferred, intent = match action with
+              | New_flow chip -> chip, Flow_authoring.Create
+              | _ -> None, Copy None in
+            let preferred = Option.first_some preferred
+                (Option.map captured.chip_target ~f:(fun c -> c.chip)) in
+            let chips = Option.value_map session.asic ~default:[] ~f:(fun s ->
+              List.map s.chips ~f:(fun c -> c.id)) in
+            flow_choices (Flow_authoring.owner_choices ~preferred ~chips intent);
+            Effect.Ignore
+          | Duplicate_profile (Some (chip, flow, source)) ->
+            execute_host ~validate session captured
+              (Flow_step (Describe (chip, Copy (Some (flow, source))))) ~exit
+          | Flow_step (Describe (chip, intent)) ->
+            let token = ref () in
+            async (fun () ->
+              form (Some (Starter_wait token));
+              let%map response = call (Describe_owner { destination = root; project = opened.project.id; chip }) in
+              match session.host.palette with
+              | Some { argument = Some (Starter_wait active); _ }
+                when phys_equal token active && Host.current session.host captured ->
+                let step = match response with
+                  | Ok (Owner_described d) -> Flow_authoring.after_describe chip intent d
+                  | Error msg | Ok (Failed {message = msg; _}) -> Error msg
+                  | _ -> Error "Unexpected owner description" in
+                (match step with
+                 | Ok step -> flow_choices (Flow_authoring.choices step)
+                 | Error msg -> form (Some (Starter_result (["Owner chip: " ^ chip; msg], None))))
+              | _ -> ())
+          | Flow_step (Name draft) -> form (Some (Starter_name (Flow_entry draft))); Effect.Ignore
+          | Flow_step (Input field) ->
+            form (Some (Flow_field field)) ~query:(match field with Initial _ -> "balanced" | _ -> "");
+            Effect.Ignore
+          | Flow_step step -> flow_choices (Flow_authoring.choices step); Effect.Ignore
           | Setup_project ->
             form None ~commands:
                [ Host.command "setup.add" "Add ASIC starter…" "preview new files" (Name_starter Asic_starter)
@@ -6605,11 +6703,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ];
              Effect.Ignore
           | Library_actions dir ->
-             form None ~commands:
-               [ Host.command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
-                   "new module" (Name_starter (Module_in dir))
-               ; Host.command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
-                   "from IP library" (Map_chip dir) ];
+             form None ~commands:(Host.library_authoring_commands dir);
              Effect.Ignore
            | Choose_chip_source ->
              form None ~commands:
@@ -6650,6 +6744,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 | None -> return ()
               in
               let%bind response = call (match starter with
+                | Flow_entry draft -> Flow_authoring.request draft ~project:opened.project.id
+                    ~destination:root ~name
                 | Chip (source, register) -> Preview_chip { target; name; source; register }
                 | _ -> Preview { recipe = Host.starter_recipe starter; name; target })
               in
@@ -6684,8 +6780,12 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                   let recipe = preview.operation.recipe in
                   let asic = String.equal recipe Authoring.add_to_project_recipe in
                   let for_module = String.equal recipe Authoring.module_recipe in
+                  let flow = List.mem [Authoring.new_flow_recipe; Authoring.duplicate_profile_recipe]
+                      recipe ~equal:String.equal in
                   if asic then session.adopted_root <- Some root;
                   [ (if asic then "ASIC starter added."
+                     else if flow then (if List.is_empty created_files then "Manual registration required."
+                                        else "Source created. Build the owner before running.")
                      else if String.equal recipe Authoring.chip_recipe then "Chip target created."
                      else if for_module then "Module created."
                      else "IP library created.")
@@ -7661,7 +7761,14 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               execution"
          };
       Effect.Ignore
-    | Edit_plan (flow, profile) ->
+    | Run_existing selection ->
+      let current () = Host.current session.host captured && Result.is_ok (validate ())
+        && Option.exists session.asic ~f:(fun s -> Launch_preferences.available selection s.flows) in
+      if current () then async (stage_fresh ~remember:true ~expected_plan_identity:None
+        ~current ~selection ~elaboration_only:false ~quick:true ~view:false)
+      else (session.host <- { session.host with notice = "Flow selection changed; reopen Run Flow." };
+            Effect.Ignore)
+    | (Edit_plan (flow, profile) | Edit_run (flow, profile)) ->
       let query =
         Launch_preferences.endpoint_query
           ~remembered:session.remembered_selection
@@ -7677,7 +7784,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query
                ; index = 0
-               ; argument = Some (Host.Plan_endpoint (flow, profile))
+               ; argument = Some (match action with Edit_run _ -> Host.Run_endpoint (flow, profile)
+                                   | _ -> Host.Plan_endpoint (flow, profile))
                }
          ; notice =
              "Enter ENDPOINT [name=value ...]; Describe flow lists capabilities. No \
@@ -8509,10 +8617,23 @@ let modal_input session input ~exit =
   | _ -> Bonsai_term.Effect.Ignore
 ;;
 
+let browser_result session browser result ~exit =
+  match result with
+  | Browser.Stay b -> session.browser <- Some b; Bonsai_term.Effect.Ignore
+  | Close -> session.browser <- None; Bonsai_term.Effect.Ignore
+  | Invoke command ->
+    (match command.action with Browse_chip_profiles _ -> () | _ -> session.browser <- None);
+    execute_host session browser.Browser.capture command.action ~exit
+;;
+
 let menu_key session event ~exit =
   let host = session.host in
   let input = Host.decode_event event in
   match host.menu, input with
+  | _, input when Option.is_some session.browser ->
+    let browser = Option.value_exn session.browser in
+    Some (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun key ->
+      browser_result session browser (Browser.input browser key) ~exit))
   | Some _, _ ->
     Some
       (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun input ->
@@ -8902,6 +9023,12 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
   in
   match session.last_dimensions with
   | None -> Effect.Ignore
+  | Some d when Option.is_some session.browser || Option.is_some session.painted_browser ->
+    (match session.browser, session.painted_browser, (kind : Event.mouse_kind), mods with
+     | Some b, Some painted, Left, [] when phys_equal b painted ->
+       Option.value_map (Browser.hit b d ~x ~y) ~default:Effect.Ignore ~f:(fun target ->
+         browser_result session b (Browser.choose b target) ~exit)
+     | _ -> Effect.Ignore)
   | Some dimensions
     when Option.is_some session.painted_palette || Option.is_some session.host.palette ->
     (* Interpret coordinates on the painted surface. If a keyboard edit or service
@@ -9052,7 +9179,7 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
-    else if Option.is_some session.host.menu
+    else if Option.is_some session.host.menu || Option.is_some session.browser
     then host_handler session event ~exit |> Option.value ~default:Effect.Ignore
     else if match event with
             | Key_press { key = Function 8; mods = [] } -> true
