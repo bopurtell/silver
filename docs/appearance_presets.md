@@ -5,10 +5,9 @@ host, not a separate renderer or synthetic-only application. No final product
 default has been selected. The aesthetics worktree now starts with A/Instrument,
 vivid color, Unicode markers and comfortable density as an experimental review preset.
 
-**Current scheme/default:** Carbon now uses black ground with bright white headers.
-Use **Color
-scheme: Carbon / Slate / Crimson / Neon** in the palette to hot-swap independently
-of skin, intensity, icons and density. Tile titles are lowercase and unadorned;
+**Current theme:** `silver-dark` on a fresh install. Open **Space c c**, search
+`theme` and press **Enter**. Browse the list to preview `silver-light` or another
+theme independently of skin, intensity, icons and density. Tile titles are lowercase and unadorned;
 focused frames retain emphasis. Labels stay neutral while typed status values keep
 their colors. [Current controls and real-example demo](real_asic_example_demo.md);
 [earlier scheme comparisons](overview_sidebar.md).

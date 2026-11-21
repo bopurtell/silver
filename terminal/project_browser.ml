@@ -429,11 +429,10 @@ let scroll ?(hints = false) t d ~x ~y ~direction =
 let render ?(hints = false) t appearance d background =
   let bounds, cells = page ~hints t d in
   let g = geometry ~width:bounds.width ~height:bounds.height in
-  let rgb = Host_view.Role.rgb in
-  let surface = rgb 38 40 41
-  and raised = rgb 55 61 63
-  and ink = rgb 228 226 219
-  and secondary = rgb 169 173 171 in
+  let surface = Host_view.Role.backdrop appearance Foreground
+  and raised = Host_view.Role.backdrop appearance Selection
+  and ink = Host_view.Role.foreground appearance Foreground
+  and secondary = Host_view.Role.foreground appearance Muted in
   let accent = Host_view.Role.foreground appearance Focus in
   let attrs fg bg = [ Attr.fg fg; Attr.bg bg ] in
   let paper = attrs ink surface in
@@ -465,7 +464,7 @@ let render ?(hints = false) t appearance d background =
     |> View.pad ~l:(c.col - g.border) ~t:(c.row - g.border)
   in
   let base = View.rectangle ~attrs:paper ~width:g.content_width ~height:g.content_height () in
-  let outline = attrs (rgb 108 119 119) surface in
+  let outline = attrs (Host_view.Role.foreground appearance Border) surface in
   let content = View.zcat (List.map cells ~f:paint @ [ base ]) in
   let panel =
     Panel.render ~rounded:true appearance ~attrs:outline ~title:View.none

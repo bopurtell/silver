@@ -187,6 +187,8 @@ type action =
   | Waveform_control of string * Simulation.Artifact.t
   | Testing_launch of W.Tile_id.t * testing_launch
   | Testing_launch_unavailable of string
+  | Testing_browse_suites
+  | Testing_select_suite of W.Tile_id.t * unit ref * string
   | Testing_accept of W.Tile_id.t
   (* WB-054: close the focused tile's inspector; replay one existing inspector key; or
      explain why a contextual action that exists is unavailable right now. *)
@@ -198,6 +200,8 @@ type command =
   { id : string
   ; title : string
   ; aliases : string
+  ; exact_queries : string list
+  ; exact_only : bool
   ; action : action
   ; unavailable : string option
   }
@@ -710,6 +714,17 @@ let update_testing t id f =
       ref (), "", Testing_workspace.empty)
   in
   set_testing t id (identity, scope, f state)
+;;
+
+let select_testing_suite t id suite_id =
+  let t =
+    update_testing t id (fun state ->
+      Testing_workspace.update_catalog state (fun catalog ->
+        if Option.equal String.equal (Simulation_catalog.suite_id catalog) (Some suite_id)
+        then catalog
+        else Simulation_catalog.select_suite catalog suite_id))
+  in
+  set_local t id { (local t id) with follow = true }
 ;;
 
 let establish_testing_scope t id ~scope =
@@ -2298,8 +2313,8 @@ let current t (c : capture) =
     && W.Workspace_id.equal c.workspace now.workspace
 ;;
 
-let command ?unavailable id title aliases action =
-  { id; title; aliases; action; unavailable }
+let command ?unavailable ?(exact_only = false) id title aliases action =
+  { id; title; aliases; exact_queries = []; exact_only; action; unavailable }
 ;;
 
 let project_entry_commands =
@@ -2368,6 +2383,69 @@ let testing_launch_command t id =
     action
 ;;
 
+let active_testing_catalog t =
+  Option.bind (active t) ~f:(fun workspace ->
+    Option.bind t.registry ~f:(fun registry ->
+      List.find registry.tiles ~f:(fun tile ->
+        W.Workspace_id.equal tile.workspace workspace.id
+        && String.equal tile.kind "simulation-catalog")))
+;;
+
+let testing_alias_commands t ?unavailable () =
+  let browse =
+    command ?unavailable "testing.suites" "Testing: Browse/select test suites…"
+      "test suites catalog" Testing_browse_suites
+  in
+  let current =
+    Option.bind (active_testing_catalog t) ~f:(fun tile ->
+      let catalog = Testing_workspace.catalog (testing_state t tile.id) in
+      Option.map (Simulation_catalog.suite catalog) ~f:(fun suite -> tile, suite))
+  in
+  let test =
+    match current with
+    | None ->
+      command ?unavailable "testing.test" "Testing: Choose a test suite…"
+        "test current selected suite" Testing_browse_suites
+    | Some (tile, suite) ->
+      let launch = testing_launch_command t tile.id in
+      { launch with
+        id = "testing.test"
+      ; title = Artifact_view.safe ("Testing: Review selected cases for " ^ suite.id ^ "…")
+      ; aliases = "test current selected suite"
+      ; unavailable = Option.first_some unavailable launch.unavailable
+      }
+  in
+  [ test; browse ]
+;;
+
+let open_testing_suite_picker t (tile : W.Tile.t) =
+  match capture t with
+  | None -> t
+  | Some capture ->
+    let catalog = Testing_workspace.catalog (testing_state t tile.id) in
+    let suites =
+      List.map (Simulation_catalog.suites catalog) ~f:(fun suite ->
+        let selected =
+          Option.equal String.equal (Simulation_catalog.suite_id catalog) (Some suite.id)
+        in
+        command
+          ("testing.select-suite." ^ suite.id)
+          (Artifact_view.safe
+             (suite.id ^ " — " ^ suite.label ^ if selected then " (selected)" else ""))
+          "select suite"
+          (Testing_select_suite (tile.id, simulation_identity t tile.id, suite.id)))
+    in
+    let discover =
+      command "simulation.discover" "Testing: Discover suites explicitly" "refresh catalog"
+        (Simulation (tile.id, Discover))
+    in
+    { t with
+      palette =
+        Some { capture; commands = suites @ [ discover ]; query = ""; index = 0; argument = None }
+    ; notice = ""
+    }
+;;
+
 let simulation_log_commands (tile : W.Tile.t) =
   if Testing_workspace.is_pane tile.kind
   then []
@@ -2388,7 +2466,7 @@ let asic_launch_commands t ~preview ~view_pending =
       (match preview with
        | None ->
          Some
-           ("No preview: "
+           ("No staged plan (no preview): "
             ^ model.message
             ^ "; focus checklist and press r to prepare; reopen palette when ready")
        | Some preview when Planned_run.launchable t.planned_run preview -> None
@@ -3820,11 +3898,11 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         "dune build"
         Build
     ; command
-        ?unavailable:needs_project
-        "project.test"
-        "Run project tests"
-        "simulation dune test"
-        Test
+         ?unavailable:needs_project
+         "project.test"
+         "Run project tests"
+         "generic dune test"
+         Test
     ; command
         ?unavailable:needs_project
         "project.discover"
@@ -3835,7 +3913,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ?unavailable:needs_project
         "asic.discover"
         "Discover ASIC flows and runs"
-        "synthesis provider explicit refresh loaded provider catalog (not config reload)"
+        "synth rows · synthesis provider explicit refresh loaded provider catalog (not config reload)"
         Discover_asic
     ; command
         "artifact.inspect"
@@ -3914,6 +3992,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         (Set_layout_mode Preferred)
     ; command "host.exit" "Exit client" "quit" Exit
     ]
+    @ testing_alias_commands t ?unavailable:needs_project ()
     @ appearance_commands t
     @ compression_commands t
     @ List.filter_map jobs ~f:(fun job ->
@@ -4748,25 +4827,104 @@ let testing_dispatch t key ~commands =
         ~f:(fun command -> capture, command.action)))
 ;;
 
+let named_stage_command_prefix = "stage.launch-view."
+let named_stage_command_id endpoint = named_stage_command_prefix ^ endpoint
+
+let known_stage_endpoints =
+  [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
+;;
+
+let global_palette_aliases =
+  [ "new ip", "project.new-ip"
+  ; "new module", "project.new-module"
+  ; "a launch", "asic.launch"
+  ; "synth", named_stage_command_id "synthesis"
+  ; "chip", "asic.pick-chip"
+  ; "elaboration", "preparation.quick-launch"
+  ; "elab", "preparation.quick-launch"
+  ; "test", "testing.test"
+  ; "test suites", "testing.suites"
+  ; "verification", "testing.suites"
+  ]
+;;
+
+let global_palette_commands commands =
+  (* Reserved global intents take precedence over provider endpoint names, even
+     when the intended command is absent. Don't change the scoped catalogs. *)
+  let reserved = List.map global_palette_aliases ~f:fst in
+  let fallbacks =
+    [ ( "asic.launch"
+      , "Launch planned run without view"
+      , "a launch"
+      , "No staged plan; stage a plan first" )
+    ; ( "asic.pick-chip"
+      , "Select Launch Target…"
+      , "chip"
+      , "No chip targets are available; discover ASIC capabilities first" )
+    ; ( "preparation.quick-launch"
+      , "Launch elaboration bundle"
+      , "elaboration"
+      , "Elaboration preparation is unavailable here" )
+    ]
+    @ List.map known_stage_endpoints ~f:(fun endpoint ->
+      ( named_stage_command_id endpoint
+      , "Launch " ^ endpoint ^ " and view"
+      , endpoint
+      , "Fresh " ^ endpoint ^ " launch is unavailable here" ))
+  in
+  let commands =
+    commands
+    @ List.filter_map fallbacks ~f:(fun (id, title, aliases, unavailable) ->
+      if List.exists commands ~f:(fun c -> String.equal c.id id)
+      then None
+      else Some (command ~unavailable ~exact_only:true id title aliases Unavailable_launch))
+  in
+  List.map commands ~f:(fun c ->
+    let exact_queries =
+      List.filter_map global_palette_aliases ~f:(fun (query, id) ->
+        Option.some_if (String.equal id c.id) query)
+    in
+    let exact_queries =
+      match String.chop_prefix c.id ~prefix:named_stage_command_prefix with
+      | Some endpoint
+        when not
+               (List.mem reserved (String.lowercase (String.strip endpoint)) ~equal:String.equal)
+        -> endpoint :: exact_queries
+      | _ -> exact_queries
+    in
+    { c with exact_queries })
+;;
+
 let ranked_matches (p : palette) =
-  let ranked =
+  let rank commands =
     Palette_search.rank
       ~query:p.query
-      (List.map p.commands ~f:(fun c ->
+      (List.map commands ~f:(fun c ->
          ( c
          , [ { Palette_search.text = c.title; weight = 100 }
            ; { text = c.aliases; weight = 85 }
            ; { text = c.id; weight = 75 }
            ] )))
   in
-  match String.lowercase (String.strip p.query) with
-  | "new ip" | "new module" as intent ->
-    let id = if String.equal intent "new ip" then "project.new-ip" else "project.new-module" in
-    let exact, others =
-      List.partition_tf ranked ~f:(fun r -> String.equal r.Palette_search.item.id id)
-    in
-    exact @ others
-  | _ -> ranked
+  let query = String.strip p.query in
+  let folded = String.lowercase query in
+  (* Prefer the exact spelling when a provider distinguishes endpoint IDs by case. *)
+  let exact =
+    Option.first_some
+      (List.find p.commands ~f:(fun c -> List.mem c.exact_queries query ~equal:String.equal))
+      (List.find p.commands ~f:(fun c ->
+         List.exists c.exact_queries ~f:(fun alias -> String.equal (String.lowercase alias) folded)))
+  in
+  (* An exact-only fallback must not change the results of unrelated searches. *)
+  let fuzzy = List.filter p.commands ~f:(fun c -> not c.exact_only) in
+  match exact with
+  | None -> rank fuzzy
+  | Some item ->
+    (* Exact bindings work even when the row doesn't qualify in fuzzy search. *)
+    (match rank [ item ] with
+     | [] -> [ { Palette_search.item; score = 0; positions = [] } ]
+     | ranked -> ranked)
+    @ rank (List.filter fuzzy ~f:(fun c -> not (String.equal c.id item.id)))
 ;;
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
@@ -5726,7 +5884,12 @@ let input t event ~commands : t * effect =
         | Character 'c', 2 ->
           let palette =
             Option.map (capture t) ~f:(fun capture ->
-              { capture; commands; query = ""; index = 0; argument = None })
+              { capture
+              ; commands = global_palette_commands commands
+              ; query = ""
+              ; index = 0
+              ; argument = None
+              })
           in
           { t with prefix = 0; palette }, No_effect
         (* Hint chords stay available while every hint area is hidden; they route through
@@ -6356,7 +6519,19 @@ let%test_unit "launch palette retains captured subset across model refresh and f
     update_testing host tile.id (fun state ->
       Testing_workspace.receive state ~ticket:0 ~selected:None Get (Ok snapshot))
   in
-  let command = testing_launch_command host tile.id in
+  let find_alias host id =
+    List.find_exn (testing_alias_commands host ()) ~f:(fun c -> String.equal c.id id)
+  in
+  (match (find_alias (receive empty registry) "testing.test").action with
+   | Testing_browse_suites -> ()
+   | _ -> assert false);
+  (match (find_alias host "testing.suites").action with
+   | Testing_browse_suites -> ()
+   | _ -> assert false);
+  List.iter
+    (testing_alias_commands host ~unavailable:"No open project" ())
+    ~f:(fun c -> assert (Option.equal String.equal c.unavailable (Some "No open project")));
+  let command = find_alias host "testing.test" in
   assert (Option.is_none command.unavailable);
   let captured =
     match command.action with
@@ -6409,7 +6584,11 @@ let%test_unit "launch palette retains captured subset across model refresh and f
    | Testing_launch_unavailable reason ->
      assert (Option.equal String.equal command.unavailable (Some reason));
      assert (String.is_substring reason ~substring:"exact failure")
-   | _ -> assert false);
+    | _ -> assert false);
+  assert (
+    Option.exists (find_alias disabled "testing.test").unavailable ~f:(fun reason ->
+      String.is_substring reason ~substring:"exact failure"));
+  assert (Option.is_none (find_alias disabled "testing.suites").unavailable);
   assert (List.is_empty (simulation_log_commands tile));
   assert (List.length (simulation_log_commands { tile with kind = "simulation" }) = 1)
 ;;
@@ -6706,7 +6885,7 @@ let%test_unit "palette similar commands capture Tab arrows aliases stable identi
   let registry = W.initial ~session_id:(W.Session_id.of_string "fuzzy-palette") in
   let host = receive empty registry in
   let command id title aliases unavailable =
-    { id; title; aliases; action = Toggle_chrome; unavailable }
+    command ?unavailable id title aliases Toggle_chrome
   in
   let commands =
     [ command "inspect" "Inspect finalization" "reconnect evidence" None

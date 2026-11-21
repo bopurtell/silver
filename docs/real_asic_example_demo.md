@@ -134,10 +134,10 @@ invented zeros, unsupported passes or source mappings.
   hash characters when shortening. Human labels are preferred when usable; blank
   labels fall back to the actual ID. Opaque IDs keep an identifying head/suffix.
   Full references remain available through Session inspection and unchanged actions.
-- **Carbon is the default**, with black ground and bright white headers. Focused
-  borders, semantic statuses and metric colors remain distinct. Slate/Crimson/Neon
-  remain available through **Color scheme: ...**. FS3 now retains scheme choices
-  across restart in project/environment-scoped client preferences.
+- **`silver-dark` is the default**. To compare it with `silver-light`, Carbon,
+  or a Cobalt palette, open **Space c c**, type `theme`, and press **Enter**.
+  Browse to preview; press **Enter** again to keep the choice across restarts
+  in this project/environment.
 
 Source layout policy is in `terminal/workspaces/overview.ml`: checklist and planned
 run have separate named 10-row minima and equal weights. Token styling/labels are

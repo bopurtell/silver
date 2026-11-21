@@ -47,7 +47,7 @@ def startup_check(t, check, http, screen):
 
 def acceptance(t, check, http, runs, presets):
     sidebar.acceptance(t, check, http, runs, presets)
-    t.command('Color scheme: Carbon')
+    t.choose_color_scheme('Carbon')
     t.command('Appearance: Color Vivid')
     def registry(): return http.rpc(domain='workspace')
     overview = next(w for w in field(registry(), 'workspaces') if field(w, 'preset') == ['overview'])
@@ -153,10 +153,10 @@ def acceptance(t, check, http, runs, presets):
                 (t.base / 'project/provider-calls.jsonl').read_text().splitlines()
                 if json.loads(line)['argv'][:1] != ['observation']]
     calls = non_poll_calls()
-    t.command('Color scheme: Crimson')
+    t.choose_color_scheme('Crimson')
     crimson = t.capture('polish-selector-crimson-live', ['completed', 'failed', 'running'])
     check(crimson.cells != screen.cells, 'Live alternative scheme repaints actual selector attributes')
-    t.command('Color scheme: Carbon')
+    t.choose_color_scheme('Carbon')
     t.command('Reset presentation overrides (inherit)')
     t.command('Unzoom workspace')
     check(non_poll_calls() == calls,

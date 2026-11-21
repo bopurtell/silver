@@ -123,15 +123,8 @@ def acceptance(t, check, http, runs, presets):
         geometry = None
         selections = None
         for scheme in ('Carbon', 'Slate', 'Crimson', 'Neon'):
-            t.command('Color scheme: ' + scheme)
-            t.open_palette('Color scheme: ' + scheme)
-            # Pin synchronization may invalidate a captured command target; a
-            # reopened palette now captures the settled registry revision.
-            if 'Color scheme: ' + scheme + ' [active]' not in t.drain().text():
-                t.key(b'\r')
-                t.open_palette('Color scheme: ' + scheme)
-            t.capture('sidebar-' + workspace + '-' + scheme.lower() + '-active', ['Color scheme: ' + scheme + ' [active]'])
-            t.key(b'\x1b')
+            t.choose_color_scheme(scheme, active_capture=
+                                  'sidebar-' + workspace + '-' + scheme.lower() + '-active')
             shot = t.capture('sidebar-' + workspace + '-' + scheme.lower(), titles)
             rects = [pane_rect(shot, title) for title in titles]
             if geometry is None:

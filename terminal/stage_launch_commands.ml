@@ -210,23 +210,33 @@ let validate_named ~asic ~remembered ~run ~intent ~selection =
   else Error "Stage launch inputs changed; reopen the palette"
 ;;
 
+let legacy_named_action ~asic ~remembered ~endpoint (stage : Asic.Stage.t) =
+  Option.is_none (Launch_preferences.chip_target asic)
+  && not (Option.exists asic ~f:(fun snapshot -> not (List.is_empty snapshot.flows)))
+  && String.equal stage.id endpoint
+  && Option.exists stage.action ~f:(fun action ->
+    String.equal action.endpoint endpoint
+    && Option.for_all (Launch_preferences.for_target asic remembered) ~f:(fun s ->
+      Asic.Selection.equal { s with endpoint } action))
+;;
+
+let validate_named_launch ~asic ~remembered ~run ~intent ~selection =
+  match intent with
+  | Stage_action.Physical_stage stage
+    when not (legacy_named_action ~asic ~remembered ~endpoint:stage.id stage) ->
+    Error "Current fresh stage launch inputs changed; reopen the palette"
+  | _ -> validate_named ~asic ~remembered ~run ~intent ~selection
+;;
+
 let named_commands host ~asic ~remembered =
   let run = workspace_run host in
   let stages =
     Option.value_map run ~default:[] ~f:(fun run -> O.observed_stages ~asic ~run)
   in
   let endpoints =
-    let chosen =
-      Option.first_some
-        (Launch_preferences.for_target asic remembered)
-        (if Option.is_some (Launch_preferences.chip_target asic)
-         then None
-         else Option.bind run ~f:(observed_selection asic))
-      |> Option.map ~f:(fun s -> s.Asic.Selection.flow)
-    in
     let flow =
       Option.first_some
-        chosen
+        (Option.map (Launch_preferences.for_target asic remembered) ~f:(fun s -> s.flow))
         (Option.bind asic ~f:(fun s -> Option.map s.catalog_default ~f:(fun p -> p.flow)))
     in
     Option.bind asic ~f:(fun s ->
@@ -239,18 +249,17 @@ let named_commands host ~asic ~remembered =
   let names =
     endpoints
     @ List.map stages ~f:(fun s -> s.Asic.Stage.id)
-    @ [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
+    @ H.known_stage_endpoints
     |> List.stable_dedup ~compare:String.compare
   in
   List.map names ~f:(fun endpoint ->
-    let intent =
-      match
-        List.find stages ~f:(fun s ->
-          String.equal s.id endpoint && Option.is_some s.action)
-      with
-      | Some stage when Option.is_none (Launch_preferences.chip_target asic) ->
-        Stage_action.Physical_stage stage
-      | _ -> Fresh_endpoint endpoint
+    let intent, run =
+      (* Named launches use the remembered recipe or the catalog default, never the
+         viewed run's inputs. Legacy providers without a catalog can still advertise
+         an exact action if it does not conflict with the current recipe. *)
+      match List.find stages ~f:(legacy_named_action ~asic ~remembered ~endpoint) with
+      | Some stage -> Stage_action.Physical_stage stage, run
+      | None -> Fresh_endpoint endpoint, None
     in
     let action =
       if Option.is_none (H.launch_target host)
@@ -263,15 +272,14 @@ let named_commands host ~asic ~remembered =
     in
     H.command
       ?unavailable:(Result.error action)
-      ("stage.launch-view." ^ endpoint)
+      (H.named_stage_command_id endpoint)
       (Artifact_view.safe
          ("Launch "
           ^ endpoint
           ^ " and view"
-          ^ (match action, Launch_preferences.chip_target asic with
-             | Ok (H.Launch_stage_and_view (_, _, selection)), Some _ ->
-               " — " ^ Launch_preferences.chip_label selection.chip_target
-               ^ " · " ^ selection.flow ^ " / " ^ selection.profile
+           ^ (match action, Launch_preferences.chip_target asic with
+              | Ok (H.Launch_stage_and_view (_, _, selection)), _ ->
+                " — " ^ Launch_preferences.label selection
              | _, Some target when Option.is_some (Option.bind asic ~f:Launch_preferences.missing_target) ->
                " — missing " ^ Launch_preferences.chip_label (Some target) ^ "; select chip target"
              | _, Some target -> " — " ^ Launch_preferences.chip_label (Some target)

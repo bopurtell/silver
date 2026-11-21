@@ -273,7 +273,7 @@ simulation tile and independent counter fixture remain supported.
 - [Try the appearance presets](docs/appearance_presets.md) — A–E skins and independent color/icon/density controls.
 - [Workspace composition and palette](docs/frontend_composition.md) — per-workspace OCaml definitions, floating fuzzy palette, configurable badges/chrome and typed status emphasis.
 - [Refined Overview and Timing](docs/frontend_refinement.md) — border titles, compact summaries, horizontal stages, wide run labels and cooperative Timing investigation panes.
-- [Current Overview sidebar and schemes](docs/overview_sidebar.md) — tightly packed vertical sidebar/right summaries, live Carbon/Slate/Crimson/Neon schemes and exact planned-run preview.
+- [Overview and theme picker](docs/overview_sidebar.md#live-color-schemes) — press **Space c c**, type `theme`, and press **Enter** to browse Silver and Cobalt palettes. Preview with the arrow keys, **Enter** to keep, **Escape** to cancel.
 - [Real ASIC example demo and current polish](docs/real_asic_example_demo.md) — black default, value-only status colors, split checklist/planned-run sidebar and verified actual-example launch commands.
 - [Launch/checklist consistency](docs/launch_stage_consistency.md) — exact submitted-run tracking beside preview readiness, real stage observations and read-only refresh after upgrade.
 - [Checklist r → Plan → Launch](docs/checklist_launch_workflow.md) — real capability-backed stage shortcuts, cold-catalog discovery and visible launch-command availability.

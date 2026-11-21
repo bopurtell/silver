@@ -6,8 +6,8 @@ This supersedes the paired-panel/horizontal-checklist Overview arrangement in th
 preserved. [Shared implementation plan](overview_sidebar_plan.md).
 
 **Subsequent owner polish delivered:** planned-run now sits below a shorter
-checklist in the left sidebar; right side has six domain summaries. Carbon/black
-with bright headers is default, field labels are neutral with value-only status
+checklist in the left sidebar; right side has six domain summaries. New clients
+start in `silver-dark`, field labels are neutral with value-only status
 colors, and Session run shortening uses available width. The next demo is prepared
 on genuine retained ASIC example evidence; see [current controls and launch commands](real_asic_example_demo.md).
 The older seven-right-panel/Slate-default description below records this first slice.
@@ -82,14 +82,14 @@ lowercase titles, tighter packing and schemes apply there as well.
 
 ## Live color schemes
 
-Open **Space c c**, search `color scheme`, and select:
+Open **Space c c**, type `theme`, and press **Enter**. Inside the picker,
+type to filter the list, then use **↑/↓** or **Tab/Shift-Tab** to see how a
+highlighted theme looks on your actual workspace. **Enter** keeps it;
+**Escape** returns to the theme you had when you opened the picker.
 
-| Palette command | Treatment |
-| --- | --- |
-| **Color scheme: Carbon** | Near-black neutral background, cool subdued accents |
-| **Color scheme: Slate** | Neutral graphite/slate ground; new default |
-| **Color scheme: Crimson** | Warm near-black ground with rose/crimson accents, inspired by Ches |
-| **Color scheme: Neon** | Previous blue-black/vivid palette, retained for comparison |
+Start with `silver-dark` or `silver-light`, or search `silver` to explore the
+rest of the family. The picker also includes Cobalt's light and dark palettes
+and Silver's original Carbon, Slate, Crimson and Neon.
 
 Scheme is independent of the A–E skin, Vivid/Selective/Restrained color intensity,
 icons and density. It changes the whole current client, including Timing, palette
@@ -97,12 +97,10 @@ and simulation views. Status roles remain distinguishable; original text and
 semantic evidence are unchanged. Swapping schemes does not mutate the registry,
 move tiles, select runs, change pins or invoke providers.
 
-Scheme changes affect the current client immediately; FS3 now saves them for
-restart, scoped by project/environment. Carbon is the current default and the
-fallback when loading an older appearance value without a scheme field. Crimson
-was adapted from the read-only Ches `ui/theme.ml` palette; Workbench does not add a
-runtime dependency on the Ches checkout. The palette/roles are implemented in
-`terminal/appearance.ml` and `terminal/host_view.ml`.
+The highlighted preview is temporary. Accepting a theme saves it for the next
+client start in this project/environment. A fresh client starts in `silver-dark`;
+older appearance files with no scheme field still load Carbon. The palettes
+ship with Silver; using them doesn't require a Cobalt checkout.
 
 ## Planned-run tile
 

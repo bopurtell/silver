@@ -121,7 +121,7 @@ imports; prove reuse within Workbench before requiring cross-repository packagin
 | E — Structured Studio | B's framed structure plus D's tabs/polish |
 
 The historical gallery preference favored A/B visually and D-style tabs. No final
-product default has been selected; current Instrument/Carbon startup/review defaults
+product skin has been selected; current Instrument/silver-dark startup defaults
 are documented in the appearance guide. E was absent from the original described
 HTML prototype, but all five skins are implemented in the current terminal.
 

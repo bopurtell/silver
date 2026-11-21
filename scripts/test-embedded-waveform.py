@@ -365,6 +365,9 @@ def pty_acceptance(args, evidence, fixture, check):
                          ['> ' + title[:min(len(title), 36)]], absent=['No matching commands'])
             self.key(b'\r')
 
+        def choose_color_scheme(self, scheme):
+            cells.choose_color_scheme(self, self.palette, scheme)
+
         def resize(self, width, height, waveform=True, hints=True):
             self.width, self.height = width, height
             before = self.received_bytes
@@ -679,7 +682,7 @@ def pty_acceptance(args, evidence, fixture, check):
                   field(retained, 'sha256')[0], session.project)),
               'normal waveform uses compact metadata; full provenance is available through inspector')
         timings = {'open_palette_to_ready_upper_bound_ms': (time.monotonic() - started) * 1000}
-        terminal.palette('Color scheme: Carbon')
+        terminal.choose_color_scheme('Carbon')
         terminal.capture('quick-global-palette-return', ['Cursor 0 ticks', 'Back to Testing'])
         check(True, 'Space c c global palette works in quick waveform inspection')
         status = Path('/proc/%d/status' % terminal.process.pid).read_text()
@@ -794,7 +797,10 @@ def pty_acceptance(args, evidence, fixture, check):
         for scheme, preset, metric, background, corner in variants:
             terminal.key(b'q')
             terminal.capture('appearance-back-' + str(len(appearance_samples)), ['simulation-artifacts'])
-            terminal.palette('Color scheme: ' + scheme if preset is None else 'Appearance: ' + preset)
+            if preset is None:
+                terminal.choose_color_scheme(scheme)
+            else:
+                terminal.palette('Appearance: ' + preset)
             terminal.palette('Simulation: Open embedded waveform retained-vcd')
             label = 'appearance-' + scheme.lower() + ('-' + preset[0].lower() if preset else '')
             terminal.capture(label, ['Cursor 0 ticks', 'integer tick grid', 'inputs.-clock', 'Back to Testing'])
@@ -837,7 +843,7 @@ def pty_acceptance(args, evidence, fixture, check):
         # Dedicated workspace extension. Seed a second real fixture job with a
         # deliberately different stdout marker; no navigation may borrow its logs.
         terminal.palette('Appearance: A - Instrument')
-        terminal.palette('Color scheme: Carbon')
+        terminal.choose_color_scheme('Carbon')
         second_launch = ['Launch', ['submission_key', 'unrelated-replay'],
             ['discovery_digest', field(catalog, 'discovery_digest')[0]],
             ['selection', [('suite', 'fixture'), ('cases', ['second']), ('seed', '99'),
@@ -1071,7 +1077,7 @@ def pty_acceptance(args, evidence, fixture, check):
                          '[ ] outputs.pop_accept', '[ ] outputs.push_accept'])
         check(True, 'unselected signal names remain in the dedicated Signals list before enabling')
         terminal.palette('Unzoom workspace')
-        terminal.palette('Color scheme: Carbon')
+        terminal.choose_color_scheme('Carbon')
         terminal.capture('workspace-global-palette-return', ['Signals', 'Waves', 'VCD picker', 'Logs'])
         terminal.palette('Waveform: Open dedicated Waveforms workspace')
         terminal.capture('workspace-specific-palette-return', ['Signals', 'Waves', 'VCD picker', 'Logs'])

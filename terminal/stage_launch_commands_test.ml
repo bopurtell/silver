@@ -418,6 +418,184 @@ let type_query host commands query =
     next)
 ;;
 
+let%test_unit "WB-076 exact launch aliases dispatch by identity against stronger fuzzy matches" =
+  let host, _, snapshot, historical = fixture () in
+  let selection = { historical with endpoint = "cts"; assignments = [ "X=2" ] } in
+  let preview = { (Option.value_exn snapshot.preview) with selection } in
+  let snapshot =
+    { snapshot with
+      preview = Some preview
+    ; operations =
+        List.map snapshot.operations ~f:(fun op ->
+          { op with key = List.hd_exn (Plain_rpc.keys (Plan selection) snapshot) })
+    ; runs =
+        List.map snapshot.runs ~f:(fun run ->
+          { run with
+            stages =
+              List.map run.stages ~f:(fun stage ->
+                if String.equal stage.id "synthesis"
+                then { stage with action = Some historical }
+                else stage)
+          })
+    }
+  in
+  let staging, ticket = Planned_run.begin_plan host.planned_run selection in
+  let ready = Planned_run.receipt staging ticket ~floor:2 (Ok ()) in
+  let host = { host with planned_run = Planned_run.receive ready ~revision:2 snapshot } in
+  assert (Planned_run.launchable host.planned_run preview);
+  let competitors =
+    List.map [ "a launch"; "synth" ] ~f:(fun query ->
+      H.command ("fixture.competing." ^ query) query "" Toggle_chrome)
+  in
+  let catalog = competitors @ full_catalog host snapshot selection in
+  let dispatch ?(competing = true) ~host ~catalog query =
+    let typed = type_query (open_palette host catalog) catalog query in
+    let palette = Option.value_exn typed.palette in
+    if competing
+    then (
+      (* Check that this fixture actually exercises an ordering conflict rather than
+         relying on an incidental fuzzy order that would pass without the pin. *)
+      let fuzzy =
+        Palette_search.rank ~query
+          (List.map palette.commands ~f:(fun c ->
+             ( c
+             , [ { Palette_search.text = c.title; weight = 100 }
+               ; { text = c.aliases; weight = 85 }
+               ; { text = c.id; weight = 75 }
+               ] )))
+      in
+      assert (String.equal (List.hd_exn fuzzy).item.id ("fixture.competing." ^ query)));
+    H.input typed Enter ~commands:catalog
+  in
+  (match dispatch ~host ~catalog "a launch" with
+   | closed, Execute (_, Launch_asic (actual, _)) ->
+     assert (Option.is_none closed.palette);
+     assert (Asic.Preview.equal actual preview)
+   | _ -> failwith "a launch did not dispatch the exact CTS preview");
+  (match dispatch ~host ~catalog "synth" with
+   | closed, Execute (_, Launch_stage_and_view (Fresh_endpoint "synthesis", _, actual)) ->
+     assert (Option.is_none closed.palette);
+     assert (Asic.Selection.equal actual { selection with endpoint = "synthesis" })
+   | _ -> failwith "synth did not dispatch fresh synthesis in view");
+  (match dispatch ~competing:false ~host ~catalog "synth rows" with
+   | closed, Execute (_, Discover_asic) -> assert (Option.is_none closed.palette)
+   | _ -> failwith "synth rows did not dispatch discovery");
+  let unstaged = { host with planned_run = Planned_run.empty } in
+  let catalog =
+    competitors @ full_catalog unstaged { snapshot with preview = None } selection
+  in
+  match dispatch ~host:unstaged ~catalog "a launch" with
+  | rejected, No_effect ->
+    assert (String.is_substring rejected.notice ~substring:"No staged plan")
+  | _ -> failwith "a launch dispatched another command in the absence of a staged plan"
+;;
+
+let%test_unit "reserved aliases block when missing only in the global palette" =
+  let host, _, snapshot, _ = fixture () in
+  let cases =
+    [ "synth", "stage.launch-view.synthesis"
+    ; "a launch", "asic.launch"
+    ; "cts", "stage.launch-view.cts"
+    ; "elaboration", "preparation.quick-launch"
+    ; "chip", "asic.pick-chip"
+    ]
+  in
+  let chips =
+    List.map (List.map cases ~f:fst) ~f:(fun name ->
+      { Asic.Chip.id = name
+      ; label = name
+      ; default_variant = "default"
+      ; variants = [ { id = "default"; label = "Default" } ]
+      })
+  in
+  let host =
+    { host with
+      planned_run = Planned_run.receive host.planned_run ~revision:2 { snapshot with chips }
+    }
+  in
+  List.iter cases ~f:(fun (query, launch_id) ->
+    let commands = [ H.command "fixture.competing" query "" Toggle_chrome ] in
+    let global = type_query (open_palette host commands) commands query in
+    let fallback = selected global in
+    assert (String.equal fallback.id launch_id);
+    let blocked, effect = H.input global Enter ~commands in
+    (match effect with
+     | No_effect -> assert (String.equal blocked.notice (Option.value_exn fallback.unavailable))
+     | _ -> failwith "global exact alias fell through to a competing command");
+    let picker = type_query (H.open_chip_picker host) commands query in
+    (match snd (H.input picker Enter ~commands) with
+    | Execute (_, Asic (Select_chip target)) ->
+       assert (String.equal target.chip query && String.equal target.variant "default")
+     | _ -> failwith "global alias shadowed a chip in the scoped picker"))
+;;
+
+let%test_unit "bare stage names dispatch the captured launch behind stronger fuzzy matches" =
+  let host, _, snapshot, selection = fixture () in
+  let physical =
+    [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
+  in
+  let flow = List.hd_exn snapshot.flows in
+  let snapshot =
+    { snapshot with
+      flows =
+        { flow with fresh_stage_endpoints = physical @ [ "metal-fill"; "chip"; "elaboration" ] }
+        :: List.tl_exn snapshot.flows
+    }
+  in
+  let dispatch ?(extra = []) snapshot query =
+    let competing =
+      H.command "fixture.competing.stage" (String.strip query) "" Toggle_chrome
+    in
+    let catalog = competing :: (full_catalog host snapshot selection @ extra) in
+    let typed = type_query (open_palette host catalog) catalog query in
+    let command = selected typed in
+    let next, effect = H.input typed Enter ~commands:catalog in
+    command, next, effect
+  in
+  List.iter
+    (List.map (physical @ [ "metal-fill" ]) ~f:(fun id -> id, id) @ [ " CtS ", "cts" ])
+    ~f:(fun (query, endpoint) ->
+      let command, closed, effect = dispatch snapshot query in
+      assert (String.equal command.id ("stage.launch-view." ^ endpoint));
+      assert (Option.is_none closed.palette);
+      match effect with
+      | Execute (_, Launch_stage_and_view (Fresh_endpoint actual, _, resolved)) ->
+        assert (String.equal actual endpoint);
+        assert (Asic.Selection.equal resolved { selection with endpoint })
+      | _ -> failwithf "%S did not dispatch fresh %s in view" query endpoint ());
+  let command, closed, effect = dispatch snapshot "elaboration" in
+  assert (String.equal command.id "preparation.quick-launch");
+  assert (Option.is_none closed.palette);
+  (match effect with
+   | Execute (_, Launch_elaboration_bundle resolved) ->
+     assert (Asic.Selection.equal resolved selection)
+   | _ -> failwith "elaboration did not dispatch the preparation bundle action");
+  let picker = H.command "asic.pick-chip" "Select Launch Target…" "" Pick_chip_target in
+  let command, closed, effect = dispatch ~extra:[ picker ] snapshot "chip" in
+  assert (String.equal command.id "asic.pick-chip");
+  assert (Option.is_none closed.palette);
+  (match effect with
+   | Execute (_, Pick_chip_target) -> ()
+   | _ -> failwith "chip did not dispatch the target picker");
+  let unavailable =
+    { snapshot with
+      flows = [ { flow with fresh_stage_endpoints = [ "synthesis" ] } ]
+    }
+  in
+  let command, rejected, effect = dispatch unavailable "cts" in
+  assert (String.equal command.id "stage.launch-view.cts");
+  assert (Option.is_some rejected.palette);
+  (match effect with
+   | No_effect ->
+     assert (String.is_substring rejected.notice ~substring:"Unsupported fresh endpoint")
+   | _ -> failwith "unavailable CTS dispatched a competing command");
+  let command, _, effect = dispatch snapshot "unselected-only" in
+  assert (String.equal command.id "fixture.competing.stage");
+  match effect with
+  | Execute (_, Toggle_chrome) -> ()
+  | _ -> failwith "an endpoint from an unselected flow displaced the fuzzy match"
+;;
+
 let%test_unit "saved workspace with no Overview tiles can search and select a chip" =
   let host, _, snapshot, selection = fixture () in
   let registry = Option.value_exn host.registry in

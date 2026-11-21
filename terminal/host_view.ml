@@ -2560,6 +2560,7 @@ let select_body_row ?(column = 0) host data tile ~width ~height ~row =
         host
         tile.id
         { local with cursor = Some (Job_id.to_string id); scroll = 0 }
+    | Some (Catalog_suite id) -> H.select_testing_suite host tile.id id
     | Some target ->
       let host =
         H.update_testing host tile.id (fun state ->
@@ -2577,12 +2578,7 @@ let select_body_row ?(column = 0) host data tile ~width ~height ~row =
           | Catalog_case id ->
             Testing_workspace.update_catalog state (fun c ->
               Simulation_catalog.select_case c id)
-          | Catalog_suite id ->
-            Testing_workspace.update_catalog state (fun c ->
-              if Option.equal String.equal (Simulation_catalog.suite_id c) (Some id)
-              then c
-              else Simulation_catalog.select_suite c id)
-          | Job _ -> state)
+          | Catalog_suite _ | Job _ -> state)
       in
       H.set_local host tile.id { (H.local host tile.id) with follow = true })
 ;;
@@ -7899,12 +7895,7 @@ let%test_unit "palette scroll keeps selected result visible at normal and tiny s
   let host = H.receive H.empty registry in
   let commands =
     List.init 40 ~f:(fun i ->
-      { H.id = Int.to_string i
-      ; title = sprintf "Similar command %02d" i
-      ; aliases = ""
-      ; action = Toggle_chrome
-      ; unavailable = None
-      })
+      H.command (Int.to_string i) (sprintf "Similar command %02d" i) "" Toggle_chrome)
   in
   let host =
     List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun host c ->

@@ -60,12 +60,30 @@ let result_row
   (result : Workspace_host.command Palette_search.result)
   =
   let command = result.item in
+  let launch_confirmation =
+    selected
+    && (String.equal command.id "asic.launch"
+        || String.equal command.id "asic.launch-view"
+        || String.is_prefix command.id ~prefix:Workspace_host.named_stage_command_prefix)
+  in
+  let display_title =
+    if not launch_confirmation || View.width (View.text command.title) <= width - 2
+    then command.title
+    else (
+      (* Use shorter action text before letting the terminal crop the endpoint. *)
+      let compact verb selection =
+        Artifact_view.safe (verb ^ " — " ^ Launch_preferences.label selection)
+      in
+      let staged verb = if verb then "Launch staged in view" else "Launch staged" in
+      match command.action with
+      | Launch_asic (preview, view) -> compact (staged view) preview.selection
+      | Launch_fresh_intent (intent, view) when not intent.elaboration_only ->
+        compact (staged view) intent.selection
+      | Launch_stage_and_view (_, _, selection) -> compact "Run in view" selection
+      | _ -> command.title)
+  in
   let title =
-    matched
-      ~attrs
-      ~match_attrs
-      command.title
-      (Palette_search.positions result command.title)
+    matched ~attrs ~match_attrs display_title (Palette_search.positions result display_title)
   in
   (* Expose whichever non-title fields actually matched. Alias-only matches must be
      discoverable rather than unexplained entries with no highlighted text. *)
@@ -74,6 +92,9 @@ let result_row
     |> List.filter ~f:(fun text ->
       not (List.is_empty (Palette_search.positions result text)))
   in
+  (* The selected launch row confirms the destination and recipe (or why it cannot
+     launch). Search metadata must not crowd that information out. *)
+  let fields = if launch_confirmation then [] else fields in
   let extra =
     List.map fields ~f:(fun text ->
       let positions = Palette_search.positions result text in
@@ -84,9 +105,7 @@ let result_row
     |> View.hcat
   in
   let title =
-    (* The launch row is a confirmation: don't truncate its destination/profile
-       to show a redundant search alias. *)
-    if List.is_empty fields || (selected && String.is_prefix command.id ~prefix:"stage.launch-view.")
+    if List.is_empty fields
     then title
     else
       box
@@ -180,13 +199,12 @@ let%test_unit "centered bounded overlay leaves exact background outside its boun
 ;;
 
 let%test_unit "alias-only row reveals matching text and clips Unicode by display cells" =
-  let command : Workspace_host.command =
-    { id = "inspect"
-    ; title = "Inspect a very long finalization evidence title 界é"
-    ; aliases = "some descriptive keywords reconnect 界é"
-    ; action = Toggle_chrome
-    ; unavailable = None
-    }
+  let command =
+    Workspace_host.command
+      "inspect"
+      "Inspect a very long finalization evidence title 界é"
+      "some descriptive keywords reconnect 界é"
+      Toggle_chrome
   in
   let result =
     List.hd_exn

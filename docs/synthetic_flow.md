@@ -75,7 +75,7 @@ The subsequent [sidebar/schemes pass](overview_sidebar.md) is now the current
 Overview: Session, Runs and a wider vertical checklist at left; individual domain
 summaries and planned-run stacked at right. Timing keeps its investigation topology.
 Use a new directory name such as `synthetic-sidebar` to review clean defaults.
-Palette **Color scheme: Carbon / Slate / Crimson / Neon** changes the live client.
+Open the command palette and type `theme` to browse and preview color schemes.
 
 `q` exits the client while the daemon stays alive. Ctrl-C stops the foreground
 daemon. `--url` permits explicitly connecting to another endpoint; `--daemon` and

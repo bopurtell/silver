@@ -32,24 +32,29 @@ def dismiss(term):
     term.drain(.2)
 
 
-def selected(term, query, tokens):
+def selected_row(term, query, label):
     for key in (b" ", b"c", b"c"):
         os.write(term.master, key)
         term.drain(.12)
+    return type_palette_query(term, query, label)
+
+
+def type_palette_query(term, query, label):
     os.write(term.master, query.encode())
     # A matching query line and an unselected matching row are both false positives.
-    screen = term.capture("before-enter-" + tokens[-1], ["> " + query, "▏"])
+    screen = term.capture(label, ["COMMAND PALETTE", "> " + query + "▏"])
     lines = screen.splitlines()
     header = next(i for i, line in enumerate(lines) if "COMMAND PALETTE" in line)
     left = lines[header].rindex("╭", 0, lines[header].index("COMMAND PALETTE"))
     right = lines[header].index("╮", left)
     rows = []
     for line in lines[header + 2:]:
-        if line[left] == "╰":
+        if line[left:left + 1] == "╰":
             break
         if line[left:].startswith("│ > "):
-            rows.append(line[left:right])
-    assert len(rows) == 1 and all(token in rows[0] for token in [query, *tokens]), screen
+            rows.append(line[left + 4:right])
+    assert len(rows) == 1, screen
+    return rows[0]
 
 
 def exercise(client, daemon, base):
@@ -114,8 +119,10 @@ def exercise(client, daemon, base):
     def pick(term, target):
         term.palette(f"Select launch target: {target[0]} / {target[1]}")
 
-    def check_row(term, target):
-        selected(term, NAMED, ["/".join(target[:2]), target[2]])
+    def check_row(term, target, query=NAMED):
+        row = selected_row(term, query, "before-enter-" + target[2])
+        assert all(token in row for token in ("/".join(target[:2]), target[2],
+                                              "synthesis", "view")), row
 
     with open_project() as term:
         term.capture("default", ["available to launch"])
@@ -146,7 +153,7 @@ def exercise(client, daemon, base):
         dismiss(term)
         term.palette("Launch planned run without view")
         screen = term.capture("stale-explanation", ["COMMAND PALETTE", "> Launch planned run without view"])
-        assert any(s in screen.lower() for s in ("no preview", "stale", "target changed",
+        assert any(s in screen.lower() for s in ("no staged plan", "no preview", "stale", "target changed",
                                                  "variant changed", "plan again")), screen
         dismiss(term)
         # Submit the *exact* prior ID too; the UI disabling its row is not
@@ -179,7 +186,7 @@ def exercise(client, daemon, base):
             term.palette("Switch to " + workspace)
             for name in ("Overview", "Timing"):
                 assert field(ctx(name)[2], "selected_run") == [run]
-            check_row(term, target)
+            check_row(term, target, "synth")
             assert len(stages()) == len(emissions()) == i
             os.write(term.master, b"\r")
             check_submission(term, target, i)

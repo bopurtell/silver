@@ -40,7 +40,13 @@ to launch an old staged plan.
 ### Start a run
 
 The picker is available even in saved workspaces without a Planned Run pane.
-For a fresh synthesis run, select **synthesis** in **Stage checklist** and
+In the command palette (`Space c c`), type `chip` to open it. Choose your
+target, then reopen the palette and type a stage: `synth` starts fresh synthesis;
+`cts` starts a fresh run through CTS. Check the target and profile on the
+highlighted row and press Enter. To launch a plan you already staged instead,
+type `a launch`.
+
+For the keyboard shortcut from **Stage checklist**, select **synthesis** and
 press **Shift+R**. Silver uses the current launch chip/variant and its flow
 settings, falling back to that target's declared default flow and profile. It
 does not reuse a different chip's plan, even if the checklist still displays

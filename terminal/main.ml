@@ -5928,9 +5928,12 @@ let resource_tile ?(kind = "resources") session ~current =
            Workspace.Workspace_id.equal w.id active.id)
        in
        let existing registry =
-         List.find registry.Workspace.Snapshot.workspaces ~f:(fun w ->
-           Workspace.Window_id.equal w.window active.window
-           && Option.equal String.equal w.preset (Some kind))
+         if String.equal kind "testing" && Option.is_some (Host.active_testing_catalog session.host)
+         then Some active
+         else
+           List.find registry.Workspace.Snapshot.workspaces ~f:(fun w ->
+             Workspace.Window_id.equal w.window active.window
+             && Option.equal String.equal w.preset (Some kind))
        in
        let%bind () =
          if Option.is_some (existing initial)
@@ -5964,7 +5967,8 @@ let resource_tile ?(kind = "resources") session ~current =
                       ~f:(Workspace.Tile_id.equal tile.id)))
            in
            Option.iter tile ~f:(fun tile ->
-             activate_workspace session workspace.id;
+             if not (String.equal kind "testing" && Workspace.Workspace_id.equal active.id workspace.id)
+             then activate_workspace session workspace.id;
              session.host <- { session.host with focus = Some tile.id });
            if Option.is_none tile
            then
@@ -6285,11 +6289,55 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       session.host
       <- Host.set_simulation session.host tile { view with logs = not view.logs };
       Effect.Ignore
-    | Testing_accept tile ->
+     | Testing_accept tile ->
       session.host
       <- Host.update_testing session.host tile (fun state ->
            Testing_workspace.update_catalog state Simulation_catalog.accept);
-      Effect.Ignore
+       Effect.Ignore
+     | Testing_browse_suites ->
+       let intent = ref () in
+       let revision = session.navigation_revision in
+       let client = session.client in
+       let project = Option.map (current_project session) ~f:(fun p -> p.id) in
+       let still_browsing () =
+         phys_equal client session.client
+         && phys_equal intent session.resource_navigation_intent
+         && Option.equal Project_id.equal project
+              (Option.map (current_project session) ~f:(fun p -> p.id))
+         && Option.is_none session.host.palette
+         && Option.is_none session.host.menu
+       in
+       session.resource_navigation_intent <- intent;
+       async (fun () ->
+         let%bind tile =
+           resource_tile ~kind:"testing" session ~current:(fun () ->
+             still_browsing () && revision = session.navigation_revision)
+         in
+         match tile, Host.capture session.host with
+         | Some tile, Some target when still_browsing () ->
+           let revision = session.navigation_revision in
+           let%map () =
+             if Option.is_none (Host.simulation session.host tile.id).snapshot
+             then refresh_simulation session
+             else return ()
+           in
+           if still_browsing ()
+              && revision = session.navigation_revision
+              && Host.current session.host target
+           then session.host <- Host.open_testing_suite_picker session.host tile
+         | _ -> return ())
+     | Testing_select_suite (tile, identity, suite_id) ->
+       let catalog = Testing_workspace.catalog (Host.testing_state session.host tile) in
+       if phys_equal identity (Host.simulation_identity session.host tile)
+          && List.exists (Simulation_catalog.suites catalog) ~f:(fun s ->
+            String.equal s.id suite_id)
+       then session.host <- Host.select_testing_suite session.host tile suite_id
+       else
+         session.host
+         <- { session.host with
+              notice = "Suite no longer available; reopen the Testing suite chooser"
+            };
+       Effect.Ignore
     | Testing_launch_unavailable reason ->
       session.host <- { session.host with notice = reason };
       Effect.Ignore
@@ -7528,7 +7576,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       let named_validation () =
         match preparation with
         | Launch_stage_and_view (_, _, selection) ->
-          Terminal_presentation.Stage_launch_commands.validate_named
+           Terminal_presentation.Stage_launch_commands.validate_named_launch
             ~asic:session.asic
             ~remembered:session.remembered_selection
             ~run
@@ -7650,7 +7698,10 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                  fresh endpoint remains available. Keep this in addition to the selected
                  checklist validator: tile-local cursor changes do not bump the registry. *)
               let resolved_validation () =
-                Terminal_presentation.Stage_launch_commands.validate_named
+                 let module Stages = Terminal_presentation.Stage_launch_commands in
+                 (match preparation with
+                  | Launch_stage_and_view _ -> Stages.validate_named_launch
+                  | _ -> Stages.validate_named)
                   ~asic:session.asic
                   ~remembered:session.remembered_selection
                   ~run

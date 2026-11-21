@@ -126,6 +126,19 @@ remains visible underneath; Esc returns to that same view/selection.
 | Ctrl-U | Clear query |
 | Backspace | Remove the last complete code point |
 
+In the global palette, these exact queries take priority over fuzzy matches:
+
+| Query + Enter | Action |
+| --- | --- |
+| `chip` | Choose the launch chip/variant without changing the run being inspected. |
+| `synth` or `synthesis` | Start a fresh synthesis run in view for the current launch target and profile. |
+| A stage name, e.g. `floorplan`, `placement`, `cts`, `routing`, `timing`, `signoff` | Start a fresh run **through** that endpoint in view. The selected flow must support it. |
+| `elaboration` | Build and emit the elaboration bundle. This preparation step does not start a physical run. |
+| `a launch` | Launch the **staged plan** at its captured endpoint. With no staged plan, show the reason. |
+| `synth rows` | Discover ASIC flows and runs. |
+| `test` | Review the selected suite and cases for launch, or choose a suite if the current workspace has none selected. |
+| `test suites` or `verification` | Browse verification suites. Choosing a suite does not submit a run. |
+
 Contextual commands for the focused view lead the list; ones that exist but cannot
 run show a `[reason]` (for example `no run selected`) instead of disappearing
 ([WB-054](features/presentation/WB-054-contextual-controls.md)). Bottom palette hints

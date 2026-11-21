@@ -44,6 +44,12 @@ acceptance state, so they do not appear as preseeded attempts in your live histo
 3. Choose cases, then press **Enter** to prepare the normal launch form.
 4. Review cases, seed and parameters; only final confirmation launches simulation.
 
+From the global palette (`Space c c`), type `test suites` or `verification`
+to open the suite picker. If no suites are listed, choose **Testing: Discover
+suites explicitly**. With a suite selected in the active Testing workspace,
+`test` opens the launch form for its selected cases. If there is no current
+suite, `test` opens the picker instead.
+
 If you already have a customized Testing workspace, **Apply default layout (add
 missing tiles)** adds the new panes and preserves extras, pins, hidden state and
 geometry. Older `simulation`, run-selector or log tiles may remain as extras. Hide
@@ -81,6 +87,8 @@ selecting an artifact exposes its exact ID, bytes, digest and media type in Deta
 
 | Focus | Key/action | Effect |
 | --- | --- | --- |
+| Palette | `test` | Review the active Testing suite's selected cases in the launch form, or open the suite chooser if there is no current suite. Only explicit confirmation launches an attempt. |
+| Palette | `test suites` or `verification` | Browse and select suites in Testing without launching. If no suites are known, choose **Discover suites explicitly**, then reopen the chooser. |
 | Any simulation pane | `d` | Explicitly discover/refresh suites; never implied by rendering |
 | Catalog | `n` / `p` | Choose next/previous declared suite |
 | Catalog | `j` / `k`, arrows | Browse cases without changing attempt investigation |
@@ -99,6 +107,17 @@ selecting an artifact exposes its exact ID, bytes, digest and media type in Deta
 | Any simulation pane | `h` | Newest history page; palette also provides older pages |
 | All panes | `[` / `]`, Tab/Shift-Tab | Independent scroll; move focus |
 | Palette | Zoom focused tile / Unzoom workspace | More room for full inputs, failures, metadata or logs |
+
+For generic Dune tests, choose **Run project tests** by name.
+
+To check the aliases against installed binaries, run from the repository root:
+
+```sh
+python3 -B terminal/test_testing_aliases_pty.py \
+  --client "$(command -v silver)" --daemon "$(command -v silver-daemon)"
+```
+
+The check uses a private project, daemon state and simulation fixture.
 
 ### Export path clipboard
 
