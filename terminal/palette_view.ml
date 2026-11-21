@@ -22,6 +22,8 @@ let bounds ~width ~height =
   { x; y; width; height }
 ;;
 
+let result_capacity ~body_height ~header_height = Int.max 0 (body_height - header_height)
+
 let box ~width ~height view =
   View.crop
     ~r:(Int.max 0 (View.width view - width))

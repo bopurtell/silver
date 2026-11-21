@@ -84,7 +84,9 @@ let%test_unit "native and explicit word gestures edit every palette argument loc
     let before =
       { host with
         palette =
-          Some { capture; commands = []; query = "top.界é🙂   "; index = 3; argument }
+          Some
+            { capture; commands = []; query = "top.界é🙂   "; index = 3
+            ; viewport = `Follow 0; argument }
       }
     in
     List.iter word_events ~f:(fun event ->

@@ -33,6 +33,7 @@ module Simulation_export = Terminal_presentation.Simulation_export
 module Export_clipboard = Terminal_presentation.Export_clipboard
 module Waveform_data = Terminal_presentation.Waveform_data
 module Waveform_view = Terminal_presentation.Waveform_view
+module Waveform_routing = Terminal_presentation.Waveform_routing
 module Waveform_preferences = Terminal_presentation.Waveform_preferences
 module Waveforms = Hardcaml_workbench_workspaces.Waveforms
 module Resources_view = Terminal_presentation.Resources_view
@@ -994,17 +995,31 @@ let load_navigation_preferences session =
             session.navigation_pending <- saved)))
 ;;
 
+let clear_waveform_transients session =
+  session.waveform <- Option.map session.waveform ~f:Waveform_routing.clear_view;
+  List.iter session.waveform_workspaces ~f:(fun (_, rt) ->
+    rt.view <- Waveform_routing.clear_view rt.view)
+;;
+
+let clear_waveform_on_navigation session host =
+  if Waveform_routing.navigation_changed session.host host
+  then clear_waveform_transients session
+;;
+
 let apply_navigation_preferences session =
   match session.navigation_pending, session.host.registry, current_project session with
   | Some saved, Some _, Some project ->
     session.navigation_pending <- None;
-    session.host
-    <- Host.restore_navigation_focus
-         saved
-         session.host
-         ~restore_active:
-           (session.navigation_revision = session.navigation_restore_revision)
-         ~preserve_focus:session.navigation_focus_touched;
+    let host =
+      Host.restore_navigation_focus
+        saved
+        session.host
+        ~restore_active:
+          (session.navigation_revision = session.navigation_restore_revision)
+        ~preserve_focus:session.navigation_focus_touched
+    in
+    clear_waveform_on_navigation session host;
+    session.host <- host;
     let saved =
       { saved with
         workspaces =
@@ -1399,8 +1414,9 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
       | Ok snapshot ->
         if Option.exists session.host.registry ~f:(fun previous ->
              not (Workspace.Session_id.equal previous.session_id snapshot.session_id))
-        then (
-          Terminal_presentation.Retained_hydration.Load.reconnect
+         then (
+           clear_waveform_transients session;
+           Terminal_presentation.Retained_hydration.Load.reconnect
             session.navigation_loaded
             ~replacement:true;
           session.navigation_pending <- None;
@@ -1416,9 +1432,10 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
           Presentation_preferences.receive
             session.presentation_preferences
             session.host
-            snapshot
-        in
-        session.host <- host;
+             snapshot
+         in
+         clear_waveform_on_navigation session host;
+         session.host <- host;
         reconcile_launch_context session project;
         session.presentation_preferences <- pending;
         apply_waveform_preferences session;
@@ -2627,6 +2644,7 @@ let hydrate_retained ?(reschedule = false) session =
 ;;
 
 let activate_workspace session id =
+  clear_waveform_transients session;
   session.navigation_revision <- session.navigation_revision + 1;
   session.timing_demand <- None;
   session.waveform_visible <- false;
@@ -5665,7 +5683,8 @@ let open_waveform session (artifact : Simulation.Artifact.t) =
       Option.first_some previous saved
       |> Option.value ~default:(Waveform_view.create ~project:project_name artifact)
     in
-    session.waveform <- Some view;
+    clear_waveform_transients session;
+    session.waveform <- Some (Waveform_routing.clear_view view);
     session.waveform_visible <- true;
     if Option.is_some previous
     then return ()
@@ -5847,9 +5866,10 @@ let open_waveform_workspace session artifact =
             Option.bind session.host.registry ~f:(fun after ->
               Waveforms.created ~before ~after)
         in
-        match target with
-        | Some workspace when current () ->
-          session.timing_demand <- None;
+         match target with
+         | Some workspace when current () ->
+           clear_waveform_transients session;
+           session.timing_demand <- None;
           session.host <- Host.set_waveform_pin session.host workspace.id pin;
           session.waveform_preferences_failed <- false;
           session.host <- Host.switch session.host workspace.id;
@@ -6473,6 +6493,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                   ; commands = []
                   ; query = Simulation_view.Form.query form
                   ; index = 0
+                  ; viewport = `Follow 0
                   ; argument =
                       Some
                         (Simulation_selection
@@ -6490,6 +6511,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = Simulation_view.Form.query form
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Simulation_selection (tile, digest, key, form))
                }
          };
@@ -6504,6 +6526,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = Simulation_view.Form.query form
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Simulation_selection (tile, digest, key, form))
                }
          };
@@ -6826,7 +6849,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             (Artifact_view.safe (flow.id ^ "/" ^ profile)) "choose endpoint"
             (Edit_run (flow.id, profile))))) in
       session.host <- { session.host with palette = Some
-        { capture = captured; commands; query = ""; index = 0; argument = None } };
+         { capture = captured; commands; query = ""; index = 0; viewport = `Follow 0
+         ; argument = None } };
       Effect.Ignore
     | (Setup_project | Choose_ip_template | Choose_module_directory | Library_actions _
       | New_flow _ | Duplicate_profile _ | Flow_step _
@@ -6845,7 +6869,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 notice
               ; palette =
                   Some
-                    { capture = captured; commands; query; index = 0; argument }
+                     { capture = captured; commands; query; index = 0; viewport = `Follow 0
+                     ; argument }
               }
          in
          let instance_id = session.hello.instance_id in
@@ -7250,6 +7275,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                       ; commands = []
                       ; query = ""
                       ; index = 0
+                      ; viewport = `Follow 0
                       ; argument =
                           Some
                             (Host.Workload_bundle
@@ -7275,6 +7301,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = ""
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some argument
                }
          ; notice
@@ -7499,6 +7526,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = ""
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Host.Resource_path bundle)
                }
          ; notice =
@@ -7608,6 +7636,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Host.Preparation_inputs (flow, profile))
                }
          ; notice = "Enter ENDPOINT [name=value ...]; captures preparation inputs only"
@@ -7991,6 +8020,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = session.remembered_acceptance
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Host.Acceptance (run, execution_file, key))
                }
          ; notice =
@@ -8021,6 +8051,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (match action with Edit_run _ -> Host.Run_endpoint (flow, profile)
                                    | _ -> Host.Plan_endpoint (flow, profile))
                }
@@ -8038,6 +8069,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ; commands = []
                ; query = ""
                ; index = 0
+               ; viewport = `Follow 0
                ; argument = Some (Host.Finalization_attempt run)
                }
          ; notice =
@@ -8325,6 +8357,16 @@ let browse_host session delta =
     session.host <- Host.set_local session.host tile.id { local with cursor; scroll })
 ;;
 
+let palette_input_capacity session =
+  Option.bind session.last_dimensions ~f:(fun dimensions ->
+    let host =
+      if session.waveform_visible && Option.is_none session.browser
+      then session.host
+      else displayed_host session
+    in
+    Host_view.palette_capacity host dimensions)
+;;
+
 let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option =
   let open Bonsai_term in
   let modal =
@@ -8344,7 +8386,8 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
   let captured = Host.capture session.host in
   let host, effect =
     Option.value_map input ~default:(session.host, Host.No_effect) ~f:(fun input ->
-      Host.input session.host input ~commands:(host_catalog session))
+      Host.input ?palette_capacity:(palette_input_capacity session)
+        session.host input ~commands:(host_catalog session))
   in
   session.host <- host;
   if host.editing_filter
@@ -8827,26 +8870,8 @@ let host_handler_overlays session event ~exit =
   | _ -> host_handler_regular session event ~exit
 ;;
 
-let waveform_key event =
-  match Waveform_view.edit_key event with
-  | Some key -> Some key
-  | None ->
-    (match event with
-     | Bonsai_term.Event.Key_press { key = Arrow `Left; mods = [] } ->
-       Some Waveform_view.Left
-     | Key_press { key = Arrow `Right; mods = [] } -> Some Waveform_view.Right
-     | _ ->
-       (match Host.decode_event event with
-        | Some (Character c) -> Some (Waveform_view.Char c)
-        | Some Enter -> Some Enter
-        | Some Escape -> Some Escape
-        | Some Backspace -> Some Backspace
-        | Some Next -> Some Down
-        | Some Previous -> Some Up
-        | _ -> None))
-;;
-
 let modal_input session input ~exit =
+  clear_waveform_transients session;
   let commands =
     match input with
     | Host.Open_menu Project_menu -> host_catalog session
@@ -8861,7 +8886,11 @@ let modal_input session input ~exit =
           List.find catalog ~f:(fun c -> String.equal c.Host.id id)))
     | _ -> []
   in
-  let host, effect = Host.input session.host input ~commands in
+  let menu_height = Option.value_map session.last_dimensions ~default:24 ~f:(fun d -> d.height) in
+  let host, effect =
+    Host.input ~menu_height ?palette_capacity:(palette_input_capacity session)
+      session.host input ~commands
+  in
   session.host <- host;
   match effect with
   | Host.Execute (capture, action) -> execute_host session capture action ~exit
@@ -8888,8 +8917,10 @@ let menu_key session event ~exit =
       modal_input session key ~exit))
   | _, input when Option.is_some session.browser ->
     let browser = Option.value_exn session.browser in
+    let hints = Host.project_browser_hints host in
     Some (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun key ->
-      browser_result session browser (Browser.input browser key) ~exit))
+      browser_result session browser
+        (Browser.input ~hints ?dimensions:session.last_dimensions browser key) ~exit))
   | Some _, _ ->
     Some
       (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun input ->
@@ -8911,127 +8942,104 @@ let menu_key session event ~exit =
   | None, _ -> None
 ;;
 
+let waveform_pane_key session key =
+  let open Waveform_view in
+  let delta = match key with Char 'k' | Up -> -1 | _ -> 1 in
+  match Host.focused session.host, active_waveform_runtime session with
+  | Some tile, Some (workspace, rt) ->
+    (match Waveforms.pane tile.kind, key with
+     | Some Picker, (Char ('j' | 'k') | Down | Up) ->
+       rt.picker_index
+       <- Int.max 0 (Int.min (List.length rt.artifacts - 1) (rt.picker_index + delta));
+       Some Bonsai_term.Effect.Ignore
+     | Some Picker, Enter ->
+       let current = waveform_current session workspace rt in
+       Some
+         (Bonsai_term.Effect.of_deferred_thunk (fun () ->
+            match List.nth rt.artifacts rt.picker_index with
+            | Some artifact
+              when current ()
+                   && Option.equal Workspace.Workspace_id.equal session.host.active (Some workspace) ->
+              open_waveform_workspace session artifact
+            | _ -> return ()))
+     | Some Logs, (Char ('j' | 'k' | 'G') | Down | Up) ->
+       let local = Host.local session.host tile.id in
+       session.host
+       <- Host.set_local
+            session.host
+            tile.id
+            { local with
+              scroll = Int.max 0 (local.scroll + delta)
+            ; follow = (match key with Char 'G' -> true | _ -> false)
+            };
+       Some Bonsai_term.Effect.Ignore
+     | _ -> None)
+  | _ -> None
+;;
+
+let host_waveform_key session event ~exit =
+  let context = waveform_context session in
+  let editing_text = Option.exists context ~f:(fun (view, _) -> Option.is_some view.editing) in
+  let identity_modal =
+    Option.exists context ~f:(fun (view, _) -> Option.is_some view.identity_scroll)
+  in
+  let fallback () = host_handler_regular session event ~exit in
+  let update input key =
+    match context, key with
+    | Some (view, set), _ ->
+      let view : Waveform_view.t = input view key in
+      let modal = Option.is_some view.editing || Option.is_some view.identity_scroll in
+      set (if modal then Waveform_routing.clear_view view else view);
+      Some Bonsai_term.Effect.Ignore
+    | None, Waveform_view.Char ('0' .. '9' | 'V') ->
+      (* Digit ownership does not require a pin, runtime, or a loaded trace. *)
+      Some Bonsai_term.Effect.Ignore
+    | None, _ -> fallback ()
+  in
+  match
+    Waveform_routing.route
+      session.host
+      ~quick:session.waveform_visible
+      ~editing_text
+      ~identity_modal
+      event
+  with
+  | Host | Host_boundary ->
+    clear_waveform_transients session;
+    fallback ()
+  | Waveform key -> update Waveform_view.input key
+  | Signals key -> update Waveform_view.signals_input key
+  | Pane key ->
+    (match waveform_pane_key session key with
+     | Some _ as handled -> handled
+     | None -> fallback ())
+  | Close_quick ->
+    clear_waveform_transients session;
+    session.waveform_visible <- false;
+    session.waveform_generation <- session.waveform_generation + 1;
+    Some Bonsai_term.Effect.Ignore
+  | Consume -> Some Bonsai_term.Effect.Ignore
+;;
+
 let host_handler session event ~exit =
   if Host.is_interrupt event
   then Some (exit ())
-  else match menu_key session event ~exit with
-  | Some _ as handled -> handled
-  | None ->
-    if session.waveform_visible
-          || Option.exists (Host.focused session.host) ~f:(fun t ->
-            Waveforms.is_pane t.kind)
-  then (
-    let context = waveform_context session in
-    let editing_text =
-      Option.exists context ~f:(fun (view, _) -> Option.is_some view.editing)
-    in
-    let global =
-      Option.is_some session.host.palette
-      || session.host.prefix > 0
-      || session.host.paste
-      || Option.exists (Host.decode_event event) ~f:(function
-        | Character ' ' -> not editing_text
-        | Focus | Focus_previous | Paste_start | Paste_end -> true
-        | _ -> false)
-    in
-    if global
-    then host_handler_regular session event ~exit
-    else (
-      let key = waveform_key event in
-      match context with
-      | None -> host_handler_regular session event ~exit
-      | Some (view, set) ->
-        let modal = Option.is_some view.editing || Option.is_some view.identity_scroll in
-        if session.waveform_visible || modal
-        then (
-          (match key with
-           | Some (Escape | Char 'q') when not modal ->
-             session.waveform_visible <- false;
-             session.waveform_generation <- session.waveform_generation + 1
-           | Some key -> set (Waveform_view.input view key)
-           | None -> ());
-          Some Bonsai_term.Effect.Ignore)
-        else (
-          match Host.focused session.host, active_waveform_runtime session with
-          | Some tile, Some (workspace, rt) ->
-            (match Waveforms.pane tile.kind, key with
-             | Some Picker, Some (Char ('j' | 'k') | Down | Up) ->
-               let delta =
-                 match key with
-                 | Some (Char 'k' | Up) -> -1
-                 | _ -> 1
-               in
-               rt.picker_index
-               <- Int.max
-                    0
-                    (Int.min (List.length rt.artifacts - 1) (rt.picker_index + delta));
-               Some Bonsai_term.Effect.Ignore
-             | Some Picker, Some Enter ->
-               let current = waveform_current session workspace rt in
-               Some
-                 (Bonsai_term.Effect.of_deferred_thunk (fun () ->
-                    match List.nth rt.artifacts rt.picker_index with
-                    | Some artifact
-                      when current ()
-                           && Option.equal
-                                Workspace.Workspace_id.equal
-                                session.host.active
-                                (Some workspace) ->
-                      open_waveform_workspace session artifact
-                    | _ -> return ()))
-             | Some Logs, Some (Char ('j' | 'k' | 'G') | Down | Up) ->
-               let local = Host.local session.host tile.id in
-               let delta =
-                 match key with
-                 | Some (Char 'k' | Up) -> -1
-                 | _ -> 1
-               in
-               session.host
-               <- Host.set_local
-                    session.host
-                    tile.id
-                    { local with
-                      scroll = Int.max 0 (local.scroll + delta)
-                    ; follow =
-                        (match key with
-                         | Some (Char 'G') -> true
-                         | _ -> false)
-                    };
-               Some Bonsai_term.Effect.Ignore
-             | ( Some (Session | Signals | Waves)
-               , Some
-                   (( Char
-                        ( 'j'
-                        | 'k'
-                        | 'h'
-                        | 'l'
-                        | 'H'
-                        | 'L'
-                        | '['
-                        | ']'
-                        | '+'
-                        | '='
-                        | '-'
-                        | ':'
-                        | '/'
-                        | 'g'
-                        | 'G'
-                        | 'i'
-                        | '{'
-                        | '}' )
-                    | Up | Down | Left | Right | Enter | Escape ) as key) ) ->
-               set (Waveform_view.input view key);
-               Some Bonsai_term.Effect.Ignore
-             | _ -> host_handler_regular session event ~exit)
-          | _ -> host_handler_regular session event ~exit)))
   else (
-    reconcile_synthesis session;
-    match Host.route_inspection_filter_event session.host event with
-    | Filter_interrupt -> Some (exit ())
-    | Filter_handled host ->
-      session.host <- host;
-      Some Bonsai_term.Effect.Ignore
-    | Filter_pass -> host_handler_overlays session event ~exit)
+    match menu_key session event ~exit with
+    | Some _ as handled -> handled
+    | None
+      when session.waveform_visible
+           || Option.exists (Host.focused session.host) ~f:(fun tile ->
+             Waveforms.is_pane tile.kind) ->
+      host_waveform_key session event ~exit
+    | None ->
+      reconcile_synthesis session;
+      (match Host.route_inspection_filter_event session.host event with
+       | Filter_interrupt -> Some (exit ())
+       | Filter_handled host ->
+         session.host <- host;
+         Some Bonsai_term.Effect.Ignore
+       | Filter_pass -> host_handler_overlays session event ~exit))
 ;;
 
 let asic_snapshot_fixture scenario =
@@ -9308,7 +9316,7 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
     (match session.browser, session.painted_browser, (kind : Event.mouse_kind), mods with
      | Some b, Some (painted, hints), Left, [] when phys_equal b painted ->
        Option.value_map (Browser.hit ~hints b d ~x ~y) ~default:Effect.Ignore ~f:(fun target ->
-         browser_result session b (Browser.choose b target) ~exit)
+         browser_result session b (Browser.choose ~hints ~dimensions:d b target) ~exit)
      | Some b, Some (painted, hints), Scroll direction, [] when phys_equal b painted ->
        browser_result session b (Browser.scroll ~hints b d ~x ~y ~direction) ~exit
      | _ -> Effect.Ignore)
@@ -9368,9 +9376,12 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
               | Left ->
                 Option.iter body ~f:(fun (column, row) ->
                   select_pointer_row session tile dimensions ~column ~row);
-                (* Switching tabs restores the destination's focus. *)
-                if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
-                then session.host <- { session.host with focus = Some tile.id };
+                 (* Switching tabs restores the destination's focus. *)
+                 if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
+                 then (
+                   let host = { session.host with focus = Some tile.id } in
+                   clear_waveform_on_navigation session host;
+                   session.host <- host);
                 Effect.Ignore
               | Scroll direction
                 when Option.exists session.host.focus ~f:(Workspace.Tile_id.equal tile.id) ->
@@ -9452,6 +9463,7 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
             | Key_press { key = Function 8; mods = [] } -> true
             | _ -> false
     then (
+      clear_waveform_transients session;
       session.show_connection_details <- not session.show_connection_details;
       session.connection_details_scroll <- 0;
       Effect.Ignore)
@@ -9459,6 +9471,7 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
             | Key_press { key = Function 9; mods = [] } -> true
             | _ -> false
     then (
+      clear_waveform_transients session;
       Export_clipboard.retry session.export_clipboard ~notice:(fun notice ->
         session.host <- { session.host with notice });
       Effect.Ignore)

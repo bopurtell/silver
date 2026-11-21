@@ -3,7 +3,7 @@ id: WB-067
 title: Vim-style tile buffers with counts, visual selection and repeat
 category: workspaces
 feature_sets: [FS3, FS5]
-status: needs-design
+status: delivered
 kind: feature
 priority: P2
 severity: n/a
@@ -27,7 +27,7 @@ count. Example: with the cursor in Waves, `20 l` moves the cursor 20 steps. In t
 Signals tile, enter a visual (line/block) mode, select down a list of signals and
 enable/disable them all at once, Vim-binding style. Requested size: **Unspecified**.
 
-## Current baseline
+## Baseline before WB-067
 Tiles have local j/k/h/l-style browsing, filters and Enter actions, each implemented
 per view (`waveform_view.ml`, `timing_workspace.ml`, `testing_workspace.ml`, ...).
 There is no shared count prefix, no visual selection and no repeat. Waveforms
@@ -58,6 +58,8 @@ and viewport-follow behavior as the corresponding single presses. The motion
 consumes the count, so `20lh` moves right twenty columns, then left one. Esc
 cancels without moving. Any other non-digit key clears the count before its
 ordinary action; leaving Waves clears it rather than saving it for the next visit.
+The indicator saturates at 9,999 so a pasted or mistyped number cannot request
+unbounded work.
 
 ## Scope
 - A shared, tile-local key-sequence layer: numeric count prefixes for motions and
@@ -76,20 +78,27 @@ Text editing, registers/macros, a full Vim emulation, configurable bindings (WB-
 and mouse selection (WB-013). Ches embedding itself is WB-018.
 
 ## Acceptance criteria
-- [ ] With Waves focused, typing `2` then `0` shows a pending `20` without switching
+- [x] With Waves focused, typing `2` then `0` shows a pending `20` without switching
   workspaces. At a compressed zoom, `20l` matches 20 single `l` column steps;
   `20L` moves exactly 20 ticks. Both clamp at trace bounds.
-- [ ] `20j` moves signal focus down as far as 20 single `j` presses would.
-- [ ] With `2` bound to another workspace, `2` switches on the first press in a
+- [x] `20j` moves signal focus down as far as 20 single `j` presses would.
+- [x] With `2` bound to another workspace, `2` switches on the first press in a
   shortcut-owning Overview tile. In Signals it stays put, and in the Signals
   filter it inserts `2`.
-- [ ] Type `20` in Waves, focus Signals, type `2`, then return to Waves: `l` moves
+- [x] Type `20` in Waves, focus Signals, type `2`, then return to Waves: `l` moves
   one column. Neither tile's digits triggered a workspace switch.
-- [ ] A pending count is visible and cleared by Esc, by a non-count key, or by focus change.
-- [ ] In Signals, a visual range can be extended with j/k and bulk-toggled in one action.
-- [ ] Bulk toggles leave filtered-out signals untouched and persist like single toggles.
-- [ ] Palette leader, modal capture and existing single-key actions behave unchanged.
-- [ ] Count/selection state is tile-local and never changes run or context selection.
+- [x] A pending count is visible and cleared by Esc, by a non-count key, or by focus change.
+- [x] In Signals, a visual range can be extended with j/k and bulk-toggled in one action.
+- [x] Bulk toggles leave filtered-out signals untouched and persist like single toggles.
+- [x] Palette leader, modal capture and existing single-key actions behave unchanged.
+- [x] Count/selection state is tile-local and never changes run or context selection.
+
+The waveform handoff PTY test drives the real client with a sparse trace where
+twenty column steps differ from twenty ticks. It compares cursor and viewport,
+checks the pending indicator with hints hidden, and exercises the same `2` in
+Overview, Session, Waves, Signals, and a text filter. For Signals it covers a
+mixed range, an all-enabled range, and cancellation. Run it with
+`scripts/with-switch.sh dune build @terminal/test-native-smoke`.
 
 ## Dependencies
 No required prerequisite. WB-068 defines the Waves step unit that counts multiply.
@@ -107,6 +116,9 @@ tests. Rolling it out to every tile is not included; each later tile adopts it i
 - Is "Ches buffer" behavior meant to match a specific Ches keymap? If so, reference it.
 
 ## References
+- [Focus and key routing](../../../terminal/waveform_routing.ml)
+- [Filtered signal ranges](../../../terminal/signal_visual.ml)
+- [Real-terminal count and selection regression](../../../terminal/test_waveform_handoff_pty.py)
 - [Waveform view input](../../../terminal/waveform_view.ml)
 - [Waveforms workspace controls](../../testing_workspace.md#dedicated-waveforms-workspace)
 - [WB-018 Ches tiles](../integrations/WB-018-ches-tiles.md)

@@ -4037,42 +4037,61 @@ let palette_controls host (p : H.palette) =
     submit "Launch" (Result.is_ok (Launch_preferences.Prompt.selection p.query ~flow ~profile))
 ;;
 
+let palette_layout host dimensions p appearance =
+  let bounds =
+    Palette_view.bounds ~width:dimensions.Dimensions.width ~height:dimensions.height
+  in
+  let geometry =
+    Panel.geometry
+      ~framed:(bounds.height >= 6 && bounds.width >= 6)
+      ~width:bounds.width
+      ~height:bounds.height
+      ~horizontal_padding:(if bounds.width >= 8 then 1 else 0)
+      ~vertical_padding:0
+  in
+  let width = geometry.content_width in
+  let height = geometry.content_height in
+  let controls =
+    Palette_view.buttons ~width ~attrs:(Role.attrs appearance Focus) (palette_controls host p)
+    |> Fn.flip List.take (Int.max 0 (height - 1))
+  in
+  let available = height - List.length controls in
+  (* Hidden palette hints return both the hint row and its separator to the result list;
+     a notice (e.g. an unavailable reason) still claims the row. *)
+  let footer_height =
+    if available >= 3 && (host.palette_hints || not (String.is_empty host.notice))
+    then 1
+    else 0
+  in
+  let footer_gap = if footer_height > 0 && available >= 5 then 1 else 0 in
+  let heading_height = if geometry.border = 0 && available >= 4 then 1 else 0 in
+  let body_height = available - footer_height - footer_gap in
+  bounds, geometry, controls, body_height, footer_height, footer_gap, heading_height
+;;
+
+let palette_capacity host dimensions =
+  Option.bind host.H.palette ~f:(fun p ->
+    if Option.is_some p.argument
+    then None
+    else (
+      let _, _, _, body_height, _, _, heading_height =
+        palette_layout host dimensions p (H.effective_appearance host)
+      in
+      (* A command search has a single-line prompt and no form help. *)
+      Some (Palette_view.result_capacity ~body_height ~header_height:(heading_height + 1))))
+;;
+
 let palette_page host dimensions =
   match host.H.palette with
   | None -> None
   | Some p ->
     let appearance = H.effective_appearance host in
     let theme = H.theme_picker p in
-    let bounds =
-      Palette_view.bounds ~width:dimensions.Dimensions.width ~height:dimensions.height
-    in
-    let geometry =
-      Panel.geometry
-        ~framed:(bounds.height >= 6 && bounds.width >= 6)
-        ~width:bounds.width
-        ~height:bounds.height
-        ~horizontal_padding:(if bounds.width >= 8 then 1 else 0)
-        ~vertical_padding:0
+    let bounds, geometry, controls, body_height, footer_height, footer_gap, heading_height =
+      palette_layout host dimensions p appearance
     in
     let width = geometry.content_width in
-    let height = geometry.content_height in
-    let controls =
-      Palette_view.buttons ~width ~attrs:(Role.attrs appearance Focus) (palette_controls host p)
-      |> Fn.flip List.take (Int.max 0 (height - 1))
-    in
-    let available = height - List.length controls in
-    (* Hidden palette hints return both the hint row and its separator to the result list;
-       a notice (e.g. an unavailable reason) still claims the row. *)
-    let footer_height =
-      if available >= 3 && (host.palette_hints || not (String.is_empty host.notice))
-      then 1
-      else 0
-    in
-    let footer_gap = if footer_height > 0 && available >= 5 then 1 else 0 in
-    let heading_height = if geometry.border = 0 && available >= 4 then 1 else 0 in
-    let prompt_rows =
-      Int.max 1 (Int.min 3 (available - footer_height - footer_gap - heading_height))
-    in
+    let prompt_rows = Int.max 1 (Int.min 3 (body_height - heading_height)) in
     let text ?(role = Role.Surface) text =
       lines ~appearance ~role ~width ~height:1 [ text ]
     in
@@ -4234,7 +4253,6 @@ let palette_page host dimensions =
         ]
       else List.map query ~f:(text ~role:Focus)
     in
-    let body_height = available - footer_height - footer_gap in
     let help_height = Int.max 0 (body_height - heading_height - List.length prompt) in
     let help_limit = Int.max 0 (List.length help - help_height) in
     let scrolling_help =
@@ -4246,9 +4264,15 @@ let palette_page host dimensions =
       @ prompt
       @ List.map help ~f:text
     in
-    let shown = Int.max 0 (body_height - List.length header) in
+    let shown = Palette_view.result_capacity ~body_height ~header_height:(List.length header) in
     let ranked = if H.palette_has_results p then H.ranked_matches p else [] in
-    let start = Int.max 0 (p.index - shown + 1) in
+    let length = List.length ranked in
+    let start =
+      if Option.is_none p.argument
+      then H.palette_top p ~length ~capacity:shown
+      else Int.max 0 (p.index - shown + 1)
+    in
+    let capture_current = H.current host p.capture in
     let commands =
       List.drop ranked start
       |> Fn.flip List.take shown
@@ -4277,7 +4301,7 @@ let palette_page host dimensions =
           result
         |> colored appearance role in
         let spans =
-          if Option.is_some result.item.unavailable || not (H.current host p.capture)
+           if Option.is_some result.item.unavailable || not capture_current
           then [] else [ 0, width, `Command result.item.id ]
         in
         { Palette_view.image; spans })
@@ -4303,9 +4327,9 @@ let palette_page host dimensions =
       then "Enter accepts input · Esc return · Ctrl-BS/Ctrl-W word · Ctrl-C exits"
       else
         sprintf
-          "%d/%d · Tab/Shift-Tab ↑/↓ · Enter run · Esc return · Ctrl-BS/Ctrl-W word"
+          "%d/%d · Tab/Shift-Tab ↑/↓ · Ctrl-Y/E scroll · Enter run · Esc return · ^W word"
           (if List.is_empty ranked then 0 else p.index + 1)
-          (List.length ranked)
+          length
     in
     let body = List.take (List.map header ~f:Palette_view.inert @ commands) body_height in
     let rows =
@@ -4317,7 +4341,7 @@ let palette_page host dimensions =
     in
     let scroll_limit =
       if scrolling_help && help_height > 0 then Some help_limit
-      else if H.palette_has_results p && shown > 0 then Some (Int.max 0 (List.length ranked - 1))
+      else if H.palette_has_results p && shown > 0 then Some (Int.max 0 (length - 1))
       else None
     in
     Some (bounds, geometry, heading, rows, scroll_limit)
@@ -4368,40 +4392,22 @@ let render_palette host dimensions background =
 (* This page is the single source of terminal coordinates for menu rendering and
    dispatch. Separators and query/status text never acquire command identities. *)
 let menu_footer (menu : H.menu) : (Role.t * string) option =
-  match List.nth (H.menu_matches menu) menu.index with
+  match H.menu_selected menu with
   | Some { command = { unavailable = Some text; _ }; _ } ->
     Some (Warning, " Unavailable: " ^ text)
   | _ ->
     (match menu.kind with
      | Project_menu -> None
-     | Actions_menu -> Some (Muted, " ↑↓ or j/k browse · Enter choose · Esc back"))
+     | Actions_menu -> Some (Muted, " j/k move · Ctrl-y/e scroll · Enter choose · Esc back"))
 ;;
 
 let menu_page (dimensions : Dimensions.t) (menu : H.menu) =
-  let left = 0 and top = if dimensions.height >= 6 then 1 else 0 in
   let width = Int.min 64 dimensions.width in
-  let matches = H.menu_matches menu in
-  let _, entries =
-    List.foldi matches ~init:(None, []) ~f:(fun i (last, output) (entry : H.menu_row) ->
-      let output =
-        if Option.equal String.equal last (Some entry.group)
-        then output
-        else `Group entry.group :: output
-      in
-      Some entry.group, `Choice (i, entry) :: output)
-  in
-  let entries = if List.is_empty entries then [ `Empty ] else List.rev entries in
-  let chrome = 3 + Bool.to_int (Option.is_some (menu_footer menu)) in
-  let height = Int.min (chrome + List.length entries) (Int.max 0 (dimensions.height - top)) in
-  let capacity = Int.max 0 (height - chrome) in
-  let selected =
-    List.findi entries ~f:(fun _ -> function `Choice (i, _) -> i = menu.index | _ -> false)
-    |> Option.value_map ~default:0 ~f:fst
-  in
-  let page =
-    List.drop entries (Int.max 0 (selected - capacity + 1)) |> Fn.flip List.take capacity
-  in
-  { W.Geometry.x = left; y = top; width; height }, page
+  let entries = H.menu_entries menu in
+  let length = List.length entries in
+  let y, height, capacity = H.menu_layout ~height:dimensions.height menu ~length in
+  let top = H.menu_top menu entries ~length ~capacity in
+  { W.Geometry.x = 0; y; width; height }, List.take (List.drop entries top) capacity
 ;;
 
 let menu_hit host dimensions ~x ~y =
@@ -4745,11 +4751,55 @@ let%test_unit "menu page hit tests follow grouping, filtering and bounded cursor
     assert (Option.is_none (menu_pointer host dimensions ~x:0 ~y))
   in
   check ~width:80 ~height:24 host "New IP Library" "project.new-ip";
-  let advance host event = fst (H.input host event ~commands:[]) in
-  let last = advance (advance host Next) Next in
+  let advance ?(menu_height = 24) host event = fst (H.input ~menu_height host event ~commands:[]) in
+  let last = advance ~menu_height:7 (advance ~menu_height:7 host Next) Next in
   check ~width:80 ~height:7 last "Select Launch Target" "asic.pick-chip";
   let filtered = advance (advance host (Character '/')) (Text "new-chip") in
   check ~width:80 ~height:24 filtered "New Chip Target" "project.new-chip"
+;;
+
+let%test_unit "Project menu scrolls physical rows independently of the selected command" =
+  let host, _, _ = refinement_fixture P.Testing.definition in
+  let dimensions : Dimensions.t = { width = 80; height = 7 } in
+  let ids = [ "project.new-ip"; "project.new-module"; "asic.pick-chip"; "project.manage" ] in
+  let commands =
+    List.mapi ids ~f:(fun i id -> H.command id id "" (if i = 0 then Toggle_chrome else Manage_project))
+  in
+  let apply t event = H.input ~menu_height:dimensions.height t event ~commands in
+  let step t event = fst (apply t event) in
+  let menu (t : H.t) = Option.value_exn t.menu in
+  let page t =
+    snd (menu_page dimensions (menu t))
+    |> List.map ~f:(function
+      | `Group name -> name
+      | `Choice (_, row) -> row.command.id
+      | `Empty -> "")
+  in
+  let check t expected = assert (List.equal String.equal (page t) expected) in
+  let host = step host (Open_menu Project_menu) in
+  check host [ "Author in this project"; "project.new-ip"; "project.new-module" ];
+  let scrolled = List.fold [ H.Character '2'; Scroll_down ] ~init:host ~f:step in
+  assert ((menu scrolled).index = 0 && (menu scrolled).count = 0);
+  check scrolled [ "project.new-module"; "Select or browse"; "asic.pick-chip" ];
+  assert (Option.is_none (menu_pointer scrolled dimensions ~x:2 ~y:4));
+  (match menu_pointer scrolled dimensions ~x:2 ~y:5 with
+   | Some (H.Menu_click "asic.pick-chip") -> ()
+   | _ -> assert false);
+  (match apply scrolled Enter with
+   | { menu = None; _ }, Execute (_, Toggle_chrome) -> ()
+   | _ -> assert false);
+  let last = List.fold [ H.Character '9'; Character '9'; Character 'j' ] ~init:scrolled ~f:step in
+  check last [ "Select or browse"; "asic.pick-chip"; "project.manage" ];
+  let previous = step last (Character 'k') in
+  assert ((menu previous).index = 2);
+  check previous (page last);
+  let _, shrunk = menu_page { dimensions with height = 4 } (menu last) in
+  (match shrunk with [ `Choice (3, _) ] -> () | _ -> assert false);
+  let _, shrunk = menu_page { dimensions with height = 4 } (menu scrolled) in
+  (match shrunk with [ `Choice (1, _) ] -> () | _ -> assert false);
+  let filtered = List.fold [ H.Character '/'; Scroll_up; Text "new-ip" ] ~init:previous ~f:step in
+  assert ((menu filtered).top = 0 && (menu filtered).index = 0);
+  check filtered [ "Author in this project"; "project.new-ip" ]
 ;;
 
 let%test_unit "Runs pointer selection follows filtered capped page and never binds a run" =
@@ -5346,6 +5396,7 @@ let%test_unit "Waveforms callback renders bounded independent bodies beneath hos
         ]
     ; query = ""
     ; index = 0
+    ; viewport = `Follow 0
     ; argument = None
     }
   in
@@ -7709,6 +7760,7 @@ let%test_unit "actual palette reserves a blank footer separator within its style
     ; commands = []
     ; query = "palette-query"
     ; index = 0
+    ; viewport = `Follow 0
     ; argument = None
     }
   in
@@ -7742,6 +7794,7 @@ let%test_unit "main-window and palette hints hide independently and reclaim rows
     ; commands = catalog
     ; query = ""
     ; index
+    ; viewport = `Follow 0
     ; argument = None
     }
   in
@@ -8258,6 +8311,65 @@ let%test_unit "palette scroll keeps selected result visible at normal and tiny s
       assert (View.width frame = width && View.height frame = height))
 ;;
 
+let%test_unit "palette uses one result viewport for navigation, rendering and pointer hits" =
+  let host = H.receive H.empty (W.initial ~session_id:(W.Session_id.of_string "palette-page")) in
+  let id i = sprintf "choice-%02d" i in
+  let commands =
+    List.init 9 ~f:(fun i ->
+      H.command (id i) (sprintf "Choice %02d" i) "" (Switch (W.Workspace_id.of_string (id i))))
+  in
+  let host =
+    List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun host c ->
+      fst (H.input host (Character c) ~commands))
+  in
+  let dimensions = { Dimensions.width = 80; height = 10 } in
+  let step host event =
+    H.input ?palette_capacity:(palette_capacity host dimensions) host event ~commands
+  in
+  let apply host event = fst (step host event) in
+  let page host =
+    let bounds, (g : Panel.geometry), _, rows, _ =
+      Option.value_exn (palette_page host dimensions)
+    in
+    let x = bounds.x + g.border + g.horizontal_padding in
+    let y0 = bounds.y + g.border + g.vertical_padding in
+    List.filter_mapi rows ~f:(fun i row ->
+      let y = y0 + i in
+      match palette_hit host dimensions ~x ~y with
+      | Some (`Command id) ->
+        Some (id, String.is_prefix (plain_text row.image) ~prefix:"> ")
+      | _ -> None)
+  in
+  let assert_page host top selected =
+    let capacity = Option.value_exn (palette_capacity host dimensions) in
+    assert (capacity = 3);
+    assert (Poly.equal (page host)
+              (List.init capacity ~f:(fun i -> id (top + i), top + i = selected)))
+  in
+  let moved = List.fold [ H.Next; Focus; Next; Next ] ~init:host ~f:apply in
+  assert_page moved 2 4;
+  let reversed = List.fold [ H.Previous; Focus_previous ] ~init:moved ~f:apply in
+  assert_page reversed 2 2;
+  assert_page (apply reversed Previous) 1 1;
+  let scrolled = apply host Scroll_down in
+  assert_page scrolled 1 0;
+  assert_page (apply scrolled Scroll_up) 0 0;
+  assert_page (apply scrolled Next) 1 1;
+  assert_page (apply scrolled (Character 'C')) 0 0;
+  let switch_to event i =
+    match step scrolled event with
+    | { palette = None; _ }, Execute (_, Switch workspace) ->
+      assert (String.equal (W.Workspace_id.to_string workspace) (id i))
+    | _ -> assert false
+  in
+  switch_to Enter 0;
+  let clicked, _ = List.last_exn (page scrolled) in
+  switch_to (Palette_click clicked) 3;
+  let stale = { scrolled with registry = Option.map scrolled.registry ~f:(fun registry ->
+    { registry with revision = registry.revision + 1 }) } in
+  assert (List.is_empty (page stale))
+;;
+
 let%test_unit "palette hit tests use visible row IDs and exact rendered form buttons" =
   let base = H.receive H.empty (W.initial ~session_id:(W.Session_id.of_string "palette-hit")) in
   let base = { base with appearance = { base.appearance with icons = Ascii } } in
@@ -8267,7 +8379,9 @@ let%test_unit "palette hit tests use visible row IDs and exact rendered form but
       H.command ?unavailable:(Option.some_if (i = 38) "disabled")
         (sprintf "id%d" i) (sprintf "Choice %02d" i) "" Toggle_chrome)
   in
-  let palette : H.palette = { capture; commands; query = ""; index = 39; argument = None } in
+  let palette : H.palette =
+    { capture; commands; query = ""; index = 39; viewport = `Follow 0; argument = None }
+  in
   let scroll ?(x = 59) ?(y = 20) p direction =
     palette_scroll { base with palette = Some p } { Dimensions.width = 120; height = 40 }
       ~x ~y ~direction
@@ -8339,6 +8453,7 @@ let%test_unit "form overlay keeps query tail visible without changing captured f
     ; commands = []
     ; query
     ; index = 0
+    ; viewport = `Follow 0
     ; argument = Some (Acceptance (Asic_snapshot_fixture.run_a, "/exact/execution", "captured-key"))
     }
   in

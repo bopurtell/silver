@@ -62,6 +62,8 @@ type region =
   | Objects
   | Commands
 
+type viewport = [ `Follow of int | `Scroll of int ]
+
 type t =
   { lifetime : unit ref
   ; message : string
@@ -69,7 +71,9 @@ type t =
   ; items : item list
   ; region : region
   ; object_index : int
+  ; object_top : viewport
   ; command_index : int
+  ; command_top : viewport
   ; query : string option
   ; editing : bool
   ; count : int
@@ -83,7 +87,9 @@ let create capture items =
   ; items
   ; region = Objects
   ; object_index = 0
+  ; object_top = `Follow 0
   ; command_index = 0
+  ; command_top = `Follow 0
   ; query = None
   ; editing = false
   ; count = 0
@@ -131,6 +137,7 @@ let receive_owner t ~chip ~parent = function
     { t with
       object_index = Option.value index ~default:t.object_index
     ; command_index = 0
+    ; command_top = `Follow 0
     }
   | Error msg | Ok (Failed { message = msg; _ }) ->
     { t with message = Artifact_view.safe msg }
@@ -138,6 +145,89 @@ let receive_owner t ~chip ~parent = function
 ;;
 
 let commands t = Option.value_map (selected t) ~default:[] ~f:(fun i -> i.commands)
+
+let footer_rows ~hints t height =
+  if height < 10 then 0 else 1 + Bool.to_int (hints || not (String.is_empty t.message))
+;;
+
+let geometry ~width ~height =
+  Panel.geometry ~framed:(width >= 32 && height >= 12) ~width ~height
+    ~horizontal_padding:0 ~vertical_padding:0
+;;
+
+type layout =
+  { bounds : Palette_view.bounds
+  ; geometry : Panel.geometry
+  ; pad : int
+  ; inner : int
+  ; top : int
+  ; footer : int
+  ; object_lines : int
+  ; action_lines : int
+  }
+
+let layout ~hints t (d : Dimensions.t) =
+  let axis n margin cap =
+    let size =
+      Int.max 0 (Int.min cap (if n >= margin * 12 then n - (2 * margin) else n))
+    in
+    (n - size) / 2, size
+  in
+  let x, width = axis d.width 2 132
+  and y, height = axis d.height 1 38 in
+  let bounds : Palette_view.bounds = { x; y; width; height } in
+  let g = geometry ~width ~height in
+  let width = g.content_width and height = g.content_height in
+  let pad = if width >= 20 then 1 else 0 in
+  let inner = width - (2 * pad) in
+  let top = if height >= 6 || t.editing then 2 else 1 in
+  let footer = footer_rows ~hints t height in
+  let room = Int.max 0 (height - top - footer) in
+  let object_lines, action_lines =
+    if inner >= 96
+    then room, room
+    else if room < 4
+    then (
+      match t.region with
+      | Objects -> room, 0
+      | Commands -> 0, room)
+    else (
+      let action_lines = Int.min (room / 2) (1 + Int.max 1 (List.length (commands t))) in
+      room - action_lines, action_lines)
+  in
+  { bounds; geometry = g; pad; inner; top; footer; object_lines; action_lines }
+;;
+
+let viewport ~hints t d region =
+  let { object_lines; action_lines; _ } = layout ~hints t d in
+  match region with
+  | Objects ->
+    t.object_top, t.object_index, List.length (objects t), Int.max 0 (object_lines - 1)
+  | Commands ->
+    t.command_top, t.command_index, List.length (commands t), Int.max 0 (action_lines - 1)
+;;
+
+let set_top t region top =
+  match region with
+  | Objects -> { t with object_top = top }
+  | Commands -> { t with command_top = top }
+;;
+
+let visible_top top ~index ~length ~capacity =
+  match top with
+  | `Follow top -> List_viewport.reveal ~top ~index ~length ~capacity
+  | `Scroll top -> List_viewport.clamp ~top ~length ~capacity
+;;
+
+let current_top ~hints t d region =
+  let top, index, length, capacity = viewport ~hints t d region in
+  visible_top top ~index ~length ~capacity
+;;
+
+let reveal ~hints t d region ~top =
+  let _, index, length, capacity = viewport ~hints t d region in
+  set_top t region (`Follow (List_viewport.reveal ~top ~index ~length ~capacity))
+;;
 
 type result =
   | Stay of t
@@ -161,30 +251,55 @@ let commit t (command : H.command) =
   { (finish_filter t) with region = Commands; command_index }
 ;;
 
-let choose t = function
+let default_dimensions : Dimensions.t = { width = 80; height = 24 }
+
+let choose ?(hints = false) ?(dimensions = default_dimensions) t =
+  function
   | Back -> Close
   | Filter -> Stay { t with editing = true; region = Objects; count = 0 }
   | Focus_region region -> Stay { (finish_filter t) with region }
   | Object i ->
-    Stay { (finish_filter t) with object_index = i; command_index = 0; region = Objects }
+    let top = current_top ~hints t dimensions Objects in
+    let selection =
+      if i = t.object_index
+      then t
+      else { t with object_index = i; command_index = 0; command_top = `Follow 0 }
+    in
+    Stay (reveal ~hints { (finish_filter selection) with region = Objects } dimensions Objects ~top)
   | Command i ->
     Option.value_map (List.nth (commands t) i) ~default:(Stay t) ~f:(fun c -> Invoke c)
 ;;
 
-let input t (key : H.input) =
+let input ?(hints = false) ?(dimensions = default_dimensions) t (key : H.input) =
+  let choose = choose ~hints ~dimensions in
   let move delta =
     let next n len = Int.max 0 (Int.min (len - 1) (n + (delta * Int.max 1 t.count))) in
     match t.region with
     | Objects -> choose t (Object (next t.object_index (List.length (objects t))))
     | Commands ->
-      Stay
-        { t with
-          command_index = next t.command_index (List.length (commands t))
-        ; count = 0
-        }
+      let top = current_top ~hints t dimensions Commands in
+      let t =
+        { t with command_index = next t.command_index (List.length (commands t)); count = 0 }
+      in
+      Stay (reveal ~hints t dimensions Commands ~top)
+  in
+  let scroll delta =
+    let viewport, index, length, capacity = viewport ~hints t dimensions t.region in
+    let top = visible_top viewport ~index ~length ~capacity in
+    let next = List_viewport.scroll ~top ~delta:(delta * Int.max 1 t.count) ~length ~capacity in
+    let t = if t.count = 0 then t else { t with count = 0 } in
+    Stay (if next = top then t else set_top t t.region (`Scroll next))
   in
   let query q =
-    Stay { t with query = Some q; object_index = 0; command_index = 0; count = 0 }
+    Stay
+      { t with
+        query = Some q
+      ; object_index = 0
+      ; object_top = `Follow 0
+      ; command_index = 0
+      ; command_top = `Follow 0
+      ; count = 0
+      }
   in
   let append q text =
     if String.length q + String.length text <= 512 then query (q ^ text) else Stay t
@@ -210,6 +325,8 @@ let input t (key : H.input) =
   | Backspace, Some q -> query (Text_edit.apply Backspace q)
   | Delete_word, Some q -> query (Text_edit.delete_word q)
   | Clear_filter, Some _ -> query ""
+  | Scroll_up, None -> scroll (-1)
+  | Scroll_down, None -> scroll 1
   | Character '/', _ -> choose t Filter
   | Character ('0' .. '9' as ch), _ ->
     Stay { t with count = Int.min 9999 ((10 * t.count) + Char.to_int ch - 48) }
@@ -236,31 +353,13 @@ type cell =
   ; target : target option
   }
 
-let footer_rows ~hints t height =
-  if height < 10 then 0 else 1 + Bool.to_int (hints || not (String.is_empty t.message))
-;;
-
 let selection_marker = " › "
 
-let geometry ~width ~height =
-  Panel.geometry ~framed:(width >= 32 && height >= 12) ~width ~height
-    ~horizontal_padding:0 ~vertical_padding:0
-;;
-
-let page ?(hints = false) t (d : Dimensions.t) =
-  let axis n margin cap =
-    let size =
-      Int.max 0 (Int.min cap (if n >= margin * 12 then n - (2 * margin) else n))
-    in
-    (n - size) / 2, size
+let page ?(hints = false) t d =
+  let { bounds; geometry = g; pad; inner; top; footer; object_lines; action_lines } =
+    layout ~hints t d
   in
-  let x, width = axis d.width 2 132
-  and y, height = axis d.height 1 38 in
-  let bounds : Palette_view.bounds = { x; y; width; height } in
-  let g = geometry ~width ~height in
-  let width = g.content_width and height = g.content_height in
-  let pad = if width >= 20 then 1 else 0 in
-  let inner = width - (2 * pad) in
+  let height = g.content_height in
   let cell col row width role ?target text = { col; row; width; role; target; text } in
   let back = if inner >= 44 then "[Back to inspection]" else "[Back]" in
   let bw = Int.min inner (String.length back) in
@@ -282,12 +381,9 @@ let page ?(hints = false) t (d : Dimensions.t) =
     let width = if t.editing then inner else Int.min inner (View.width (View.text text)) in
     cell pad 1 width (if t.editing then Heading else Foreground) ~target:Filter text
   in
-  let top = if height >= 6 || t.editing then 2 else 1 in
-  let footer = footer_rows ~hints t height in
-  let room = Int.max 0 (height - top - footer) in
   let objs = objects t
   and cmds = commands t in
-  let pane r col row width lines index label items describe =
+  let pane r col row width lines index offset label items describe =
     let capacity = Int.max 0 (lines - 1) in
     let total = List.length items in
     let focused = Poly.equal t.region r in
@@ -296,7 +392,7 @@ let page ?(hints = false) t (d : Dimensions.t) =
       ^ label
       ^ if total > capacity then sprintf " · %d/%d" (index + 1) total else ""
     in
-    let offset = Int.max 0 (index - capacity + 1) in
+    let offset = visible_top offset ~index ~length:total ~capacity in
     let rows =
       if total = 0 && capacity > 0
       then
@@ -333,10 +429,10 @@ let page ?(hints = false) t (d : Dimensions.t) =
       :: rows
   in
   let objects col row width lines =
-    pane Objects col row width lines t.object_index "Objects" objs (fun i o ->
+    pane Objects col row width lines t.object_index t.object_top "Objects" objs (fun i o ->
       o.label, Object i)
   and actions col row width lines =
-    pane Commands col row width lines t.command_index "Actions" cmds (fun i c ->
+    pane Commands col row width lines t.command_index t.command_top "Actions" cmds (fun i c ->
       ( String.substr_index c.H.title ~pattern:" · "
         |> Option.value_map ~default:c.title ~f:(String.prefix c.title)
       , Command i ))
@@ -345,20 +441,11 @@ let page ?(hints = false) t (d : Dimensions.t) =
     if inner >= 96
     then (
       let left = inner / 2 in
-      objects pad top left room @ actions (pad + left + 1) top (inner - left - 1) room)
-    else if room < 4
-    then
-      (match t.region with
-       | Objects -> objects
-       | Commands -> actions)
-        pad
-        top
-        inner
-        room
-    else (
-      let action_lines = Int.min (room / 2) (1 + Int.max 1 (List.length cmds)) in
-      let obj_lines = room - action_lines in
-      objects pad top inner obj_lines @ actions pad (top + obj_lines) inner action_lines)
+      objects pad top left object_lines
+      @ actions (pad + left + 1) top (inner - left - 1) action_lines)
+    else
+      objects pad top inner object_lines
+      @ actions pad (top + object_lines) inner action_lines
   in
   let foot =
     if footer = 0
@@ -380,7 +467,7 @@ let page ?(hints = false) t (d : Dimensions.t) =
                 then t.message
                 else if t.editing
                 then "Type to filter · Tab actions · Esc finish filter"
-                else "Tab switch pane · ↑/↓ move · Enter select · Esc back")
+                 else "Tab switch pane · j/k move · Ctrl-y/e scroll · Enter select · Esc back")
            ]
          else [])
   in
@@ -420,6 +507,8 @@ let scroll ?(hints = false) t d ~x ~y ~direction =
   | None -> Stay t
   | Some region ->
     input
+      ~hints
+      ~dimensions:d
       { (finish_filter t) with region }
       (match direction with
        | `Up -> Previous
@@ -540,7 +629,7 @@ module%test Permanent_project_window = struct
         let d : Dimensions.t = { width; height } in
         let t =
           List.fold [ H.Character 'G'; Focus; Character 'G' ] ~init:state ~f:(fun t key ->
-            stay (input t key))
+             stay (input ~dimensions:d t key))
         in
         let buffer = Buffer.create (width * height) in
         Notty.Render.to_buffer
@@ -573,6 +662,50 @@ module%test Permanent_project_window = struct
         ignore (check "[Back to inspection]" (Some Back) : int * int);
         ignore (check "[Filter]" (Some Filter) : int * int);
         assert (Option.is_none (hit t d ~x:0 ~y:ty)))
+  ;;
+
+  let%test_unit "keyboard paging keeps independent object and action viewports" =
+    List.iter [ 80, 16; 120, 16 ] ~f:(fun (width, height) ->
+      let d : Dimensions.t = { width; height } in
+      let hints = true in
+      let apply t keys =
+        List.fold keys ~init:t ~f:(fun t key -> stay (input ~hints ~dimensions:d t key))
+      in
+      let object_rows t =
+        snd (page ~hints t d)
+        |> List.filter_map ~f:(fun c ->
+          match c.target with Some (Object i) -> Some (i, c) | _ -> None)
+      in
+      let _, _, _, capacity = viewport ~hints state d Objects in
+      let t = apply state [ Character '3'; Scroll_down ] in
+      let bounds, cells = page ~hints t d in
+      let first, row = List.hd_exn (object_rows t) in
+      assert (first = 3 && List.length (object_rows t) = capacity);
+      assert (t.object_index = 0 && t.command_index = 0 && t.count = 0);
+      assert (Poly.equal (hit ~hints t d ~x:(bounds.x + row.col) ~y:(bounds.y + row.row))
+                (Some (Object 3)));
+      assert (not (List.exists cells ~f:(fun c -> Poly.equal c.role Selection)));
+      assert (List.exists cells ~f:(fun c -> String.equal c.text "For: Object 00"));
+      let t = apply t [ Focus; Character '2'; Scroll_down ] in
+      assert (Poly.equal t.object_top (`Scroll 3) && Poly.equal t.command_top (`Scroll 2)
+              && t.command_index = 0);
+      (match input ~hints ~dimensions:d t Enter with
+       | Invoke c -> assert (String.equal c.id "Action 00")
+       | _ -> assert false);
+      let t = apply t [ Character '3'; Character 'j'; Character 'k' ] in
+      assert (t.command_index = 2 && Poly.equal t.command_top (`Follow 2));
+      let t = apply t [ Character '2'; Character 'k' ] in
+      assert (t.command_index = 0 && Poly.equal t.command_top (`Follow 0));
+      let t = apply t [ Scroll_down; Focus; Character '4'; Character 'j' ] in
+      assert (t.object_index = 4 && Poly.equal t.object_top (`Follow 3));
+      assert (Poly.equal t.command_top (`Follow 0));
+      let t = apply t [ Character '9'; Character '9'; Scroll_down ] in
+      assert (t.object_index = 4 && Poly.equal t.object_top (`Scroll (40 - capacity)));
+      let t = apply t [ Character '/'; Scroll_up ] in
+      assert (Poly.equal t.object_top (`Scroll (40 - capacity)));
+      let filtered = apply t [ Text "39" ] in
+      assert (filtered.object_index = 0 && Poly.equal filtered.object_top (`Follow 0));
+      assert (List.length (objects filtered) = 1))
   ;;
 
   let%test_unit "hint choice changes idle help but keeps filters and messages" =

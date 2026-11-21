@@ -77,6 +77,8 @@ Put broadly discoverable actions in Project (Open/New Project, New IP Library, N
 
 A menu should be one focused list, not a permanent Tab stop for every command. Provide a documented key to open Project from a tile. Preserve normal Tab/Shift-Tab focus navigation outside the menu. Inside it, support arrows or `j`/`k`, movement counts such as `10j`, `/` to filter, and Enter to invoke. In filter text mode, `j` types a letter. Escape leaves filtering, then closes the menu and restores the original focus. Mouse activation should produce the same result as Enter.
 
+**Selection and scrolling are independent.** In the Project menu, Manage This Project, and the command palette, moving the selection within the visible rows leaves the screen still. For example, after jumping to the last entry, moving up one entry leaves the last entry visible. Crossing an edge scrolls just far enough to show the new selection. `Ctrl-E` scrolls the list down one row and `Ctrl-Y` scrolls it up one row without selecting a different item. Enter still acts on the selected item; the next selection movement brings it back into view.
+
 ## Command palette: stable intent beats fuzzy ranking
 
 Treat the first result for a small set of common queries as a learned keyboard shortcut. Bind curated aliases to stable command IDs rather than assigning a global priority to every command. More specific queries such as `synth rows` should still find specialist actions. New commands must not displace the basic actions below.

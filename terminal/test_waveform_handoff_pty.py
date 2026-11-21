@@ -27,6 +27,21 @@ def load(name, path):
 
 wire = load('handoff_wire', ROOT / 'scripts/fixtures/simulation_fixture_wire.py')
 testing_layout = load('handoff_testing_layout', ROOT / 'scripts/fixtures/testing_layout.py')
+TESTING_TAB = re.compile(r'\A[^\n]*\[2 Testing\]')
+WAVEFORMS_TAB = re.compile(r'\A[^\n]*\[3 Waveforms\]')
+
+
+def handoff_vcd(case):
+    lines = ['$timescale 1 ns $end', f'$scope module {case} $end',
+             '$var wire 1 ! clk $end']
+    # More than twenty rows, and a sparse time range that starts compressed.
+    # Keep the original clock reference so the handoff identity checks still apply.
+    signals = range(1, 25) if case == 'flops256' else ()
+    lines.extend(f'$var wire 1 s{i} s{i:02d} $end' for i in signals)
+    lines.extend(('$upscope $end', '$enddefinitions $end', '#0', '0!'))
+    lines.extend(f'0s{i}' for i in signals)
+    lines.extend(('#5', '1!', '#8192' if signals else '#10', '0!'))
+    return '\n'.join(lines) + '\n'
 
 
 def provider():
@@ -54,11 +69,177 @@ def provider():
         # JSON-only run, then mixed artifacts with distinct case-specific signal names.
         if selection['seed'] == '2':
             path = a.artifact_dir / (case + '.vcd')
-            path.write_text('$timescale 1 ns $end\n$scope module ' + case +
-                ' $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#5\n1!\n#10\n0!\n')
+            path.write_text(handoff_vcd(case))
             writer.artifact(case + '-waveform', case, 'trace', 'text/vcd', path.name)
         writer.finish_case(case)
     writer.emit(['Finished', 'Passed'])
+
+
+def check_waveform_modal_keys(terminal, check):
+    count = re.compile(r'\bCount: *\d+\b', re.IGNORECASE)
+    cursor_and_window = re.compile(r'Cursor (\d+) ticks .*?window (\d+)\.\.(\d+)')
+    visual = 'Visual line ('
+
+    def focus(title):
+        # Click the visible frame title rather than a Signals row: focusing a
+        # tile must not itself change the selected signal or cursor.
+        screen = terminal.capture('counts-focus-' + title, [f'╭ {title} '])
+        for y, line in enumerate(screen.splitlines(), 1):
+            if f'╭ {title} ' in line:
+                x = line.index(f'╭ {title} ') + 3
+                terminal.key(f'\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m'.encode())
+                return
+
+    def state(label, tick=None, *, pending=None, expected=(), absent=()):
+        expectations = [WAVEFORMS_TAB, '╭ Waves ', cursor_and_window, *expected]
+        if tick is not None:
+            expectations.append(f'Cursor {tick} ticks')
+        if pending is not None:
+            expectations.append(re.compile(rf'\bCount: *{pending}\b', re.IGNORECASE))
+        else:
+            absent = [count, *absent]
+        screen = terminal.capture('waveform-' + label, expectations, absent=absent)
+        return tuple(map(int, cursor_and_window.search(screen).groups()))
+
+    def signal_row(name, *, enabled=None, marker='[>~ ]'):
+        flag = {True: r'\*', False: ' ', None: '[ *]'}[enabled]
+        return re.compile(rf'{marker}\[{flag}\] flops256\.{name}\b')
+
+    def active_signal(name):
+        return signal_row(name, marker='>')
+
+    focus('Waves')
+    initial = state('start', 0, expected=['Compressed edges', active_signal('clk')])
+    for _ in range(20):
+        terminal.key(b'l')
+    repeated = state('twenty-single-columns')
+    check(repeated[0] > 20, 'fixture distinguishes compressed columns from exact ticks')
+    terminal.key(b'g')
+    state('rewind', 0)
+
+    terminal.key(b'2')
+    check(state('pending-two', 0, pending=2) == initial, 'first digit neither moves nor pans')
+    terminal.key(b'0')
+    check(state('pending-twenty', 0, pending=20) == initial, 'second digit extends count without motion')
+    terminal.key(b'l')
+    check(state('twenty-columns', repeated[0]) == repeated,
+          '20l matches twenty single l presses, including viewport')
+    terminal.key(b'20h')
+    state('twenty-columns-back', 0)
+    terminal.key(b'20h')
+    state('column-clamps-at-start', 0)
+    terminal.key(b'20L')
+    state('twenty-ticks', 20)
+    terminal.key(b'H')
+    state('consumed-count', 19)
+    terminal.key(b'20H')
+    state('tick-clamps-at-start', 0)
+    terminal.key(b'GH')
+    state('one-before-end', 8191)
+    terminal.key(b'20L')
+    state('tick-clamps-at-end', 8192)
+    terminal.key(b'H')
+    state('one-before-column-clamp', 8191)
+    terminal.key(b'20l')
+    state('column-clamps-at-end', 8192)
+    terminal.key(b'20')
+    state('before-non-motion', 8192, pending=20)
+    terminal.key(b'g')
+    state('non-motion-cancels-and-still-rewinds', 0)
+
+    terminal.key(b'20j')
+    state('twenty-rows', 0, expected=[active_signal('s20')])
+    terminal.key(b'3k')
+    state('three-rows-back', 0, expected=[active_signal('s17')])
+    terminal.key(b'20k')
+    state('row-clamps-at-start', 0, expected=[active_signal('clk')])
+
+    terminal.key(b'20')
+    state('before-escape', 0, pending=20)
+    terminal.key(b'\x1b')
+    state('escape-cancels', 0)
+    terminal.key(b'L')
+    state('single-tick-after-escape', 1)
+
+    terminal.key(b'20')
+    state('before-palette', 1, pending=20)
+    for key in (b' ', b'c', b'c'):
+        terminal.key(key)
+    terminal.capture('counts-palette-opens', ['COMMAND PALETTE'])
+    terminal.key(b'\x1b')
+    state('palette-cancels', 1, absent=['COMMAND PALETTE'])
+    terminal.key(b'L')
+    state('single-tick-after-palette', 2)
+
+    terminal.key(b'20')
+    state('before-tab', 2, pending=20)
+    terminal.key(b'\t')
+    state('tab-cancels', 2)
+    focus('Signals')
+    terminal.key(b'2')
+    state('signals-digit-is-local', 2, expected=[active_signal('clk')])
+    terminal.key(b'j')
+    state('signals-digit-does-not-count', 2, expected=[active_signal('s01')])
+    focus('Waves')
+    terminal.key(b'L')
+    state('return-to-waves-has-no-count', 3)
+
+    focus('Signals')
+    terminal.key(b'/20')
+    state('digits-in-filter-edit', 3, expected=[re.compile(r'/ 20 *(?:[│|]|·)')])
+    terminal.key(b'\r')
+    state('digits-in-filter-applied', 3, expected=['1 matching', active_signal('s20')])
+    terminal.key(b'/\x1799\r')
+    state('filter-no-matches', 3, expected=['0 matching'])
+    terminal.key(b'2')
+    state('signals-owns-digits-even-when-empty', 3, expected=['0 matching'])
+
+    # The VCD declares clk and s01–s07 first, so the initial eight enabled
+    # signals straddle the s07/s08 boundary. Filter to s01–s09 to test both
+    # visible neighbors and ensure bulk actions don't touch filtered-out clk.
+    terminal.key(b'/\x17s0\rjjjjjj')
+    s06 = signal_row('s06', enabled=True, marker=' ')
+    s07_on = signal_row('s07', enabled=True)
+    s08_off = signal_row('s08', enabled=False)
+    s09 = signal_row('s09', enabled=False, marker=' ')
+    state('visual-fixture', 3, expected=[
+        '9 matching · 8 enabled', active_signal('s07'), s06, s07_on, s08_off, s09],
+        absent=[visual])
+    terminal.key(b'V')
+    state('visual-start', 3, expected=['Visual line (1)', active_signal('s07')])
+    terminal.key(b'jj')
+    state('visual-extends-down', 3, expected=[
+        'Visual line (3)', signal_row('s07', enabled=True, marker='~'),
+        signal_row('s08', enabled=False, marker='~'), active_signal('s09')])
+    terminal.key(b'k')
+    state('visual-shrinks-on-k', 3, expected=[
+        'Visual line (2)', active_signal('s08'), s09])
+    terminal.key(b'\r')
+    s08_on = signal_row('s08', enabled=True)
+    state('visual-enter-enables-mixed-range', 3, expected=[
+        '9 matching · 9 enabled', s06, s07_on, s08_on, s09], absent=[visual])
+
+    terminal.key(b'Vk')
+    state('visual-extends-up', 3, expected=[
+        'Visual line (2)', active_signal('s07'), signal_row('s08', enabled=True, marker='~')])
+    terminal.key(b'\x1b')
+    state('visual-escape-keeps-both-enabled', 3, expected=[
+        '9 matching · 9 enabled', s06, s07_on, s08_on, s09], absent=[visual])
+    terminal.key(b'Vj\r')
+    state('visual-enter-disables-all-enabled-range', 3, expected=[
+        '9 matching · 7 enabled', s06, signal_row('s07', enabled=False), s08_off, s09],
+        absent=[visual])
+    terminal.key(b'/\x17\r')
+    state('visual-leaves-filtered-out-signal-enabled', 3, expected=[
+        '25 matching · 7 enabled', signal_row('clk', enabled=True)], absent=[visual])
+    check(True, 'Signals visual mode expands in both directions, toggles only the range, and cancels')
+
+    focus('Session')
+    terminal.key(b'2')
+    terminal.capture('counts-session-digit-switches-to-testing',
+                     [TESTING_TAB, 'simulation-artifacts'],
+                     absent=['╭ Waves ', count])
+    check(True, 'Waves counts are consumed or cancelled; Signals and Session route digits by focus')
 
 
 def run(args, evidence):
@@ -83,7 +264,10 @@ def run(args, evidence):
     checks = []
 
     class Terminal(native.Terminal):
-        width, height = 160, 50
+        def __init__(self, session):
+            # Give stock Waveforms' narrow left column enough room to display
+            # full signal names and enabled totals, alongside the Waves plot.
+            super().__init__(session, width=200, height=50)
 
         def palette(self, title):
             for key in (b' ', b'c', b'c'):
@@ -131,8 +315,9 @@ def run(args, evidence):
         session.args = argparse.Namespace(**vars(args))
         session.args.client = wrapper
         terminal = Terminal(session)
-        terminal.capture('startup', ['Overview'])
-        terminal.palette('Switch to Testing')
+        terminal.capture('startup', [re.compile(r'\A[^\n]*\[1 Overview\]')])
+        terminal.key(b'2')
+        terminal.capture('overview-digit-switches-to-testing', [TESTING_TAB, 'simulation-artifacts'])
         testing_layout.focus_pane(terminal, 'simulation-attempts')
 
         def reopen(attempt):
@@ -241,6 +426,7 @@ def run(args, evidence):
         terminal.capture('picker-cross-case-absent', ['No matching commands'])
         terminal.key(b'\x1b')
         check(True, 'pinned case picker excludes another case VCD')
+        check_waveform_modal_keys(terminal, check)
         check(all(r['request']['artifact_id'].endswith('-waveform') for r in proxy.records),
             'production byte requests never target result-reference JSON')
         terminal.palette('Workloads: Launch fresh memory workload')

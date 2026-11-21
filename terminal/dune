@@ -47,7 +47,8 @@
   workspace_host
   flow_authoring
   evidence_activity
-  palette_search
+   palette_search
+   list_viewport
   text_edit
   text_edit_test
    palette_view
@@ -70,8 +71,10 @@
   export_clipboard
   waveform_data
   waveform_preferences
-  waveform_time
-  waveform_view)
+  signal_visual
+   waveform_time
+   waveform_routing
+   waveform_view)
  (libraries
   async
   core

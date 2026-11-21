@@ -1,4 +1,4 @@
-"""WB-077: actual 80-column client, Testing inspection and object-scoped dispatch."""
+"""Real PTY regressions for project navigation, scrolling and object-scoped dispatch."""
 import argparse
 from contextlib import closing
 import json
@@ -15,6 +15,8 @@ from test_ip_authoring_pty import expected, snapshot
 
 
 NEW, OPEN = "New Project…", "Open Project…"
+UP, DOWN = b"\x1b[A", b"\x1b[B"
+CTRL_Y, CTRL_E = b"\x19", b"\x05"
 
 
 def send(t, keys):
@@ -133,20 +135,144 @@ def pointer_authoring(t, root, renderer):
         send(t, b"k")
 
 
+def list_page(t, name, rows, selected, *, heading, end=None):
+    """Check ordered physical rows and the marker, scoped to the painted list."""
+    screen = t.capture(name, [heading])
+    lines = screen.splitlines()
+    first = next(i for i, line in enumerate(lines) if heading in line)
+    shown, markers = [], []
+    for line in lines[first + 1:]:
+        line = line.lstrip()
+        if line.startswith("╰") or (end is not None and end in line):
+            break
+        text = line.removeprefix("│").split("│", 1)[0].strip()
+        if not text or text == "/ filter" or "▏" in text or re.match(r"\d+/\d+\b", text):
+            continue
+        marked = text.startswith(("› ", "> "))
+        title = (text[2:] if marked else text).strip().split(" · ", 1)[0].removesuffix("…")
+        shown.append(title)
+        if marked:
+            markers.append(title)
+    assert shown == list(rows), (name, shown, rows, screen)
+    assert markers == ([] if selected is None else [selected]), (name, markers, selected, screen)
+    return screen
+
+
 def scrolled_palette(t):
-    # A real 80x10 PTY leaves just a few visible results. Filter with the
-    # keyboard, scroll past the first match, then click an unselected row.
+    # A real 80x10 PTY leaves just a few visible results. The workspace tabs
+    # can paint before the initial ASIC read binds the selected chip. Opening
+    # a palette that early leaves a stale capture, whose rows are rightly inert.
     t.capture("compact", ["Overview"])
+
+    def bound_chip():
+        screen = send(t, b" ccSelect launch target: fifo / deep")
+        send(t, b"\x1b")
+        return "> Select launch target: fifo / deep (selected)" in screen
+
+    wait(t, bound_chip, "palette did not capture the initial selected chip")
     for key in (b" ", b"c", b"c", b"Switch to"):
         send(t, key)
-    screen = t.capture("filtered", ["> Switch to Overview"], absent=["Switch to Resources"])
+    labels = tuple("Switch to " + name for name in ("Overview", "Testing", "Waveforms",
+                                                    "Timing", "Resources"))
+    first, second, _, timing, last = labels
+    screen = t.capture("filtered", ["> Switch to Overview", "Switch to Testing"], absent=[last])
+    capacity = sum("Switch to " in row and "▏" not in row for row in screen.splitlines())
+    assert 2 <= capacity < len(labels), screen
+
+    def page(name, top, selected):
+        return list_page(t, "scroll-palette-" + name, labels[top:top + capacity], selected,
+                         heading="COMMAND PALETTE")
+
+    page("initial", 0, first)
+    send(t, CTRL_E)
+    page("down-without-selection", 1, None)
+    send(t, CTRL_Y * 2)
+    screen = page("back-at-start", 0, first)
+    # Wheel still moves the selection, not just the viewport.
     click(t, screen, "Switch to Overview", button=65)
-    t.capture("palette-wheel", ["> Switch to Testing"])
-    send(t, b"\x1b[B" * 3)
-    screen = t.capture("scrolled", ["> Switch to Resources", "Switch to Timing"],
-                       absent=["Switch to Overview"])
-    click(t, screen, "Switch to Timing")
+    page("wheel", 0, second)
+    send(t, DOWN * 3)
+    bottom = len(labels) - capacity
+    page("last-result", bottom, last)
+    send(t, UP)
+    page("reverse-stays-put", bottom, timing)
+    send(t, UP * (3 - bottom))
+    page("reverse-to-top-edge", bottom, labels[bottom])
+    send(t, UP)
+    page("cross-top-edge", bottom - 1, labels[bottom - 1])
+    send(t, DOWN * (len(labels) - bottom))
+    screen = page("bottom-for-click", bottom, last)
+    click(t, screen, timing)  # Click a visible row other than the selection.
     t.capture("clicked-scrolled-row", ["Timing: active"], absent=["COMMAND PALETTE"])
+
+    # Enter dispatches the hidden selection, not the top displayed match.
+    for key in (b" ", b"c", b"c", b"Switch to"):
+        send(t, key)
+    page("reopened", 0, first)
+    send(t, DOWN * 4 + CTRL_Y * 4)
+    page("hidden-last-selection", 0, None)
+    send(t, b"\r")
+    t.capture("entered-hidden-result", [re.compile(r"Resources: active|\[5 Resources\]")],
+              absent=["COMMAND PALETTE"])
+
+
+def scrolled_project(t):
+    author, select = "─ Author in this project", "─ Select or browse"
+    ip, module, chip = "New IP Library", "New Module", "New Chip Target"
+    flow, duplicate, run = "New Flow", "Duplicate Profile", "Run Flow"
+    launch, manage = "Select Launch Target", "Manage This Project"
+    rows = (author, ip, module, chip, flow, duplicate, select, run, launch, manage)
+    t.capture("scroll-project-ready", ["Overview"])
+
+    def page(name, top, selected):
+        return list_page(t, "scroll-project-" + name, rows[top:top + 6], selected,
+                         heading="╭ Project ")
+
+    send(t, b"\x1bOQ")
+    page("initial", 0, ip)
+    send(t, CTRL_E)
+    page("group-scroll", 1, ip)
+    send(t, CTRL_E)
+    page("selection-hidden", 2, None)
+    send(t, CTRL_Y)
+    page("selection-recovered", 1, ip)
+    send(t, CTRL_E + b"\r")
+    t.capture("scroll-project-enter-hidden", ["choose template", "sample"])
+    send(t, b"\x1b")
+    t.capture("scroll-project-template-closed", ["Overview"], absent=["choose template"])
+    send(t, b"\x1bOQ")
+    send(t, b"99j")
+    page("jump-to-bottom", 4, manage)
+    send(t, UP)
+    screen = page("reverse-stays-put", 4, launch)
+    click(t, screen, manage)
+    t.capture("scroll-browser-open", ["Back to inspection", "Objects", "Actions", "fifo-flow"])
+
+    objects = ("Project", "Chip: " + FIFO[0], "fifo-flow", "balanced", FIFO[2],
+               "Chip: " + MEM[0])
+
+    def browser(name, top, selected, destination):
+        screen = list_page(t, "scroll-browser-" + name, objects[top:top + 4], selected,
+                           heading="Objects", end="Actions")
+        assert "For: " + destination in screen, screen
+        return screen
+
+    browser("initial", 0, "Project", "Project")
+    send(t, CTRL_E)
+    browser("hidden-object-keeps-owner", 1, None, "Project")
+    send(t, CTRL_Y)
+    browser("restored-object", 0, "Project", "Project")
+    send(t, b"4j")
+    browser("select-over-edge", 1, FIFO[2], "fifo/fifo-flow/fast")
+    send(t, UP)
+    screen = browser("reverse-stays-put", 1, "balanced", "fifo/fifo-flow/balanced")
+    click(t, screen, FIFO[2])
+    browser("clicked-scrolled-object", 1, FIFO[2], "fifo/fifo-flow/fast")
+    send(t, CTRL_Y)
+    browser("hidden-profile-keeps-owner", 0, None, "fifo/fifo-flow/fast")
+    send(t, b"\r")
+    t.capture("scroll-browser-enter-hidden-owner",
+              ["▶ Actions", "› Duplicate Profile", "For: fifo/fifo-flow/fast"])
 
 
 def local_projects(s, base, renderer, simulation):
@@ -325,6 +451,8 @@ def exercise(args, base):
         s.start(daemon_args=["--authoring-root", str(root)])
         with closing(Terminal(s, width=80, height=10)) as t:
             scrolled_palette(t)
+        with closing(Terminal(s, width=80, height=10)) as t:
+            scrolled_project(t)
         with closing(Terminal(s, width=80)) as t:
             t.capture("connected", ["Project ▾"])
             project(t)

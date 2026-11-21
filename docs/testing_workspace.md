@@ -232,6 +232,12 @@ raw ticks, and `20j` / `20k` move down / up signal rows. Esc cancels an unused
 count; moving focus clears it too. In **Signals**, numbers stay local:
 typing `2` in the list keeps you there, and typing it in `/` enters filter text.
 
+To toggle several signals, press `V` in **Signals**, extend the marked rows
+with `j` / `k`, then press Enter. If every marked signal is enabled, Enter
+disables them; otherwise it enables them all. Only rows matching the current
+filter participate. If enabling the range would exceed the 16-lane limit,
+nothing changes. Esc cancels the selection.
+
 Signals defaults to **Inline** values in aligned name/width/value columns. Choose
 **Waveform: Signal values: Stacked (two rows per signal)** or **Waveform: Signal
 values: Inline (aligned columns; default)** in the palette. This display preference

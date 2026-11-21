@@ -26,9 +26,11 @@ type t =
   ; loaded : loaded
   ; filter : string
   ; editing : editing option
+  ; pending_count : int option
   ; query : string
   ; focus : int
   ; selected : Int.Set.t
+  ; visual_selection : Signal_visual.t option
   ; cursor : int64
   ; start : int64
   ; span : int64 (* elapsed tick distance, not inclusive tick count *)
@@ -48,9 +50,11 @@ let create ~project artifact =
   ; loaded = Loading
   ; filter = ""
   ; editing = None
+  ; pending_count = None
   ; query = ""
   ; focus = 0
   ; selected = Int.Set.empty
+  ; visual_selection = None
   ; cursor = 0L
   ; start = 0L
   ; span = 128L
@@ -70,11 +74,25 @@ let same t ~project artifact =
   && Hardcaml_workbench_protocol.Simulation.Artifact.equal t.artifact artifact
 ;;
 
+let clear_count t =
+  match t.pending_count with
+  | None -> t
+  | Some _ -> { t with pending_count = None }
+;;
+
+let clear_selection t =
+  match t.visual_selection with
+  | None -> t
+  | Some _ -> { t with visual_selection = None; notice = "" }
+;;
+
 let remember t =
   { t with
     loaded = Loading
   ; cache = None
+  ; visual_selection = None
   ; editing = None
+  ; pending_count = None
   ; identity_scroll = None
   ; notice = "Fetching bounded bytes; verifying exact identity and SHA256"
   }
@@ -98,7 +116,12 @@ let default_extent data =
 ;;
 
 let receive ?(restore_navigation = false) t = function
-  | Error e -> { t with loaded = Failed (Error.to_string_hum e); cache = None }
+  | Error e ->
+    { t with
+      loaded = Failed (Error.to_string_hum e)
+    ; visual_selection = None
+    ; cache = None
+    }
   | Ok data ->
     let first, span, extent_basis = default_extent data in
     let received =
@@ -109,6 +132,7 @@ let receive ?(restore_navigation = false) t = function
       ; span
       ; extent_basis
       ; notice = ""
+      ; visual_selection = None
       ; selected =
           D.signals data
           |> Array.to_list
@@ -142,10 +166,34 @@ let clamp_time data time =
   Int64.max first (Int64.min last time)
 ;;
 
-let stop t data =
-  let _, last = D.time_bounds data in
+let window_stop ~start ~span ~last =
   (* Subtraction before addition also handles timestamps near Int64.max_value. *)
-  Int64.(t.start + min t.span (last - t.start))
+  Int64.(start + min span (last - start))
+;;
+
+let stop t data = window_stop ~start:t.start ~span:t.span ~last:(snd (D.time_bounds data))
+
+(* Keep each intermediate follow decision: in a compressed window, following changes the
+   column-to-tick mapping, especially as the window clips at the trace end. *)
+let move_cursor t ~last ~count ~step =
+  let rec loop remaining ~followed ~start ~cursor =
+    if remaining = 0
+    then
+      { t with
+        start
+      ; cursor
+      ; extent_basis = (if followed then "Manual window" else t.extent_basis)
+      }
+    else (
+      let stop = window_stop ~start ~span:t.span ~last in
+      let next = step ~start ~stop cursor in
+      let follow = Int64.(next < start || next > stop) in
+      let start = if follow then next else start in
+      (* A stationary directional step is already at a trace bound. *)
+      let remaining = if Int64.equal next cursor then 0 else remaining - 1 in
+      loop remaining ~followed:(followed || follow) ~start ~cursor:next)
+  in
+  loop count ~followed:false ~start:t.start ~cursor:t.cursor
 ;;
 
 type input =
@@ -167,6 +215,11 @@ let edit_key event =
     | Text_edit.Backspace -> Backspace
     | Delete_word -> Delete_word)
 ;;
+
+(* Limit the amount of work a single key can request, including when the trace is much
+   wider than the viewport. Accumulation and the indicator stay bounded too. *)
+let max_count = 9_999
+let count_indicator t = Option.map t.pending_count ~f:(sprintf "Count: %d")
 
 let input t key =
   match t.identity_scroll with
@@ -206,30 +259,26 @@ let input t key =
           { t with query = t.query ^ String.of_char c }
         | _ -> t)
      | None ->
+       let pending_count = t.pending_count in
+       let t = clear_count t in
        (match key, t.loaded with
+        | Char ('0' .. '9' as digit), _ ->
+          let count = Option.value pending_count ~default:0 in
+          let digit = Char.to_int digit - Char.to_int '0' in
+          { t with pending_count = Some (Int.min max_count ((10 * count) + digit)) }
         | Char 'i', _ -> { t with identity_scroll = Some 0 }
         | Char '/', _ -> { t with editing = Some Filter; query = t.filter }
         | Char ':', _ -> { t with editing = Some Time; query = Int64.to_string t.cursor }
         | _, (Loading | Failed _) -> t
         | _, Ready data ->
-          let signals = filtered t data in
-          let move delta =
-            { t with
-              focus = Int.max 0 (Int.min (List.length signals - 1) (t.focus + delta))
-            ; value_offset = 0
-            }
-          in
-          let cursor time =
-            let cursor = clamp_time data time in
-            let start =
-              if Int64.(cursor < t.start || cursor > stop t data) then cursor else t.start
-            in
-            { t with
-              cursor
-            ; start
-            ; extent_basis =
-                (if Int64.equal start t.start then t.extent_basis else "Manual window")
-            }
+          let count = Option.value pending_count ~default:1 in
+          let move ~forward count =
+            let limit = Int.max 0 (List.length (filtered t data) - 1) in
+            let clamp row = Int.max 0 (Int.min limit row) in
+            let step = if forward then 1 else -1 in
+            (* Even an out-of-date focus is clamped on the first press. *)
+            let first = clamp (t.focus + step) in
+            { t with focus = clamp (first + (step * (count - 1))); value_offset = 0 }
           in
           (match key with
            | Char 'f' ->
@@ -244,36 +293,46 @@ let input t key =
            | Char 'd' ->
              let start, span, extent_basis = default_extent data in
              { t with start; span; extent_basis; notice = ""; viewport_ticks = None }
-           | Up | Char 'k' -> move (-1)
-           | Down | Char 'j' -> move 1
+           | Up -> move ~forward:false 1
+           | Down -> move ~forward:true 1
+           | Char 'k' when count > 0 -> move ~forward:false count
+           | Char 'j' when count > 0 -> move ~forward:true count
            | Char '{' ->
              { t with value_offset = Int.max 0 (t.value_offset - t.value_page_size) }
            | Char '}' ->
              let limit =
-               Option.value_map (List.nth signals t.focus) ~default:0 ~f:(fun s ->
-                 Int.max 0 (s.D.width - 1))
+               Option.value_map
+                 (List.nth (filtered t data) t.focus)
+                 ~default:0
+                 ~f:(fun s -> Int.max 0 (s.D.width - 1))
              in
              { t with value_offset = Int.min limit (t.value_offset + t.value_page_size) }
            | Left | Right | Char ('h' | 'l') ->
              let first, last = D.time_bounds data in
-             let forward =
+             let forward, count =
                match key with
-               | Right | Char 'l' -> true
-               | _ -> false
+               | Right -> true, 1
+               | Left -> false, 1
+               | Char 'l' -> true, count
+               | _ -> false, count
              in
-             let mapping =
-               Time.create_window
-                 ~columns:t.viewport_columns
-                 ~start:t.start
-                 ~stop:(stop t data)
-             in
-             cursor (Time.step_column mapping ~first ~last ~forward t.cursor)
-           | Char 'H' -> cursor Int64.(max 0L (t.cursor - 1L))
-           | Char 'L' ->
-             let _, last = D.time_bounds data in
-             cursor (if Int64.(t.cursor < last) then Int64.succ t.cursor else last)
-           | Char 'g' -> cursor (fst (D.time_bounds data))
-           | Char 'G' -> cursor (snd (D.time_bounds data))
+             move_cursor t ~last ~count ~step:(fun ~start ~stop cursor ->
+               let mapping =
+                 Time.create_window ~columns:t.viewport_columns ~start ~stop
+               in
+               Time.step_column mapping ~first ~last ~forward cursor)
+           | Char (('H' | 'L') as motion) ->
+             let first, last = D.time_bounds data in
+             move_cursor t ~last ~count ~step:(fun ~start:_ ~stop:_ cursor ->
+               if Char.equal motion 'L'
+               then if Int64.(cursor < last) then Int64.succ cursor else last
+               else if Int64.(cursor > first)
+               then Int64.pred cursor
+               else first)
+           | Char (('g' | 'G') as motion) ->
+             let first, last = D.time_bounds data in
+             let target = if Char.equal motion 'g' then first else last in
+             move_cursor t ~last ~count:1 ~step:(fun ~start:_ ~stop:_ _ -> target)
            | Char '[' ->
              { t with
                extent_basis = "Manual window"
@@ -305,7 +364,7 @@ let input t key =
              ; viewport_ticks = None
              }
            | Enter ->
-             (match List.nth signals t.focus with
+             (match List.nth (filtered t data) t.focus with
               | None -> t
               | Some s ->
                 if Set.mem t.selected s.index
@@ -315,6 +374,37 @@ let input t key =
                   { t with notice = "Selection limit: 16 signals; deselect a lane first" }
                 else { t with selected = Set.add t.selected s.index; notice = "" })
            | _ -> t)))
+;;
+
+let signals_input t key =
+  let t = clear_count t in
+  if Option.is_some t.editing || Option.is_some t.identity_scroll
+  then input (clear_selection t) key
+  else (
+    match key, t.visual_selection, t.loaded with
+    | Char '0' .. '9', _, _ -> t
+    | Char 'V', None, Ready data ->
+      let row_count = List.length (filtered t data) in
+      (match Signal_visual.start ~row_count ~focus:t.focus with
+       | None -> t
+       | Some range -> { t with visual_selection = Some range; notice = "" })
+    | (Escape | Char 'V'), Some _, _ -> clear_selection t
+    | (Up | Down | Char ('j' | 'k')), Some _, _ -> input { t with notice = "" } key
+    | Enter, Some range, Ready data ->
+      (match
+         Signal_visual.toggle
+           range
+           ~focus:t.focus
+           ~rows:(filtered t data)
+           ~id:(fun s -> s.D.index)
+           ~enabled:t.selected
+           ~limit:max_selected
+       with
+       | Toggled selected -> { (clear_selection t) with selected }
+       | Selection_limit ->
+         { t with notice = sprintf "Selection limit: %d signals" max_selected }
+       | No_range -> clear_selection t)
+    | _ -> input (clear_selection t) key)
 ;;
 
 let safe = Artifact_view.safe
@@ -672,11 +762,24 @@ let value_chunk ~columns ~offset value =
   text, offset, offset + count
 ;;
 
-let inline_signal_row ~appearance ~columns ~active ~enabled (s : D.signal) ~value ~offset =
+let signal_row_marker ~active ~marked =
+  if active then ">" else if marked then "~" else " "
+;;
+
+let inline_signal_row
+  ~appearance
+  ~columns
+  ~active
+  ?(marked = false)
+  ~enabled
+  (s : D.signal)
+  ~value
+  ~offset
+  =
   let open Bonsai_term in
   let module R = Host_view.Role in
-  let role = if active then R.Selection else R.Foreground in
-  let value_role = if active then R.Metric else R.Muted in
+  let role = if active || marked then R.Selection else R.Foreground in
+  let value_role = if active then R.Metric else if marked then R.Selection else R.Muted in
   let text role s = View.text ~attrs:(R.attrs appearance role) (safe s) in
   let name = text role s.name in
   let name =
@@ -692,7 +795,10 @@ let inline_signal_row ~appearance ~columns ~active ~enabled (s : D.signal) ~valu
   View.hcat
     [ text
         role
-        (sprintf "%s[%s] " (if active then ">" else " ") (if enabled then "*" else " "))
+        (sprintf
+           "%s[%s] "
+           (signal_row_marker ~active ~marked)
+           (if enabled then "*" else " "))
     ; box ~width:columns.name_width ~height:1 name
     ; text role (sprintf " [%*d]" columns.width_digits s.width)
     ; text value_role " = "
@@ -700,7 +806,7 @@ let inline_signal_row ~appearance ~columns ~active ~enabled (s : D.signal) ~valu
     ]
 ;;
 
-let signal_page t data ~hints ~value_layout ~width ~height =
+let signal_page ?(visual_hint = true) t data ~hints ~value_layout ~width ~height =
   let signals = filtered t data in
   let columns = signal_columns t ~width in
   let rows_per_signal =
@@ -726,12 +832,21 @@ let signal_page t data ~hints ~value_layout ~width ~height =
       (editing_prompt ~width t)
       (if not (String.is_empty t.notice)
        then Some t.notice
-       else
-         Option.first_some
-           page
-           (if hints
-            then Some "j/k browse · Enter toggle · / filter · Space c c commands"
-            else None))
+       else (
+         match t.visual_selection with
+         | Some _ -> Some "j/k extend · Enter enable/disable · Esc cancel"
+         | None ->
+           Option.first_some
+             page
+             (if hints
+              then
+                Some
+                  (if visual_hint
+                   then
+                     "j/k browse · V visual · Enter toggle · / filter · Space c c \
+                      commands"
+                   else "j/k browse · Enter toggle · / filter · Space c c commands")
+              else None)))
   in
   let editing_error = Option.is_some t.editing && not (String.is_empty t.notice) in
   let visible =
@@ -755,8 +870,11 @@ let select_signal_row t ~hints ~value_layout ~width ~height ~row =
       signal_page t data ~hints ~value_layout ~width ~height
     in
     let i = (row - 1) / rows_per_signal in
-    if i < List.length page && first + i <> t.focus
-    then { t with focus = first + i; value_offset = 0 }
+    if i < List.length page
+    then
+      if first + i <> t.focus
+      then { (clear_selection t) with focus = first + i; value_offset = 0 }
+      else clear_selection t
     else t
   | _ -> t
 ;;
@@ -765,6 +883,7 @@ let render_signals
   ?(appearance = Appearance.default)
   ?(hints = true)
   ?(value_layout = Inline)
+  ?(visual_hint = true)
   t
   ~width
   ~height
@@ -782,20 +901,36 @@ let render_signals
       @ Option.to_list (Option.map (editing_prompt ~width t) ~f:(text R.Muted))
     | Ready data ->
       let matching, columns, _, footer, editing_error, first, page =
-        signal_page t data ~hints ~value_layout ~width ~height
+        signal_page ~visual_hint t data ~hints ~value_layout ~width ~height
       in
       let rows =
         page
         |> List.concat_mapi ~f:(fun i s ->
-          let active = first + i = t.focus in
+          let row = first + i in
+          let active = row = t.focus in
+          let marked =
+            Option.exists t.visual_selection ~f:(fun range ->
+              Signal_visual.contains range ~focus:t.focus ~row)
+          in
           let enabled = Set.mem t.selected s.D.index in
           let value = D.value_at data s ~time:t.cursor |> Option.value ~default:"unset" in
-          let role = if active then R.Selection else R.Foreground in
-          let value_role = if active then R.Metric else R.Muted in
+          let role = if active || marked then R.Selection else R.Foreground in
+          let value_role =
+            if active then R.Metric else if marked then R.Selection else R.Muted
+          in
           let offset = if active then t.value_offset else 0 in
           match value_layout with
           | Inline ->
-            [ inline_signal_row ~appearance ~columns ~active ~enabled s ~value ~offset ]
+            [ inline_signal_row
+                ~appearance
+                ~columns
+                ~active
+                ~marked
+                ~enabled
+                s
+                ~value
+                ~offset
+            ]
           | Stacked ->
             let value, _, _ =
               value_chunk ~columns:(Int.max 1 (width - 5)) ~offset value
@@ -804,7 +939,7 @@ let render_signals
                 role
                 (sprintf
                    "%s[%s] %s [%d]"
-                   (if active then ">" else " ")
+                   (signal_row_marker ~active ~marked)
                    (if enabled then "*" else " ")
                    s.name
                    s.width)
@@ -814,7 +949,9 @@ let render_signals
       (text
          R.Muted
          (sprintf
-            "%d matching · %d enabled · filter: %s"
+            "%s%d matching · %d enabled · filter: %s"
+            (Option.value_map t.visual_selection ~default:"" ~f:(fun range ->
+               sprintf "Visual line (%d) · " (Signal_visual.length range ~focus:t.focus)))
             matching
             (Set.length t.selected)
             t.filter)
@@ -917,17 +1054,22 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
   let open Bonsai_term in
   let module R = Host_view.Role in
   let text role s = View.text ~attrs:(R.attrs appearance role) (safe s) in
+  let status_line role label =
+    match count_indicator t with
+    | None -> text role label
+    | Some count -> View.hcat [ text R.Focus count; text role (" · " ^ label) ]
+  in
   let geometry = waves_geometry ~width ~height in
   let graph_height = geometry.graph_height in
   let body =
     match t.loaded with
     | Loading ->
       View.vcat
-        ([ text R.Muted t.notice ]
+        ([ status_line R.Muted t.notice ]
          @ Option.to_list (Option.map (editing_prompt ~width t) ~f:(text R.Muted)))
     | Failed e ->
       View.vcat
-        ([ text R.Failure ("VCD unavailable: " ^ e) ]
+        ([ status_line R.Failure ("VCD unavailable: " ^ e) ]
          @ Option.to_list (Option.map (editing_prompt ~width t) ~f:(text R.Muted)))
     | Ready data ->
       let selected =
@@ -1012,7 +1154,7 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
         else description
       in
       View.vcat
-        [ text
+        [ status_line
             (if Option.is_some status then R.Warning else R.Muted)
             (sprintf
                "%sCursor %Ld ticks × %s · window %Ld..%Ld"
@@ -1234,7 +1376,13 @@ let render_waveform
       let body_height = Int.min 80 (Int.max 3 (height - 5 - List.length header)) in
       let graph_width = Int.min 1024 (Int.max 7 (width - side_width - 1)) in
       let sidebar =
-        render_signals ~appearance ~value_layout t ~width:side_width ~height:body_height
+        render_signals
+          ~appearance
+          ~value_layout
+          ~visual_hint:false
+          t
+          ~width:side_width
+          ~height:body_height
       in
       let waves = render_waves ~appearance t ~width:graph_width ~height:body_height in
       View.vcat
@@ -1257,6 +1405,10 @@ let render_waveform
     | None ->
       "h/l column · H/L tick · Space c c commands · j/k signal · Enter toggle · / filter \
        · : time · [/] pan · +/- zoom · f Fit · d Default · g/G ends · { } value"
+  in
+  let footer =
+    Option.value_map (count_indicator t) ~default:footer ~f:(fun count ->
+      count ^ " · " ^ footer)
   in
   let value =
     match t.loaded with
@@ -1378,6 +1530,129 @@ let render
          ~height:(Int.max 1 dimensions.height)
     |> Host_view.colored appearance R.Foreground
 ;;
+
+module%test Counts = struct
+  let loading =
+    let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+      { id = "counts"
+      ; attempt_id = "attempt"
+      ; case_id = None
+      ; label = "counts"
+      ; kind = "waveform"
+      ; media_type = "text/vcd"
+      ; size = None
+      ; sha256 = None
+      ; availability = Available
+      }
+    in
+    create ~project:"p" artifact
+  ;;
+
+  let ready ~last =
+    let variables =
+      List.init 30 ~f:(fun i -> sprintf "$var wire 1 s%d signal_%d $end " i i)
+      |> String.concat
+    in
+    let vcd =
+      sprintf "$timescale 1ns $end %s $enddefinitions $end #0 0s0 #%Ld" variables last
+    in
+    receive loading (D.parse vcd)
+  ;;
+
+  let type_keys t keys =
+    String.to_list keys |> List.fold ~init:t ~f:(fun t c -> input t (Char c))
+  ;;
+
+  let navigation t = t.cursor, t.start, t.span, t.extent_basis, t.focus, t.value_offset
+
+  let same_navigation a b =
+    [%equal: int64 * int64 * int64 * string * int * int] (navigation a) (navigation b)
+  ;;
+
+  let%test_unit "Waves counts are visible before and after load, without applying motion" =
+    let screen t =
+      let width, height = 30, 12 in
+      let view = render_waves ~hints:false t ~width ~height in
+      let buf = Buffer.create 1024 in
+      Notty.Render.to_buffer
+        buf
+        Notty.Cap.dumb
+        (0, 0)
+        (width, height)
+        (Bonsai_term.View.Private.notty_image view);
+      Buffer.contents buf
+    in
+    let shows_count t = String.is_substring (screen t) ~substring:"Count: 20" in
+    List.iter
+      [ loading; ready ~last:1000L ]
+      ~f:(fun t ->
+        let pending = type_keys t "20" in
+        assert (shows_count pending);
+        assert (same_navigation pending t);
+        assert (not (shows_count (input pending Escape)));
+        assert (not (shows_count (clear_count pending)));
+        assert (not (shows_count (type_keys pending "x")));
+        assert (not (shows_count (remember pending))));
+    assert (Option.is_none (type_keys loading "20l").pending_count)
+  ;;
+
+  let%test_unit "all counted motions match repeated steps, including viewport follow" =
+    let last = Int64.max_value in
+    let t = ready ~last in
+    let cases =
+      [ 0L, 49L, 0L, 5
+      ; 71L, 9L, 75L, 20 (* expanded ticks and duplicated cells *)
+      ; 71L, 0L, 71L, 5
+      ; 71L, 51L, 50L, 5 (* cursor panned off either side *)
+      ; 71L, 51L, 150L, 5
+      ; 71L, 49L, 87L, 1
+      ; Int64.(last - 60L), 49L, Int64.(last - 50L), 5
+      ; Int64.(last - 4L), 51L, last, 5
+      ; 0L, last, Int64.(last / 2L), 5
+      ]
+    in
+    List.iter cases ~f:(fun (start, span, cursor, viewport_columns) ->
+      List.iter [ 0; 1; 2; 5; 20; 99 ] ~f:(fun count ->
+        List.iter [ 'h'; 'l'; 'H'; 'L'; 'j'; 'k' ] ~f:(fun motion ->
+          let t =
+            { t with start; span; cursor; viewport_columns; focus = 5; value_offset = 10 }
+          in
+          let repeated = type_keys t (String.make count motion) in
+          let counted = type_keys t (sprintf "%d%c" count motion) in
+          assert (same_navigation repeated counted);
+          assert (Option.is_none counted.pending_count))));
+    let t = { t with span = 49L; viewport_columns = 5 } in
+    let columns = type_keys t "20l" in
+    assert (Int64.equal columns.cursor 232L && Int64.equal columns.start 232L);
+    let ticks = type_keys t "20L" in
+    assert (Int64.equal ticks.cursor 20L && Int64.equal ticks.start 0L);
+    assert ((type_keys t "20j").focus = 20);
+    List.iter
+      [ { t with focus = 40 }; { t with filter = "unmatched"; focus = 5 } ]
+      ~f:(fun t -> assert (same_navigation (type_keys t "5k") (type_keys t "kkkkk")));
+    let after = type_keys t "20lh" in
+    assert (Int64.equal after.cursor 223L && Int64.equal after.start 223L)
+  ;;
+
+  let%test_unit "count saturation, modal input, and non-count actions" =
+    let t = ready ~last:100_000L in
+    let t = { t with span = 0L } in
+    let pending = type_keys t (String.make 100 '9') in
+    assert (Option.equal Int.equal pending.pending_count (Some max_count));
+    assert (Int64.equal (type_keys pending "l").cursor (Int64.of_int max_count));
+    assert (Int64.equal (input pending Right).cursor 1L);
+    assert (Int64.equal (type_keys (clear_count pending) "l").cursor 1L);
+    assert (Int64.equal (type_keys (input pending Escape) "l").cursor 1L);
+    let toggled = input pending Enter in
+    assert (Set.length toggled.selected = Set.length t.selected - 1);
+    assert (Option.is_none toggled.pending_count);
+    let editing = type_keys pending "/20" in
+    assert (String.equal editing.query "20" && Option.is_none editing.pending_count);
+    let inspector = type_keys pending "i20" in
+    assert (Option.equal Int.equal inspector.identity_scroll (Some 0));
+    assert (Option.is_none inspector.pending_count)
+  ;;
+end
 
 let%test_unit "connected original-event rails, compressed direction, pulses and bus boxes" =
   let data =
@@ -2082,6 +2357,84 @@ let%test_unit "independent Signals never hides disabled names; Space is reserved
          ~case_id:artifact.case_id
          (List.init 256 ~f:(fun _ -> artifact)))
     = 128)
+;;
+
+let%test_unit "Signals visual range marks filtered rows, bulk toggles, and survives \
+               reload"
+  =
+  let data =
+    D.parse
+      "$timescale 1 ns $end\n\
+       $var wire 1 ! bus_a $end\n\
+       $var wire 1 \" hidden_enabled $end\n\
+       $var wire 1 # bus_b $end\n\
+       $var wire 1 $ hidden_disabled $end\n\
+       $var wire 1 % bus_c $end\n\
+       $var wire 1 & bus_d $end\n\
+       $enddefinitions $end\n\
+       #0\n\
+       1!\n"
+    |> Or_error.ok_exn
+  in
+  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    { id = "trace"
+    ; attempt_id = "captured-attempt"
+    ; case_id = Some "case"
+    ; label = "VCD"
+    ; kind = "waveform"
+    ; media_type = "text/vcd"
+    ; size = Some 1
+    ; sha256 = Some (String.make 64 'a')
+    ; availability = Available
+    }
+  in
+  let t =
+    { (receive (create ~project:"project" artifact) (Ok data)) with
+      selected = Int.Set.of_list [ 0; 1; 5 ]
+    }
+  in
+  let press t keys = List.fold keys ~init:t ~f:signals_input in
+  let filtered = press t [ Char '/'; Char 'b'; Char 'u'; Char 's'; Enter ] in
+  let visual =
+    press filtered [ Char 'V'; Char 'j'; Char '2'; Char 'j'; Char 'j'; Char 'k' ]
+  in
+  let plain ~value_layout ~height t =
+    let view = render_signals ~hints:false ~value_layout t ~width:80 ~height in
+    let buffer = Buffer.create 256 in
+    Notty.Render.to_buffer
+      buffer
+      Notty.Cap.dumb
+      (0, 0)
+      (Bonsai_term.View.width view, Bonsai_term.View.height view)
+      (Bonsai_term.View.Private.notty_image view);
+    Buffer.contents buffer
+  in
+  List.iter
+    [ Inline, 4; Stacked, 6 ]
+    ~f:(fun (value_layout, height) ->
+      let screen = plain ~value_layout ~height visual in
+      assert (String.is_substring screen ~substring:"Visual line (3)");
+      assert (String.is_substring screen ~substring:"~[ ] bus_b");
+      assert (String.is_substring screen ~substring:">[ ] bus_c");
+      assert (not (String.is_substring screen ~substring:"bus_a"));
+      assert (not (String.is_substring screen ~substring:"hidden")));
+  assert (Set.equal (signals_input visual Escape).selected t.selected);
+  let editing = press visual [ Char '/'; Char 'V' ] in
+  assert (Option.is_none editing.visual_selection);
+  assert (String.equal editing.query "busV");
+  let enabled = signals_input visual Enter in
+  assert (Option.is_none enabled.visual_selection);
+  assert (Set.equal enabled.selected (Int.Set.of_list [ 0; 1; 2; 4; 5 ]));
+  let remembered = remember enabled in
+  let restored = receive ~restore_navigation:true remembered (Ok data) in
+  assert (Set.equal restored.selected enabled.selected);
+  let backward = press restored [ Char 'V'; Char 'k'; Char 'k' ] in
+  let disabled = signals_input backward Enter in
+  assert (Set.equal disabled.selected (Int.Set.of_list [ 1; 5 ]));
+  assert (Set.equal (signals_input disabled Enter).selected t.selected);
+  assert (Option.is_none (clear_selection backward).visual_selection);
+  assert (Option.is_none (remember backward).visual_selection);
+  assert (Option.is_none (receive backward (Ok data)).visual_selection)
 ;;
 
 let%test_unit "picker retains missing pin marker and cursor without matching changed \

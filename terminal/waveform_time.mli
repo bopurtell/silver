@@ -24,8 +24,8 @@ val capacity : code:int -> columns:int -> int
     the real retained trace/window end, never extrapolation. *)
 val create : code:int -> columns:int -> start:int64 -> stop:int64 -> t
 
-(** Inclusive requested bounds, unchanged by raster width. No allocation per tick.
-    Supports [0,Int64.max_value], including a one-column viewport. *)
+(** Inclusive requested bounds, unchanged by raster width. Cells are calculated on
+    demand. Supports [0,Int64.max_value], including a one-column viewport. *)
 val create_window : columns:int -> start:int64 -> stop:int64 -> t
 
 val columns : t -> int

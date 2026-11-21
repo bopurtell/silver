@@ -255,6 +255,8 @@ type palette =
   ; commands : command list
   ; query : string
   ; index : int
+  (* A selection move reveals the cursor; an explicit scroll may leave it offscreen. *)
+  ; viewport : [ `Follow of int | `Scroll of int ]
   ; argument : argument option
   }
 
@@ -274,6 +276,8 @@ type menu =
   ; query : string
   ; filtering : bool
   ; index : int
+  ; top : int
+  ; detached : bool
   ; count : int
   }
 
@@ -2370,7 +2374,9 @@ let open_chip_picker t =
   | Some capture, Some s ->
     { t with
       palette =
-        Some { capture; commands = chip_commands s; query = ""; index = 0; argument = None }
+        Some
+          { capture; commands = chip_commands s; query = ""; index = 0
+          ; viewport = `Follow 0; argument = None }
     }
   | _ -> t
 ;;
@@ -2452,7 +2458,9 @@ let open_testing_suite_picker t (tile : W.Tile.t) =
     in
     { t with
       palette =
-        Some { capture; commands = suites @ [ discover ]; query = ""; index = 0; argument = None }
+        Some
+          { capture; commands = suites @ [ discover ]; query = ""; index = 0
+          ; viewport = `Follow 0; argument = None }
     ; notice = ""
     }
 ;;
@@ -4952,6 +4960,12 @@ let palette_has_results (p : palette) =
   Option.is_none p.argument || Option.is_some (theme_picker p)
 ;;
 
+let palette_top (p : palette) ~length ~capacity =
+  match p.viewport with
+  | `Follow top -> List_viewport.reveal ~top ~index:p.index ~length ~capacity
+  | `Scroll top -> List_viewport.clamp ~top ~length ~capacity
+;;
+
 let effective_appearance t =
   (* Rendering only: preference capture always reads [t.appearance]. *)
   match t.palette with
@@ -5001,6 +5015,7 @@ let open_theme_picker t capture =
           ; commands
           ; query = ""
           ; index = theme_index commands original
+          ; viewport = `Follow 0
           ; argument = Some (Theme_picker { original; preview = original })
           }
     ; prefix = 0
@@ -5054,7 +5069,9 @@ let starter_preview_lines ?source (p : Authoring.Preview.t) =
 (* Edits start a new search and follow its best result. Arrow/Tab choices remain selected
    until the next edit; an unchanged query does not undo navigation. *)
 let palette_query (p : palette) query =
-  if String.equal p.query query then p else { p with query; index = 0 }
+  if String.equal p.query query
+  then p
+  else { p with query; index = 0; viewport = `Follow 0 }
 ;;
 
 type input =
@@ -5069,6 +5086,8 @@ type input =
   | Backspace
   | Delete_word
   | Clear_filter
+  | Scroll_up
+  | Scroll_down
   | Next
   | Previous
   | Focus
@@ -5121,6 +5140,14 @@ let decode_event (event : Bonsai_term.Event.t) : input option =
        when Uchar.equal value (Uchar.of_char 'r') || Uchar.equal value (Uchar.of_char 'R')
        -> Some (Character 'R')
      | Key_press { key = ASCII ('u' | 'U'); mods = [ Ctrl ] } -> Some Clear_filter
+     | Key_press { key = ASCII ('y' | 'Y'); mods = [ Ctrl ] } -> Some Scroll_up
+     | Key_press { key = ASCII ('e' | 'E'); mods = [ Ctrl ] } -> Some Scroll_down
+     | Key_press { key = Uchar value; mods = [ Ctrl ] }
+       when Uchar.equal value (Uchar.of_char 'y') || Uchar.equal value (Uchar.of_char 'Y')
+       -> Some Scroll_up
+     | Key_press { key = Uchar value; mods = [ Ctrl ] }
+       when Uchar.equal value (Uchar.of_char 'e') || Uchar.equal value (Uchar.of_char 'E')
+       -> Some Scroll_down
      | Key_press { key = Uchar value; mods = [ Ctrl ] }
        when Uchar.equal value (Uchar.of_char 'u') || Uchar.equal value (Uchar.of_char 'U')
        -> Some Clear_filter
@@ -5155,6 +5182,14 @@ let decode_theme_event (event : Bonsai_term.Event.t) =
     (match decode_event event with
      | Some (Open_menu _) -> None
      | input -> input)
+;;
+
+let%test_unit "viewport keys require Control; plain e and y remain printable" =
+  let open Bonsai_term.Event in
+  List.iter [ 'e', Scroll_down; 'y', Scroll_up ] ~f:(fun (c, expected) ->
+    List.iter [ Key.ASCII c; Uchar (Uchar.of_char c) ] ~f:(fun key ->
+      assert (Poly.equal (decode_event (Key_press { key; mods = [ Ctrl ] })) (Some expected));
+      assert (Poly.equal (decode_event (Key_press { key; mods = [] })) (Some (Character c)))))
 ;;
 
 let%test_unit "Shift-R decodes to quick-launch character" =
@@ -5581,7 +5616,61 @@ let menu_matches menu =
     List.for_all words ~f:(fun substring -> String.is_substring text ~substring))
 ;;
 
-let open_menu t kind commands =
+let menu_entries menu =
+  let _, entries =
+    List.foldi (menu_matches menu) ~init:(None, []) ~f:(fun i (last, output) entry ->
+      let output =
+        if Option.equal String.equal last (Some entry.group)
+        then output
+        else `Group entry.group :: output
+      in
+      Some entry.group, `Choice (i, entry) :: output)
+  in
+  if List.is_empty entries then [ `Empty ] else List.rev entries
+;;
+
+let menu_selected menu = List.nth (menu_matches menu) menu.index
+
+let menu_layout ~height menu ~length =
+  let y = if height >= 6 then 1 else 0 in
+  let has_footer =
+    match menu.kind with
+    | Actions_menu -> true
+    | Project_menu ->
+      Option.exists (menu_selected menu) ~f:(fun row -> Option.is_some row.command.unavailable)
+  in
+  (* The filter and the two borders are outside the scrolled physical rows. *)
+  let chrome = 3 + Bool.to_int has_footer in
+  let height = Int.min (chrome + length) (Int.max 0 (height - y)) in
+  y, height, Int.max 0 (height - chrome)
+;;
+
+let menu_top menu entries ~length ~capacity =
+  if menu.detached
+  then List_viewport.clamp ~top:menu.top ~length ~capacity
+  else (
+    let index =
+      List.find_mapi entries ~f:(fun i -> function
+        | `Choice (index, _) when index = menu.index -> Some i
+        | _ -> None)
+      |> Option.value ~default:0
+    in
+    List_viewport.reveal ~top:menu.top ~index ~length ~capacity)
+;;
+
+let menu_current_top ~height menu =
+  let entries = menu_entries menu in
+  let length = List.length entries in
+  let _, _, capacity = menu_layout ~height menu ~length in
+  menu_top menu entries ~length ~capacity
+;;
+
+let menu_reveal ~height menu =
+  let menu = { menu with detached = false } in
+  { menu with top = menu_current_top ~height menu }
+;;
+
+let open_menu t kind commands ~height =
   match capture t with
   | None -> t, No_effect
   | Some _ when Poly.equal kind Actions_menu && not (has_local_actions t) ->
@@ -5594,9 +5683,9 @@ let open_menu t kind commands =
     in
     let menu =
       { kind; rows; menu_capture; origin = t.focus; query = ""; filtering = false
-      ; index = 0; count = 0 }
+      ; index = 0; top = 0; detached = false; count = 0 }
     in
-    { t with menu = Some menu; prefix = 0; notice = "" }, No_effect
+    { t with menu = Some (menu_reveal ~height menu); prefix = 0; notice = "" }, No_effect
 ;;
 
 let dispatch_command t capture command ~close ~stale_notice =
@@ -5608,10 +5697,11 @@ let dispatch_command t capture command ~close ~stale_notice =
     | None -> close t, Execute (capture, command.action))
 ;;
 
-let menu_input t menu event =
+let menu_input t menu event ~height =
   let update menu = { t with menu = Some menu }, No_effect in
   let close t = { t with menu = None; prefix = 0 } in
-  let query text = update { menu with query = text; index = 0; count = 0 } in
+  let reset menu = update (menu_reveal ~height { menu with index = 0; top = 0; count = 0 }) in
+  let query text = reset { menu with query = text } in
   let append text =
     if printable_utf8 text && String.length text + String.length menu.query <= 4096
     then query (menu.query ^ text)
@@ -5620,14 +5710,27 @@ let menu_input t menu event =
   let move direction =
     let last = List.length (menu_matches menu) - 1 in
     let index = menu.index + (direction * Int.max 1 menu.count) in
-    update { menu with index = Int.max 0 (Int.min last index); count = 0 }
+    let top = menu_current_top ~height menu in
+    menu_reveal ~height { menu with index = Int.max 0 (Int.min last index); top; count = 0 }
+    |> update
+  in
+  let scroll delta =
+    let entries = menu_entries menu in
+    let length = List.length entries in
+    let _, _, capacity = menu_layout ~height menu ~length in
+    let top = menu_top menu entries ~length ~capacity in
+    let next = List_viewport.scroll ~top ~delta:(delta * Int.max 1 menu.count) ~length ~capacity in
+    update (if next = top then { menu with count = 0 }
+            else { menu with top = next; detached = true; count = 0 })
   in
   match event with
   | Escape when menu.filtering ->
-    update { menu with filtering = false; query = ""; index = 0; count = 0 }
+    reset { menu with filtering = false; query = "" }
   | Escape | Dismiss_menu -> close t, No_effect
   | Next -> move 1
   | Previous -> move (-1)
+  | Scroll_up when not menu.filtering -> scroll (-1)
+  | Scroll_down when not menu.filtering -> scroll 1
   | Character ch when menu.filtering -> append (String.of_char ch)
   | Text text when menu.filtering -> append text
   | Backspace when menu.filtering -> query (drop_last_codepoint menu.query)
@@ -5650,7 +5753,14 @@ let menu_input t menu event =
      | Some _ when not (Option.equal W.Tile_id.equal t.focus menu.origin) ->
        { (close t) with notice = "Menu origin changed; reopen menu" }, No_effect
      | Some (index, row) ->
-       let t = { t with menu = Some { menu with index; count = 0 } } in
+       let menu =
+         match event with
+         | Menu_click _ ->
+           let top = menu_current_top ~height menu in
+           menu_reveal ~height { menu with index; top; count = 0 }
+         | _ -> { menu with count = 0 }
+       in
+       let t = { t with menu = Some menu } in
        dispatch_command t menu.menu_capture row.command ~close
          ~stale_notice:"Command target changed; reopen menu")
   | _ -> t, No_effect
@@ -5745,7 +5855,7 @@ let accept_catalog_configuration t (p : palette) tile launch form =
      | Ok (`Launch _) -> assert false)
 ;;
 
-let input t event ~commands : t * effect =
+let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
   match event with
   | Paste_start -> { t with paste = true; prefix = 0 }, No_effect
   | Paste_end -> { t with paste = false }, No_effect
@@ -5760,9 +5870,10 @@ let input t event ~commands : t * effect =
       | Character ch -> append_reference t (String.of_char ch)
       | Text text -> append_reference t text
       | _ -> reject_reference_text t)
-  | _ when Option.is_some t.menu -> menu_input t (Option.value_exn t.menu) event
+   | _ when Option.is_some t.menu ->
+     menu_input t (Option.value_exn t.menu) event ~height:menu_height
   | Open_menu kind when Option.is_none t.palette && not t.editing_filter ->
-    open_menu t kind commands
+    open_menu t kind commands ~height:menu_height
   | Open_menu _ | Menu_click _ | Dismiss_menu -> t, No_effect
   | Character ch when finalization_form t -> append_reference t (String.of_char ch)
   | Text text when finalization_form t -> append_reference t text
@@ -5799,6 +5910,19 @@ let input t event ~commands : t * effect =
   | _ ->
     (match t.palette with
      | Some p ->
+       let update p = { t with palette = Some p }, No_effect in
+       let navigate delta =
+         let length = List.length (matches p) in
+         let index = Int.max 0 (Int.min (length - 1) (p.index + delta)) in
+         let viewport =
+           match palette_capacity with
+           | Some capacity when Option.is_none p.argument && capacity > 0 ->
+             let top = palette_top p ~length ~capacity in
+             `Follow (List_viewport.reveal ~top ~index ~length ~capacity)
+           | _ -> p.viewport
+         in
+         update { p with index; viewport }
+       in
        (match p.argument, event with
           | Some (Starter_preview (_, Asic_starter)), Enter ->
             t, No_effect
@@ -5848,17 +5972,18 @@ let input t event ~commands : t * effect =
         | Delete_word ->
           ( { t with palette = Some (palette_query p (Text_edit.delete_word p.query)) }
           , No_effect )
-        | Next | Focus ->
-          ( { t with
-              palette =
-                Some
-                  { p with
-                    index = Int.min (Int.max 0 (List.length (matches p) - 1)) (p.index + 1)
-                  }
-            }
-          , No_effect )
-        | Previous | Focus_previous ->
-          { t with palette = Some { p with index = Int.max 0 (p.index - 1) } }, No_effect
+         | Next | Focus -> navigate 1
+         | (Previous | Focus_previous) when Option.is_none p.argument -> navigate (-1)
+         | Previous | Focus_previous -> update { p with index = Int.max 0 (p.index - 1) }
+         | (Scroll_up | Scroll_down) when Option.is_none p.argument ->
+           (match palette_capacity with
+            | Some capacity when capacity > 0 ->
+              let length = List.length (matches p) in
+              let top = palette_top p ~length ~capacity in
+              let delta = match event with Scroll_up -> -1 | _ -> 1 in
+              let next = List_viewport.scroll ~top ~delta ~length ~capacity in
+              if next = top then t, No_effect else update { p with viewport = `Scroll next }
+            | _ -> t, No_effect)
         | Enter when Option.is_some p.argument ->
           if not (current t p.capture)
           then
@@ -6081,10 +6206,11 @@ let input t event ~commands : t * effect =
           let palette =
             Option.map (capture t) ~f:(fun capture ->
               { capture
-              ; commands = global_palette_commands commands
-              ; query = ""
-              ; index = 0
-              ; argument = None
+               ; commands = global_palette_commands commands
+               ; query = ""
+               ; index = 0
+               ; viewport = `Follow 0
+               ; argument = None
               })
           in
           { t with prefix = 0; palette }, No_effect
@@ -6285,9 +6411,10 @@ let input t event ~commands : t * effect =
                   Some
                     { capture
                     ; commands = []
-                    ; query = Simulation_view.Form.query form
-                    ; index = 0
-                    ; argument = Some (Catalog_configuration (tile.id, launch, form))
+                     ; query = Simulation_view.Form.query form
+                     ; index = 0
+                     ; viewport = `Follow 0
+                     ; argument = Some (Catalog_configuration (tile.id, launch, form))
                     }
               }, No_effect
             | _, Testing_launch_unavailable notice -> { t with notice }, No_effect
@@ -6501,6 +6628,7 @@ let%test_unit "hierarchy controls are focused, local and yield to palette and pr
     ; commands = []
     ; query = ""
     ; index = 0
+    ; viewport = `Follow 0
     ; argument = None
     }
   in
@@ -6925,6 +7053,7 @@ let%test_unit "launch palette retains captured subset across model refresh and f
     ; commands = [ command ]
     ; query = ""
     ; index = 0
+    ; viewport = `Follow 0
     ; argument = None
     }
   in
@@ -6977,7 +7106,7 @@ let%test_unit "launch palette retains captured subset across model refresh and f
 let%test_unit "ASIC design path can be cancelled or submitted literally, never launched" =
   let host = receive empty (W.initial ~session_id:(W.Session_id.of_string "adoption")) in
   let capture = Option.value_exn (capture host) in
-  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0;
+  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0; viewport = `Follow 0;
                                          argument = Some Design_executable } } in
   let path = "_build/chip (A)/main.exe" in
   let host, _ = input host (Text path) ~commands:[] in
@@ -7001,7 +7130,7 @@ let%test_unit "bound starter preview requires explicit apply, cancel keeps recei
     ; files = []; registration = None
     }
   in
-  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0;
+  let host = { host with palette = Some { capture; commands = []; query = ""; index = 0; viewport = `Follow 0;
                                          argument = Some (Starter_preview (preview, Asic_starter)) } } in
   (match input host Enter ~commands:[] with
    | { palette = Some _; _ }, No_effect -> ()
@@ -7038,6 +7167,7 @@ let%test_unit "simulation palette paste captures cases without launching or losi
           ; commands = []
           ; query = ""
           ; index = 0
+          ; viewport = `Follow 0
           ; argument =
               Some (Simulation_selection (tile, "exact-digest", "exact-key", form))
           }
@@ -7562,6 +7692,7 @@ let%test_unit "finalization form dispatches only an explicit exact attempt and c
           ; commands = []
           ; query
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Finalization_attempt run)
           }
     }
@@ -7631,6 +7762,7 @@ let%test_unit "acceptance form is typed bounded collateral captured with run and
           ; commands = []
           ; query
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Acceptance (run, execution_file, "captured-key"))
           }
     }
@@ -7692,6 +7824,7 @@ let%test_unit "finalization paths accept UTF-8 and bracketed paste without comma
           ; commands = []
           ; query = ""
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Finalization_attempt Asic_snapshot_fixture.run_a)
           }
     }
@@ -7761,6 +7894,7 @@ let%test_unit "finalization text rejects controls and truncates only at UTF-8 bo
           ; commands = []
           ; query
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Finalization_attempt Asic_snapshot_fixture.run_a)
           }
     }

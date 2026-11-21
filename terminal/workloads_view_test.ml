@@ -210,6 +210,7 @@ let%test_unit "production host keys import forms rendering and tile lifetimes" =
           ; commands = []
           ; query = "/retained/result with spaces.json"
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some Workload_path
           }
     }

@@ -334,6 +334,7 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
           ; commands = []
           ; query = "timing"
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (H.Plan_endpoint ("selected", "balanced"))
           }
     }

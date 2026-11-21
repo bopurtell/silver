@@ -410,6 +410,7 @@ let%test_unit "preparation input form captures exact selected inputs and rejects
           ; commands = []
           ; query = "routing X=1 Y=exact"
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (H.Preparation_inputs ("chosen-flow", "chosen-profile"))
           }
     }

@@ -971,6 +971,7 @@ let%test_unit "host resource keys and bounded import form dispatch typed actions
           ; commands = []
           ; query = path
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Resource_path false)
           }
     }
@@ -988,6 +989,7 @@ let%test_unit "host resource keys and bounded import form dispatch typed actions
           ; commands = []
           ; query = "/bad\npath"
           ; index = 0
+          ; viewport = `Follow 0
           ; argument = Some (Resource_path true)
           }
     }

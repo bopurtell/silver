@@ -16,7 +16,6 @@ type t =
   ; start : int64
   ; stop : int64
   ; scale : scale
-  ; cells : (int64 * int64) array option
   }
 
 let scale_of_code code =
@@ -43,7 +42,6 @@ let create ~code ~columns ~start ~stop =
   ; start
   ; stop = Int64.(start + min (stop - start) (of_int length - 1L))
   ; scale = scale_of_code code
-  ; cells = None
   }
 ;;
 
@@ -59,23 +57,7 @@ let create_window ~columns ~start ~stop =
   then invalid_arg "Invalid waveform window";
   let distance = Int64.(stop - start) in
   let compressed = Int64.(distance >= of_int columns) in
-  let cells =
-    Array.init columns ~f:(fun i ->
-      if compressed
-      then (
-        let first = Int64.(start + offset distance i columns) in
-        let last =
-          if i = columns - 1
-          then stop
-          else Int64.(start + offset distance (Int.succ i) columns - 1L)
-        in
-        first, last)
-      else (
-        let denominator = Int.max 1 (columns - 1) in
-        let tick = Int64.(start + offset distance i denominator) in
-        tick, tick))
-  in
-  { columns; start; stop; scale = Window_cells { compressed }; cells = Some cells }
+  { columns; start; stop; scale = Window_cells { compressed } }
 ;;
 
 let columns t = t.columns
@@ -83,21 +65,40 @@ let start t = t.start
 let stop t = t.stop
 let scale t = t.scale
 
+(* Compute cells on demand so following a cursor across many windows does not allocate a
+   raster for each intermediate window. *)
+let window_cell_first t ~compressed column =
+  let denominator = if compressed then t.columns else Int.max 1 (t.columns - 1) in
+  Int64.(t.start + offset (t.stop - t.start) column denominator)
+;;
+
+let window_cell_last t ~compressed column =
+  if not compressed
+  then window_cell_first t ~compressed column
+  else if column = t.columns - 1
+  then t.stop
+  else Int64.pred (window_cell_first t ~compressed (column + 1))
+;;
+
 let cursor t time =
   if Int64.(time < t.start)
   then Left
   else if Int64.(time > t.stop)
   then Right
   else (
-    match t.cells with
-    | Some cells ->
-      let rec search i =
-        if i = t.columns - 1 || Int64.(time <= snd cells.(i))
-        then Column i
-        else search (i + 1)
+    match t.scale with
+    | Window_cells { compressed } ->
+      let rec search lo hi =
+        if lo = hi
+        then Column lo
+        else (
+          let mid = (lo + hi) / 2 in
+          if Int64.(time <= window_cell_last t ~compressed mid)
+          then search lo mid
+          else search (mid + 1) hi)
       in
-      search 0
-    | None ->
+      search 0 (t.columns - 1)
+    | Cells_per_tick _ | Ticks_per_cell _ ->
       let delta = Int64.(time - t.start) in
       let column =
         match t.scale with
@@ -114,9 +115,11 @@ let cell_bounds t ~column =
   if column < 0 || column >= t.columns
   then None
   else (
-    match t.cells with
-    | Some cells -> Some cells.(column)
-    | None ->
+    match t.scale with
+    | Window_cells { compressed } ->
+      let first = window_cell_first t ~compressed column in
+      Some (first, if compressed then window_cell_last t ~compressed column else first)
+    | Cells_per_tick _ | Ticks_per_cell _ ->
       let offset, count =
         match t.scale with
         | Cells_per_tick n -> column / n, 1
@@ -151,9 +154,15 @@ let step_column t ~first ~last ~forward time =
       then Int64.max first (Int64.min last tick)
       else adjacent (column + if forward then 1 else -1)
   in
-  match cursor t time with
-  | Left | Right -> fallback ()
-  | Column column -> adjacent (column + if forward then 1 else -1)
+  match t.scale with
+  | Window_cells { compressed = false } ->
+    (* An expanded window includes every tick; neither duplicate cells nor following the
+       cursor beyond its edges can change the one-tick stride. *)
+    fallback ()
+  | _ ->
+    (match cursor t time with
+     | Left | Right -> fallback ()
+     | Column column -> adjacent (column + if forward then 1 else -1))
 ;;
 
 let%test_unit "column steps follow full-range cells and saturate without overflow" =
@@ -346,9 +355,9 @@ let legacy_ruler t ~timescale =
 ;;
 
 let ruler t ~timescale =
-  match t.cells with
-  | None -> legacy_ruler t ~timescale
-  | Some _ ->
+  match t.scale with
+  | Cells_per_tick _ | Ticks_per_cell _ -> legacy_ruler t ~timescale
+  | Window_cells _ ->
     let labels = ref [] in
     List.iter
       [ 0; t.columns - 1; t.columns / 2; t.columns / 4; 3 * t.columns / 4 ]
