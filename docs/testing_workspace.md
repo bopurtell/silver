@@ -26,8 +26,12 @@ historical context for retained FIFO acceptance.
 1. Open **Space c c → Create Testing workspace** for a new default arrangement.
 2. Tab to **simulation-catalog**. Silver loads the configured project's suites
    in the background after opening it, even if you start in Overview.
-3. Choose cases, then press **Enter** to prepare the normal launch form.
-4. Review cases, seed and parameters; only final confirmation launches simulation.
+3. Choose the suite and check the cases you want. With **Simulation Catalog**
+   focused, press **Shift+R** to launch one attempt immediately with the suite's
+   displayed seed and parameters. These start at the provider's defaults. Use
+   **`e`** to edit and save the catalog settings without starting a run.
+4. To change inputs for one attempt, press **Enter** instead. Edit cases, seed
+   and parameters in the form, then confirm to launch.
 
 Reconnecting to the same daemon reuses its catalog. A fresh daemon discovers
 again. If the provider failed, Silver shows the error rather than repeatedly
@@ -95,7 +99,9 @@ remain inspectable in Detail.
 | Catalog | `a` | Explicitly select all currently declared cases |
 | Catalog | `/`, then text; Enter/Esc | Edit/finish a case filter; matching never launches work |
 | Catalog | `u` | Accept current refreshed discovery/defaults after reviewing changes |
-| Catalog | Enter or `r` | Open a launch form with exact suite/subset/digest |
+| Catalog | `R` (Shift+R) | Run the current suite's checked cases immediately with the displayed seed and parameters. The filter only changes which cases you see. |
+| Catalog | `e` | Edit and save inputs for subsequent runs of the selected suite without launching an attempt. |
+| Catalog | Enter or `r` | Review the selected suite and cases; edit seed or parameters for this run before confirming. |
 | Attempts | `j` / `k`, arrows | Select an exact retained attempt and observe its detail |
 | Cases | `j` / `k`, arrows | Select a case for shared investigation |
 | Artifacts | `j` / `k`, arrows | Select an exact artifact; list explicitly includes all cases |
@@ -366,6 +372,9 @@ The existing multi-step launch form accepts cases, canonical uint64 seed, each
 declared parameter and final `launch` confirmation. Ctrl-U clears a field. Catalog
 defaults are not guessed: the initial declared suite defaults are shown, and
 changed/removed selections disable launch until explicitly corrected/accepted.
+The `e` settings form saves inputs in the current Testing workspace without
+running them. Switching suites or changing the discovery digest drops the saved
+seed and parameter overrides. The one-run Enter form never overwrites them.
 Failed/in-flight discovery can retain browsable catalog rows without enabling Run.
 Already-open palette/forms keep captured inputs; stale launch requests are rejected
 by the normal backend digest/config checks rather than retargeted.

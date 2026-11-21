@@ -3,7 +3,7 @@ id: WB-074
 title: Normalized suite/parameter/seed fields and run inputs in the simulation catalog
 category: verification
 feature_sets: [FS2, FS5]
-status: needs-design
+status: partial
 kind: enhancement
 priority: P2
 severity: n/a
@@ -34,6 +34,12 @@ case, parameter and seed information is shown combined rather than in separate c
 The provider is invoked with the configured executable and prefix args; values reach
 it through the structured submission, not raw shell text.
 
+The focused Catalog also supports **`R` for quick launch**: submit the checked
+cases with the displayed inputs without opening the form. Start with the suite
+defaults or use **`e`** to edit and save settings without running. This shortcut
+uses the same discovery and selection validation as the reviewed path. Per-run
+edits still use Enter; editing directly in the list remains separate work.
+
 ## Scope
 - Show suite, case, declared parameters (name, type, default) and seed as separate,
   aligned fields.
@@ -49,7 +55,7 @@ change), seed sweeps and parameter matrices (WB-030), and saving named run prese
 ## Acceptance criteria
 - [ ] Suite, case, parameters and seed are visually and structurally separate.
 - [ ] Inline edits are validated; invalid values block Run with a reason.
-- [ ] Run uses exactly the shown values; the attempt records them and they appear in history.
+- [x] Run uses exactly the shown values; the attempt records them and they appear in history.
 - [ ] Reset returns fields to the discovered defaults.
 - [ ] Narrow widths keep field identity readable.
 

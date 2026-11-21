@@ -2,6 +2,11 @@ open! Core
 open Hardcaml_workbench_protocol
 module S = Simulation
 
+type overrides =
+  { seed : string
+  ; parameters : (string * string) list
+  }
+
 type t =
   { discovery : S.Discovery.t option
   ; digest : string option
@@ -12,6 +17,7 @@ type t =
   ; selected : string list
   ; captured_suite : S.Suite.t option
   ; captured_digest : string option
+  ; overrides : overrides option
   ; filter : string
   }
 
@@ -25,6 +31,7 @@ let empty =
   ; selected = []
   ; captured_suite = None
   ; captured_digest = None
+  ; overrides = None
   ; filter = ""
   }
 ;;
@@ -50,10 +57,17 @@ let select_suite t id =
     ; selected = List.map s.cases ~f:(fun c -> c.id)
     ; captured_suite = Some s
     ; captured_digest = t.digest
+    ; overrides =
+        (if Option.equal String.equal t.suite_id (Some id)
+            && Option.equal S.Suite.equal t.captured_suite (Some s)
+            && Option.equal String.equal t.captured_digest t.digest
+         then t.overrides
+         else None)
     }
 ;;
 
 let update t (s : S.Snapshot.t) =
+  let previous_suite = suite t in
   let t =
     { t with
       discovery = Option.first_some s.discovery t.discovery
@@ -71,6 +85,12 @@ let update t (s : S.Snapshot.t) =
               then Some "No current discovery; retained catalog is browse-only"
               else None))
     }
+  in
+  let t =
+    if Option.equal String.equal t.captured_digest t.digest
+       && Option.equal S.Suite.equal previous_suite (suite t)
+    then t
+    else { t with overrides = None }
   in
   (* Only initial discovery selects a default. A missing selected suite/case stays
      selected, even if a newly discovered suite occupies its former position. *)
@@ -183,12 +203,29 @@ let disabled_reason t =
         else None)
 ;;
 
+let current_selection t s =
+  let defaults = Simulation_view.selection s in
+  let selection =
+    match t.overrides with
+    | None -> defaults
+    | Some { seed; parameters } -> { defaults with seed; parameters }
+  in
+  { selection with cases = t.selected }
+;;
+
+let save_configuration t (selection : S.Selection.t) =
+  { t with
+    selected = selection.cases
+  ; overrides = Some { seed = selection.seed; parameters = selection.parameters }
+  }
+;;
+
 let launch t =
   match disabled_reason t with
   | Some reason -> Or_error.error_string reason
   | None ->
     let s = Option.value_exn t.captured_suite in
-    let selection = { (Simulation_view.selection s) with cases = t.selected } in
+    let selection = current_selection t s in
     Ok (s, selection, Option.value_exn t.captured_digest)
 ;;
 
@@ -211,7 +248,7 @@ let rows ?(string_compression = true) t =
       (Option.value_map (suite t) ~default:"Choose a suite" ~f:(fun s ->
          "Suite: " ^ s.id ^ " — " ^ s.label))
   ; row (sprintf "Selected: %d cases; filter: %s" (List.length t.selected) t.filter)
-  ; row ~hint:true "Browse cases; toggle subset; accept refresh; launch explicitly"
+  ; row ~hint:true "R quick run with shown inputs; e save inputs; Enter edit one run"
   ]
   @ List.map (visible_cases t) ~f:(fun c ->
     row
@@ -231,13 +268,15 @@ let rows ?(string_compression = true) t =
        ^ " — "
        ^ s.label))
   @ Option.value_map (suite t) ~default:[] ~f:(fun s ->
-    [ row ~indicator:Seed ("Default seed: " ^ s.default_seed) ]
+     let selection = current_selection t s in
+     let seed_label = if Option.is_some t.overrides then "Saved seed: " else "Default seed: " in
+     [ row ~indicator:Seed (seed_label ^ selection.seed) ]
     @ List.map s.parameters ~f:(fun p ->
       row
         ("Parameter "
          ^ p.key
          ^ " = "
-         ^ p.default
+         ^ List.Assoc.find_exn selection.parameters p.key ~equal:String.equal
          ^
          if List.is_empty p.choices
          then ""
@@ -324,6 +363,63 @@ let%test_unit "catalog captures exact subset defaults and digest; filter only br
   let none = toggle_case t "seeded" in
   assert (Or_error.is_error (launch none));
   assert (Option.equal String.equal (case_id (move_case t 1)) (Some "seeded"))
+;;
+
+let%test_unit "per-launch form edits do not change the catalog's quick run inputs" =
+  let t =
+    update empty (Test_data.snapshot [ Test_data.suite ])
+    |> fun t -> toggle_case t "directed"
+  in
+  let suite, defaults, digest = launch t |> Or_error.ok_exn in
+  let saved = { defaults with seed = "91"; parameters = [ "cycles", "150" ] } in
+  let t = save_configuration t saved in
+  let _, effective, _ = launch t |> Or_error.ok_exn in
+  let form = Simulation_view.Form.create ~selection:effective suite in
+  let edit form value =
+    match Simulation_view.Form.accept form value |> Or_error.ok_exn with
+    | `Next form -> form
+    | `Launch _ | `Save _ -> assert false
+  in
+  let form =
+    edit form "directed" |> fun form -> edit form "1" |> fun form -> edit form "200"
+  in
+  (match Simulation_view.Form.accept form "launch" |> Or_error.ok_exn with
+   | `Launch selection ->
+     assert (List.equal String.equal selection.cases [ "directed" ]);
+     assert (String.equal selection.seed "1");
+     assert (List.equal [%equal: string * string] selection.parameters [ "cycles", "200" ])
+   | `Next _ | `Save _ -> assert false);
+  let _, current, current_digest = launch t |> Or_error.ok_exn in
+  assert (S.Selection.equal saved current);
+  assert (String.equal digest current_digest)
+;;
+
+let%test_unit "saved inputs follow the current subset and reset on suite or digest change" =
+  let s = Test_data.suite in
+  let other = { s with id = "other" } in
+  let snapshot = Test_data.snapshot [ s; other ] in
+  let t = update empty snapshot in
+  let _, defaults, _ = launch t |> Or_error.ok_exn in
+  let saved =
+    { defaults with cases = [ "seeded" ]; seed = "91"; parameters = [ "cycles", "200" ] }
+  in
+  let t = save_configuration t saved in
+  let selection t =
+    let _, selection, _ = launch t |> Or_error.ok_exn in
+    selection
+  in
+  assert (S.Selection.equal (selection (update t snapshot)) saved);
+  let t = select_all t in
+  assert (S.Selection.equal (selection t) { saved with cases = defaults.cases });
+  assert (S.Selection.equal (selection (select_suite (select_suite t "other") s.id)) defaults);
+  let refreshed = update t (Test_data.snapshot ~digest:"d2" [ s; other ]) in
+  assert (Or_error.is_error (launch refreshed));
+  assert (S.Selection.equal (selection (accept refreshed)) defaults);
+  let changed = { s with default_seed = "70" } in
+  assert (
+    S.Selection.equal
+      (selection (accept (update t (Test_data.snapshot [ changed; other ]))))
+      (Simulation_view.selection changed))
 ;;
 
 let%test_unit "refresh never retargets missing suite case or changed defaults" =

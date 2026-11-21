@@ -3828,6 +3828,11 @@ let main_hint_text host =
   | None
     when Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind "timing")
     -> "Space c c | Tab focus | Enter paths | d details | r refresh | Esc back | q exit"
+  | None
+    when Option.exists (H.focused host) ~f:(fun tile ->
+      String.equal tile.kind "simulation-catalog") ->
+    "R run checked cases | e edit settings | Enter review | x toggle case | n/p suite | \
+     Space c c commands"
   | None ->
     "Space c c commands | Tab/Shift-Tab focus | j/k browse | Enter inspect | F8 details | \
      q exit"
@@ -4005,9 +4010,10 @@ let palette_controls host (p : H.palette) =
   | Some (Workload_bundle _ | Workload_path | Resource_path _ | Finalization_attempt _) ->
     submit "Read" nonblank
   | Some (Acceptance _) -> submit "Submit" nonblank
-  | Some (Simulation_selection (_, _, _, form)) ->
-    (match Simulation_view.Form.accept form p.query with
+   | Some (Simulation_selection (_, _, _, form) | Catalog_configuration (_, _, form)) ->
+     (match Simulation_view.Form.accept form p.query with
      | Ok (`Launch _) -> submit "Launch" true
+     | Ok (`Save _) -> submit "Save" true
      | Ok (`Next _) -> submit "Next" true
      | Error _ -> submit "Next" false)
   | Some (Preparation_inputs (flow, profile) | Plan_endpoint (flow, profile)) ->
@@ -4108,8 +4114,10 @@ let palette_page host dimensions =
         ^ " - exact returned attempt; Enter imports; Esc closes"
       | Some (H.Acceptance (run, _, _)) ->
         "FINALIZE AND ACCEPT " ^ run_label run ^ " — Enter submits; Esc closes"
-      | Some (H.Simulation_selection _) ->
-        "SIMULATION LAUNCH FORM — explicit inputs; Enter accepts each field"
+       | Some (H.Simulation_selection _) ->
+         "SIMULATION LAUNCH FORM — explicit inputs; Enter accepts each field"
+       | Some (H.Catalog_configuration _) ->
+         "CATALOG CONFIGURATION — Enter accepts each field; save without running"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "ip.empty") ->
         "NEW IP LIBRARY — choose template"
       | None when List.exists p.commands ~f:(fun c -> String.equal c.id "chip.example") ->
@@ -4128,7 +4136,7 @@ let palette_page host dimensions =
     in
     let query =
       match p.argument with
-      | Some (H.Simulation_selection _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
+       | Some (H.Simulation_selection _ | H.Catalog_configuration _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
         let input =
           "> "
           ^ p.query
@@ -4183,7 +4191,7 @@ let palette_page host dimensions =
         ; "Uses _flow_tools and _flow_results/workbench/asic under the project root."
         ; "No build or EDA runs. Reopen with a fresh daemon to discover flows."
         ] |> List.concat_map ~f:(wrap_cells ~width)
-      | Some (H.Simulation_selection (_, _, _, form)) ->
+       | Some (H.Simulation_selection (_, _, _, form) | H.Catalog_configuration (_, _, form)) ->
         Simulation_view.Form.help form |> List.concat_map ~f:(wrap_cells ~width)
       | Some (H.Acceptance _) ->
         [ "Acceptance S-expression (≤4096 UTF-8 bytes; quote paths with spaces):"

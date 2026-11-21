@@ -126,6 +126,8 @@ type session =
   ; mutable retained_reads : Terminal_presentation.Retained_hydration.t
   ; mutable simulation_discovery :
       Terminal_presentation.Retained_hydration.Simulation_discovery.t
+  ; mutable simulation_launches_pending :
+      (Http.Client.t * Project_id.t * string * Simulation.Selection.t) list
   ; navigation_loaded : Terminal_presentation.Retained_hydration.Load.t
   ; mutable navigation_pending : Terminal_presentation.Navigation_preferences.t option
   ; mutable navigation_saved : string option
@@ -347,6 +349,7 @@ let create_session
       ; retained_reads = Terminal_presentation.Retained_hydration.create ()
       ; simulation_discovery =
           Terminal_presentation.Retained_hydration.Simulation_discovery.create ()
+      ; simulation_launches_pending = []
       ; navigation_loaded = Terminal_presentation.Retained_hydration.Load.create ()
       ; navigation_pending = None
       ; navigation_saved = None
@@ -2285,7 +2288,7 @@ let initialize_host_layout session =
   | None -> return ()
 ;;
 
-let simulation_request session tile_id (operation : Simulation.Operation.t) =
+let simulation_request_unchecked session tile_id (operation : Simulation.Operation.t) =
   match current_project session with
   | None -> return ()
   | Some project ->
@@ -2391,6 +2394,43 @@ let simulation_request session tile_id (operation : Simulation.Operation.t) =
            return ())
       | _ -> return ())
     else return ()
+;;
+
+let simulation_request session tile (operation : Simulation.Operation.t) =
+  match operation, current_project session with
+  | Launch { discovery_digest; selection; _ }, Some project ->
+    (* Form confirmation and quick run share this guard. The view's busy flag is
+       unsuitable: unrelated background observations also set and clear it.
+        Parameter bindings are keyed; preserve the requested case order. *)
+    let client = session.client in
+    let canonical =
+      { selection with
+        parameters = List.sort selection.parameters ~compare:[%compare: string * string]
+      }
+    in
+    let pending (owner, id, digest, inputs) =
+      phys_equal owner client
+      && Project_id.equal id project.id
+      && String.equal digest discovery_digest
+      && Simulation.Selection.equal inputs canonical
+    in
+    if List.exists session.simulation_launches_pending ~f:pending
+    then (
+      session.host
+      <- { session.host with notice = "Simulation launch already in flight; duplicate ignored" };
+      return ())
+    else (
+      session.simulation_launches_pending
+      <- (client, project.id, discovery_digest, canonical)
+         :: session.simulation_launches_pending;
+      Monitor.protect
+        ~run:`Now
+        ~finally:(fun () ->
+          session.simulation_launches_pending
+          <- List.filter session.simulation_launches_pending ~f:(Fn.non pending);
+          return ())
+        (fun () -> simulation_request_unchecked session tile operation))
+  | _ -> simulation_request_unchecked session tile operation
 ;;
 
 let refresh_simulation session =
@@ -4785,6 +4825,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; retained_reads = Terminal_presentation.Retained_hydration.create ()
     ; simulation_discovery =
         Terminal_presentation.Retained_hydration.Simulation_discovery.create ()
+    ; simulation_launches_pending = []
     ; navigation_loaded = Terminal_presentation.Retained_hydration.Load.create ()
     ; navigation_pending = None
     ; navigation_saved = None
@@ -6368,10 +6409,56 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               notice = "Suite no longer available; reopen the Testing suite chooser"
             };
        Effect.Ignore
-    | Testing_launch_unavailable reason ->
-      session.host <- { session.host with notice = reason };
-      Effect.Ignore
-    | Testing_launch (tile, launch) ->
+     | Testing_launch_unavailable reason ->
+       session.host <- { session.host with notice = reason };
+       Effect.Ignore
+     | Quick_launch_catalog tile ->
+       let focused_catalog () =
+         Option.exists (Host.focused session.host) ~f:(fun catalog ->
+           Workspace.Tile_id.equal catalog.id tile
+           && String.equal catalog.kind "simulation-catalog")
+       in
+       (if not (focused_catalog ())
+        then (
+          session.host <- { session.host with notice = "Testing catalog changed; run again" };
+          Effect.Ignore)
+        else
+          (match Host.testing_launch_action session.host tile with
+           | Testing_launch (_, launch) ->
+             let instance = session.hello.instance_id in
+             async (fun () ->
+               let validation =
+                 let open Or_error.Let_syntax in
+                 let%bind () =
+                   if focused_catalog ()
+                   then Host.validate_testing_launch session.host tile launch
+                   else Or_error.error_string "Testing catalog changed; run again"
+                 in
+                 if V1.Daemon_instance_id.equal instance session.hello.instance_id
+                    && Option.exists (current_project session) ~f:(fun project ->
+                      String.equal launch.scope (Project_id.to_string project.id))
+                 then Ok ()
+                 else Or_error.error_string "Testing project or daemon changed; run again"
+               in
+               match validation with
+               | Error error ->
+                 session.host <- { session.host with notice = Error.to_string_hum error };
+                 return ()
+               | Ok () ->
+                 let { Host.selection; digest; _ } = launch.inputs in
+                 simulation_request
+                   session
+                   tile
+                   (Launch
+                      { submission_key = submission_key "simulation"
+                      ; discovery_digest = digest
+                      ; selection
+                      }))
+           | Testing_launch_unavailable reason ->
+             session.host <- { session.host with notice = reason };
+             Effect.Ignore
+           | _ -> assert false))
+     | Testing_launch (tile, launch) ->
       (match Host.validate_testing_launch session.host tile launch with
        | Error error ->
          session.host <- { session.host with notice = Error.to_string_hum error }
@@ -8475,6 +8562,11 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
      | Some (Character 't') -> dispatch "project.test"
      | Some (Character 'i') -> dispatch "project.discover"
      | Some (Character 's') -> dispatch "synthesis.cycle-sort"
+     | Some (Character 'e')
+       when Option.exists (Host.focused session.host) ~f:(fun tile ->
+              String.equal tile.kind "simulation-catalog") ->
+       (* The Catalog reducer owns local configuration, including disabled notices. *)
+       Some Effect.Ignore
      | Some (Character 'e') ->
        (match Host.focused session.host with
         | Some tile when Terminal_result_view.supports tile.kind ->

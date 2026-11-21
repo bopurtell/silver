@@ -188,6 +188,7 @@ type action =
   | Simulation_waveform_workspace of Simulation.Artifact.t
   | Waveform_control of string * Simulation.Artifact.t
   | Testing_launch of W.Tile_id.t * testing_launch
+  | Quick_launch_catalog of W.Tile_id.t
   | Testing_launch_unavailable of string
   | Testing_browse_suites
   | Testing_select_suite of W.Tile_id.t * unit ref * string
@@ -242,6 +243,7 @@ type argument =
   | Workload_bundle of bool * Workloads_view.capture_token
   | Acceptance of Run_ref.t * string * string
   | Simulation_selection of W.Tile_id.t * string * string * Simulation_view.Form.t
+  | Catalog_configuration of W.Tile_id.t * testing_launch * Simulation_view.Form.t
 
 type restore_ticket =
   { intent : unit ref
@@ -771,10 +773,10 @@ let capture_testing_inputs catalog =
     { suite; selection; digest })
 ;;
 
-let validate_testing_inputs catalog captured =
+let validate_testing_inputs ?(reopen = "reopen the launch command") catalog captured =
   match capture_testing_inputs catalog with
   | Error error ->
-    Or_error.error_string (Error.to_string_hum error ^ "; reopen the launch command")
+    Or_error.error_string (Error.to_string_hum error ^ "; " ^ reopen)
   | Ok current ->
     if Simulation.Suite.equal captured.suite current.suite
        && Simulation.Selection.equal captured.selection current.selection
@@ -782,7 +784,7 @@ let validate_testing_inputs catalog captured =
     then Ok ()
     else
       Or_error.error_string
-        "Catalog choices or discovery changed; reopen the launch command"
+        ("Catalog choices or discovery changed; " ^ reopen)
 ;;
 
 let testing_launch_action t id =
@@ -796,15 +798,15 @@ let testing_launch_action t id =
     Testing_launch_unavailable "No current Testing catalog; reopen the launch command"
 ;;
 
-let validate_testing_launch t id captured =
+let validate_testing_launch ?(reopen = "reopen the launch command") t id captured =
   match simulation_tile t id, testing t id with
   | Some tile, Some (identity, scope, state)
     when phys_equal captured.identity identity
          && String.equal captured.scope scope
          && W.Workspace_id.equal captured.workspace tile.workspace ->
-    validate_testing_inputs (Testing_workspace.catalog state) captured.inputs
+    validate_testing_inputs ~reopen (Testing_workspace.catalog state) captured.inputs
   | _ ->
-    Or_error.error_string "Testing workspace identity changed; reopen the launch command"
+    Or_error.error_string ("Testing workspace identity changed; " ^ reopen)
 ;;
 
 let set_filter t id filter =
@@ -1278,7 +1280,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-      | Some { argument = Some (Simulation_selection _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
+       | Some { argument = Some (Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -5200,13 +5202,15 @@ let finalization_form t =
         | Workload_path
         | Workload_bundle _
         | Acceptance _
-        | Simulation_selection _ ) -> true
+         | Simulation_selection _
+         | Catalog_configuration _ ) -> true
     | _ -> false)
 ;;
 
 let reference_limit t =
   match Option.bind t.palette ~f:(fun p -> p.argument) with
-  | Some (Simulation_selection (_, _, _, form)) when form.field = 0 -> 256 * 1024
+  | Some (Simulation_selection (_, _, _, form) | Catalog_configuration (_, _, form))
+    when form.field = 0 -> 256 * 1024
   | _ -> 4096
 ;;
 
@@ -5705,6 +5709,42 @@ let theme_picker_input t (p : palette) picker event =
     | _ -> t, No_effect)
 ;;
 
+let accept_catalog_configuration t (p : palette) tile launch form =
+  let validation =
+    match simulation_tile t tile with
+    | Some catalog when String.equal catalog.kind "simulation-catalog" ->
+      validate_testing_launch ~reopen:"reopen Catalog configuration with e" t tile launch
+    | _ ->
+      Or_error.error_string "Testing Catalog changed; reopen Catalog configuration with e"
+  in
+  match validation with
+  | Error error -> { t with palette = None; notice = Error.to_string_hum error }, No_effect
+  | Ok () ->
+    (match Simulation_view.Form.accept form p.query with
+     | Error error ->
+       { t with notice = "Invalid typed input: " ^ Error.to_string_hum error }, No_effect
+     | Ok (`Next form) ->
+       ( { t with
+           notice = ""
+         ; palette =
+             Some
+               { p with
+                 query = Simulation_view.Form.query form
+               ; argument = Some (Catalog_configuration (tile, launch, form))
+               }
+         }
+       , No_effect )
+     | Ok (`Save selection) ->
+       let t =
+         update_testing t tile (fun state ->
+           Testing_workspace.update_catalog state (fun catalog ->
+             Simulation_catalog.save_configuration catalog selection))
+       in
+       { t with palette = None; notice = "Catalog inputs saved locally; no run started" }
+       , No_effect
+     | Ok (`Launch _) -> assert false)
+;;
+
 let input t event ~commands : t * effect =
   match event with
   | Paste_start -> { t with paste = true; prefix = 0 }, No_effect
@@ -5791,7 +5831,8 @@ let input t event ~commands : t * effect =
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
-                   | Simulation_selection _ ) -> String.length p.query >= 4096
+                    | Simulation_selection _
+                    | Catalog_configuration _ ) -> String.length p.query >= 4096
                 | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false ->
           { t with notice = "Finalization reference is limited to 4096 bytes" }, No_effect
         | Character ch ->
@@ -5828,7 +5869,7 @@ let input t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                          | Simulation_selection _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
+                           | Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
                          | _ -> false))
           then
             ( { t with
@@ -5843,18 +5884,24 @@ let input t event ~commands : t * effect =
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
-                      | Simulation_selection _ ) ->
+                       | Simulation_selection _
+                       | Catalog_configuration _ ) ->
                     String.length p.query > reference_limit t
                    | None | Some (Theme_picker _ | Run_endpoint _ | Plan_endpoint _ | Preparation_inputs _) -> false
           then
             ( { t with notice = "Finalization reference is limited to 4096 bytes" }
             , No_effect )
-          else (
-            let operation =
+           else (
+             match p.argument with
+             | Some (Catalog_configuration (tile, launch, form)) ->
+               accept_catalog_configuration t p tile launch form
+             | _ ->
+             let operation =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
-                  | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _ -> assert false
+                   | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
+                   | Catalog_configuration _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
                   | Flow_field field -> Flow_step (Flow_authoring.accept field p.query)
                   | Chip_directory ->
@@ -5887,9 +5934,10 @@ let input t event ~commands : t * effect =
                   (match Simulation_view.Form.accept form p.query |> Or_error.ok_exn with
                    | `Next form ->
                      Simulation_edit (tile, discovery_digest, submission_key, form)
-                   | `Launch selection ->
-                     Simulation
-                       (tile, Launch { submission_key; discovery_digest; selection }))
+                    | `Launch selection ->
+                      Simulation
+                        (tile, Launch { submission_key; discovery_digest; selection })
+                    | `Save _ -> assert false)
                 | (Run_endpoint (flow, profile) | Plan_endpoint (flow, profile) | Preparation_inputs (flow, profile)) as
                   argument ->
                   let selection =
@@ -6223,6 +6271,34 @@ let input t event ~commands : t * effect =
           let t = update_testing t tile.id (fun _ -> state) in
           let local = local t tile.id in
           set_local t tile.id { local with follow = true }, No_effect
+         | Character 'e', 0
+           when Option.exists (focused t) ~f:(fun tile ->
+                  String.equal tile.kind "simulation-catalog") ->
+           let tile = Option.value_exn (focused t) in
+           (match capture t, testing_launch_action t tile.id with
+            | Some capture, Testing_launch (_, launch) ->
+              let { suite; selection; _ } = launch.inputs in
+              let form = Simulation_view.Form.create ~configure:true ~selection suite in
+              { t with
+                notice = ""
+              ; palette =
+                  Some
+                    { capture
+                    ; commands = []
+                    ; query = Simulation_view.Form.query form
+                    ; index = 0
+                    ; argument = Some (Catalog_configuration (tile.id, launch, form))
+                    }
+              }, No_effect
+            | _, Testing_launch_unavailable notice -> { t with notice }, No_effect
+            | _ -> t, No_effect)
+         | Character 'R', 0
+          when Option.exists (focused t) ~f:(fun tile ->
+                 String.equal tile.kind "simulation-catalog") ->
+          let tile = Option.value_exn (focused t) in
+          (match capture t with
+           | None -> t, No_effect
+           | Some capture -> t, Execute (capture, Quick_launch_catalog tile.id))
         | Enter, _
           when Option.exists (focused t) ~f:(fun tile ->
                  String.equal tile.kind "simulation-catalog") ->
@@ -6556,6 +6632,163 @@ let%test_unit "catalog reducer browses filters and captures subset without launc
       (Error "obsolete observation")
   in
   assert (Option.is_none (Testing_workspace.view late).error)
+;;
+
+let%test_unit "catalog quick launch is focused and respects input modes" =
+  let s = W.initial ~session_id:(W.Session_id.of_string "testing-quick-launch") in
+  let workspace = List.hd_exn s.workspaces in
+  let s =
+    W.apply
+      s
+      (Mutate
+         { expected_revision = s.revision
+         ; mutation = P.Definition.apply P.Testing.definition ~workspace:workspace.id
+         })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let host = receive empty s in
+  let catalog =
+    List.find_exn (tiles host) ~f:(fun tile -> String.equal tile.kind "simulation-catalog")
+  in
+  let host = { host with focus = Some catalog.id } in
+  let quick =
+    decode_event (Key_press { key = ASCII 'r'; mods = [ Shift ] }) |> Option.value_exn
+  in
+  let step host event =
+    match input host event ~commands:[] with
+    | host, No_effect -> host
+    | _ -> assert false
+  in
+  (match input host quick ~commands:[] with
+   | unchanged, Execute (captured, Quick_launch_catalog id) ->
+     assert (phys_equal unchanged host);
+     assert (W.Tile_id.equal id catalog.id);
+     assert (Poly.equal (Some captured) (capture host))
+   | _ -> assert false);
+  ignore (step host (Character 'r') : t);
+  ignore (step host (Text "R") : t);
+  ignore (step { host with focus = None } quick : t);
+  List.iter (tiles host) ~f:(fun tile ->
+    if not (W.Tile_id.equal tile.id catalog.id)
+    then ignore (step { host with focus = Some tile.id } quick : t));
+  let filtered = step (step host (Character '/')) quick in
+  assert (filtered.editing_filter && String.equal (local filtered catalog.id).filter "R");
+  let palette =
+    List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun h c -> step h (Character c))
+  in
+  let palette = step palette quick |> fun h -> Option.value_exn h.palette in
+  assert (String.equal palette.query "R");
+  let menu = step host (Open_menu Project_menu) in
+  let menu = step (step menu (Character '/')) quick |> fun h -> Option.value_exn h.menu in
+  assert (menu.filtering && String.equal menu.query "R");
+  let pasting = step host Paste_start in
+  assert (phys_equal (step pasting quick) pasting);
+  let prefixed = step host (Character ' ') in
+  assert ((step prefixed quick).prefix = 0)
+;;
+
+let%test_unit "catalog configuration saves locally and rejects stale form or workspace" =
+  let apply s mutation =
+    W.apply s (Mutate { expected_revision = s.W.Snapshot.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let s = W.initial ~session_id:(W.Session_id.of_string "testing-configuration") in
+  let first = List.hd_exn s.workspaces
+  and second = List.last_exn s.workspaces in
+  let s = apply s (P.Definition.apply P.Testing.definition ~workspace:first.id) in
+  let s = apply s (P.Definition.apply P.Testing.definition ~workspace:second.id) in
+  let catalog workspace =
+    List.find_exn s.tiles ~f:(fun tile ->
+      W.Workspace_id.equal tile.workspace workspace
+      && String.equal tile.kind "simulation-catalog")
+  in
+  let tile = catalog first.id and other = catalog second.id in
+  let suite : Simulation.Suite.t =
+    { id = "fifo"
+    ; label = "FIFO"
+    ; cases = [ { id = "a"; label = "A" }; { id = "b"; label = "B" } ]
+    ; default_seed = "42"
+    ; parameters =
+        [ { key = "mode"; label = "Mode"; default = "fast"; choices = [ "fast"; "slow" ] } ]
+    }
+  in
+  let snapshot : Simulation.Snapshot.t =
+    { configured = true
+    ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; discovery_digest = Some "digest"
+    ; discovery_job = None
+    ; discovery_error = None
+    ; attempts = []
+    ; next_before = None
+    ; history_error = None
+    ; detail = None
+    ; byte_page = None
+    }
+  in
+  let update host tile snapshot =
+    update_testing host tile (fun state ->
+      Testing_workspace.receive state ~ticket:0 ~selected:None Get (Ok snapshot))
+  in
+  let host = update (receive empty s) tile.id snapshot in
+  let host = update { host with focus = Some tile.id } other.id snapshot in
+  let step host event =
+    match input host event ~commands:[] with
+    | host, No_effect -> host
+    | _ -> assert false
+  in
+  let query host = (Option.value_exn host.palette).query in
+  let field host text =
+    step (step (step host Clear_filter) (Text text)) Enter
+  in
+  let selection host tile =
+    let catalog = Testing_workspace.catalog (testing_state host tile) in
+    let _, selection, _ = Simulation_catalog.launch catalog |> Or_error.ok_exn in
+    selection
+  in
+  let defaults = selection host tile.id in
+  let open_form = step host (Character 'e') in
+  assert (String.equal (query open_form) "a b");
+  let editing = field open_form "b" in
+  assert (String.equal (query editing) "42");
+  let invalid = field editing "01" in
+  assert (String.is_substring invalid.notice ~substring:"canonical decimal");
+  let editing = field editing "91" in
+  assert (String.equal (query editing) "fast");
+  let invalid = field editing "unknown" in
+  assert (String.is_substring invalid.notice ~substring:"Invalid parameter mode");
+  let confirming = field editing "slow" in
+  assert (String.equal (query confirming) "save");
+  let cancelled = step confirming Escape in
+  assert (Simulation.Selection.equal (selection cancelled tile.id) defaults);
+  let saved = step confirming Enter in
+  assert (Option.is_none saved.palette);
+  assert (not (simulation saved tile.id).busy && (simulation saved tile.id).request = 0);
+  assert (
+    Simulation.Selection.equal
+      (selection saved tile.id)
+      { defaults with cases = [ "b" ]; seed = "91"; parameters = [ "mode", "slow" ] });
+  assert (Simulation.Selection.equal (selection saved other.id) defaults);
+  let reopened = step saved (Character 'e') in
+  assert (String.equal (query reopened) "b");
+  let reopened = step reopened Enter in
+  assert (String.equal (query reopened) "91");
+  assert (String.equal (query (step reopened Enter)) "slow");
+  let stale =
+    update confirming tile.id { snapshot with discovery_digest = Some "changed" }
+  in
+  let rejected = step stale Enter in
+  assert (Option.is_none rejected.palette);
+  assert (String.is_substring rejected.notice ~substring:"Catalog changed");
+  let accepted =
+    update_testing rejected tile.id (fun state ->
+      Testing_workspace.update_catalog state Simulation_catalog.accept)
+  in
+  assert (Simulation.Selection.equal (selection accepted tile.id) defaults);
+  let switched = step { confirming with active = Some second.id; focus = Some other.id } Enter in
+  assert (Option.is_none switched.palette);
+  assert (Simulation.Selection.equal (selection switched other.id) defaults)
 ;;
 
 let%test_unit "catalog launch captures exact inputs and rejects changed catalog choices" =

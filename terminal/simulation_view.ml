@@ -126,14 +126,20 @@ module Form = struct
     { suite : S.Suite.t
     ; selection : S.Selection.t
     ; field : int
+    ; configure : bool
     }
 
-  let create ?selection:captured suite =
-    { suite; selection = Option.value captured ~default:(selection suite); field = 0 }
+  let create ?(configure = false) ?selection:captured suite =
+    { suite
+    ; selection = Option.value captured ~default:(selection suite)
+    ; field = 0
+    ; configure
+    }
   ;;
 
   let parameter t = List.nth t.suite.parameters (t.field - 2)
   let confirming t = t.field >= 2 + List.length t.suite.parameters
+  let confirmation t = if t.configure then "save" else "launch"
 
   let query t =
     if t.field = 0
@@ -141,7 +147,7 @@ module Form = struct
     else if t.field = 1
     then t.selection.seed
     else if confirming t
-    then "launch"
+    then confirmation t
     else (
       let p = Option.value_exn (parameter t) in
       List.Assoc.find_exn t.selection.parameters p.key ~equal:String.equal)
@@ -153,7 +159,10 @@ module Form = struct
     else if t.field = 1
     then "SEED — canonical unsigned 64-bit decimal"
     else if confirming t
-    then "CONFIRM — type launch and Enter to submit captured inputs on current project"
+    then (
+      if t.configure
+      then "SAVE — Enter saves inputs locally without running"
+      else "CONFIRM — type launch and Enter to submit captured inputs on current project")
     else (
       let p = Option.value_exn (parameter t) in
       "PARAMETER "
@@ -169,9 +178,13 @@ module Form = struct
   let help t =
     [ "Suite: " ^ t.suite.id ^ " — " ^ t.suite.label
     ; label t
-    ; "Ctrl-U clears; Ctrl-BS/Ctrl-W word; Backspace edits; Enter accepts field; Esc \
-       abandons form"
     ]
+    @ (if t.configure && t.field > 0 && not (confirming t)
+       then [ "Selected cases: " ^ String.concat ~sep:" " t.selection.cases ]
+       else [])
+    @ [ "Ctrl-U clears; Ctrl-BS/Ctrl-W word; Backspace edits; Enter accepts field; Esc \
+         abandons form"
+      ]
     @
     if t.field = 0
     then
@@ -212,9 +225,9 @@ module Form = struct
         else Ok { t.selection with seed = query })
       else if confirming t
       then
-        if String.equal query "launch"
+        if String.equal query (confirmation t)
         then Ok t.selection
-        else Or_error.error_string "Type launch to confirm"
+        else Or_error.error_string ("Type " ^ confirmation t ^ " to confirm")
       else (
         let p = Option.value_exn (parameter t) in
         if String.length query > S.Limits.string_bytes
@@ -229,7 +242,8 @@ module Form = struct
             })
     in
     if confirming t
-    then Ok (`Launch selection)
+    then
+      if t.configure then Ok (`Save selection) else Ok (`Launch selection)
     else Ok (`Next { t with selection; field = t.field + 1 })
   ;;
 end
@@ -582,7 +596,7 @@ let%test_unit "launch wizard captures explicit cases uint64 seed and declared pa
   let next f q =
     match Form.accept f q |> Or_error.ok_exn with
     | `Next f -> f
-    | `Launch _ -> assert false
+    | `Launch _ | `Save _ -> assert false
   in
   let f = next f "b" in
   List.iter [ "-1"; "01"; "18446744073709551616"; "1.0" ] ~f:(fun q ->
@@ -592,7 +606,7 @@ let%test_unit "launch wizard captures explicit cases uint64 seed and declared pa
   let f = next f "slow" |> fun f -> next f "" in
   assert (Form.confirming f);
   match Form.accept f "launch" |> Or_error.ok_exn with
-  | `Next _ -> assert false
+  | `Next _ | `Save _ -> assert false
   | `Launch s ->
     assert (List.equal String.equal s.cases [ "b" ]);
     assert (String.equal s.seed "18446744073709551615");
@@ -766,7 +780,7 @@ let%test_unit "launch form starts from exact catalog subset and captured default
   let next f =
     match Form.accept f (Form.query f) |> Or_error.ok_exn with
     | `Next f -> f
-    | `Launch _ -> assert false
+    | `Launch _ | `Save _ -> assert false
   in
   let form = next form in
   assert (String.equal (Form.query form) "99");
@@ -774,5 +788,5 @@ let%test_unit "launch form starts from exact catalog subset and captured default
   assert (String.equal (Form.query form) "captured");
   match Form.accept (next form) "launch" |> Or_error.ok_exn with
   | `Launch actual -> assert (S.Selection.equal actual captured)
-  | `Next _ -> assert false
+  | `Next _ | `Save _ -> assert false
 ;;

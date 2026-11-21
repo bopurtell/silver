@@ -31,7 +31,12 @@ val accept : t -> t
 
 val disabled_reason : t -> string option
 
-(** Captures exact suite, subset, declared defaults and digest for Form.create. *)
+(** Applies the validated case selection and saves seed/parameter values for the current suite
+    and digest. The caller must validate the captured form and its workspace first. *)
+val save_configuration : t -> Simulation.Selection.t -> t
+
+(** Captures the exact suite, subset, effective seed/parameters and digest.
+    The editable form uses these as initial inputs; quick run submits them as-is. *)
 val launch : t -> (Simulation.Suite.t * Simulation.Selection.t * string) Or_error.t
 
 val rows : ?string_compression:bool -> t -> Simulation_view.row list
