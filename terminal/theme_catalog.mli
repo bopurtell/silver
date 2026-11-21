@@ -1,6 +1,13 @@
 (** Packed 24-bit terminal color, [0xRRGGBB]. *)
 type rgb = int
 
+(** Extra role-specific text colors for monitor-inspired themes in Vivid mode. *)
+type monitor_inks =
+  { selected : rgb
+  ; running : rgb
+  ; search_match : rgb
+  }
+
 type palette =
   { background : rgb
   ; foreground : rgb
@@ -16,6 +23,7 @@ type palette =
   ; warning : rgb
   ; failure : rgb
   ; heading : rgb
+  ; monitor : monitor_inks option
   }
 
 type t
@@ -32,7 +40,7 @@ val neon : t
 val silver_dark : t
 val silver_light : t
 
-(** Original Silver themes first, followed by legacy Silver and Cobalt imports. *)
+(** Silver themes first, followed by btop, legacy Silver and Cobalt themes. *)
 val all : t list
 
 (** Case-insensitive stable ID lookup. Spaces and underscores become hyphens. *)

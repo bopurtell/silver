@@ -16,6 +16,9 @@ from support.terminal import Terminal
 PICKER = "Choose theme"
 DARK = "Silver Dark"
 LIGHT = "Silver Light"
+BTOP_DEFAULT = "btop Default"
+BTOP_KANAGAWA = "btop Kanagawa Wave"
+BTOP_FLEXOKI = "btop Flexoki Light"
 ACTIVE = " [active]"
 NO_MATCHES = "No matching themes"
 PROJECT_BACKGROUND = re.compile(rb"\x1b\[(?:\d+;)*48;2;(\d+;\d+;\d+)mProject: ")
@@ -72,6 +75,15 @@ def exercise(client, base):
         send(term, b"q")
         assert term.process.wait(timeout=5) == 0
 
+    def wait_for_save(previous, key):
+        deadline = time.monotonic() + 5
+        while (saved := saved_preferences()) == previous:
+            assert time.monotonic() < deadline, "Enter did not save presentation preferences"
+            time.sleep(.05)
+        (contents, _, _), = saved.values()
+        assert f"(scheme {key})".encode() in contents, contents
+        return saved
+
     with launch(base / "first") as term:
         term.capture("startup", ["Overview", "Connection: connected", "Project: theme_test"])
         dark_background = background(term)
@@ -93,15 +105,7 @@ def exercise(client, base):
         send(term, b"\r")
         term.capture("preview-applied", ["Overview"], absent=[PICKER])
         assert background(term) == light_background, "Enter did not retain Silver Light"
-        deadline = time.monotonic() + 5
-        while True:
-            saved = saved_preferences()
-            if saved != untouched:
-                break
-            assert time.monotonic() < deadline, "Enter did not save presentation preferences"
-            term.drain(.1)
-        (contents, _, _), = saved.values()
-        assert b"(scheme silver-light)" in contents, contents
+        saved = wait_for_save(untouched, "silver-light")
         quit_client(term)
 
     with launch(base / "restart") as term:
@@ -128,8 +132,28 @@ def exercise(client, base):
         send(term, b"\x1b")
         term.capture("no-matches-cancelled", ["Overview"], absent=[PICKER])
         assert background(term) == light_background, "Escape did not restore saved Silver Light"
+        assert saved_preferences() == saved, "Restart or inert picker rewrote preferences"
+
+        open_picker(term, LIGHT)
+        send(term, b"btop")
+        term.capture("btop-family", [PICKER, BTOP_DEFAULT, BTOP_KANAGAWA, BTOP_FLEXOKI],
+                     absent=[DARK, LIGHT])
+        send(term, b"-kanagawa-wave")
+        term.capture("btop-preview", [PICKER, f"> {BTOP_KANAGAWA}"],
+                     absent=[BTOP_DEFAULT, BTOP_FLEXOKI])
+        assert background(term) == (22, 22, 29), "Kanagawa Wave did not preview"
+        assert saved_preferences() == saved, "btop preview wrote preferences"
+        send(term, b"\r")
+        term.capture("btop-applied", ["Overview"], absent=[PICKER])
+        assert background(term) == (22, 22, 29), "Kanagawa Wave did not apply"
+        saved = wait_for_save(saved, "btop-kanagawa-wave")
         quit_client(term)
-    assert saved_preferences() == saved, "Restart or inert picker rewrote preferences"
+
+    with launch(base / "btop-restart") as term:
+        term.capture("btop-restart", ["Overview", "Connection: connected"])
+        assert background(term) == (22, 22, 29), "Restart did not load Kanagawa Wave"
+        quit_client(term)
+    assert saved_preferences() == saved, "Restart rewrote btop preferences"
 
 
 if __name__ == "__main__":

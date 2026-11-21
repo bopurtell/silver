@@ -2,6 +2,12 @@ open! Core
 
 type rgb = int
 
+type monitor_inks =
+  { selected : rgb
+  ; running : rgb
+  ; search_match : rgb
+  }
+
 type palette =
   { background : rgb
   ; foreground : rgb
@@ -17,6 +23,7 @@ type palette =
   ; warning : rgb
   ; failure : rgb
   ; heading : rgb
+  ; monitor : monitor_inks option
   }
 
 type t =
@@ -74,6 +81,10 @@ let legible ~is_light ~against ~target color =
   loop 0
 ;;
 
+let text_ink ~is_light ~background ~card ~surface ~selection =
+  legible ~is_light ~against:[ selection; background; card; surface ] ~target:4.5
+;;
+
 let make
   ~key
   ~label
@@ -95,7 +106,7 @@ let make
      on all four grounds, including when a search match is selected. Leave decorative
      borders softer; do not use them for secondary text. *)
   let grounds = [ background; card; surface ] in
-  let text = legible ~is_light ~against:(selection :: grounds) ~target:4.5 in
+  let text = text_ink ~is_light ~background ~card ~surface ~selection in
   let foreground = text foreground in
   { key
   ; label
@@ -115,6 +126,7 @@ let make
       ; warning = text warning
       ; failure = text failure
       ; heading = foreground
+      ; monitor = None
       }
   }
 ;;
@@ -156,6 +168,7 @@ let legacy
       ; warning
       ; failure
       ; heading = 0xffffff
+      ; monitor = None
       }
   }
 ;;
@@ -417,9 +430,88 @@ let cobalt =
   ]
 [@@ocamlformat "disable"]
 
+(* Adapted from btop at 5d03929 (Apache-2.0; https://github.com/aristocratos/btop). Btop's
+   distinct meter/graph hues become Silver's metric, activity and search inks. Silver adds
+   neutral card and surface steps, and adjusts inks for text contrast rather than
+   reproducing the meter gradients. *)
+let btop_theme
+  ~key
+  ~label
+  ~is_light
+  ~background
+  ~foreground
+  ~selection
+  ~muted
+  ~border
+  ~accent
+  ~metric
+  ~success
+  ~warning
+  ~failure
+  ~heading
+  ~monitor
+  =
+  let card = mix background foreground 5 in
+  let surface = mix background foreground 9 in
+  let theme =
+    make
+      ~key
+      ~label
+      ~is_light
+      ~background
+      ~foreground
+      ~surface
+      ~card
+      ~selection
+      ~muted
+      ~border
+      ~accent
+      ~metric
+      ~success
+      ~warning
+      ~failure
+  in
+  let text = text_ink ~is_light ~background ~card ~surface ~selection in
+  { theme with
+    palette =
+      { theme.palette with
+        heading = text heading
+      ; monitor =
+          Some
+            { selected = text monitor.selected
+            ; running = text monitor.running
+            ; search_match = text monitor.search_match
+            }
+      }
+  }
+;;
+
+let btop =
+  [ (* src/btop_theme.cpp: Default_theme, Aristocratos *)
+    btop_theme ~key:"btop-default" ~label:"btop Default" ~is_light:false
+      ~background:0x000000 ~foreground:0xcccccc ~selection:0x6a2f2f ~muted:0x606060
+      ~border:0x556d59 ~accent:0xb54040 ~metric:0xb0a9de ~success:0xb5e685
+      ~warning:0xffd77a ~failure:0xff4769 ~heading:0xeeeeee
+      ~monitor:{ selected = 0xeeeeee; running = 0x74e6fc; search_match = 0xdcafde }
+  ; (* themes/kanagawa-wave.theme, philikarus *)
+    btop_theme ~key:"btop-kanagawa-wave" ~label:"btop Kanagawa Wave" ~is_light:false
+      ~background:0x16161d ~foreground:0xdcd7ba ~selection:0x223249 ~muted:0x727169
+      ~border:0x727169 ~accent:0x7e9cdb ~metric:0x957fbb ~success:0x98bb6c
+      ~warning:0xe6c384 ~failure:0xff5d62 ~heading:0xdcd7ba
+      ~monitor:{ selected = 0xdca561; running = 0x7aa89f; search_match = 0x7fb4ca }
+  ; (* themes/flexoki-light.theme, Steph Ango *)
+    btop_theme ~key:"btop-flexoki-light" ~label:"btop Flexoki Light" ~is_light:true
+      ~background:0xfffcf0 ~foreground:0x343331 ~selection:0xe6e4d9 ~muted:0x6f6e69
+      ~border:0xcecdc3 ~accent:0xbc5215 ~metric:0x5e409d ~success:0x66800b
+      ~warning:0xad8301 ~failure:0xaf3029 ~heading:0x100f0f
+      ~monitor:{ selected = 0x100f0f; running = 0x24837b; search_match = 0xa02f6f }
+  ]
+[@@ocamlformat "disable"]
+
 let all =
   [ silver_dark; silver_light ]
   @ silver_variants
+  @ btop
   @ [ carbon; slate; crimson; neon ]
   @ cobalt
 ;;
@@ -440,7 +532,7 @@ let%test_unit "all Cobalt themes are present, including the disambiguated Crimso
 
 let%test_unit "new palettes keep text readable on every ground, with quieter borders" =
   List.iter
-    ([ silver_dark; silver_light ] @ silver_variants @ cobalt)
+    ([ silver_dark; silver_light ] @ silver_variants @ btop @ cobalt)
     ~f:(fun theme ->
       let p = theme.palette in
       let grounds = [ p.background; p.surface; p.card ] in
@@ -455,6 +547,8 @@ let%test_unit "new palettes keep text readable on every ground, with quieter bor
         ; p.warning
         ; p.failure
         ]
+        @ Option.value_map p.monitor ~default:[] ~f:(fun m ->
+          [ m.selected; m.running; m.search_match ])
       in
       assert (
         Bool.equal theme.is_light Float.(luminance p.background > luminance p.foreground));
@@ -464,4 +558,18 @@ let%test_unit "new palettes keep text readable on every ground, with quieter bor
           if Float.(contrast fg bg < 4.5)
           then failwithf "%s: #%06x on #%06x is below 4.5:1" theme.key fg bg ()));
       assert (Float.(contrast p.selection p.background >= 1.2)))
+;;
+
+let%test_unit "btop monitor inks distinguish focus, selection, activity, search and \
+               metrics"
+  =
+  assert (List.length btop = 3);
+  List.iter btop ~f:(fun theme ->
+    let p = theme.palette in
+    let m = Option.value_exn p.monitor in
+    assert (
+      not
+        (List.contains_dup
+           [ p.accent; m.selected; m.running; m.search_match; p.metric ]
+           ~compare:Int.compare)))
 ;;

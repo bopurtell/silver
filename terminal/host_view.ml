@@ -54,6 +54,11 @@ module Role = struct
       | Selective -> p.selective
       | Vivid -> p.accent
     in
+    let vivid_ink ink ~default =
+      match appearance.color with
+      | Vivid -> Option.value_map p.monitor ~default ~f:ink
+      | Restrained | Selective -> default
+    in
     color
       (match role with
        | Muted | Inactive_tab -> p.muted
@@ -61,10 +66,17 @@ module Role = struct
          (match appearance.color with
           | Vivid -> p.border
           | _ -> p.muted)
-       | Focus | Selection | Active_tab | Running -> accent
-       | Metric | Matched ->
+       | Focus -> accent
+       | Selection | Active_tab -> vivid_ink (fun m -> m.selected) ~default:accent
+       | Running -> vivid_ink (fun m -> m.running) ~default:accent
+       | Metric ->
          (match appearance.color with
           | Vivid -> p.metric
+          | _ -> p.foreground)
+       | Matched ->
+         (match appearance.color with
+          | Vivid ->
+            Option.value_map p.monitor ~default:p.metric ~f:(fun m -> m.search_match)
           | _ -> p.foreground)
        | Success -> p.success
        | Warning -> p.warning
@@ -84,6 +96,20 @@ module Role = struct
     | _ -> []
   ;;
 end
+
+let%test_unit "btop rendering gives each monitor role its own ink in Vivid only" =
+  let scheme = Option.value_exn (Appearance.Scheme.of_key "btop-kanagawa-wave") in
+  let vivid = { Appearance.default with scheme; color = Vivid } in
+  let ink appearance role = Role.foreground appearance role in
+  let roles =
+    [ Role.Focus; Selection; Running; Matched; Metric; Success; Warning; Failure ]
+  in
+  assert (not (List.contains_dup (List.map roles ~f:(ink vivid)) ~compare:Poly.compare));
+  let subdued = { vivid with color = Selective } in
+  assert (Poly.equal (ink subdued Focus) (ink subdued Running));
+  assert (Poly.equal (ink subdued Focus) (ink subdued Selection));
+  assert (Poly.equal (ink subdued Matched) (ink subdued Metric))
+;;
 
 (** Clip the actual terminal image, not UTF-8 bytes. Notty/Bonsai measure display cells,
     including wide and combining characters, before clipping. *)

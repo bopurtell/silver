@@ -96,6 +96,17 @@ compare Cobalt Midnight, Electric, Mist and Frost. Silver's original Carbon,
 Slate, Crimson and Neon keep their colors; **Cobalt Crimson** is the separate
 Cobalt interpretation.
 
+Search `btop` for three palettes adapted from the
+[btop source](https://github.com/aristocratos/btop/tree/5d03929):
+
+- **btop Default** — black and oxblood, with lavender metrics and cyan activity.
+- **btop Kanagawa Wave** — charcoal and indigo, with violet metrics and teal activity.
+- **btop Flexoki Light** — warm paper, with violet metrics and magenta search matches.
+
+Use **Vivid** to see their full range: focus, selection, running states, search
+matches, and metrics each have their own ink, with green, gold, and red reserved
+for success, warnings, and failures.
+
 Scheme is independent of the A–E skin, Vivid/Selective/Restrained color intensity,
 icons and density. It changes the whole current client, including Timing, palette
 and simulation views. Status roles remain distinguishable; original text and
@@ -105,7 +116,7 @@ move tiles, select runs, change pins or invoke providers.
 The highlighted preview is temporary. Accepting a theme saves it for the next
 client start in this project/environment. A fresh client starts in `silver-dark`;
 older appearance files with no scheme field still load Carbon. The palettes
-ship with Silver; using them doesn't require a Cobalt checkout.
+ship with Silver; using them doesn't require a Cobalt or btop checkout.
 
 ## Planned-run tile
 
