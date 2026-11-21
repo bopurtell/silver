@@ -30,9 +30,12 @@ val create_with_detail_cache
 
 (** Parent validates instance/project before calling. Automatic discovery checks
     [preparation_target_compatible] before publishing a changed chip target.
+    [on_target_change] retires direct preparation stages on Main target changes.
+    Independent contexts have their own discovery, preview and staged intent.
     Provider work is scheduled; [Get] observes it. Client detach never cancels work. *)
 val handle
   :  ?preparation_target_compatible:(Asic.Chip_target.t -> bool)
+  -> ?on_target_change:(Asic.Chip_target.t option -> unit)
   -> t
   -> root:string
   -> environment:V1.Environment_selection.t

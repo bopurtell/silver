@@ -982,8 +982,21 @@ esac
                 && Option.equal Asic.Chip_target.equal discovered.chip_target selection.chip_target)
          "Source-only catalog default lost";
        let%bind _ = asic (Select_chip {chip="memory"; variant="fast"}) in
+       let workspace operation = Service.workspace service { instance_id; project; operation } >>| ok in
+       let%bind registry = workspace Get in
+       let w = List.hd_exn registry.workspaces in
+       let inherited = { Asic.Chip_target.chip = "memory"; variant = "fast" } in
+       let%bind registry = workspace (Mutate
+         { expected_revision = registry.revision; mutation = Detach_with_target (w.id, inherited) }) in
+       let context = Workspace.Context_id.to_string (Workspace.workspace registry w.id).context in
+       let%bind observed = Service.asic service { instance_id; project;
+         operation = In_context { context; initial_target=None; operation=Get } } >>| ok in
+       require (Option.equal Asic.Chip_target.equal observed.chip_target (Some inherited))
+         "A seedless observer polling first discarded the registry's detached target";
        let%bind stale = stage () in
        conflict stale "Stale direct target accepted for preparation staging";
+       let%bind stale = launch staged.id "stale-picker" in
+       conflict stale "Preparation launched a receipt after switching chip/variant";
        let jobs = (ok (Service.snapshot service { instance_id })).jobs in
        require
          (!builds = 0
@@ -993,6 +1006,11 @@ esac
           && Hashtbl.is_empty service.artifacts
           && List.is_empty (Sys_unix.ls_dir service.log_dir))
          "Stage/cancel/rejected launches created jobs, tools or logs";
+       let%bind _ = asic (Select_chip (Option.value_exn selection.chip_target)) in
+       let%bind stale = launch staged.id "stale-round-trip" in
+       conflict stale "Switching back revived a superseded preparation receipt";
+       let%bind selected = stage () >>| ok in
+       let staged = Option.value_exn selected.staged in
        let%bind accepted, duplicate =
          Deferred.both (launch staged.id "launch") (launch staged.id "launch")
        in

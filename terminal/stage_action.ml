@@ -37,6 +37,11 @@ let resolve_intent ~intent ~remembered ~observed ~(snapshot : Asic.Snapshot.t op
   let for_target = Launch_preferences.for_target snapshot in
   let open Result.Let_syntax in
   let%bind () =
+    match Option.bind snapshot ~f:Launch_preferences.missing_target with
+    | Some reason -> Error reason
+    | None -> Ok ()
+  in
+  let%bind () =
     match intent with
     | Fresh_endpoint _ -> Ok ()
     | Physical_stage stage ->

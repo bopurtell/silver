@@ -268,10 +268,14 @@ let named_commands host ~asic ~remembered =
          ("Launch "
           ^ endpoint
           ^ " and view"
-          ^ Option.value_map
-              (Launch_preferences.chip_target asic)
-              ~default:""
-              ~f:(fun t -> " — " ^ Launch_preferences.chip_label (Some t))))
+          ^ (match action, Launch_preferences.chip_target asic with
+             | Ok (H.Launch_stage_and_view (_, _, selection)), Some _ ->
+               " — " ^ Launch_preferences.chip_label selection.chip_target
+               ^ " · " ^ selection.flow ^ " / " ^ selection.profile
+             | _, Some target when Option.is_some (Option.bind asic ~f:Launch_preferences.missing_target) ->
+               " — missing " ^ Launch_preferences.chip_label (Some target) ^ "; select chip target"
+             | _, Some target -> " — " ^ Launch_preferences.chip_label (Some target)
+             | _ -> "")))
       ("quick launch " ^ endpoint ^ " fresh stage new run captured context")
       (Result.ok action |> Option.value ~default:H.Unavailable_launch))
 ;;
@@ -306,8 +310,28 @@ let validate_elaboration ~asic ~remembered selection =
     else Error "Elaboration input selection changed; reopen the palette")
 ;;
 
-let commands host ~asic ~remembered =
-  selected_commands host ~asic
+let inspected_run host =
+  match H.focused host with
+  | Some tile -> H.tile_run host tile
+  | None -> workspace_run host
+;;
+
+let commands ?inspected host ~asic ~remembered =
+  (let run = Option.value_or_thunk inspected ~default:(fun () -> inspected_run host) in
+   match run, Option.bind run ~f:(observed_selection asic)
+         |> Option.bind ~f:(fun s -> s.chip_target) with
+   | Some run, Some target ->
+     [ H.command
+         ?unavailable:(if Option.exists asic ~f:(fun s ->
+           Launch_preferences.has_target s target) then None
+           else Some "This run's chip/variant is missing from the current catalog")
+         "asic.use-run-target"
+         (Artifact_view.safe ("Use this run's chip/variant as launch target — "
+          ^ Launch_preferences.chip_label (Some target)))
+         "retarget inspected run evidence"
+         (H.Use_run_target (run, target)) ]
+   | _ -> [])
+  @ selected_commands host ~asic
   @ [ elaboration_command host ~asic ~remembered ]
   @ named_commands host ~asic ~remembered
   @ Option.value_map asic ~default:[] ~f:(fun snapshot ->

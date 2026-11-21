@@ -32,11 +32,10 @@ def wait(term, predicate, label):
             raise AssertionError(f"{label}\n{screen}")
 
 
-def equipment(root, tools):
+def equipment(root, tools, chips=(("alpha", "regular"), ("bravo", "compact"))):
     # The two chips share neither flow nor profile. Each catalog deliberately
     # puts a valid non-default profile first, so an accidental fallback is visible.
-    chips = [("alpha", "regular"), ("bravo", "compact")]
-    (root / "chips.json").write_text(json.dumps(dict(schema_version=1, default_chip="alpha",
+    (root / "chips.json").write_text(json.dumps(dict(schema_version=1, default_chip=chips[0][0],
         chips=[dict(id=c, label=c, default_variant=v, variants=[dict(id=v, label=v)])
                for c, v in chips])))
     for chip, _ in chips:

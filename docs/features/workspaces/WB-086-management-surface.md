@@ -20,6 +20,8 @@ related: [WB-077, WB-085]
 
 # WB-086 — Project management window versus workspace prototype
 
+**Ready to prototype.** The browser's purpose and entry point are settled; its permanent host is deliberately undecided.
+
 ## Request
 Try keeping the larger set of authoring controls outside Overview: compare a separate management window with a dedicated Project workspace.
 
@@ -27,7 +29,15 @@ Try keeping the larger set of authoring controls outside Overview: compare a sep
 Workspace tabs organize views. The proposed compact Project menu gives discoverability without reserving a permanent row of actions, but it may not be the best place to browse and manage many objects.
 
 ## Scope
-Build two bounded interactive demos around the same command IDs, contexts and authoring responses: (A) open a management window while keeping the current workspace, (B) switch to a dedicated Project workspace. Keep the Project menu as an entry point and reference for comparison. A fixture may stand in for the service; neither prototype writes source itself.
+Enter via **Project ▾ → Manage This Project…**. First prototype a dedicated Project workspace; then host the same browser in a separate management window while keeping the current inspection visible. Compare the hosts, not two different command implementations. A fixture may stand in for the service; neither prototype writes source itself.
+
+| Browser selection | Local commands (same bindings as the palette, with object context) |
+| --- | --- |
+| IP libraries → `controlled_fifo` | New Module…, New Chip Target from This IP… |
+| Chip targets → `fifo_demo` | New Flow… with FIFO preselected |
+| `fifo_demo` → `standard` → `balanced` | Duplicate Profile… for `standard/balanced` |
+
+The hierarchy belongs in the browser, not a cascading Project menu. Highlighting an object is inspection only: selecting SRAM to browse its flows does not change the launch target or staged plan. Retargeting requires an explicit action. Reuse WB-077's navigation model: Tab between regions, arrows or counted `j`/`k` within lists, `/` to filter, Enter to choose, Esc to return.
 
 ## Out of scope
 Shipping both UIs, choosing a permanent layout before trying them, or duplicating provider or daemon work.
@@ -35,6 +45,7 @@ Shipping both UIs, choosing a permanent layout before trying them, or duplicatin
 ## Acceptance criteria
 - [ ] Try the same tasks in both: from Testing find New IP Library by mouse; from a selected library create a module by keyboard; preview then cancel a chip creation and resume the original inspection.
 - [ ] At 80 columns compare discoverability, visible destination, keyboard travel and focus restoration. Confirm neither requires a crowded Overview toolbar.
+- [ ] In both hosts, with FIFO the launch target, browse a different chip and invoke New Flow. Assert the wizard receives that chip while FIFO and its staged plan remain unchanged. Compare whether an ongoing run stays visible during management and what it takes to resume inspection.
 - [ ] Record owner feedback and recommend window, workspace, both or neither, with a reason. Keep the palette path available regardless of the outcome.
 
 ## Dependencies

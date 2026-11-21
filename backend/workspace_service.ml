@@ -32,6 +32,20 @@ type t =
 
 let create ~state_dir = { state_dir; projects = String.Table.create () }
 
+let context_seed (snapshot : Workspace.Snapshot.t) context =
+  List.find_map snapshot.contexts ~f:(fun c ->
+    Option.some_if
+      (String.equal (Workspace.Context_id.to_string c.id) context)
+      c.initial_launch_target)
+;;
+
+(* A context ID's detach seed is immutable. Polling it does not need to
+   revalidate every workspace and tile on every ASIC snapshot. *)
+let cached_context_seed t ~project_key context =
+  Option.bind (Hashtbl.find t.projects project_key) ~f:(fun entry ->
+    Option.bind entry.snapshot ~f:(fun snapshot -> context_seed snapshot context))
+;;
+
 let digest value =
   Cryptokit.hash_string (Cryptokit.Hash.sha256 ()) value
   |> Cryptokit.transform_string (Cryptokit.Hexa.encode ())

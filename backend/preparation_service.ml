@@ -64,6 +64,12 @@ let catalog_target_compatible t ~project_key target =
   | _ -> true
 ;;
 
+let target_changed t ~project_key target =
+  Option.iter (Hashtbl.find t.projects project_key) ~f:(fun p ->
+    p.staged <- Option.filter p.staged ~f:(fun stage ->
+      Option.equal Asic.Chip_target.equal stage.receipt.selection.chip_target target))
+;;
+
 let rpc_error kind message = raise (Rpc_error (V1.Error.create kind message))
 
 let load_config root =
@@ -274,7 +280,7 @@ let handle
            then rpc_error Conflict "Submission key already used for a different selection";
            return (snapshot ~requested_attempt:a.value.id availability)
          | None ->
-           if Option.is_none launching then check_target selection;
+           check_target selection;
            (match
               List.find project.attempts ~f:(fun a ->
                 (not unique)

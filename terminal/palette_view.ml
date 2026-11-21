@@ -84,7 +84,9 @@ let result_row
     |> View.hcat
   in
   let title =
-    if List.is_empty fields
+    (* The launch row is a confirmation: don't truncate its destination/profile
+       to show a redundant search alias. *)
+    if List.is_empty fields || (selected && String.is_prefix command.id ~prefix:"stage.launch-view.")
     then title
     else
       box
@@ -107,6 +109,43 @@ let result_row
 
 let overlay ~background ~panel bounds =
   View.zcat [ View.pad ~l:bounds.x ~t:bounds.y panel; background ]
+;;
+
+(* Hit intervals are half-open display-cell coordinates on the very row that
+   paints the label. Inter-button spaces, frame and padding stay inert. *)
+type 'a row =
+  { image : View.t
+  ; spans : (int * int * 'a) list
+  }
+
+let inert image = { image; spans = [] }
+
+let buttons ~width ~attrs controls =
+  let flush views spans rows =
+    if List.is_empty views then rows else
+      { image = View.hcat (List.rev views); spans = List.rev spans } :: rows
+  in
+  let rec pack used views spans rows = function
+    | [] -> List.rev (flush views spans rows)
+    | (label, target) :: rest ->
+      let glyph = View.text ~attrs ("[" ^ label ^ "]") in
+      let size = View.width glyph in
+      let x = if used = 0 then 0 else used + 1 in
+      if used > 0 && x + size > width
+      then pack 0 [] [] (flush views spans rows) ((label, target) :: rest)
+      else
+        let views = if used = 0 then views else View.text " " :: views in
+        pack (x + size) (glyph :: views) ((x, Int.min width (x + size), target) :: spans)
+          rows rest
+  in
+  if width <= 0 then [] else pack 0 [] [] [] controls
+;;
+
+let hit rows ~x ~y =
+  if y < 0 then None else
+    Option.bind (List.nth rows y) ~f:(fun row ->
+      List.find_map row.spans ~f:(fun (left, right, target) ->
+        Option.some_if (left <= x && x < right) target))
 ;;
 
 let%test_unit "centered bounded overlay leaves exact background outside its bounds" =

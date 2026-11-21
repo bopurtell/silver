@@ -44,6 +44,23 @@ let chip_label (target : Asic.Chip_target.t option) =
     t.chip ^ "/" ^ t.variant)
 ;;
 
+let has_target (snapshot : Asic.Snapshot.t) (target : Asic.Chip_target.t) =
+  List.exists snapshot.chips ~f:(fun c ->
+    String.equal c.id target.chip
+    && List.exists c.variants ~f:(fun v -> String.equal v.id target.variant))
+;;
+
+let missing_target (snapshot : Asic.Snapshot.t) =
+  Option.bind snapshot.chip_target ~f:(fun target ->
+    Option.some_if
+      (not (has_target snapshot target)
+       && (not (List.is_empty snapshot.chips)
+           || List.exists snapshot.operations ~f:(fun op ->
+             String.equal op.key "discover" && String.equal op.state "failed")))
+      ("Saved chip/variant " ^ target.chip ^ " / " ^ target.variant
+       ^ " is missing; select a launch target explicitly"))
+;;
+
 let label (s : Asic.Selection.t) =
   sprintf "%s · %s / %s → %s" (chip_label s.chip_target) s.flow s.profile s.endpoint
 ;;

@@ -2189,13 +2189,32 @@ let asic_without_preparation t (request : Asic.Request.t) =
       match Hashtbl.find t.projects request.project with
       | None -> return (error Not_found "Unknown project")
       | Some session ->
-        Asic_service.handle
-          ~preparation_target_compatible:
-            (Preparation_service.catalog_target_compatible t.preparation_service ~project_key:session.key)
-          t.asic_service
-          ~root:session.root
-          ~environment:session.environment
-          request.operation)
+        let handle operation =
+          Asic_service.handle
+            ~preparation_target_compatible:
+              (Preparation_service.catalog_target_compatible t.preparation_service ~project_key:session.key)
+            ~on_target_change:
+              (Preparation_service.target_changed t.preparation_service ~project_key:session.key)
+            t.asic_service
+            ~root:session.root
+            ~environment:session.environment
+            operation
+        in
+        match request.operation with
+        | In_context { context; initial_target; operation } ->
+          (* Detach and first discovery are separate requests. An observer's Get
+             can win that race; use the registry's immutable detach seed rather
+             than letting whichever client polled first choose the target. *)
+          let scoped seed =
+            handle (In_context { context; initial_target = Option.value seed ~default:initial_target; operation })
+          in
+          (match Workspace_service.cached_context_seed t.workspace_service ~project_key:session.key context with
+           | Some _ as seed -> scoped seed
+           | None ->
+             (match%bind Workspace_service.handle t.workspace_service ~project_key:session.key Get with
+              | Error error -> return (Error error)
+              | Ok registry -> scoped (Workspace_service.context_seed registry context)))
+        | operation -> handle operation)
 ;;
 
 let simulation t (request : Simulation.Request.t) =
@@ -2609,14 +2628,15 @@ let preparation_internal
          ~project_key:session.key
          ~environment:session.environment
          ~target_is_current:(fun target ->
-           (* Workflow reservations and Launch_staged pin their inputs. For new
-              direct requests, fence the picker after asynchronous config IO. *)
+           (* Workflow reservations pin their inputs. Direct launches, including
+              a staged receipt, must still match Main after asynchronous config IO. *)
            captured_target
            || not (Option.exists
              (Asic_service.peek_snapshot t.asic_service ~root:session.root ~environment:session.environment)
              ~f:(fun snapshot ->
-               Option.is_some snapshot.chip_target
-               && not (Option.equal Asic.Chip_target.equal snapshot.chip_target target))))
+               Option.exists snapshot.chip_target ~f:(fun current ->
+                 not (Option.equal Asic.Chip_target.equal snapshot.chip_target target)
+                 || not (Asic_public.has_target snapshot.chips current)))))
          ~schedule
          ~import
          ~get_job:(fun id -> Option.map (Hashtbl.find t.jobs id) ~f:(fun e -> e.job))

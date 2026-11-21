@@ -13,6 +13,22 @@ let mutate (s : W.Snapshot.t) mutation =
 
 let geometry : W.Geometry.t = { x = 2; y = 3; width = 35; height = 9 }
 
+let%test_unit "detached context retains the exact initial pair independently of links" =
+  let initial = W.initial ~session_id:(W.Session_id.of_string "target-context") in
+  let workspace = (List.last_exn initial.workspaces).id in
+  let target : Asic.Chip_target.t = { chip = "fifo"; variant = "deep" } in
+  let detached = mutate initial (Detach_with_target (workspace, target)) in
+  let restored = W.Snapshot.t_of_sexp (W.Snapshot.sexp_of_t detached) in
+  let independent = (W.workspace restored workspace).context in
+  assert (not (W.Context_id.equal independent restored.main_context));
+  assert (Option.equal Asic.Chip_target.equal
+            (W.context restored independent).initial_launch_target (Some target));
+  let linked = mutate restored (Link_context { workspace; context = restored.main_context }) in
+  assert (W.Context_id.equal (W.workspace linked workspace).context linked.main_context);
+  assert (Option.is_none (W.context linked linked.main_context).initial_launch_target);
+  assert (W.Context.equal (W.context linked independent) (W.context restored independent))
+;;
+
 let fixture () =
   let s = W.initial ~session_id:(W.Session_id.of_string "restore") in
   let w = List.hd_exn s.workspaces in

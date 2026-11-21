@@ -47,8 +47,8 @@ def exercise(client, base, real_renderer=None):
     session = SimpleNamespace(env=env, evidence=base)
 
     @contextlib.contextmanager
-    def launch(*flags, cwd=start, program=silver):
-        term = Terminal(session, argv=[str(program), *flags], cwd=cwd)
+    def launch(*flags, cwd=start, program=silver, width=120, height=40):
+        term = Terminal(session, argv=[str(program), *flags], cwd=cwd, width=width, height=height)
         try:
             yield term
         finally:
@@ -56,6 +56,15 @@ def exercise(client, base, real_renderer=None):
 
     def send(term, data):
         os.write(term.master, data.encode())
+
+    def point(term, label, button=0, release_only=False):
+        screen = term.capture("pointer-target", [label])
+        y, row = next((i, row) for i, row in enumerate(screen.splitlines(), 1) if label in row)
+        report = f"\x1b[<{button};{row.index(label) + 1};{y}"
+        if not release_only:
+            send(term, report + "M")
+        if button in (0, 2):
+            send(term, report + "m")
 
     def see(term, text, timeout=15):
         deadline = time.monotonic() + timeout
@@ -96,6 +105,35 @@ def exercise(client, base, real_renderer=None):
 
     def untouched():
         assert list(start.iterdir()) == [] and not state.exists()
+
+    # Use a short viewport so that scrolling the visible preview is observable.
+    with launch(width=79, height=17) as term:
+        point(term, "[q] Quit")  # Visible behind the modal but inert.
+        menu(term)
+        point(term, "Esc dismiss")
+        point(term, "[p] Create")
+        point(term, "New Project")
+        send(term, "demo")
+        point(term, "Enter continue")
+        point(term, "Enter preview")
+        first = "First registered chip target"
+        term.capture("pointer-preview", [first])
+        point(term, "Create preview", 65)
+        term.capture("wheel-down", ["Create preview"], absent=[first])
+        point(term, "↑")
+        term.capture("click-up", [first])
+        point(term, "↓")
+        term.capture("click-down", ["Create preview"], absent=[first])
+        point(term, "Create preview", 64)
+        term.capture("wheel-up", [first])
+        point(term, first)  # Body text is not Apply.
+        point(term, "Apply and open", 2)
+        point(term, "Apply and open", release_only=True)
+        term.capture("preview-inert", [first])
+        untouched()
+        point(term, "Esc cancel")
+        term.capture("pointer-cancelled", [unbound], absent=["Create preview"])
+        untouched()
 
     # Match the current rendered screen; the launch dialog is transient and
     # its bytes (and stale preview details) remain in the PTY transcript.
@@ -170,7 +208,7 @@ def exercise(client, base, real_renderer=None):
     with launch() as term:
         form(term, str(base))
         term.capture("denied", ["Destination_denied"])
-        send(term, "\r")
+        point(term, "Enter retry")
         form(term, name="BadName")
         term.capture("bad-name", ["Invalid_operation"])
         dismiss(term, "Invalid_operation")
@@ -202,7 +240,7 @@ def exercise(client, base, real_renderer=None):
         assert unbound.encode() not in term.data
     with launch() as term:
         menu(term)
-        send(term, "o")
+        point(term, "Open existing")
         term.capture("open", ["Existing project directory"])
         send(term, ".\r")
         term.capture("open-error", ["must directly contain"])
@@ -211,7 +249,8 @@ def exercise(client, base, real_renderer=None):
         menu(term)
         send(term, "o")
         term.capture("open-again", ["Existing project directory"])
-        send(term, str(existing) + "\r")
+        send(term, str(existing))
+        point(term, "Enter open")
         dashboard(term, existing.name)
     assert not list(start.iterdir())
     assert (existing / "dune-project").read_text() == "(lang dune 3.10)\n"
@@ -228,7 +267,10 @@ def exercise(client, base, real_renderer=None):
             assert set(work.iterdir()) == initial
             if target.exists():
                 assert not list(target.iterdir())
-            send(term, "\r")
+            if destination == "already-empty":
+                point(term, "Apply and open")
+            else:
+                send(term, "\r")
             dashboard(term, "demo")
             if destination == "new":
                 # Keep A's hand edit and its default while appending B in this same session.
@@ -262,6 +304,12 @@ def exercise(client, base, real_renderer=None):
         assert [entry["id"] for entry in catalog["targets"]] == (
             ["demo", "second"] if destination == "new" else ["demo"])
     assert not eda.exists(), eda.read_text() if eda.exists() else ""
+
+    with launch("--no-mouse") as term:
+        point(term, "New Project")
+        menu(term)
+        send(term, "c")
+        term.capture("keyboard-only", ["Project name"])
 
 
 if __name__ == "__main__":

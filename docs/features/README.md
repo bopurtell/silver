@@ -233,7 +233,11 @@ needed; References. A dependency needs a reason, not just a list of IDs.
 
 ## Project adoption and design scope
 
-[WB-082](project/WB-082-chip-target-starter.md) is **delivered**: the first and additional chip targets share a recipe, with explicit IP mapping and optional catalog registration. The ticket links the real-daemon, native terminal and migrated example checks.
+[WB-077](presentation/WB-077-project-action-menu.md) is **delivered**. Open **Project ▾ / F2** from any workspace. Right-click a run for its actions, or press **F3** on the highlighted run.
+
+[WB-081](project/WB-081-chip-target-selection.md) is **closed**. Linked workspaces share Main's launch target; detached ones retain their own. Installed-binary acceptance verified the actual chip/profile dispatched from each context, stale-plan rejection, and exact or missing-variant restore.
+
+[WB-082](project/WB-082-chip-target-starter.md) is **closed**: the first and additional chip targets share a recipe, with explicit IP mapping and optional catalog registration. The ticket links the real-daemon, native terminal and migrated example checks.
 
 **2026-11-20 closeout:** [WB-051](project/WB-051-new-project-creation.md) (provider starter), [WB-078](project/WB-078-project-entry.md) (in-app create, add and import), [WB-080](project/WB-080-chip-catalog.md) (provider target catalog) and [WB-085](project/WB-085-authoring-service.md) (preview/apply service) are **closed**. [WB-079](project/WB-079-ip-and-module-starters.md) is **closed, owner-verified**: reusable IP library and module creation through Silver and `silver-author`. Each ticket records its automated acceptance evidence.
 

@@ -76,6 +76,7 @@ type action =
   | Test
   | Cancel of Job_id.t
   | Refresh_integration
+  | Project_entry of [ `New | `Open ]
   | Setup_project
   | Setup_asic
   | Choose_ip_template
@@ -97,6 +98,8 @@ type action =
   | Load_hierarchy of W.Tile_id.t
   | Hierarchy_detail of W.Tile_id.t
   | Discover_asic
+  | Pick_chip_target
+  | Use_run_target of Run_ref.t * Asic.Chip_target.t
   | Open_resources
   | Orient_resources of resource_orientation
   | Open_workloads
@@ -226,12 +229,32 @@ type palette =
   ; argument : argument option
   }
 
+type menu_kind = Project_menu | Actions_menu
+
+type menu_row =
+  { group : string
+  ; label : string
+  ; command : command
+  }
+
+type menu =
+  { kind : menu_kind
+  ; rows : menu_row list
+  ; menu_capture : capture
+  ; origin : W.Tile_id.t option
+  ; query : string
+  ; filtering : bool
+  ; index : int
+  ; count : int
+  }
+
 type t =
   { registry : W.Snapshot.t option
   ; active : W.Workspace_id.t option
   ; focus : W.Tile_id.t option
   ; locals : (string * local) list
   ; palette : palette option
+  ; menu : menu option
   ; prefix : int
   ; paste : bool
   ; inspection_paste : W.Tile_id.t option
@@ -270,6 +293,7 @@ let empty =
   ; focus = None
   ; locals = []
   ; palette = None
+  ; menu = None
   ; prefix = 0
   ; paste = false
   ; inspection_paste = None
@@ -1170,6 +1194,7 @@ let receive t (s : W.Snapshot.t) =
         ; testing = []
         ; waveforms = []
         ; palette = None
+        ; menu = None
         ; prefix = 0
         ; editing_filter = false
         }
@@ -1345,6 +1370,7 @@ let reconnect t ~replacement =
   let t =
     { t with
       palette = None
+    ; menu = None
     ; layout_intent = ref ()
     ; prefix = 0
     ; paste = false
@@ -1727,6 +1753,7 @@ let switch t id =
     let t =
       { t with
         active = Some id
+      ; menu = None
       ; layout_intent = (if changed then ref () else t.layout_intent)
       ; focus
       ; workspace_focus
@@ -2259,6 +2286,12 @@ let command ?unavailable id title aliases action =
   { id; title; aliases; action; unavailable }
 ;;
 
+let project_entry_commands =
+  [ command "project.new" "New Project…" "create local dune project" (Project_entry `New)
+  ; command "project.open" "Open Project…" "open existing local dune root" (Project_entry `Open)
+  ]
+;;
+
 let chip_commands (s : Asic.Snapshot.t) =
   List.concat_map s.chips ~f:(fun chip ->
     List.map chip.variants ~f:(fun variant ->
@@ -2282,8 +2315,7 @@ let has_target_picker t (tile : W.Tile.t) =
     && List.exists s.chips ~f:(fun c -> not (List.is_empty c.variants)))
 ;;
 
-let open_target_picker t (tile : W.Tile.t) =
-  let t = { t with focus = Some tile.id; prefix = 0 } in
+let open_chip_picker t =
   match capture t, Planned_run.snapshot t.planned_run with
   | Some capture, Some s ->
     { t with
@@ -2291,6 +2323,10 @@ let open_target_picker t (tile : W.Tile.t) =
         Some { capture; commands = chip_commands s; query = ""; index = 0; argument = None }
     }
   | _ -> t
+;;
+
+let open_target_picker t (tile : W.Tile.t) =
+  open_chip_picker { t with focus = Some tile.id; prefix = 0 }
 ;;
 
 let testing_launch_command t id =
@@ -4641,7 +4677,7 @@ let testing_dispatch t key ~commands =
         ~f:(fun command -> capture, command.action)))
 ;;
 
-let ranked_matches p =
+let ranked_matches (p : palette) =
   let ranked =
     Palette_search.rank
       ~query:p.query
@@ -4702,11 +4738,15 @@ let starter_preview_lines ?source (p : Authoring.Preview.t) =
 
 (* Edits start a new search and follow its best result. Arrow/Tab choices remain selected
    until the next edit; an unchanged query does not undo navigation. *)
-let palette_query p query =
+let palette_query (p : palette) query =
   if String.equal p.query query then p else { p with query; index = 0 }
 ;;
 
 type input =
+  | Open_menu of menu_kind
+  | Menu_click of string
+  | Palette_click of string
+  | Dismiss_menu
   | Character of char
   | Text of string
   | Enter
@@ -4779,6 +4819,8 @@ let decode_event (event : Bonsai_term.Event.t) : input option =
         | Escape -> Some Escape
         | Backspace -> Some Backspace
         | Tab -> Some Focus
+        | Function 2 -> Some (Open_menu Project_menu)
+        | Function 3 -> Some (Open_menu Actions_menu)
         | Arrow `Down -> Some Next
         | Arrow `Up -> Some Previous
         | _ -> None)
@@ -4914,6 +4956,7 @@ let route_inspection_filter_event t (event : Bonsai_term.Event.t) =
       | None
         when (not t.paste)
              && Option.is_none t.palette
+             && Option.is_none t.menu
              && (not t.editing_filter)
              && t.prefix = 0 ->
         Option.bind (focused t) ~f:(fun tile ->
@@ -5161,6 +5204,121 @@ let%test_unit "Timing workspace filter paste is literal and shared only within i
   | _ -> assert false
 ;;
 
+(** Menus project a captured catalog. Labels and grouping are presentation; the
+    command record (including its disabled reason and object-bound action) is shared. *)
+let project_menu_rows commands =
+  List.filter_map
+    [ "Open or create", "project.new", "New Project…"
+    ; "Open or create", "project.open", "Open Project…"
+    ; "Author in this project", "project.new-ip", "New IP Library…"
+    ; "Author in this project", "project.new-module", "New Module…"
+    ; "Author in this project", "project.new-chip", "New Chip Target…"
+    ; "Select or browse", "asic.pick-chip", "Select Launch Target…"
+    ]
+    ~f:(fun (group, id, label) ->
+      List.find commands ~f:(fun c -> String.equal c.id id)
+      |> Option.map ~f:(fun command -> { group; label; command }))
+;;
+
+let has_local_actions t =
+  Option.exists (focused t) ~f:(fun tile -> String.equal tile.kind "run-selector")
+;;
+
+(* The caller supplies only the inspected run's catalog entries. *)
+let run_menu_rows commands =
+  List.filter_map commands ~f:(fun command ->
+    Option.some_if
+      (String.equal command.id "asic.use-run-target"
+       || String.is_prefix command.id ~prefix:"asic.artifacts."
+       || String.is_prefix command.id ~prefix:"asic.refresh.")
+      { group = "Selected run"; label = command.title; command })
+;;
+
+let menu_matches menu =
+  let words = String.split (String.lowercase (String.strip menu.query)) ~on:' ' in
+  List.filter menu.rows ~f:(fun row ->
+    let text =
+      String.concat ~sep:" " [ row.label; row.command.id; row.command.aliases ]
+      |> String.lowercase
+    in
+    List.for_all words ~f:(fun substring -> String.is_substring text ~substring))
+;;
+
+let open_menu t kind commands =
+  match capture t with
+  | None -> t, No_effect
+  | Some _ when Poly.equal kind Actions_menu && not (has_local_actions t) ->
+    { t with notice = "No Actions menu for this tile"; prefix = 0 }, No_effect
+  | Some menu_capture ->
+    let rows =
+      match kind with
+      | Project_menu -> project_menu_rows commands
+      | Actions_menu -> run_menu_rows commands
+    in
+    let menu =
+      { kind; rows; menu_capture; origin = t.focus; query = ""; filtering = false
+      ; index = 0; count = 0 }
+    in
+    { t with menu = Some menu; prefix = 0; notice = "" }, No_effect
+;;
+
+let dispatch_command t capture command ~close ~stale_notice =
+  if not (current t capture)
+  then { (close t) with notice = stale_notice }, No_effect
+  else (
+    match command.unavailable with
+    | Some reason -> { t with notice = reason }, No_effect
+    | None -> close t, Execute (capture, command.action))
+;;
+
+let menu_input t menu event =
+  let update menu = { t with menu = Some menu }, No_effect in
+  let close t = { t with menu = None; prefix = 0 } in
+  let query text = update { menu with query = text; index = 0; count = 0 } in
+  let append text =
+    if printable_utf8 text && String.length text + String.length menu.query <= 4096
+    then query (menu.query ^ text)
+    else t, No_effect
+  in
+  let move direction =
+    let last = List.length (menu_matches menu) - 1 in
+    let index = menu.index + (direction * Int.max 1 menu.count) in
+    update { menu with index = Int.max 0 (Int.min last index); count = 0 }
+  in
+  match event with
+  | Escape when menu.filtering ->
+    update { menu with filtering = false; query = ""; index = 0; count = 0 }
+  | Escape | Dismiss_menu -> close t, No_effect
+  | Next -> move 1
+  | Previous -> move (-1)
+  | Character ch when menu.filtering -> append (String.of_char ch)
+  | Text text when menu.filtering -> append text
+  | Backspace when menu.filtering -> query (drop_last_codepoint menu.query)
+  | Delete_word when menu.filtering -> query (Text_edit.delete_word menu.query)
+  | Clear_filter when menu.filtering -> query ""
+  | Character '/' -> update { menu with filtering = true; count = 0 }
+  | Character ('0' .. '9' as ch) ->
+    update { menu with count = Int.min 9999 ((10 * menu.count) + Char.to_int ch - 48) }
+  | Character 'j' -> move 1
+  | Character 'k' -> move (-1)
+  | Enter | Menu_click _ ->
+    let rows = menu_matches menu in
+    let selected =
+      match event with
+      | Menu_click id -> List.findi rows ~f:(fun _ r -> String.equal r.command.id id)
+      | _ -> Option.map (List.nth rows menu.index) ~f:(fun row -> menu.index, row)
+    in
+    (match selected with
+     | None -> t, No_effect
+     | Some _ when not (Option.equal W.Tile_id.equal t.focus menu.origin) ->
+       { (close t) with notice = "Menu origin changed; reopen menu" }, No_effect
+     | Some (index, row) ->
+       let t = { t with menu = Some { menu with index; count = 0 } } in
+       dispatch_command t menu.menu_capture row.command ~close
+         ~stale_notice:"Command target changed; reopen menu")
+  | _ -> t, No_effect
+;;
+
 let input t event ~commands : t * effect =
   match event with
   | Paste_start -> { t with paste = true; prefix = 0 }, No_effect
@@ -5173,6 +5331,10 @@ let input t event ~commands : t * effect =
       | Character ch -> append_reference t (String.of_char ch)
       | Text text -> append_reference t text
       | _ -> reject_reference_text t)
+  | _ when Option.is_some t.menu -> menu_input t (Option.value_exn t.menu) event
+  | Open_menu kind when Option.is_none t.palette && not t.editing_filter ->
+    open_menu t kind commands
+  | Open_menu _ | Menu_click _ | Dismiss_menu -> t, No_effect
   | Character ch when finalization_form t -> append_reference t (String.of_char ch)
   | Text text when finalization_form t -> append_reference t text
   | (Backspace | Delete_word) when finalization_form t ->
@@ -5356,15 +5518,22 @@ let input t event ~commands : t * effect =
             | Error error ->
               ( { t with notice = "Invalid typed input: " ^ Error.to_string_hum error }
               , No_effect ))
-        | Enter ->
-          (match List.nth (matches p) p.index with
+        | Enter | Palette_click _ ->
+          let rows = matches p in
+          let selected =
+            match event with
+            | Palette_click id when Option.is_none p.argument ->
+              List.findi rows ~f:(fun _ c -> String.equal c.id id)
+            | Enter -> Option.map (List.nth rows p.index) ~f:(fun c -> p.index, c)
+            | _ -> None
+          in
+          (match selected with
            | None -> t, No_effect
-           | Some _ when not (current t p.capture) ->
-             ( { t with palette = None; notice = "Command target changed; reopen palette" }
-             , No_effect )
-           | Some { unavailable = Some reason; _ } ->
-             { t with notice = reason }, No_effect
-           | Some c -> { t with palette = None }, Execute (p.capture, c.action))
+           | Some (index, c) ->
+             let t = { t with palette = Some { p with index } } in
+             dispatch_command t p.capture c
+               ~close:(fun t -> { t with palette = None })
+               ~stale_notice:"Command target changed; reopen palette")
         | _ -> t, No_effect)
      | None ->
        (match event, t.prefix with
@@ -5667,6 +5836,118 @@ let input t event ~commands : t * effect =
            | Some capture -> t, Execute (capture, testing_launch_action t tile.id))
         | Enter, _ -> { t with prefix = 0 }, Activate
         | _, _ -> { t with prefix = 0 }, No_effect))
+;;
+
+let%test_unit "Project menu projects live commands in design order; filtering and \
+               dismissal preserve the inspected row"
+  =
+  let s = W.initial ~session_id:(W.Session_id.of_string "menu-focus") in
+  let host =
+    receive empty { s with tiles = [ { (List.hd_exn s.tiles) with kind = "simulation-catalog" } ] }
+  in
+  let tile = Option.value_exn (focused host) in
+  let host =
+    set_local host tile.id { (local host tile.id) with cursor = Some "prior"; scroll = 4 }
+  in
+  let ip = command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template in
+  let commands =
+    [ command "asic.pick-chip" "Select chip target…" "launch" Pick_chip_target
+    ; command "project.setup" "Set up" "" Setup_project
+    ; command "project.new-chip" "New Chip Target…" "" Choose_chip_source
+    ; ip
+    ]
+  in
+  let step host event =
+    match input host event ~commands with
+    | host, No_effect -> host
+    | _ -> assert false
+  in
+  let key n =
+    Option.value_exn (decode_event (Key_press { key = Function n; mods = [] }))
+  in
+  let opened = step host (key 2) in
+  let menu t = Option.value_exn t.menu in
+  let rows t = menu_matches (menu t) in
+  assert (List.equal String.equal (List.map (rows opened) ~f:(fun r -> r.command.id))
+            [ "project.new-ip"; "project.new-chip"; "asic.pick-chip" ]);
+  assert (phys_equal (List.hd_exn (rows opened)).command ip);
+  let browse events = List.fold events ~init:opened ~f:step in
+  let no_matches = browse [ Character '/'; Character 'j' ] in
+  assert (String.equal (menu no_matches).query "j");
+  assert (List.is_empty (rows (step no_matches (Character 'z'))));
+  let editing_done = step no_matches Escape in
+  assert (not (menu editing_done).filtering && List.length (rows editing_done) = 3);
+  let closed = step editing_done Escape in
+  assert (Option.is_none closed.menu && phys_equal closed.focus host.focus
+          && phys_equal closed.locals host.locals && phys_equal closed.active host.active);
+  let filtered = browse [ Character '/'; Text "IP library" ] in
+  (match input filtered Enter ~commands:[] with
+   | { menu = None; _ }, Execute (_, Choose_ip_template) -> ()
+   | _ -> assert false);
+  assert (Option.is_none (step host (key 3)).menu)
+;;
+
+let%test_unit "project root commands lead F2 and dispatch the captured palette actions" =
+  let host = receive empty (W.initial ~session_id:(W.Session_id.of_string "root-menu")) in
+  let chip = command "project.new-chip" "New Chip Target…" "" Choose_chip_source in
+  let commands = chip :: List.rev project_entry_commands in
+  let step host event = fst (input host event ~commands) in
+  let menu = step host (Open_menu Project_menu) in
+  let rows = (Option.value_exn menu.menu).rows in
+  assert (List.equal (Tuple2.equal ~eq1:String.equal ~eq2:String.equal)
+            (List.map rows ~f:(fun r -> r.group, r.command.id))
+            [ "Open or create", "project.new"; "Open or create", "project.open"
+            ; "Author in this project", "project.new-chip" ]);
+  let palette =
+    List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun h c -> step h (Character c))
+  in
+  List.iteri [ "project.new", `New; "project.open", `Open ] ~f:(fun index (id, entry) ->
+    let selected = if index = 0 then menu else step menu Next in
+    let palette = { palette with palette = Option.map palette.palette ~f:(fun p -> palette_query p id) } in
+    List.iter [ selected, Enter; menu, Menu_click id; palette, Enter ] ~f:(fun (h, event) ->
+      match input h event ~commands:[] with
+      | { menu = None; palette = None; _ }, Execute (captured, Project_entry actual) ->
+        assert (Poly.equal actual entry && Poly.equal (Some captured) (capture host))
+      | _ -> assert false))
+;;
+
+let%test_unit "counted menu navigation, pointer and keyboard invoke captured commands; \
+               invisible, disabled and stale commands do not execute"
+  =
+  let s = W.initial ~session_id:(W.Session_id.of_string "menu-run") in
+  let tile = { (List.hd_exn s.tiles) with kind = "run-selector" } in
+  let host = receive empty { s with tiles = [ tile ] } in
+  let target : Asic.Chip_target.t = { chip = "inspected"; variant = "small" } in
+  let commands =
+    List.init 12 ~f:(fun i ->
+      command ("asic.artifacts." ^ Int.to_string i) ("Run " ^ Int.to_string i) ""
+        (Browse_artifacts Fs0_fixture.run_b))
+    @ [ command "asic.use-run-target" "Use chip/variant" ""
+          (Use_run_target (Fs0_fixture.run_b, target))
+      ; command ~unavailable:"offline" "asic.refresh.disabled" "Refresh" "" Refresh_integration
+      ]
+  in
+  let opened = fst (input host (Open_menu Actions_menu) ~commands) in
+  let step host event =
+    match input host event ~commands:[] with
+    | host, No_effect -> host
+    | _ -> assert false
+  in
+  let moved = List.fold [ Character '1'; Character '0'; Character 'j' ] ~init:opened ~f:step in
+  assert ((Option.value_exn moved.menu).index = 10);
+  let moved = List.fold [ Character 'k'; Previous; Next ] ~init:moved ~f:step in
+  assert ((Option.value_exn moved.menu).index = 9);
+  let filtered = List.fold [ Character '/'; Text "chip/variant" ] ~init:moved ~f:step in
+  assert (Option.is_some (step filtered (Menu_click "asic.artifacts.1")).menu);
+  List.iter [ Enter; Menu_click "asic.use-run-target" ] ~f:(fun event ->
+    match input filtered event ~commands:[] with
+    | { menu = None; _ }, Execute (_, Use_run_target (run, chip)) ->
+      assert (Run_ref.equal run Fs0_fixture.run_b && Asic.Chip_target.equal target chip)
+    | _ -> assert false);
+  let disabled = step opened (Menu_click "asic.refresh.disabled") in
+  assert (Option.is_some disabled.menu && String.equal disabled.notice "offline");
+  let updated = receive filtered { s with tiles = [ tile ]; revision = s.revision + 1 } in
+  assert (Option.is_none (step updated Enter).menu)
 ;;
 
 let%test_unit "resource reader uses only its workspace list, including through zoom" =
@@ -7157,12 +7438,34 @@ let%test_unit "palette captures text and revalidates registry target" =
     |> Option.value_exn
   in
   let t = receive t changed in
-  let t, effect = press t Enter in
-  assert (Option.is_none t.palette);
-  assert (
-    match effect with
-    | No_effect -> true
-    | _ -> false)
+  List.iter [ Enter; Palette_click "test" ] ~f:(fun event ->
+    match press t event with
+    | { palette = None; _ }, No_effect -> ()
+    | _ -> assert false)
+;;
+
+let%test_unit "palette click resolves only visible captured commands, including disabled state" =
+  let host = receive empty (W.initial ~session_id:(W.Session_id.of_string "click")) in
+  let blocked = command ~unavailable:"offline" "blocked" "Preview B" "" Test in
+  let enabled = command "enabled" "Preview A" "" Toggle_chrome in
+  let captured = [ blocked; enabled ] in
+  let opened =
+    List.fold [ ' '; 'c'; 'c' ] ~init:host ~f:(fun t c ->
+      fst (input t (Character c) ~commands:captured))
+  in
+  let click host id =
+    input host (Palette_click id) ~commands:[ { blocked with unavailable = None }; enabled ]
+  in
+  (match click opened "blocked" with
+   | { palette = Some _; notice; _ }, No_effect -> assert (String.equal notice "offline")
+   | _ -> assert false);
+  (match click opened "enabled" with
+   | { palette = None; _ }, Execute (_, Toggle_chrome) -> ()
+   | _ -> assert false);
+  let filtered, _ = input opened (Text "blocked") ~commands:[] in
+  match click filtered "enabled" with
+  | { palette = Some _; _ }, No_effect -> ()
+  | _ -> assert false
 ;;
 
 let%test_unit "linked contexts and pins use registry semantics; local state survives" =

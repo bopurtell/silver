@@ -97,6 +97,9 @@ val chip_epoch : t -> int
 val current_selection : t -> Asic.Selection.t -> bool
 val model : t -> model
 val launchable : t -> Asic.Preview.t -> bool
+type staged
+val suspend : t -> (string * staged) option
+val resume : t -> staged -> t
 val rows : model -> detail:bool -> row list
 val launch_label : model -> string
 val max_scroll : model -> detail:bool -> int

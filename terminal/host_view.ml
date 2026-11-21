@@ -1670,6 +1670,10 @@ let planned_target_rows host tile ~width =
          else [ E.text (E.clip ~width (E.plain text)) ])
         |> List.map ~f:(fun text -> pickable, { Planned_run.role = Fact; text }))
     in
+    let target_rows = target_rows @
+      Option.to_list (Option.bind snapshot ~f:Launch_preferences.missing_target
+                      |> Option.map ~f:(fun reason ->
+                        false, { Planned_run.role = Warning; text = Artifact_view.safe reason })) in
     if H.has_target_picker host tile
     then (
       let targets, fields = List.split_while target_rows ~f:fst in
@@ -2003,6 +2007,27 @@ let run_page host tile ~height candidates =
   selected, start, List.take (List.drop candidates start) (Int.max 0 available)
 ;;
 
+let local_menu_run host data tile =
+  if not (String.equal tile.W.Tile.kind "run-selector")
+  then None
+  else
+    let candidates = run_candidates data ~filter:(H.local host tile.id).filter in
+    Option.bind (run_cursor host tile) ~f:(fun cursor ->
+      List.find_map candidates ~f:(fun (run, _) ->
+        Option.some_if (String.equal (run_label run) cursor) run))
+;;
+
+let menu_button appearance label =
+  View.text ~attrs:(Role.attrs appearance Surface @ [ Attr.bold ]) (" " ^ label ^ " ▾ ")
+;;
+
+let project_prefix appearance ~width =
+  let button = menu_button appearance "Project" in
+  if width >= View.width button + 5
+  then View.hcat [ button; View.text ~attrs:(Role.attrs appearance Border) "│" ]
+  else View.none
+;;
+
 let browse_index values ~cursor ~delta =
   let index =
     Option.bind cursor ~f:(fun cursor ->
@@ -2248,6 +2273,26 @@ let workspace_page host tile ~width ~height rows =
   in
   if List.sum (module Int) chips ~f:(fun (view, _) -> View.width view) <= width
   then `Strip chips
+  else if height = 1
+  then (
+    (* A one-line workspace strip never turns into a one-entry vertical list.
+       Keep the browsed tab visible while retaining as many neighbours as fit. *)
+    let cursor = Option.map (H.workspace_cursor host tile.W.Tile.id) ~f:(fun w -> w.id) in
+    let selected =
+      List.findi chips ~f:(fun _ (_, id) -> Option.equal W.Workspace_id.equal id cursor)
+      |> Option.value_map ~default:0 ~f:fst
+    in
+    let rec trim remaining count used =
+      match remaining with
+      | (view, _) :: rest when count > 0 && used > width ->
+        trim rest (count - 1) (used - View.width view)
+      | _ -> remaining
+    in
+    let used =
+      List.take chips (selected + 1)
+      |> List.sum (module Int) ~f:(fun (v, _) -> View.width v)
+    in
+    `Strip (trim chips selected used))
   else (
     let selected =
       Option.map (H.workspace_cursor host tile.W.Tile.id) ~f:(fun w -> w.id)
@@ -2278,9 +2323,14 @@ let workspace_tab_at host data tile ~width ~height ~column ~row =
   then None
   else
     Option.bind (utility_rows host data tile) ~f:(fun rows ->
-      match workspace_page host tile ~width ~height rows with
-      | `Strip chips -> if row = 0 then Overview_tiles.chip_at chips ~column else None
-      | `Rows page -> List.nth page row |> Option.bind ~f:(fun r -> r.workspace))
+      let offset = View.width (project_prefix host.appearance ~width) in
+      let column = column - offset in
+      if column < 0
+      then None
+      else (
+        match workspace_page host tile ~width:(width - offset) ~height rows with
+        | `Strip chips -> if row = 0 then Overview_tiles.chip_at chips ~column else None
+        | `Rows page -> List.nth page row |> Option.bind ~f:(fun r -> r.workspace)))
 ;;
 
 let mixed_checklist host data tile =
@@ -2959,7 +3009,7 @@ let tile_view
             let candidates = run_candidates data ~filter:local.filter in
             let status_width =
               Int.min
-                (Int.max 0 (body_width / 3))
+                (Int.min (body_width / 3) (Int.max 0 (body_width - 9)))
                 (List.fold candidates ~init:0 ~f:(fun n (_, status) ->
                    Int.max n (cell_width status)))
             in
@@ -3111,8 +3161,10 @@ let tile_view
            ]
          |> box ~width:body_width ~height:body_height
        | Some rows when String.equal tile.kind "workspace-tabs" ->
+         let prefix = project_prefix appearance ~width:body_width in
+         let width = body_width - View.width prefix in
          let navigation =
-           match workspace_page host tile ~width:body_width ~height:body_height rows with
+           match workspace_page host tile ~width ~height:body_height rows with
            | `Strip chips -> View.hcat (List.map chips ~f:fst)
            | `Rows page ->
              Overview_tiles.render
@@ -3121,12 +3173,12 @@ let tile_view
                ~selected_bg:(Role.backdrop appearance Selection)
                ~appearance
                ~attrs:(utility_attrs appearance)
-               ~width:body_width
+               ~width
                ~height:(Int.max 1 (body_height - 1))
                page
          in
          View.vcat
-           [ navigation
+           [ View.hcat [ prefix; navigation ]
            ; (if not policy.hints
               then View.none
               else
@@ -3383,7 +3435,20 @@ let tile_layout host ({ Dimensions.width; height } : Dimensions.t) =
       tile, { W.Geometry.x = 0; y = 0; width; height = available })
   in
   let layout =
-    if zoomed || compact
+    if compact && width >= 24 && available >= 8
+    then (
+      (* Keep the workspace navigation strip reachable above a focused pane on a
+         short terminal. The strip is still the existing tile, not a new tab stop. *)
+      let nav =
+        List.find tiles ~f:(fun t ->
+          String.equal t.kind "workspace-tabs"
+          && (body_bounds host t (panel_geometry host t ~width ~height:1)).height = 1)
+      in
+      match nav, focused () with
+      | Some nav, [ tile, g ] when not (W.Tile_id.equal tile.id nav.id) ->
+        [ nav, { g with height = 1 }; tile, { g with y = 1; height = available - 1 } ]
+      | _ -> focused ())
+    else if zoomed || compact
     then focused ()
     else (
       match layout_mode, fit with
@@ -3419,7 +3484,7 @@ let tile_layout host ({ Dimensions.width; height } : Dimensions.t) =
 (** Hit-test the workspace layer at a zero-based terminal cell. A frame,
     padding or heading hit still identifies the tile, but only body cells
     have a body-relative (column,row). The caller owns overlay routing. *)
-let pointer_hit host (dimensions : Dimensions.t) ~x ~y =
+let pointer_geometry host (dimensions : Dimensions.t) ~x ~y =
   let top = Bool.to_int (show_global_header host) in
   if x < 0 || x >= dimensions.width || y < top || y >= dimensions.height
   then None
@@ -3444,7 +3509,41 @@ let pointer_hit host (dimensions : Dimensions.t) ~x ~y =
               (bx >= 0 && by >= 0 && bx < body.width && by < body.height)
               (bx, by)
           in
-          Some (tile, body_cell))))
+          Some (tile, body, body_cell))))
+;;
+
+let pointer_hit host dimensions ~x ~y =
+  Option.map (pointer_geometry host dimensions ~x ~y) ~f:(fun (tile, _, cell) ->
+    tile, cell)
+;;
+
+let menu_trigger_at host _data dimensions ~x ~y =
+  match pointer_geometry host dimensions ~x ~y with
+  | Some (tile, body, Some (column, row)) ->
+    let local = H.local host tile.id in
+    if Option.is_some local.artifacts || Option.is_some local.inspection
+    then None
+    else (
+      match tile.kind with
+      | "workspace-tabs" when row = 0 && not local.utility_detail ->
+        let prefix = project_prefix host.appearance ~width:body.width in
+        Option.some_if (column < View.width prefix - 1) `Project
+      | _ -> None)
+  | _ -> None
+;;
+
+let run_context_at host data dimensions ~x ~y =
+  match pointer_geometry host dimensions ~x ~y with
+  | Some (tile, body, Some (_, row)) when String.equal tile.kind "run-selector" ->
+    let local = H.local host tile.id in
+    if Option.is_some local.artifacts || Option.is_some local.inspection
+    then None
+    else (
+      let _, _, page =
+        run_page host tile ~height:body.height (run_candidates data ~filter:local.filter)
+      in
+      List.nth page row |> Option.map ~f:(fun (run, _) -> tile, run))
+  | _ -> None
 ;;
 
 let%test_unit "pointer follows packed tiles, borders and compact resize" =
@@ -3893,9 +3992,44 @@ let render_workspace
     |> box ~width:dimensions.width ~height:dimensions.height
 ;;
 
-let render_palette host dimensions background =
+let palette_controls host (p : H.palette) =
+  let current = H.current host p.capture in
+  let nonblank = not (String.is_empty (String.strip p.query)) in
+  let input label (event : H.input) = label, `Input event in
+  let submit label valid =
+    (if current && valid then [ input label H.Enter ] else []) @ [ input "Cancel" H.Escape ]
+  in
+  match p.argument with
+  | None -> []
+  | Some (Starter_name _) -> submit "Preview" nonblank
+  | Some (Starter_wait _) -> [ input "Dismiss" Escape ]
+  | Some (Starter_preview (_, starter)) ->
+    (if current then [ input "Apply" (H.Character 'a') ] else [])
+    @ [ input "Cancel" Escape ]
+    @ (match starter with
+       | Chip _ when current -> [ input "Toggle registration" (Character 'r') ]
+       | _ -> [])
+  | Some (Starter_result (_, select)) ->
+    [ input "Done" Enter ]
+    @ (if current && Option.is_some select then [ input "Select target" (Character 's') ] else [])
+  | Some (Chip_directory | Module_directory) -> submit "Next" (nonblank && not (Filename.is_absolute p.query))
+  | Some (Chip_mapping _) -> submit "Next" (String.equal p.query "ui_in:uo_out:comb8")
+  | Some Design_executable -> submit "Import" nonblank
+  | Some (Workload_bundle _ | Workload_path | Resource_path _ | Finalization_attempt _) ->
+    submit "Read" nonblank
+  | Some (Acceptance _) -> submit "Submit" nonblank
+  | Some (Simulation_selection (_, _, _, form)) ->
+    (match Simulation_view.Form.accept form p.query with
+     | Ok (`Launch _) -> submit "Launch" true
+     | Ok (`Next _) -> submit "Next" true
+     | Error _ -> submit "Next" false)
+  | Some (Preparation_inputs (flow, profile) | Plan_endpoint (flow, profile)) ->
+    submit "Accept" (Result.is_ok (Launch_preferences.Prompt.selection p.query ~flow ~profile))
+;;
+
+let palette_page host dimensions =
   match host.H.palette with
-  | None -> background
+  | None -> None
   | Some p ->
     let appearance = host.appearance in
     let bounds =
@@ -3911,17 +4045,22 @@ let render_palette host dimensions background =
     in
     let width = geometry.content_width in
     let height = geometry.content_height in
+    let controls =
+      Palette_view.buttons ~width ~attrs:(Role.attrs appearance Focus) (palette_controls host p)
+      |> Fn.flip List.take (Int.max 0 (height - 1))
+    in
+    let available = height - List.length controls in
     (* Hidden palette hints return both the hint row and its separator to the result list;
        a notice (e.g. an unavailable reason) still claims the row. *)
     let footer_height =
-      if height >= 3 && (host.palette_hints || not (String.is_empty host.notice))
+      if available >= 3 && (host.palette_hints || not (String.is_empty host.notice))
       then 1
       else 0
     in
-    let footer_gap = if footer_height > 0 && height >= 5 then 1 else 0 in
-    let heading_height = if geometry.border = 0 && height >= 4 then 1 else 0 in
+    let footer_gap = if footer_height > 0 && available >= 5 then 1 else 0 in
+    let heading_height = if geometry.border = 0 && available >= 4 then 1 else 0 in
     let prompt_rows =
-      Int.max 1 (Int.min 3 (height - footer_height - footer_gap - heading_height))
+      Int.max 1 (Int.min 3 (available - footer_height - footer_gap - heading_height))
     in
     let text ?(role = Role.Surface) text =
       lines ~appearance ~role ~width ~height:1 [ text ]
@@ -4032,8 +4171,7 @@ let render_palette host dimensions background =
           | Some (H.Starter_result (rows, _)) -> rows
           | _ -> assert false
         in
-        let rows = List.concat_map rows ~f:(wrap_cells ~width) in
-        List.drop rows (Int.min p.index (Int.max 0 (List.length rows - 1)))
+        List.concat_map rows ~f:(wrap_cells ~width)
       | Some H.Design_executable ->
         [ "Path to the built design CLI (absolute or relative to the open project)."
         ; "Enter writes .workbench/hardcaml-workbench-asic.sexp. Esc cancels."
@@ -4068,12 +4206,19 @@ let render_palette host dimensions background =
         ]
       else List.map query ~f:(text ~role:Focus)
     in
+    let body_height = available - footer_height - footer_gap in
+    let help_height = Int.max 0 (body_height - heading_height - List.length prompt) in
+    let help_limit = Int.max 0 (List.length help - help_height) in
+    let scrolling_help =
+      match p.argument with Some (H.Starter_preview _ | H.Starter_result _) -> true | _ -> false
+    in
+    let help = if scrolling_help then List.drop help (Int.min p.index help_limit) else help in
     let header =
       (if heading_height > 0 then [ text heading ] else [])
       @ prompt
       @ List.map help ~f:text
     in
-    let shown = Int.max 0 (height - List.length header - footer_height - footer_gap) in
+    let shown = Int.max 0 (body_height - List.length header) in
     let ranked = if Option.is_some p.argument then [] else H.ranked_matches p in
     let start = Int.max 0 (p.index - shown + 1) in
     let commands =
@@ -4088,18 +4233,23 @@ let render_palette host dimensions background =
         let match_attrs =
           Role.attrs appearance Matched @ [ Attr.bg (Role.backdrop appearance role) ]
         in
-        Palette_view.result_row
+        let image = Palette_view.result_row
           ~attrs
           ~match_attrs
           ~marker_attrs:(Role.attrs appearance role)
           ~width
           ~selected
           result
-        |> colored appearance role)
+        |> colored appearance role in
+        let spans =
+          if Option.is_some result.item.unavailable || not (H.current host p.capture)
+          then [] else [ 0, width, `Command result.item.id ]
+        in
+        { Palette_view.image; spans })
     in
     let commands =
       if Option.is_none p.argument && List.is_empty ranked && shown > 0
-      then [ text ~role:Muted "No matching commands" ]
+      then [ Palette_view.inert (text ~role:Muted "No matching commands") ]
       else commands
     in
     let footer =
@@ -4115,16 +4265,50 @@ let render_palette host dimensions background =
           (if List.is_empty ranked then 0 else p.index + 1)
           (List.length ranked)
     in
-    let body =
-      View.vcat (header @ commands)
-      |> box ~width ~height:(Int.max 0 (height - footer_height - footer_gap))
+    let body = List.take (List.map header ~f:Palette_view.inert @ commands) body_height in
+    let rows =
+      body
+      @ List.init (body_height - List.length body) ~f:(fun _ -> Palette_view.inert (text ""))
+      @ controls
+      @ (if footer_gap > 0 then [ Palette_view.inert (text "") ] else [])
+      @ (if footer_height > 0 then [ Palette_view.inert (text ~role:Muted footer) ] else [])
     in
+    let scroll_limit =
+      if scrolling_help && help_height > 0 then Some help_limit
+      else if Option.is_none p.argument && shown > 0 then Some (Int.max 0 (List.length ranked - 1))
+      else None
+    in
+    Some (bounds, geometry, heading, rows, scroll_limit)
+;;
+
+let palette_hit host dimensions ~x ~y =
+  Option.bind (palette_page host dimensions) ~f:(fun (bounds, geometry, _, rows, _) ->
+    Palette_view.hit rows
+      ~x:(x - bounds.x - geometry.border - geometry.horizontal_padding)
+      ~y:(y - bounds.y - geometry.border - geometry.vertical_padding))
+;;
+
+let palette_scroll host dimensions ~x ~y ~direction =
+  match host.H.palette, palette_page host dimensions with
+  | Some p, Some (bounds, _, _, _, Some limit)
+    when x >= bounds.x && x < bounds.x + bounds.width
+         && y >= bounds.y && y < bounds.y + bounds.height ->
+    (match direction with
+     | `Up when p.index > 0 && limit > 0 -> Some H.Previous
+     | `Down when p.index < limit -> Some H.Next
+     | `Up | `Down -> None)
+  | _ -> None
+;;
+
+let render_palette host dimensions background =
+  match palette_page host dimensions with
+  | None -> background
+  | Some (bounds, geometry, heading, rows, _) ->
+    let appearance = host.H.appearance in
     let panel =
-      View.vcat
-        ([ body ]
-         @ (if footer_gap > 0 then [ text "" ] else [])
-         @ if footer_height > 0 then [ text ~role:Muted footer ] else [])
-      |> box ~width ~height
+      List.map rows ~f:(fun row -> row.Palette_view.image)
+      |> View.vcat
+      |> box ~width:geometry.content_width ~height:geometry.content_height
       |> Panel.render
            appearance
            ~attrs:(Role.attrs appearance Focus)
@@ -4136,6 +4320,123 @@ let render_palette host dimensions background =
       |> colored appearance Surface
     in
     Palette_view.overlay ~background ~panel bounds
+    |> box ~width:dimensions.width ~height:dimensions.height
+;;
+
+(* This page is the single source of terminal coordinates for menu rendering and
+   dispatch. Separators and query/status text never acquire command identities. *)
+let menu_page (dimensions : Dimensions.t) (menu : H.menu) =
+  let left = 0 and top = if dimensions.height >= 6 then 1 else 0 in
+  let width = Int.min 64 dimensions.width in
+  let matches = H.menu_matches menu in
+  let _, entries =
+    List.foldi matches ~init:(None, []) ~f:(fun i (last, output) (entry : H.menu_row) ->
+      let output =
+        if Option.equal String.equal last (Some entry.group)
+        then output
+        else `Group entry.group :: output
+      in
+      Some entry.group, `Choice (i, entry) :: output)
+  in
+  let entries = if List.is_empty entries then [ `Empty ] else List.rev entries in
+  let height = Int.min (4 + List.length entries) (Int.max 0 (dimensions.height - top)) in
+  let capacity = Int.max 0 (height - 4) in
+  let selected =
+    List.findi entries ~f:(fun _ -> function `Choice (i, _) -> i = menu.index | _ -> false)
+    |> Option.value_map ~default:0 ~f:fst
+  in
+  let page =
+    List.drop entries (Int.max 0 (selected - capacity + 1)) |> Fn.flip List.take capacity
+  in
+  { W.Geometry.x = left; y = top; width; height }, page
+;;
+
+let menu_hit host dimensions ~x ~y =
+  Option.map host.H.menu ~f:(fun menu ->
+    let g, page = menu_page dimensions menu in
+    let col = x - g.x
+    and row = y - g.y in
+    if col < 0 || row < 0 || col >= g.width || row >= g.height
+    then `Outside
+    else if col = 0 || col = g.width - 1 || row < 2
+    then `Chrome
+    else (
+      match List.nth page (row - 2) with
+      | Some (`Choice (i, entry)) -> `Choice (i, entry.command.id)
+      | _ -> `Chrome))
+;;
+
+let menu_row_at host dimensions ~x ~y =
+  match menu_hit host dimensions ~x ~y with Some (`Choice (i, _)) -> Some i | _ -> None
+;;
+
+let menu_pointer host dimensions ~x ~y =
+  match menu_hit host dimensions ~x ~y with
+  | Some (`Choice (_, id)) -> Some (H.Menu_click id)
+  | Some `Outside -> Some H.Dismiss_menu
+  | _ -> None
+;;
+
+let render_menu host dimensions background =
+  match host.H.menu with
+  | None -> background
+  | Some menu ->
+    let appearance = host.appearance in
+    let g, page = menu_page dimensions menu in
+    let inner = Int.max 0 (g.width - 2) in
+    let line role text = lines ~appearance ~role ~width:inner ~height:1 [ text ] in
+    let filter =
+      if menu.filtering
+      then (
+        let prefix = View.text ~attrs:(Role.attrs appearance Focus) " Filter: " in
+        let attrs = Role.attrs appearance Focus in
+        let input = View.text ~attrs menu.query in
+        let room = Int.max 0 (inner - View.width prefix - 1) in
+        View.hcat
+          [ prefix
+          ; View.crop ~l:(Int.max 0 (View.width input - room)) input
+          ; View.text ~attrs "▏"
+          ])
+      else
+        line Muted (if menu.count > 0 then sprintf " Count: %d" menu.count else " / filter")
+    in
+    let reason =
+      List.nth (H.menu_matches menu) menu.index
+      |> Option.bind ~f:(fun entry -> entry.command.unavailable)
+    in
+    let body =
+      filter
+      :: List.map page ~f:(function
+        | `Group name -> line Heading ("─ " ^ name)
+        | `Empty -> line Muted " No matching actions"
+        | `Choice (i, entry) ->
+          let selected = i = menu.index in
+          let disabled = Option.is_some entry.command.unavailable in
+          let suffix = if disabled then " [unavailable]" else "" in
+          let label =
+            fit_label ~width:(Int.max 0 (inner - 2 - cell_width suffix)) entry.label
+          in
+          line (if selected then Selection else if disabled then Muted else Foreground)
+            ((if selected then "› " else "  ") ^ label ^ suffix))
+      @ [ (match reason with
+           | None -> line Muted " ↑↓ or j/k browse · Enter choose · Esc back"
+           | Some text -> line Warning (" Unavailable: " ^ text)) ]
+      |> View.vcat
+    in
+    let title =
+      match menu.kind with Project_menu -> "Project" | Actions_menu -> "Actions"
+    in
+    let geometry =
+      Panel.geometry ~framed:true ~width:g.width ~height:g.height
+        ~horizontal_padding:0 ~vertical_padding:0
+    in
+    let panel =
+      Panel.render appearance ~attrs:(Role.attrs appearance Border)
+        ~title:(View.text ~attrs:(Role.attrs appearance Heading) title)
+        ~geometry ~width:g.width ~height:g.height body
+      |> colored appearance Surface
+    in
+    View.zcat [ View.pad ~l:g.x ~t:g.y panel; background ]
     |> box ~width:dimensions.width ~height:dimensions.height
 ;;
 
@@ -4173,7 +4474,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dime
       View.vcat rows |> colored host.appearance Surface |> box ~width ~height
     | None -> render_workspace ~now ?indicator_frames ?render_pane host data dimensions
   in
-  render_palette host dimensions background
+  render_palette host dimensions (render_menu host dimensions background)
 ;;
 
 let appearance_cases =
@@ -4254,6 +4555,92 @@ let refinement_fixture (definition : P.Definition.t) =
     List.find_exn (H.tiles host) ~f:(fun tile -> String.equal tile.W.Tile.kind kind)
   in
   host, data, find
+;;
+
+let%test_unit "80-column Project button and visible run rows have distinct hit targets" =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = find "run-selector" in
+  let active = Option.value_exn (tile_run host tile) in
+  let other = { active with id = "browsed-run" } in
+  let data =
+    { data with
+      runs =
+        [ { active with id = "earlier" }, "hit0"
+        ; active, "hit1"
+        ; { active with id = "filtered-out" }, "skip"
+        ; other, "hit2"
+        ; { active with id = "later" }, "hit3"
+        ]
+    }
+  in
+  let host =
+    H.set_local host tile.id
+      { (H.local host tile.id) with
+        filter = "hit"
+      ; scroll = 1
+      ; presentation = { T.inherit_ with run_selector_rows = Some 2 }
+      }
+  in
+  let dimensions = { Dimensions.width = 80; height = 40 } in
+  let screen = render_workspace host data dimensions |> plain_text |> String.split_lines in
+  let buttons label =
+    List.filter_mapi screen ~f:(fun y text ->
+      String.substr_index text ~pattern:label
+      |> Option.map ~f:(fun byte -> cell_width (String.prefix text byte), y))
+  in
+  let hit (x, y) = menu_trigger_at host data dimensions ~x ~y in
+  (match hit (List.hd_exn (buttons "Project ▾")) with
+   | Some `Project -> ()
+   | _ -> assert false);
+  assert (List.is_empty (buttons "Actions ▾"));
+  let painted_rows =
+    List.map [ "hit1", active; "hit2", other ] ~f:(fun (label, run) ->
+      let x, y = List.hd_exn (buttons label) in
+      assert (Option.is_none (hit (x, y)));
+      (match pointer_geometry host dimensions ~x ~y with
+       | Some (selector, body, Some (column, _)) when W.Tile_id.equal tile.id selector.id ->
+         let left = x - column in
+         List.iter [ left; x; left + body.width - 1 ] ~f:(fun x ->
+           match run_context_at host data dimensions ~x ~y with
+           | Some (selector, actual) ->
+             assert (W.Tile_id.equal tile.id selector.id && Run_ref.equal run actual)
+           | None -> assert false);
+         List.iter [ left - 1; left + body.width ] ~f:(fun x ->
+           assert (Option.is_none (run_context_at host data dimensions ~x ~y)))
+       | _ -> assert false);
+      y, run)
+  in
+  let x, _ = List.hd_exn (buttons "hit1") in
+  for y = 0 to dimensions.height - 1 do
+    let expected = List.Assoc.find painted_rows y ~equal:Int.equal in
+    let actual = run_context_at host data dimensions ~x ~y in
+    assert (Option.equal Run_ref.equal expected (Option.map actual ~f:snd))
+  done;
+  let browsing = H.set_local host tile.id { (H.local host tile.id) with cursor = Some (run_label other) } in
+  assert (Option.equal Run_ref.equal (local_menu_run browsing data tile) (Some other));
+  assert (Option.equal Run_ref.equal (tile_run browsing tile) (Some active))
+;;
+
+let%test_unit "menu page hit tests follow grouping, filtering and bounded cursor scrolling" =
+  let host, data, _ = refinement_fixture P.Testing.definition in
+  let command id = H.command id id "" Toggle_chrome in
+  let commands = List.map [ "project.new-ip"; "project.new-chip"; "asic.pick-chip" ] ~f:command in
+  let host, _ = H.input host (Open_menu Project_menu) ~commands in
+  let check ~width ~height host name id =
+    let dimensions = { Dimensions.width; height } in
+    let rows = render host data dimensions |> plain_text |> String.split_lines in
+    let y = List.findi_exn rows ~f:(fun _ line -> String.is_substring line ~substring:name) |> fst in
+    (match menu_pointer host dimensions ~x:2 ~y with
+     | Some (Menu_click clicked) -> assert (String.equal id clicked)
+     | _ -> assert false);
+    assert (Option.is_none (menu_pointer host dimensions ~x:0 ~y))
+  in
+  check ~width:80 ~height:24 host "New IP Library" "project.new-ip";
+  let advance host event = fst (H.input host event ~commands:[]) in
+  let last = advance (advance host Next) Next in
+  check ~width:80 ~height:7 last "Select Launch Target" "asic.pick-chip";
+  let filtered = advance (advance host (Character '/')) (Text "new-chip") in
+  check ~width:80 ~height:24 filtered "New Chip Target" "project.new-chip"
 ;;
 
 let%test_unit "Runs pointer selection follows filtered capped page and never binds a run" =
@@ -4539,7 +4926,9 @@ let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
     | `Strip chips -> chips
     | `Rows _ -> assert false
   in
-  let boundary = View.width (fst (List.hd_exn chips)) in
+  let boundary = View.width (project_prefix host.appearance ~width:120)
+                 + View.width (fst (List.hd_exn chips)) in
+  assert (Option.is_none (click ~width:120 ~row:0 ~column:0));
   List.iter
     [ click ~width:120 ~row:0 ~column:boundary; click ~width:4 ~row:1 ~column:0 ]
     ~f:(fun target -> assert (Option.equal W.Workspace_id.equal target (Some other.id)));
@@ -7519,6 +7908,77 @@ let%test_unit "palette scroll keeps selected result visible at normal and tiny s
           (View.rectangle ~width ~height ())
       in
       assert (View.width frame = width && View.height frame = height))
+;;
+
+let%test_unit "palette hit tests use visible row IDs and exact rendered form buttons" =
+  let base = H.receive H.empty (W.initial ~session_id:(W.Session_id.of_string "palette-hit")) in
+  let base = { base with appearance = { base.appearance with icons = Ascii } } in
+  let capture = Option.value_exn (H.capture base) in
+  let commands =
+    List.init 40 ~f:(fun i ->
+      H.command ?unavailable:(Option.some_if (i = 38) "disabled")
+        (sprintf "id%d" i) (sprintf "Choice %02d" i) "" Toggle_chrome)
+  in
+  let palette : H.palette = { capture; commands; query = ""; index = 39; argument = None } in
+  let scroll ?(x = 59) ?(y = 20) p direction =
+    palette_scroll { base with palette = Some p } { Dimensions.width = 120; height = 40 }
+      ~x ~y ~direction
+  in
+  assert (Poly.equal (scroll palette `Up) (Some H.Previous));
+  assert (Option.is_none (scroll palette `Down));
+  assert (Option.is_none (scroll ~x:0 palette `Up));
+  let check ~width ~height p label target =
+    let host = { base with palette = Some p } in
+    let dimensions = { Dimensions.width; height } in
+    let frame = render_palette host dimensions (View.rectangle ~width ~height ()) in
+    let x, y =
+      List.find_map (List.init height ~f:Fn.id) ~f:(fun y ->
+        let line = View.crop ~t:y ~b:(height - y - 1) frame |> plain_text in
+        Option.map (String.substr_index line ~pattern:label) ~f:(fun x ->
+          cell_width (String.prefix line x), y))
+      |> Option.value_exn
+    in
+    let hit x = palette_hit host dimensions ~x ~y in
+    assert (Poly.equal (hit x) target);
+    assert (Poly.equal (hit (x + String.length label - 1)) target);
+    if String.is_prefix label ~prefix:"[" then assert (Option.is_none (hit (x - 1)));
+    assert (Option.is_none (palette_hit host dimensions ~x:(-1) ~y))
+  in
+  check ~width:120 ~height:40 palette "Choice 38" None;
+  check ~width:120 ~height:40 palette "Choice 39" (Some (`Command "id39"));
+  let form argument = { palette with argument = Some argument; query = "demo" } in
+  let name = form (Starter_name Empty_ip) in
+  assert (Option.is_none (scroll name `Up));
+  List.iter [ 17, 9; 100, 32 ] ~f:(fun (width, height) ->
+    check ~width ~height name "[Preview]" (Some (`Input Enter));
+    check ~width ~height name "[Cancel]" (Some (`Input Escape)));
+  let preview : Authoring.Preview.t =
+    { preview_id = "captured"
+    ; operation =
+        { recipe = Authoring.chip_recipe; name = "demo"
+        ; target = { destination = "/project"; project = None; object_id = None } }
+    ; new_files = []; files = []; provider = "fixture"; version = "1"; registration = None
+    }
+  in
+  let chip = form (Starter_preview (preview, Chip (Example, true))) in
+  let long_preview = { preview with new_files = List.init 60 ~f:Int.to_string } in
+  let at_top argument = { (form argument) with index = 0 } in
+  List.iter [ H.Starter_preview (long_preview, Empty_ip); Starter_result (long_preview.new_files, None) ]
+    ~f:(fun argument ->
+      let page = at_top argument in
+      assert (Poly.equal (scroll page `Down) (Some H.Next));
+      assert (Option.is_none (scroll page `Up));
+      assert (Option.is_none (scroll ~y:0 page `Down)));
+  check ~width:100 ~height:32 chip "[Toggle registration]" (Some (`Input (Character 'r')));
+  let ip = form (Starter_preview (preview, Empty_ip)) in
+  check ~width:17 ~height:9 ip "[Apply]" (Some (`Input (Character 'a')));
+  check ~width:17 ~height:9 ip "[Cancel]" (Some (`Input Escape));
+  assert (not (List.Assoc.mem (palette_controls base ip) "Toggle registration" ~equal:String.equal));
+  let result = form (Starter_result ([ "Created" ], Some "demo")) in
+  check ~width:100 ~height:32 result "[Done]" (Some (`Input Enter));
+  check ~width:100 ~height:32 result "[Select target]" (Some (`Input (Character 's')));
+  assert (not (List.Assoc.mem (palette_controls base (form (Starter_result ([], None))))
+                 "Select target" ~equal:String.equal))
 ;;
 
 let%test_unit "form overlay keeps query tail visible without changing captured form state"

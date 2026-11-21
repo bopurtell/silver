@@ -22,6 +22,23 @@ In Overview, **Session** summarizes the launch chip and variant on one line.
 aligned rows. The run selector and physical-stage results are evidence from the
 selected execution, which may belong to a different chip. Selecting that run
 does not pick the next launch target.
+
+### Main and independent workspaces
+
+Linked workspaces use Main's launch target. Making a workspace independent
+starts it with the same chip and variant; selecting a different target there
+does not change Main. For example, Overview can launch FIFO while a detached
+workspace launches program memory, even if both are inspecting the same old
+FIFO run. To launch for the chip behind that evidence, explicitly choose
+**Use this run's chip/variant as launch target**.
+
+On reopen, a saved chip/variant pair must still exist. If either ID is gone,
+select a replacement explicitly. The catalog default is for first use, not a
+substitute for a missing target. Restoring a target does not restore permission
+to launch an old staged plan.
+
+### Start a run
+
 The picker is available even in saved workspaces without a Planned Run pane.
 For a fresh synthesis run, select **synthesis** in **Stage checklist** and
 press **Shift+R**. Silver uses the current launch chip/variant and its flow

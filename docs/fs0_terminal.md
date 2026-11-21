@@ -52,7 +52,9 @@ startup treatment, not an accepted final aesthetic.
 
 | Input | Action |
 | --- | --- |
-| `Space c c` | Searchable command palette; `Esc` closes, arrows browse, `Enter` executes |
+| `Space c c` | Searchable command palette; click a result to invoke it, or browse with arrows and press `Enter`. `Esc` closes. |
+| `F2` / `Project ▾` | Open project actions without switching workspaces. In a local session choose **New Project…** or **Open Project…** to work in another Dune root; **New IP Library…** adds to the current one. |
+| Right-click a run / `F3` | Open actions for the run under the pointer or, with `F3`, the highlighted run. Arrow keys or `j`/`k` move, a count repeats movement, `/` filters, and `Enter` invokes the highlighted action. `Esc` exits filtering, then dismisses the menu. |
 | `1`, `2` | Overview, Timing |
 | `Tab` | Next visible tile |
 | `j` / `k`, down / up | Browse runs or project attempts in the focused tile |

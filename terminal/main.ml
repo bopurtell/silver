@@ -94,6 +94,7 @@ type waveform_runtime =
 type session =
   { requested_endpoint : string option
   ; local_project_files : bool
+  ; mutable project_entry : [ `New | `Open ] option
   ; mutable adopted_root : string option
   ; project_root : string option
   ; environment_selection : V1.Environment_selection.t
@@ -131,6 +132,7 @@ type session =
   ; mutable navigation_focus_touched : string list
   ; mutable reconnect_delay_ms : int
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
+  ; mutable painted_palette : Host.t option
   ; mutable show_connection_details : bool
   ; mutable connection_details_scroll : int
   ; mutable host : Host.t
@@ -138,6 +140,9 @@ type session =
   ; mutable registry_busy : bool
   ; mutable asic : Asic.Snapshot.t option
   ; mutable asic_request_id : int
+  ; mutable context_epoch : int
+  ; mutable selecting_chip : bool
+  ; staged_contexts : Planned_run.staged String.Table.t
   ; mutable catalog_open_checked : bool
   ; mutable resource_navigation_intent : unit ref
   ; mutable preparation_request_id : int
@@ -308,6 +313,7 @@ let create_session
     let session =
       { requested_endpoint = endpoint
       ; local_project_files
+      ; project_entry = None
       ; adopted_root = None
       ; project_root
       ; environment_selection
@@ -341,6 +347,7 @@ let create_session
       ; navigation_focus_touched = []
       ; reconnect_delay_ms = 250
       ; last_dimensions = None
+      ; painted_palette = None
       ; show_connection_details = false
       ; connection_details_scroll = 0
       ; host = Host.empty
@@ -348,6 +355,9 @@ let create_session
       ; registry_busy = false
       ; asic = None
       ; asic_request_id = 0
+      ; context_epoch = 0
+      ; selecting_chip = false
+      ; staged_contexts = String.Table.create ()
       ; catalog_open_checked = false
       ; resource_navigation_intent = ref ()
       ; preparation_request_id = 0
@@ -412,12 +422,52 @@ let current_project session =
   State.current_project ~opened:session.opened session.snapshot
 ;;
 
+let launch_context session =
+  Option.bind session.host.registry ~f:(fun registry ->
+    Option.bind (Host.active session.host) ~f:(fun workspace ->
+      Option.some_if
+        (not (Workspace.Context_id.equal workspace.context registry.main_context))
+        (Workspace.context registry workspace.context)))
+;;
+
+let scoped_operation context operation =
+  match context with
+  | None -> operation
+  | Some (c : Workspace.Context.t) ->
+    Asic.Operation.In_context
+      { context = Workspace.Context_id.to_string c.id
+      ; initial_target = c.initial_launch_target
+      ; operation
+      }
+;;
+
 let plan_scope session (project : Project.t) =
   Sexp.to_string_mach
     (Sexp.List
        [ V1.Daemon_instance_id.sexp_of_t session.hello.instance_id
        ; Project_id.sexp_of_t project.id
+       ; [%sexp_of: Workspace.Context_id.t option]
+           (Option.map (launch_context session) ~f:(fun c -> c.id))
        ])
+;;
+
+let reconcile_launch_context session project =
+  let planned_run =
+    Planned_run.reset session.host.planned_run ~scope:(plan_scope session project)
+  in
+  if not (phys_equal planned_run session.host.planned_run)
+  then (
+    Option.iter (Planned_run.suspend session.host.planned_run) ~f:(fun (key, data) ->
+      Hashtbl.set session.staged_contexts ~key ~data);
+    session.context_epoch <- session.context_epoch + 1;
+    session.selecting_chip <- false;
+    session.asic <- None;
+    session.catalog_open_checked <- false;
+    session.preferences_loaded <- false;
+    session.remembered_selection <- None;
+    session.host <- { session.host with planned_run; remembered_selection = None;
+      stage_generation = session.host.stage_generation + 1;
+      stage_preparation = None; planned_preparation = false })
 ;;
 
 let project_artifacts session =
@@ -433,6 +483,7 @@ let project_artifacts session =
 let reconcile_selection session =
   match current_project session with
   | None ->
+    Hashtbl.clear session.staged_contexts;
     session.host
     <- { session.host with
          planned_run = Planned_run.reset session.host.planned_run ~scope:""
@@ -445,11 +496,7 @@ let reconcile_selection session =
     session.artifact_view <- None;
     session.hierarchy_view <- None
   | Some project ->
-    let planned_run =
-      Planned_run.reset session.host.planned_run ~scope:(plan_scope session project)
-    in
-    if not (phys_equal planned_run session.host.planned_run) then session.asic <- None;
-    session.host <- { session.host with planned_run };
+    reconcile_launch_context session project;
     let target, configuration =
       State.reconcile_selection
         project
@@ -632,6 +679,10 @@ let preference_context session =
 
 let preference_location session =
   let project_key, state_directory = preference_context session in
+  let project_key =
+    Option.value_map (launch_context session) ~default:project_key ~f:(fun c ->
+      Sexp.to_string_mach (Sexp.List [ Atom project_key; Workspace.Context_id.sexp_of_t c.id ]))
+  in
   project_key, Launch_preferences.path ~state_directory ~project_key
 ;;
 
@@ -1027,10 +1078,14 @@ let load_preferences session =
   then return ()
   else (
     session.preferences_loaded <- true;
+    let epoch = session.context_epoch in
+    let location = Or_error.try_with (fun () -> preference_location session) in
+    let pending_saves = session.preference_saves in
+    let%bind () = pending_saves in
     let%map result =
       In_thread.run (fun () ->
         Or_error.try_with (fun () ->
-          let project_key, path = preference_location session in
+          let project_key, path = Or_error.ok_exn location in
           match Sys_unix.file_exists path with
           | `No -> None
           | `Unknown -> failwith ("Cannot inspect terminal preferences: " ^ path)
@@ -1040,7 +1095,8 @@ let load_preferences session =
             then failwith "Terminal preference size limit exceeded";
             Some (Launch_preferences.decode ~project_key (Sexp.of_string content))))
     in
-    match result with
+    if epoch = session.context_epoch && phys_equal pending_saves session.preference_saves
+    then match result with
     | Ok selection ->
       session.remembered_selection <- selection;
       session.host <- { session.host with remembered_selection = selection }
@@ -1051,6 +1107,7 @@ let load_preferences session =
 ;;
 
 let save_preferences session selection =
+  let location = Or_error.try_with (fun () -> preference_location session) in
   session.remembered_selection <- Some selection;
   session.host <- { session.host with remembered_selection = Some selection };
   let previous = session.preference_saves in
@@ -1065,7 +1122,7 @@ let save_preferences session selection =
       let%map result =
         In_thread.run (fun () ->
           Or_error.try_with (fun () ->
-            let project_key, path = preference_location session in
+            let project_key, path = Or_error.ok_exn location in
             let directory = Filename.dirname path in
             Core_unix.mkdir_p directory ~perm:0o700;
             let temp = Filename_unix.temp_file ~in_dir:directory ".launch-" ".tmp" in
@@ -1344,6 +1401,7 @@ let workspace_request ?(on_snapshot = fun _ -> ()) session operation =
             snapshot
         in
         session.host <- host;
+        reconcile_launch_context session project;
         session.presentation_preferences <- pending;
         apply_waveform_preferences session;
         reconcile_synthesis session;
@@ -1354,6 +1412,37 @@ let mutate_workspace ?on_snapshot session mutation =
   match session.host.registry with
   | None -> return ()
   | Some snapshot ->
+    let capture_mutation () =
+      match mutation with
+      | Workspace.Mutation.Make_independent id ->
+        let workspace = Workspace.workspace snapshot id in
+        let capture (s : Asic.Snapshot.t) =
+          Option.value_map s.chip_target ~default:mutation ~f:(fun t ->
+            Workspace.Mutation.Detach_with_target (id, t))
+        in
+        if session.selecting_chip then return (Error "Chip selection pending; retry detach")
+        else (match Host.active session.host, session.asic, current_project session with
+        | Some active, Some s, _ when Workspace.Context_id.equal active.context workspace.context ->
+          return (Ok (capture s))
+        | _, _, Some project ->
+          let client = session.client and instance_id = session.hello.instance_id in
+          let context =
+            Option.some_if (not (Workspace.Context_id.equal workspace.context snapshot.main_context))
+              (Workspace.context snapshot workspace.context)
+          in
+          let%map result = request session.diagnostics_file (fun () ->
+            Http.Client.asic client
+              { instance_id; project = project.id
+              ; operation = scoped_operation context Get }) in
+          if phys_equal client session.client
+             && V1.Daemon_instance_id.equal instance_id session.hello.instance_id
+             && Option.exists (current_project session) ~f:(fun p ->
+               Project_id.equal p.id project.id)
+          then Result.map result ~f:capture
+          else Error "Project changed before workspace detach"
+        | _ -> return (Error "Workspace project unavailable"))
+      | _ -> return (Ok mutation)
+    in
     if session.registry_busy
     then (
       session.host
@@ -1367,7 +1456,10 @@ let mutate_workspace ?on_snapshot session mutation =
           return ())
         (fun () ->
           let%bind () =
-            workspace_request
+            let%bind captured = capture_mutation () in
+            match captured with
+            | Error notice -> session.host <- { session.host with notice }; return ()
+            | Ok mutation -> workspace_request
               ?on_snapshot
               session
               (Mutate { expected_revision = snapshot.revision; mutation })
@@ -1513,6 +1605,11 @@ and perform_asic_request
   =
   match current_project session with
   | None -> return ()
+  | Some _ when session.selecting_chip && (match operation with
+      | Asic.Operation.Select_chip _ | Plan _ | Stage_fresh _ | Launch_fresh _
+      | Run _ | Discover | Ensure_discovered -> true | _ -> false) ->
+    session.host <- { session.host with notice = "Chip selection pending; retry after discovery" };
+    return ()
   | Some project ->
     let instance_id = session.hello.instance_id in
     let client = session.client in
@@ -1526,6 +1623,15 @@ and perform_asic_request
     in
     session.asic_request_id <- session.asic_request_id + 1;
     let request_id = session.asic_request_id in
+    let selecting = match operation with Asic.Operation.Select_chip _ -> true | _ -> false in
+    let apply_snapshot = not session.selecting_chip in
+    if selecting then (
+      session.selecting_chip <- true;
+      session.context_epoch <- session.context_epoch + 1;
+      session.host <- { session.host with
+        stage_generation = session.host.stage_generation + 1; stage_preparation = None });
+    let epoch = session.context_epoch in
+    let context = launch_context session in
     let scope = plan_scope session project in
     let planned_run = Planned_run.reset session.host.planned_run ~scope in
     let planned_run, plan_ticket =
@@ -1560,18 +1666,23 @@ and perform_asic_request
     session.host <- { session.host with planned_run };
     let%map response =
       request session.diagnostics_file (fun () ->
-        Http.Client.asic client { instance_id; project = project.id; operation })
+        Http.Client.asic client { instance_id; project = project.id;
+          operation = scoped_operation context operation })
     in
-    let current =
+    let same_project =
       phys_equal client session.client
       && V1.Daemon_instance_id.equal instance_id session.hello.instance_id
       && Option.value_map (current_project session) ~default:false ~f:(fun p ->
         Project_id.equal p.id project.id)
     in
+    let current =
+      same_project && epoch = session.context_epoch && String.equal scope (plan_scope session project)
+    in
     let plan_current =
       Option.value_map plan_ticket ~default:true ~f:(fun ticket ->
         Planned_run.current_ticket session.host.planned_run ticket)
     in
+    if current && selecting then session.selecting_chip <- false;
     if current && plan_current then Option.iter fresh_receipt ~f:(fun f -> f response);
     if current
     then
@@ -1616,7 +1727,7 @@ and perform_asic_request
            });
     (* A rejected/timed-out launch must release its pending view even when a newer Get
        snapshot has already arrived. Never retry a potentially accepted launch. *)
-    if current
+    if same_project
     then (
       match operation, response, session.view_on_allocation with
       | ( (Asic.Operation.Run { key; _ } | Launch_fresh { key; _ })
@@ -1664,7 +1775,7 @@ and perform_asic_request
                ~ticket
                ~publish_notice:(request_id >= session.asic_applied_id)
                (Result.map response ~f:(fun _ -> ()))));
-    if request_id >= session.asic_applied_id && current
+    if apply_snapshot && request_id >= session.asic_applied_id && current
     then (
       match response with
       | Error message ->
@@ -1683,12 +1794,20 @@ and perform_asic_request
           session.host <- { session.host with
             stage_generation = session.host.stage_generation + 1;
             stage_preparation = None; planned_preparation = false };
+        let missing = Launch_preferences.missing_target snapshot in
+        if not (Option.equal String.equal missing
+                  (Option.bind session.asic ~f:Launch_preferences.missing_target))
+        then Option.iter missing ~f:(fun reason ->
+          session.host <- { session.host with notice = Artifact_view.safe reason });
         session.asic <- Some snapshot;
-        session.host
-        <- { session.host with
-             planned_run =
-               Planned_run.receive session.host.planned_run ~revision:request_id snapshot
-           };
+        let planned_run =
+          Planned_run.receive session.host.planned_run ~revision:request_id snapshot in
+        let planned_run =
+          match Hashtbl.find_and_remove session.staged_contexts scope with
+          | None -> planned_run
+          | Some staged -> Planned_run.resume planned_run staged
+        in
+        session.host <- { session.host with planned_run };
         reconcile_synthesis session);
     if current && Option.is_some artifact_request then reconcile_synthesis session;
     Option.iter timing_receipt ~f:(fun receipt ->
@@ -1915,10 +2034,11 @@ let export_artifact_text session tile_id ~viewer (reference : Asic_artifact.Refe
           session.artifact_export_busy <- false;
           return ())
         (fun () ->
+          let scope = launch_context session in
           let call operation =
             let%map response =
               request session.diagnostics_file (fun () ->
-                Http.Client.asic client { instance_id; project = project_id; operation })
+                Http.Client.asic client { instance_id; project = project_id; operation = scoped_operation scope operation })
             in
             Result.map_error response ~f:Error.of_string
           in
@@ -2041,10 +2161,11 @@ let export_artifact_binary session tile_id ~viewer (reference : Asic_artifact.Re
           session.artifact_export_busy <- false;
           return ())
         (fun () ->
+          let scope = launch_context session in
           let call operation =
             let%map result =
               request session.diagnostics_file (fun () ->
-                Http.Client.asic client { instance_id; project = project.id; operation })
+                Http.Client.asic client { instance_id; project = project.id; operation = scoped_operation scope operation })
             in
             Result.map_error result ~f:Error.of_string
           in
@@ -2425,6 +2546,7 @@ let hydrate_retained ?(reschedule = false) session =
              then return ()
              else (
                apply_navigation_preferences session;
+               Option.iter (current_project session) ~f:(reconcile_launch_context session);
                reconcile_synthesis session;
                refresh_simulation session))
           ])
@@ -2436,6 +2558,7 @@ let activate_workspace session id =
   session.waveform_visible <- false;
   session.waveform_generation <- session.waveform_generation + 1;
   session.host <- Host.switch session.host id;
+  Option.iter (current_project session) ~f:(reconcile_launch_context session);
   reconcile_synthesis session;
   Option.iter session.asic ~f:(fun snapshot ->
     List.iter (Host.tiles session.host) ~f:(fun tile ->
@@ -2899,6 +3022,9 @@ and reconnect session =
            (Option.map opened ~f:(fun opened -> opened.project.id)))
     in
     session.client <- client;
+    Hashtbl.clear session.staged_contexts;
+    session.context_epoch <- session.context_epoch + 1;
+    session.selecting_chip <- false;
     session.catalog_open_checked <- false;
     session.hello <- hello;
     session.opened <- opened;
@@ -4491,6 +4617,11 @@ let select_pointer_row session (tile : Workspace.Tile.t) dimensions ~column ~row
 ;;
 
 let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
+  session.painted_palette <- None;
+  let remember_palette (host : Host.t) =
+    session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
+    host
+  in
   let render_host () =
     session.last_dimensions <- Some dimensions;
     reconcile_synthesis session;
@@ -4504,7 +4635,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
         match hierarchy_pane session tile ~width ~height with
         | Some pane -> Some pane
         | None -> waveform_pane session tile ~width ~height)
-      (displayed_host session)
+      (remember_palette (displayed_host session))
       data
       dimensions
   in
@@ -4522,7 +4653,7 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
     in
     session.waveform <- Some view;
     Host_view.render_palette
-      session.host
+      (remember_palette session.host)
       dimensions
       (Waveform_view.render
          ~appearance
@@ -4560,6 +4691,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
   let session =
     { requested_endpoint = Some fixture.endpoint
     ; local_project_files = false
+    ; project_entry = None
     ; adopted_root = None
     ; project_root = Some (Project_root.to_absolute_path fixture.opened.project.root)
     ; environment_selection = fixture.opened.environment.selection
@@ -4593,6 +4725,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; navigation_focus_touched = []
     ; reconnect_delay_ms = 250
     ; last_dimensions = None
+    ; painted_palette = None
     ; show_connection_details = fixture.show_connection_details
     ; connection_details_scroll = 0
     ; host = Host.empty
@@ -4600,6 +4733,9 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; registry_busy = false
     ; asic = None
     ; asic_request_id = 0
+    ; context_epoch = 0
+    ; selecting_chip = false
+    ; staged_contexts = String.Table.create ()
     ; catalog_open_checked = false
     ; resource_navigation_intent = ref ()
     ; preparation_request_id = 0
@@ -4751,9 +4887,24 @@ let library_commands session ~f =
          f label dir)))
 ;;
 
+let inspected_run session =
+  match Host.focused session.host with
+  | Some tile when String.equal tile.kind "run-selector"
+                   && Option.is_none (Host_view.inspection_explorer session.host tile)
+                   && Option.is_none (Host_view.artifact_inspector session.host tile) ->
+    Host_view.local_menu_run session.host (host_data session) tile
+  | _ -> Terminal_presentation.Stage_launch_commands.inspected_run session.host
+;;
+
 let host_catalog_base session =
+  (if session.local_project_files && Option.is_some session.opened
+   then Host.project_entry_commands
+   else [])
+  @
   (match session.opened with
    | None -> []
+   | Some _ when not (List.mem session.hello.capabilities Authoring.capability ~equal:String.equal) ->
+     []
    | Some _ ->
      [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
      ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
@@ -4931,6 +5082,7 @@ let host_catalog_base session =
             (Asic (Plan selection))
         ])
   @ Terminal_presentation.Stage_launch_commands.commands
+      ~inspected:(inspected_run session)
       session.host
       ~asic:session.asic
       ~remembered:session.remembered_selection
@@ -4939,7 +5091,10 @@ let host_catalog_base session =
       ~preview:(Option.bind session.asic ~f:(fun asic -> asic.preview))
       ~view_pending:(Option.is_some session.view_on_allocation)
   @ Option.value_map session.asic ~default:[] ~f:(fun asic ->
-    Terminal_presentation.Stage_launch_commands.chip_commands asic
+    List.filter_opt
+      [ Option.some_if (List.exists asic.chips ~f:(fun chip -> not (List.is_empty chip.variants)))
+          (Host.command "asic.pick-chip" "Select Launch Target…" "select chip target project launch chip variant" Pick_chip_target) ]
+    @ Terminal_presentation.Stage_launch_commands.chip_commands asic
     @ List.concat_map asic.flows ~f:(fun flow ->
       (Host.command
          ("asic.describe." ^ flow.id)
@@ -5578,6 +5733,7 @@ let open_waveform_workspace session artifact =
           session.host <- Host.set_waveform_pin session.host workspace.id pin;
           session.waveform_preferences_failed <- false;
           session.host <- Host.switch session.host workspace.id;
+          Option.iter (current_project session) ~f:(reconcile_launch_context session);
           let has_session =
             Option.value_map session.host.registry ~default:false ~f:(fun registry ->
               List.exists registry.tiles ~f:(fun tile ->
@@ -6407,6 +6563,10 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           | Ok payload ->
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
+    | Project_entry entry ->
+      if session.local_project_files && Option.is_some session.opened
+      then session.project_entry <- Some entry;
+      Effect.Ignore
     | (Setup_project | Choose_ip_template | Choose_module_directory | Library_actions _
       | Choose_chip_source | Choose_chip_library | Enter_chip_directory | Map_chip _
       | Toggle_chip _ | Select_created_chip _ | Name_starter _ | Preview_starter _ | Finish_starter _
@@ -6681,6 +6841,20 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Load_hierarchy id -> async (fun () -> load_tile_hierarchy session id)
     | Hierarchy_detail id -> async (fun () -> detail_tile_hierarchy session id)
     | Discover_asic -> async (fun () -> asic_request session Discover)
+    | Pick_chip_target ->
+      session.host <- Host.open_chip_picker session.host;
+      Effect.Ignore
+    | Use_run_target (run, target) ->
+      let module C = Terminal_presentation.Stage_launch_commands in
+      let current () =
+        let evidence = inspected_run session in
+        Option.equal Run_ref.equal evidence (Some run)
+        && Option.exists (C.observed_selection session.asic run) ~f:(fun s ->
+          Option.equal Asic.Chip_target.equal s.chip_target (Some target))
+      in
+      execute_host ~validate:(fun () ->
+        if current () then validate () else Error "Inspected run changed; reopen palette")
+        session captured (Asic (Select_chip target)) ~exit
     | Open_workloads ->
       let intent = ref () in
       session.resource_navigation_intent <- intent;
@@ -8313,10 +8487,60 @@ let waveform_key event =
         | _ -> None))
 ;;
 
+let modal_input session input ~exit =
+  let commands =
+    match input with
+    | Host.Open_menu Project_menu -> host_catalog session
+    | Open_menu Actions_menu ->
+      Option.value_map (inspected_run session) ~default:[] ~f:(fun run ->
+        let label = Host_view.run_label run in
+        let ids =
+          [ "asic.use-run-target"; "asic.artifacts." ^ label; "asic.refresh." ^ label ]
+        in
+        let catalog = host_catalog session in
+        List.filter_map ids ~f:(fun id ->
+          List.find catalog ~f:(fun c -> String.equal c.Host.id id)))
+    | _ -> []
+  in
+  let host, effect = Host.input session.host input ~commands in
+  session.host <- host;
+  match effect with
+  | Host.Execute (capture, action) -> execute_host session capture action ~exit
+  | _ -> Bonsai_term.Effect.Ignore
+;;
+
+let menu_key session event ~exit =
+  let host = session.host in
+  let input = Host.decode_event event in
+  match host.menu, input with
+  | Some _, _ ->
+    Some
+      (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun input ->
+         modal_input session input ~exit))
+  | None, Some (Open_menu kind as input) ->
+    let blocked =
+      Option.is_some host.palette || host.paste || host.editing_filter
+      || session.waveform_visible || Option.is_some host.inspection_paste
+      || Option.exists (Host.focused host) ~f:(fun tile ->
+        Option.exists (Host.inspection host tile.id) ~f:(fun view -> view.editing)
+        || (Poly.equal kind Host.Actions_menu
+            && (Option.is_some (Host_view.inspection_explorer host tile)
+                || Option.is_some (Host_view.artifact_inspector host tile)))
+        || (Waveforms.is_pane tile.kind
+            && Option.exists (waveform_context session) ~f:(fun (view, _) ->
+              Option.is_some view.editing || Option.is_some view.identity_scroll)))
+    in
+    Some (if blocked then Bonsai_term.Effect.Ignore else modal_input session input ~exit)
+  | None, _ -> None
+;;
+
 let host_handler session event ~exit =
   if Host.is_interrupt event
   then Some (exit ())
-  else if session.waveform_visible
+  else match menu_key session event ~exit with
+  | Some _ as handled -> handled
+  | None ->
+    if session.waveform_visible
           || Option.exists (Host.focused session.host) ~f:(fun t ->
             Waveforms.is_pane t.kind)
   then (
@@ -8679,6 +8903,40 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
   match session.last_dimensions with
   | None -> Effect.Ignore
   | Some dimensions
+    when Option.is_some session.painted_palette || Option.is_some session.host.palette ->
+    (* Interpret coordinates on the painted surface. If a keyboard edit or service
+       reply replaced it before repaint, consume the gesture without retargeting. *)
+    (match session.painted_palette, session.host.palette with
+     | Some host, Some palette
+       when Option.exists host.palette ~f:(phys_equal palette)
+            && not (session.show_connection_details || session.host.paste || session.host.editing_filter)
+            && (session.waveform_visible
+                || (Option.is_none session.hierarchy_view && Option.is_none session.artifact_view))
+            && Option.is_none session.host.menu ->
+      let input =
+        match (kind : Event.mouse_kind), mods with
+        | Left, [] ->
+          Option.map (Host_view.palette_hit host dimensions ~x ~y) ~f:(function
+            | `Command id -> Host.Palette_click id
+            | `Input input -> input)
+        | Scroll direction, [] -> Host_view.palette_scroll host dimensions ~x ~y ~direction
+        | _ -> None
+      in
+      Option.value_map input ~default:Effect.Ignore ~f:(fun input ->
+        modal_input session input ~exit)
+     | _ -> Effect.Ignore)
+  | Some dimensions when Option.is_some session.host.menu ->
+    (match (kind : Event.mouse_kind), mods with
+     | Left, [] ->
+       Option.value_map (Host_view.menu_pointer session.host dimensions ~x ~y)
+         ~default:Effect.Ignore ~f:(fun input -> modal_input session input ~exit)
+     | Scroll direction, [] when not session.host.paste ->
+       (match Host_view.menu_hit session.host dimensions ~x ~y with
+        | Some (`Chrome | `Choice _) ->
+          modal_input session (match direction with `Up -> Previous | `Down -> Next) ~exit
+        | _ -> Effect.Ignore)
+     | _ -> Effect.Ignore)
+  | Some dimensions
     when pointer_captured session
          || x < 0
          || y < 0
@@ -8690,34 +8948,51 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
        navigate
          Tab
          (match direction with
-          | `Up -> [ Shift ]
-          | `Down -> [])
-     | (Left | Scroll _), [] ->
-       (match Host_view.pointer_hit (displayed_host session) dimensions ~x ~y with
+           | `Up -> [ Shift ]
+           | `Down -> [])
+     | Right, [] ->
+       (match
+          Host_view.run_context_at (displayed_host session) (host_data session) dimensions ~x ~y
+        with
         | None -> Effect.Ignore
-        | Some (tile, body) ->
-          (match kind with
-           | Left ->
-             Option.iter body ~f:(fun (column, row) ->
-               select_pointer_row session tile dimensions ~column ~row);
-             (* A workspace tab may have switched away and restored that
-                workspace's focus. Never focus a tile from the old workspace. *)
-             if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
-             then session.host <- { session.host with focus = Some tile.id };
-             Effect.Ignore
-           | Scroll direction
-             when Option.exists session.host.focus ~f:(Workspace.Tile_id.equal tile.id) ->
-             navigate
-               (ASCII
-                  (match direction with
-                   | `Down -> 'j'
-                   | `Up -> 'k'))
-               []
-           | _ -> Effect.Ignore))
+        | Some (tile, run) ->
+          (* Bind the browse cursor before the menu captures its catalog and workspace. *)
+          let local = Host.local session.host tile.id in
+          session.host
+          <- Host.set_local
+               { session.host with focus = Some tile.id }
+               tile.id
+               { local with cursor = Some (Host_view.run_label run) };
+          modal_input session (Open_menu Actions_menu) ~exit)
+     | (Left | Scroll _), [] ->
+       let trigger =
+         match kind with
+         | Left ->
+           Host_view.menu_trigger_at (displayed_host session) (host_data session) dimensions ~x ~y
+         | _ -> None
+       in
+       (match trigger with
+        | Some `Project -> modal_input session (Open_menu Project_menu) ~exit
+        | None ->
+          (match Host_view.pointer_hit (displayed_host session) dimensions ~x ~y with
+           | None -> Effect.Ignore
+           | Some (tile, body) ->
+             (match kind with
+              | Left ->
+                Option.iter body ~f:(fun (column, row) ->
+                  select_pointer_row session tile dimensions ~column ~row);
+                (* Switching tabs restores the destination's focus. *)
+                if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
+                then session.host <- { session.host with focus = Some tile.id };
+                Effect.Ignore
+              | Scroll direction
+                when Option.exists session.host.focus ~f:(Workspace.Tile_id.equal tile.id) ->
+                navigate (ASCII (match direction with `Down -> 'j' | `Up -> 'k')) []
+              | _ -> Effect.Ignore)))
      | _ -> Effect.Ignore)
 ;;
 
-let tui session ~no_mouse ~exit ~dimensions (local_ graph) =
+let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
   let open Bonsai_term in
   let open Bonsai.Let_syntax in
   (* Session navigation is currently mutable. Give those mutations a reactive invalidation
@@ -8777,6 +9052,8 @@ let tui session ~no_mouse ~exit ~dimensions (local_ graph) =
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if Option.is_some session.host.menu
+    then host_handler session event ~exit |> Option.value ~default:Effect.Ignore
     else if match event with
             | Key_press { key = Function 8; mods = [] } -> true
             | _ -> false
@@ -8908,11 +9185,21 @@ let tui session ~no_mouse ~exit ~dimensions (local_ graph) =
       ]
   in
   let handler =
-    Bonsai.map3 session update_revision write_to_tty ~f:(fun session update write event ->
+    let on_entry =
+      Option.value on_entry ~default:(Bonsai.return (fun _ _ -> Effect.Ignore))
+    in
+    Bonsai.map3 (Bonsai.both session on_entry) update_revision write_to_tty ~f:(fun (session, on_entry) update write event ->
       let previous = session.host in
-      let publish = publish session ~update ~write previous in
+      let publish effect =
+        let effect = publish session ~update ~write previous effect in
+        match session.project_entry with
+        | None -> effect
+        | Some mode ->
+          session.project_entry <- None;
+          Effect.Many [ effect; on_entry session mode ]
+      in
       match event with
-      | Event.Mouse { kind = (Left | Scroll _) as kind; mods; position = { x; y } }
+      | Event.Mouse { kind = (Left | Right | Scroll _) as kind; mods; position = { x; y } }
         when not no_mouse -> publish (handle_pointer session ~exit ~kind ~mods ~x ~y)
       | Mouse _ -> Effect.Ignore
       | _ -> publish (handle_keyboard session event))
@@ -9423,9 +9710,15 @@ let rpc_call session thunk =
 let run_plain_asic session operation ~wait ~timeout_seconds =
   let project = (Option.value_exn session.opened).project.id in
   let instance_id = session.hello.instance_id in
+  let scope, operation =
+    match (operation : Asic.Operation.t) with
+    | In_context { context; initial_target; operation } ->
+      (fun operation -> Asic.Operation.In_context { context; initial_target; operation }), operation
+    | operation -> Fn.id, operation
+  in
   let call operation =
     rpc_call session (fun () ->
-      Http.Client.asic session.client { instance_id; project; operation })
+      Http.Client.asic session.client { instance_id; project; operation = scope operation })
   in
   let last = ref None in
   let finish response failure = Asic.Response.sexp_of_t response, failure in
@@ -9654,8 +9947,8 @@ let start_endpoint ~standalone ~endpoint ~project_root ~state_dir =
 
 (* The project chooser and the bound host share one terminal driver. Activating the bound
    branch starts its polling clock only after the local service is ready. *)
-let unbound_workspace
-  ~start
+let local_workspace
+  ~initial
   ~no_mouse
   ~environment
   ~state_dir
@@ -9667,14 +9960,26 @@ let unbound_workspace
   let diagnostics_file =
     Option.first_some diagnostics_file (Sys.getenv "HARDCAML_WORKBENCH_DIAGNOSTICS")
   in
-  let opened = ref None in
-  let bind root =
+  (* Keep each embedded service alive for the invocation: switching does not
+     interrupt jobs or discard the old dashboard's in-memory state. *)
+  let sessions = String.Table.create () in
+  let endpoints = String.Table.create () in
+  let bind_new root =
     match parse_environment environment with
     | Error error -> return (Error error)
     | Ok (environment_selection, environment_label) ->
       let project_root = Some root in
+      let first = Hashtbl.is_empty endpoints in
       let%bind.Deferred.Or_error endpoint =
-        start_endpoint ~standalone:true ~endpoint:None ~project_root ~state_dir
+        match Hashtbl.find endpoints root with
+        | Some endpoint -> return (Ok endpoint)
+        | None ->
+          let%map.Deferred.Or_error endpoint =
+            start_endpoint ~standalone:true ~endpoint:None ~project_root
+              ~state_dir:(if first then state_dir else None)
+          in
+          Hashtbl.set endpoints ~key:root ~data:endpoint;
+          endpoint
       in
       let%bind created =
         create_session
@@ -9691,38 +9996,63 @@ let unbound_workspace
          let%map () =
            initialize_open_workspace
              session
-             ~workspace_config
+             ~workspace_config:(if Hashtbl.is_empty sessions then workspace_config else None)
              ~artifact_viewer
              ~artifact_binary_viewer
          in
-         opened := Some session;
+         Hashtbl.set sessions ~key:root ~data:session;
          Ok session)
+  in
+  let bind root =
+    Monitor.try_with_or_error (fun () ->
+      let root = Filename_unix.realpath root in
+      match Hashtbl.find sessions root with
+      | Some session -> return (Ok session)
+      | None -> bind_new root)
+    >>| Or_error.join
+  in
+  let%bind.Deferred.Or_error initial =
+    match initial with
+    | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
+    | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
   in
   let app ~exit ~dimensions (local_ graph) =
     let open Bonsai.Let_syntax in
-    let session, set_session = Bonsai.state None graph in
+    let page, set_page = Bonsai.state initial graph in
     let result =
-      match%sub session with
-      | Some session ->
-        let ~view, ~handler = tui session ~no_mouse ~exit ~dimensions graph in
+      match%sub page with
+      | `Bound session ->
+        let on_entry =
+          let%arr set_page in
+          fun s mode ->
+            match s.project_root with
+            | None -> Bonsai_term.Effect.Ignore
+            | Some original ->
+              let start = Filename.dirname original in
+              let screen = match mode with `New -> Startup_entry.Name "" | `Open -> Existing "" in
+              set_page (`Entry (Startup_entry.entry ~original ~start screen, Some s))
+        in
+        let ~view, ~handler = tui ~on_entry session ~no_mouse ~exit ~dimensions graph in
         let%arr view and handler in
         ~view, ~handler
-      | None ->
+      | `Entry (entry, previous) ->
+        let on_cancel =
+          let%arr previous and set_page in
+          fun () -> Option.value_map previous ~default:Bonsai_term.Effect.Ignore
+                      ~f:(fun s -> set_page (`Bound s))
+        in
         let on_open =
-          let%arr set_session in
+          let%arr set_page in
           fun root ->
             let open Bonsai_term in
             Effect.bind
-              (Effect.of_deferred_thunk (fun () ->
-                 Deferred.map
-                   (Monitor.try_with_or_error (fun () -> bind root))
-                   ~f:Or_error.join))
+              (Effect.of_deferred_thunk (fun () -> bind root))
               ~f:(function
                 | Error e -> Effect.return (Error e)
-                | Ok s -> Effect.map (set_session (Some s)) ~f:(fun () -> Ok ()))
+                | Ok s -> Effect.map (set_page (`Bound s)) ~f:(fun () -> Ok ()))
         in
         let ~view, ~handler =
-          Startup_entry.component ~start ~exit ~on_open ~dimensions graph
+          Startup_entry.component ~no_mouse ~entry ~exit ~on_open ~on_cancel ~dimensions graph
         in
         let%arr view and handler in
         ~view, ~handler
@@ -9738,7 +10068,7 @@ let unbound_workspace
         app)
   in
   let%map () =
-    Option.value_map !opened ~default:(return ()) ~f:(fun s -> s.preference_saves)
+    Deferred.all_unit (List.map (Hashtbl.data sessions) ~f:(fun s -> s.preference_saves))
   in
   Or_error.join result
 ;;
@@ -9991,7 +10321,13 @@ let command =
          | Ok (`Unbound start) ->
            timing_prefetch_neighbors := timing_neighbors;
            timing_preload_override := timing_preload;
-           unbound_workspace ~start ~no_mouse ~environment ~state_dir:standalone_state_dir
+           local_workspace ~initial:(`Unbound start) ~no_mouse ~environment ~state_dir:standalone_state_dir
+             ~diagnostics_file ~workspace_config ~artifact_viewer ~artifact_binary_viewer
+         | Ok (`Open (Some root, note)) when interactive ->
+           timing_prefetch_neighbors := timing_neighbors;
+           timing_preload_override := timing_preload;
+           Option.iter note ~f:(eprintf "%s: %s\n%!" program);
+           local_workspace ~initial:(`Open root) ~no_mouse ~environment ~state_dir:standalone_state_dir
              ~diagnostics_file ~workspace_config ~artifact_viewer ~artifact_binary_viewer
          | Ok (`Open (project_root, note)) ->
           timing_prefetch_neighbors := timing_neighbors;

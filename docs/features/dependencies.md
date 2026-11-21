@@ -14,7 +14,7 @@ For the [project authoring intake](../project_authoring_and_command_design.md), 
 - WB-085 → WB-079 and WB-083: library/module and flow/profile commands use the same service boundary.
 - WB-080 → WB-081: Silver consumes the provider's target identities and entry points.
 - WB-080 + WB-085 → WB-082: create a target and offer registration.
-- WB-078 + WB-082 → WB-084: exercise the real starter from empty directory to CLI reproduction.
+- WB-078 + WB-082 → WB-084: both prerequisites are closed; reproducing real synthesis from a clean checkout is WB-084's acceptance work.
 
 | Prerequisite | Consumers | What the consumer needs |
 | --- | --- | --- |

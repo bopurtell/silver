@@ -206,10 +206,16 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
     }
   in
   let ready_snapshot = { s with preview = Some preview; operations = [ completed ] } in
-  let ready = Planned_run.receive host.planned_run ~revision:2 ready_snapshot in
+  let retained = Planned_run.receive host.planned_run ~revision:2 ready_snapshot in
+  assert (not (Planned_run.launchable retained preview));
+  let staging, ticket = Planned_run.begin_plan retained selection in
+  let ready = Planned_run.receipt staging ticket ~floor:3 (Ok ()) in
+  let ready = Planned_run.receive ready ~revision:3 ready_snapshot in
   assert (Planned_run.launchable ready preview);
+  let _, suspended = Planned_run.suspend ready |> Option.value_exn in
+  assert (Planned_run.launchable (Planned_run.resume retained suspended) preview);
   let stale =
-    Planned_run.receive ready ~revision:3 { ready_snapshot with chip_target = Some other }
+    Planned_run.receive ready ~revision:4 { ready_snapshot with chip_target = Some other }
   in
   assert (not (Planned_run.launchable stale preview));
   assert (Planned_run.equal_status (Planned_run.model stale).status Stale);
@@ -221,6 +227,43 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
     ; remembered_selection = Some selection
     }
   in
+  assert (not (Planned_run.fresh_launchable before.planned_run intent));
+  let missing = { s with chips = List.map chips ~f:(fun c ->
+    { c with variants = List.filter c.variants ~f:(fun v ->
+      not (String.equal v.id target.variant)) }) } in
+  let disabled =
+    C.named_commands before ~asic:(Some missing) ~remembered:(Some selection)
+    |> List.find_exn ~f:(fun c -> String.equal c.id "stage.launch-view.synthesis")
+  in
+  assert (String.is_substring (Option.value_exn disabled.unavailable)
+            ~substring:"select a launch target explicitly");
+  let inspected = { (List.hd_exn snapshot.runs) with
+    selection = Some { selection with chip_target = Some other } } in
+  let commands = C.commands before ~asic:(Some { s with runs = [ inspected ] })
+                   ~remembered:(Some selection) in
+  (match (List.find_exn commands ~f:(fun c -> String.equal c.id "asic.use-run-target")).action with
+   | Use_run_target (run, chip) ->
+     assert (Run_ref.equal run inspected.run && Asic.Chip_target.equal chip other)
+   | _ -> assert false);
+  (* Browsing a different run in the selector does not switch the workspace's
+     active run. The explicit retarget action must still use that browsed row. *)
+  let browsed = { inspected with run = Fs0_fixture.run_b; selection = Some selection } in
+  let from_cursor run =
+    C.commands before ~inspected:run ~asic:(Some { s with runs = [ inspected; browsed ] })
+      ~remembered:(Some selection)
+    |> List.find_map ~f:(fun c ->
+      match c.action with Use_run_target (run, chip) -> Some (run, chip) | _ -> None)
+  in
+  assert (Option.is_none (from_cursor None));
+  let run, chip = Option.value_exn (from_cursor (Some browsed.run)) in
+  assert (Run_ref.equal run browsed.run && Asic.Chip_target.equal chip target);
+  let named = List.find_exn commands ~f:(fun c -> String.equal c.id "stage.launch-view.synthesis") in
+  assert (String.is_substring named.title ~substring:(Launch_preferences.chip_label (Some target)));
+  assert (String.is_substring named.title ~substring:selection.profile);
+  (match named.action with
+   | Launch_stage_and_view (_, _, s) ->
+     assert (Option.equal Asic.Chip_target.equal s.chip_target (Some target))
+   | _ -> assert false);
   let registry = Option.value_exn before.registry in
   let tile =
     List.find_exn registry.tiles ~f:(fun t -> String.equal t.kind "planned-run")

@@ -62,9 +62,17 @@ session can own that project's state at a time.
 
 Outside a Dune project, interactive local `silver` opens with a floating project
 setup dialog. Create an ASIC starter in the empty directory, choose a new
-directory beneath it, or open an existing Dune project. Review the files before
-pressing **Enter** to apply and open the project. **Esc** dismisses setup without
-creating anything or quitting Silver; **p** reopens it.
+directory beneath it, or open an existing Dune project. Type the project name
+or path, then click the displayed controls to preview, apply, or cancel.
+**Enter** also advances each step. **Esc** dismisses setup without creating
+anything or quitting Silver; **p** reopens it.
+
+With a local project already open, click **Project ▾ → New Project…** to
+create a separate Dune project with its first chip target. **Open Project…**
+opens an existing Dune root instead. To create another chip *inside the current
+project*, choose **New Chip Target…**.
+New projects default to a sibling directory. Both actions stay in the same
+terminal; switching projects keeps the original workspace and its running jobs.
 
 Inside an existing, unconfigured Dune project, open the command palette
 (**Space c c**) and choose **Set up project…**. **Add ASIC starter…** adds design
@@ -73,9 +81,12 @@ files to this project and keeps its `dune-project` and existing sources.
 reference. Creating or adding a starter requires `hardcaml-asic-starter` on
 `PATH`; importing a design does not. None of these actions launches EDA.
 
-**Reusable IP:** In an open project, type **`new ip`** in the palette and press
-**Enter**. Choose an empty or sample library, name it, and review the paths
-under `ip/<name>/`. **Enter** creates the files; **Esc** cancels. Use **New
+**Reusable IP:** Click **Project ▾ → New IP Library…**, or type **`new ip`**
+in the palette and press **Enter**. Click the empty or sample template, type a
+name, then click **Preview**. Review the paths under `ip/<name>/` and click
+**Apply** to create the files or **Cancel** to leave the project alone. The
+same steps work with the keyboard: arrows and **Enter** to choose, **Enter**
+to preview and apply, **Esc** to cancel. Use **New
 Module…** to add an `.ml` file to a library. Without a selected library, enter
 its directory relative to the project root. If the library lists modules
 explicitly, the preview explains the Dune edit to make yourself.
@@ -401,7 +412,16 @@ state. The specimen shows **673 synthesis cells**, aggregate setup/hold around
 **11.6755/0.125029 ns**, and terminal acceptance **pass**. Execution completion,
 individual checks and that explicit acceptance operation remain separate facts.
 
-In the client:
+**Project and object actions:** Click **Project ▾** at the left of the workspace
+tabs, or press **F2** from a tile. For example, from Testing choose **New IP
+Library…** to open the same wizard as the `new ip` palette command. In the run
+selector, **right-click a run** to open its actions, or press **F3** for the
+highlighted run. Opening the menu does not switch workspaces, change your
+launch target, or select a run for inspection.
+
+In either menu, use **↑/↓** or **k/j** to move (**10j** moves ten rows), **/**
+to filter, and **Enter** or a click to choose. While filtering, `j` and `k`
+type letters. **Esc** leaves filtering; **Esc** again returns to the tile.
 
 The workspace accepts terminal mouse input by default. Click a workspace tab
 to switch immediately, or click a tile to focus it. In Runs, clicking a run

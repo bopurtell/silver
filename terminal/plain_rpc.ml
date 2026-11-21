@@ -12,8 +12,9 @@ let digest text =
   |> Cryptokit.transform_string (Cryptokit.Hexa.encode ())
 ;;
 
-let keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
+let rec keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
   match operation with
+  | In_context { operation; _ } -> keys operation snapshot
   | Get -> List.filter snapshot.operations ~f:active |> List.map ~f:(fun op -> op.key)
   | Discover | Select_chip _ -> [ "discover" ]
   | Ensure_discovered ->
@@ -70,8 +71,9 @@ let keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
     ]
 ;;
 
-let watched_keys operation keys (snapshot : Asic.Snapshot.t) =
+let rec watched_keys operation keys (snapshot : Asic.Snapshot.t) =
   match (operation : Asic.Operation.t) with
+  | In_context { operation; _ } -> watched_keys operation keys snapshot
   | Run _ | Launch_fresh _ ->
     keys
     @ List.concat_map snapshot.operations ~f:(fun op ->

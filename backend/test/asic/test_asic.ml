@@ -2360,6 +2360,28 @@ let chip_fixture root state_dir =
       "Concurrent native opens ran more than one chip query";
     require (List.length snap.chips = 2 && Option.equal Asic.Chip_target.equal snap.chip_target (Some first))
       "Catalog default not resolved";
+    let scoped operation =
+      Asic.Operation.In_context
+        { context = "investigation"; initial_target = Some first; operation }
+    in
+    let scoped_settled service operation =
+      let%bind _ = handle service root (scoped operation) in
+      let%bind () = Service.completion service in
+      handle service root (scoped Get)
+    in
+    let%bind detached = scoped_settled service Ensure_discovered in
+    require (Option.equal Asic.Chip_target.equal detached.chip_target (Some first))
+      "Detached discovery did not inherit Main";
+    let same = { (selection "balanced") with chip_target = Some first } in
+    let%bind _ = Deferred.both
+      (handle service root (Plan same))
+      (handle service root (scoped (Plan same))) in
+    let%bind () = Service.completion service in
+    let%bind main_plan, other_plan =
+      Deferred.both (handle service root Get) (handle service root (scoped Get)) in
+    List.iter [ main_plan; other_plan ] ~f:(fun s ->
+      require (Asic.Selection.equal same (Option.value_exn s.Asic.Snapshot.preview).selection)
+        "Concurrent identical plan keys lost a context's completion");
     let%bind snap = settled service root (Select_chip fast) in
     let selected = { (selection "balanced") with chip_target = snap.chip_target } in
     let%bind snap = settled service root (Plan selected) in
@@ -2377,6 +2399,16 @@ let chip_fixture root state_dir =
     let%bind staged = handle service root
       (Stage_fresh {selection=selected; elaboration_only=true; expected_plan_identity=None}) in
     let intent = Option.value_exn staged.fresh_intent in
+    let detached_selection = { selected with chip_target = Some first } in
+    let%bind detached = scoped_settled service (Plan detached_selection) in
+    require (Asic.Selection.equal (Option.value_exn detached.preview).selection detached_selection)
+      "Independent planning used Main's inputs";
+    let%bind detached = handle service root (scoped
+      (Stage_fresh {selection=detached_selection; elaboration_only=true; expected_plan_identity=None})) in
+    let detached_intent = Option.value_exn detached.fresh_intent in
+    let%bind wrong_context = Service.handle service ~root ~environment
+      (Launch_fresh { key="cross-context"; intent_id=detached_intent.id }) in
+    require (Result.is_error wrong_context) "Main consumed an independent staged intent";
     let calls_before = In_channel.read_all (Filename.concat root "calls") in
     let%bind reopened = settled service root Ensure_discovered in
     require (Option.equal Asic.Fresh.Intent.equal reopened.fresh_intent staged.fresh_intent
@@ -2397,6 +2429,15 @@ let chip_fixture root state_dir =
     let%bind () = reject (Plan selected) in
     let%bind () = reject (Plan {selected with chip_target=changed.chip_target; flow="unknown"}) in
     let%bind () = reject (Select_chip (target "engine" "unknown")) in
+    let%bind detached = handle service root (scoped Get) in
+    require (Option.equal Asic.Fresh.Intent.equal detached.fresh_intent (Some detached_intent))
+      "Main target switch invalidated independent staging";
+    let%bind _ = scoped_settled service (Select_chip fast) in
+    let before = In_channel.read_all (Filename.concat root "calls") in
+    let%bind () = reject (scoped (Launch_fresh {key="stale-context"; intent_id=detached_intent.id})) in
+    let%bind () = reject (scoped (Run {key="stale-context-preview"; preview=Option.value_exn detached.preview})) in
+    require (String.equal before (In_channel.read_all (Filename.concat root "calls")))
+      "Stale launch invoked the provider";
     let restarted = Service.create ~state_dir:(state_dir ^ "-chips") in
     let%bind () = Monitor.protect ~finally:(fun () -> Service.shutdown restarted) (fun () ->
       let%bind cold = handle restarted root Get in
@@ -2406,10 +2447,42 @@ let chip_fixture root state_dir =
       let%bind unavailable = Service.handle restarted ~root ~environment
         (Run {key="cold";preview}) in
       require (Result.is_error unavailable) "Cold launch accepted another chip's preview";
-      let%map discovered = settled restarted root Discover in
+      let%bind discovered = settled restarted root Discover in
       require (Option.equal Asic.Chip_target.equal discovered.chip_target changed.chip_target
                && not (List.is_empty discovered.flows))
-        "Rediscovery replaced valid saved target with project default") in
+        "Rediscovery replaced valid saved target with project default";
+      let%bind restored = scoped_settled restarted Ensure_discovered in
+      require (Option.equal Asic.Chip_target.equal restored.chip_target (Some fast)
+               && Option.is_none restored.preview && Option.is_none restored.fresh_intent)
+        "Independent reopen used detach seed or retained staging authority";
+      Out_channel.write_all path ~data:(String.substr_replace_all fixture
+        ~pattern:{|{"id":"fast","label":"Fast"}|} ~with_:{|{"id":"replacement","label":"New"}|});
+      let missing_service = Service.create ~state_dir:(state_dir ^ "-chips") in
+      Monitor.protect ~finally:(fun () -> Service.shutdown missing_service) (fun () ->
+        let%bind missing = scoped_settled missing_service Ensure_discovered in
+        require (Option.equal Asic.Chip_target.equal missing.chip_target (Some fast)
+                 && List.is_empty missing.flows && Option.is_none missing.catalog_default
+                 && Public.has_target missing.chips first
+                 && List.exists missing.operations ~f:(fun op ->
+                   String.equal op.key "discover" && String.equal op.state "failed"
+                   && Option.exists op.error ~f:(String.is_substring ~substring:"engine / fast is missing")))
+          "Missing saved variant silently fell back to the chip's default";
+        let blocked operation =
+          match%map Service.handle missing_service ~root ~environment (scoped operation) with
+          | Error e -> require (String.is_substring e.message ~substring:"select a launch target explicitly")
+                         "Missing target launch did not explain recovery"
+          | Ok _ -> failwith "Missing variant admitted launch"
+        in
+        let before = In_channel.read_all (Filename.concat root "calls") in
+        let%bind () = blocked (Stage_fresh {selection=detached_selection; elaboration_only=false; expected_plan_identity=None}) in
+        let%bind () = blocked (Launch_fresh {key="missing-intent"; intent_id=intent.id}) in
+        let%bind () = blocked (Run {key="missing-preview";preview}) in
+        require (String.equal before (In_channel.read_all (Filename.concat root "calls")))
+          "Missing variant caused a producer invocation";
+        let%map chosen = scoped_settled missing_service (Select_chip first) in
+        require (Option.equal Asic.Chip_target.equal chosen.chip_target (Some first)
+                 && not (List.is_empty chosen.flows))
+          "Explicit choice failed to recover the missing variant")) in
     Out_channel.write_all path ~data:{|{"schema_version":2}|};
     let%bind malformed = settled service root Discover in
     require (List.exists malformed.operations ~f:(fun op ->

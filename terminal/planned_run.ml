@@ -75,6 +75,8 @@ type t =
   ; launch_generation : int
   ; launch_intent : launch_intent option
   ; fresh_mode : bool
+  ; local_preview : Asic.Preview.t option
+  ; target_changed : bool
   ; elaboration_only : bool
   }
 
@@ -102,6 +104,8 @@ let empty =
   ; launch_generation = 0
   ; launch_intent = None
   ; fresh_mode = false
+  ; local_preview = None
+  ; target_changed = false
   ; elaboration_only = false
   }
 ;;
@@ -153,6 +157,8 @@ let begin_plan t selection =
   let generation = t.generation + 1 in
   ( { t with
       generation
+    ; target_changed = false
+    ; local_preview = None
     ; intent =
         Some
           { selection
@@ -261,6 +267,11 @@ let receive t ~revision (snapshot : Asic.Snapshot.t) =
           chip_epoch = t.chip_epoch + 1
         ; generation = t.generation + 1
         ; intent = None
+        ; target_changed =
+            t.target_changed || Option.is_some t.intent
+            || Option.exists t.snapshot ~f:(fun s ->
+              Option.is_some s.fresh_intent || Option.is_some s.preview)
+        ; local_preview = None
         ; fresh_mode = false
         ; elaboration_only = false
         }
@@ -311,6 +322,9 @@ let receive t ~revision (snapshot : Asic.Snapshot.t) =
     { t with
       revision
     ; snapshot = Some snapshot
+    ; local_preview =
+        (if Option.is_some t.intent && Option.is_none intent
+         then snapshot.preview else t.local_preview)
     ; intent
     ; launch_intent
     ; launch_generation =
@@ -608,13 +622,22 @@ let current_selection t (s : Asic.Selection.t) =
 
 let model t =
   let m = raw_model t in
-  if equal_status m.status Ready
+  if t.target_changed && equal_status m.status Empty
+  then { m with status = Stale; message = "Chip/variant changed; plan the current launch target first" }
+  else if equal_status m.status Ready
      && Option.exists m.selection ~f:(fun s -> not (current_selection t s))
   then
     { m with
       status = Stale
     ; message = "Chip/variant changed; plan the current launch target"
     }
+  else if equal_status m.status Ready
+          && Option.is_some (Launch_preferences.chip_target t.snapshot)
+          && (match fresh_intent t with
+              | Some _ -> not t.fresh_mode
+              | None -> Option.is_none t.local_preview
+                        || not (Option.equal Asic.Preview.equal t.local_preview m.preview))
+  then { m with status = Stale; message = "Retained plan; stage again in this context before launch" }
   else m
 ;;
 
@@ -665,6 +688,31 @@ let launchable t (preview : Asic.Preview.t) =
                        [ "completed"; "failed"; "cancelled"; "interrupted" ]
                        r.status
                        ~equal:String.equal))))
+;;
+
+(** Only local, ready plans survive a workspace switch. Re-admit against the exact
+    service receipt after reading that context again; never serialize this authority. *)
+type staged =
+  | Fresh of Asic.Fresh.Intent.t
+  | Preview of Asic.Preview.t
+
+let suspend t =
+  match fresh_intent t, t.local_preview with
+  | Some i, _ when t.fresh_mode && fresh_launchable t i -> Some (t.scope, Fresh i)
+  | _, Some p when launchable t p -> Some (t.scope, Preview p)
+  | _ -> None
+;;
+
+let resume t = function
+  | Fresh i when current_selection t i.selection
+                 && Option.exists (shared_fresh_intent t) ~f:(Asic.Fresh.Intent.equal i) ->
+    let staged, ticket = begin_fresh t ~elaboration_only:i.elaboration_only i.selection in
+    fresh_receipt staged ticket ~floor:t.revision (Ok i)
+  | Preview p when current_selection t p.selection
+                   && Option.exists t.snapshot ~f:(fun s ->
+                     Option.exists s.preview ~f:(Asic.Preview.equal p)) ->
+    { t with local_preview = Some p }
+  | _ -> t
 ;;
 
 let launch_label (m : model) =

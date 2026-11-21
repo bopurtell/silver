@@ -78,13 +78,13 @@ class Session:
         self.env = dict(os.environ, XDG_STATE_HOME=str(evidence / 'client-state'),
                         OMP_NUM_THREADS='20', OPENROAD_THREADS='20', _OPENLANE_MAX_CORES='20')
 
-    def start(self):
+    def start(self, *, daemon_args=()):
         discovery = self.evidence / ('discovery-' + str(time.time_ns()))
         discovery.mkdir()
         self.log = open(self.evidence / (discovery.name + '.log'), 'wb')
         self.process = subprocess.Popen([str(self.args.daemon), '--port', '0',
                                         '--discovery-dir', str(discovery), '--state-dir',
-                                         str(self.state_dir)], env=self.env,
+                                         str(self.state_dir), *daemon_args], env=self.env,
                                        stdout=self.log, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 20
         metadata = discovery / 'daemon.sexp'

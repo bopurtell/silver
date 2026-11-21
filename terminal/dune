@@ -219,6 +219,34 @@
  (name runtest)
  (deps (alias test-checklist-defaults-pty)))
 
+(rule
+ (alias test-chip-contexts-pty)
+ (deps test_chip_contexts_pty.py test_checklist_defaults_pty.py ../scripts/test-fs0.py
+       ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py
+       ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
+       ../scripts/fixtures/unified_fresh_prefix.py)
+ (action (run python3 -B %{dep:test_chip_contexts_pty.py}
+          --client %{exe:main.exe} --daemon %{exe:../daemon/main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-chip-contexts-pty)))
+
+(rule
+ (alias test-project-menus-pty)
+  (deps test_project_menus_pty.py test_ip_authoring_pty.py ip_starter_fixture.py
+        test_chip_contexts_pty.py test_checklist_defaults_pty.py
+       ../scripts/test-fs0.py ../test/support/__init__.py ../test/support/screen.py
+       ../test/support/terminal.py ../scripts/fixtures/fs2_provider.py ../scripts/fixtures/fs2_wire.py
+       ../backend/test/asic/production_flow_list.json ../backend/test/fresh_provider.py
+       ../scripts/fixtures/unified_fresh_prefix.py)
+ (action (run python3 -B %{dep:test_project_menus_pty.py}
+          --client %{exe:main.exe} --daemon %{exe:../daemon/main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-project-menus-pty)))
+
 ; Pass a renderer path to the same PTY driver for installed-provider coverage.
 (rule
  (alias test-ip-authoring-pty)

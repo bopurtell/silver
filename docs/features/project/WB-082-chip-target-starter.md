@@ -3,7 +3,7 @@ id: WB-082
 title: New chip target inside an existing project
 category: project
 feature_sets: [FS3]
-status: delivered
+status: closed
 design_status: designed
 kind: feature
 priority: P2
@@ -56,6 +56,8 @@ Reimplementing Dune-root creation (reuse WB-051), provisioning tools, inferring 
 The original 13 points covered one starter and registration. Revised provisional estimate: 21 points, including both starter paths, first-target reuse and provider/example vocabulary migration.
 
 ## Implementation and verification
+Closed at the owner's request after the example's launch picker was verified with the newly registered `funky_chip1 / default`. In a separate session, the installed Silver selected that chip and produced the same synthesis plan as its direct executable. No physical run was needed for this check.
+
 The first supported IP interface is the sample library at `ip/<name>` with its `chip-interface.json` declaration and `Block.create : Hardcaml.Signal.t -> Hardcaml.Signal.t`. The explicit `ui_in:uo_out:comb8` mapping connects eight input and output pins; the block uses neither clock nor reset. Preview typechecks the selected source on the service host. The generated test compares wrapper and IP outputs across all 256 inputs.
 
 `r` changes the registration choice at preview; **Enter** applies. Registration does not select the target for launch. For custom catalogs the preview supplies a manual entry instead of rewriting the file.

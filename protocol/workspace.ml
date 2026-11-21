@@ -54,6 +54,9 @@ module Context = struct
     { id : Context_id.t
     ; name : string
     ; selected_run : Run_ref.t option
+      (* Immutable seed at detach, not the current selection. The ASIC service
+          persists subsequent picks under this context's stable ID. *)
+    ; initial_launch_target : Asic.Chip_target.t option [@sexp.option]
     ; selection_revision : int
     }
   [@@deriving bin_io, compare, equal, sexp]
@@ -256,6 +259,7 @@ module Mutation = struct
         ; before : Workspace_id.t option
         }
     | Close_separate_investigation of Workspace_id.t
+    | Detach_with_target of Workspace_id.t * Asic.Chip_target.t
   [@@deriving bin_io, compare, equal, sexp]
 end
 
@@ -372,6 +376,10 @@ let validate (s : Snapshot.t) =
     ignore (context s s.main_context : Context.t);
     List.iter s.contexts ~f:(fun c ->
       valid_name c.name;
+      Option.iter c.initial_launch_target ~f:(fun t ->
+        List.iter [ t.chip; t.variant ] ~f:(fun id ->
+          require (not (String.is_empty id) && String.length id <= 256)
+            "Invalid initial chip/variant"));
       Option.iter c.selected_run ~f:valid_run;
       require
         (c.selection_revision >= 0 && c.selection_revision <= s.revision)
@@ -487,7 +495,7 @@ let initial ~session_id : Snapshot.t =
   ; next_id = 7
   ; main_context
   ; contexts =
-      [ { id = main_context; name = "Main"; selected_run = None; selection_revision = 0 }
+      [ { id = main_context; name = "Main"; selected_run = None; initial_launch_target = None; selection_revision = 0 }
       ]
   ; windows = [ { id = window; name = "Primary" } ]
   ; workspaces = [ arrangement overview "Overview"; arrangement timing "Timing" ]
@@ -724,7 +732,7 @@ let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
             { c with selected_run = run; selection_revision = c.selection_revision + 1 }
           else c)
     }
-  | Make_independent id ->
+  | (Make_independent id | Detach_with_target (id, _)) ->
     let w = workspace s id in
     let c = context s w.context in
     let fresh, s = allocate s "context" in
@@ -737,6 +745,10 @@ let apply_mutation (s : Snapshot.t) (mutation : Mutation.t) =
                 id = fresh
               ; name = w.name ^ " independent"
               ; selection_revision = 0
+              ; initial_launch_target =
+                  (match mutation with
+                   | Detach_with_target (_, target) -> Some target
+                   | _ -> None)
               }
             ]
       }

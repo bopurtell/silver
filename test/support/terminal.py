@@ -17,12 +17,13 @@ from .screen import terminal_screen
 
 
 class Terminal:
-    def __init__(self, session, *, argv=None, cwd=None):
+    def __init__(self, session, *, argv=None, cwd=None, width=120, height=40):
         self.session = session
+        self.width, self.height = width, height
         self.data = bytearray()
         self.master, slave = pty.openpty()
         try:
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
             self.process = subprocess.Popen(
                 argv if argv is not None else
                 [str(session.args.client), '--connect', session.url, '--project-root', str(session.root)],
@@ -54,7 +55,7 @@ class Terminal:
                 self.data.extend(data)
         if self.process.poll() is not None and not allow_exit:
             raise AssertionError('PTY client exited unexpectedly')
-        return terminal_screen(bytes(self.data))
+        return terminal_screen(bytes(self.data), self.width, self.height)
 
     def capture(self, label, expected=(), absent=(), timeout=12):
         deadline = time.monotonic() + timeout

@@ -40,7 +40,7 @@ def cell(screen, label):
 def pointer(term, button, pos):
     x, y = pos
     report = f'\x1b[<{button};{x};{y}'
-    term.key((report + 'M' + (report + 'm' if button == 0 else '')).encode())
+    term.key((report + 'M' + (report + 'm' if button in (0, 2) else '')).encode())
 
 
 def quit_client(term):
@@ -80,7 +80,8 @@ def run(args, tmp):
         def focus(name):
             return 'Overview › ' + name
 
-        screen = term.capture('startup', [focus('workspaces'), '✓ completed', '! failed'])
+        screen = term.capture('startup', [focus('workspaces'), '✓ completed', '! failed'],
+                              absent=['Actions ▾'])
         modes, _ = mouse_modes(term.data)
         assert modes & TRACKING and 1006 in modes, f'SGR mouse reporting not active: {modes}'
 
@@ -141,7 +142,7 @@ def run(args, tmp):
         screen = term.capture('palette', ['COMMAND PALETTE', '[1 Overview]'])
         pointer(term, 0, inactive_tab(screen, '[1 Overview]', 'Testing'))
         term.capture('palette-consumes-workspace-click', ['COMMAND PALETTE', '[1 Overview]'])
-        for button in (0, 81, 65):
+        for button in (0, 2, 81, 65):
             pointer(term, button, (2, bad[1]))  # Exposed run tile outside centered overlay.
             term.capture(f'palette-consumes-{button}', ['COMMAND PALETTE'])
         term.key(b'\x1b')
@@ -163,10 +164,21 @@ def run(args, tmp):
         # Stray reports from a multiplexer must not route even if the terminal
         # sends them without being asked.
         pointer(keyboard, 0, bad)
+        pointer(keyboard, 2, bad)
         pointer(keyboard, 81, bad)
         keyboard.capture('disabled-ignores-pointer', [focus('workspaces')])
         keyboard.key(b'\t')
         keyboard.capture('disabled-keyboard-tab', [focus('session')])
+        for key in (b' ', b'c', b'c', b'Switch to Testing'):
+            keyboard.key(key)
+        screen = keyboard.capture('disabled-filtered-palette', ['COMMAND PALETTE', '> Switch to Testing'])
+        # Match the result, not the identical filter text in the query field.
+        row = next(y for y, line in enumerate(screen.splitlines(), 1)
+                   if '> Switch to Testing' in line and '▏' not in line)
+        pointer(keyboard, 0, (screen.splitlines()[row - 1].index('Switch to Testing') + 1, row))
+        keyboard.capture('disabled-ignores-modal-pointer', ['COMMAND PALETTE', '[1 Overview]'])
+        keyboard.key(b'\x1b')
+        keyboard.capture('disabled-restores-focus', [focus('session')], absent=['COMMAND PALETTE'])
         quit_client(keyboard)
         assert not (mouse_modes(keyboard.data)[1] & TRACKING), '--no-mouse enabled reporting'
 

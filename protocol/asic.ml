@@ -531,9 +531,16 @@ module Operation = struct
         ; source_digest : string
         ; row_id : string
         }
-    (** Native open: at most one catalog attempt per loaded project/environment.
+    (** Native open: at most one catalog attempt per loaded launch context.
         Explicit [Discover] can always retry. *)
     | Ensure_discovered
+    (** Independent workspace launch state. The stable context key scopes discovery,
+        staging and their poll results. [initial_target] seeds a new context only. *)
+    | In_context of
+        { context : string
+        ; initial_target : Chip_target.t option
+        ; operation : t
+        }
   [@@deriving bin_io, compare, equal, sexp]
 end
 

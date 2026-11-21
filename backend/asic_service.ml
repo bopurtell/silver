@@ -49,6 +49,7 @@ module Stored = struct
     ; finalizations : Finalization_stored.t list [@sexp.default []]
     ; stage_starts : (string * (string * Timestamp.t) list) list [@sexp.default []]
     ; workflows : Asic.Fresh.Workflow.t list [@sexp.default []]
+    ; context_targets : (string * Asic.Chip_target.t) list [@sexp.default []] [@sexp_drop_default.equal]
     ; preferred_target : Asic.Chip_target.t option [@sexp.default None] [@sexp_drop_default.equal]
     }
   [@@deriving sexp]
@@ -135,8 +136,13 @@ let decode_summary_blob sexp =
   else summary
 ;;
 
+(* Discovery is scoped to a workspace context. Plan and description results are
+   additionally scoped to a selection generation, including A -> B -> A switches. *)
+type query_scope = string * int option [@@deriving sexp_of]
+
 type task =
-  { cancel : unit Ivar.t
+  { query_scope : query_scope option
+  ; cancel : unit Ivar.t
   ; mutable pending : Asic.Pending.t
   ; mutable completion : unit Deferred.t
   }
@@ -146,8 +152,28 @@ type reservation =
   ; result : (unit, exn) Result.t Deferred.t
   }
 
+type launch_context =
+  { key : string
+  ; mutable target_generation : int
+  ; mutable flows : Asic.Flow.t list
+  ; mutable catalog_attempted : bool
+  ; mutable catalog_ready : bool
+  ; mutable chips : Asic.Chip.t list
+  ; mutable chip_target : Asic.Chip_target.t option
+  ; mutable catalog_default : Asic.Flow_default.t option
+  ; mutable description : string option
+  ; mutable preview : Asic.Preview.t option
+  ; mutable desired_plan : Asic.Selection.t option
+  ; mutable desired_description : string option
+  ; mutable fresh_intent : Asic.Fresh.Intent.t option
+  ; mutable fresh_generation : int
+  }
+
 type project =
-  { root : string
+  { main : launch_context
+  ; contexts : launch_context String.Table.t
+  ; mutable catalog_seen : bool
+  ; root : string
   ; environment : V1.Environment_selection.t
   ; config : Config.t option
   ; identity : string
@@ -173,24 +199,12 @@ type project =
   ; mutable recency : string list
   ; tasks : task String.Table.t
   ; reservations : reservation String.Table.t
-  ; mutable flows : Asic.Flow.t list
-  ; mutable catalog_attempted : bool
-  ; mutable chips : Asic.Chip.t list
-  ; mutable chip_target : Asic.Chip_target.t option
-  ; mutable preferred_target : Asic.Chip_target.t option
-  ; mutable catalog_default : Asic.Flow_default.t option
-  ; mutable description : string option
-  ; mutable preview : Asic.Preview.t option
-  ; mutable desired_plan : Asic.Selection.t option
-  ; mutable desired_description : string option
   ; read_tails : unit Deferred.t String.Table.t
   ; mutable provider_check : (unit, exn) Result.t Deferred.t option
   ; mutable timing_stage : bool
   ; mutable cache_error : string option
   ; mutable registry_writable : bool
   ; mutable save_tail : unit Deferred.t
-  ; mutable fresh_intent : Asic.Fresh.Intent.t option
-  ; mutable fresh_generation : int
   ; mutable workflows : Asic.Fresh.Workflow.t list
   ; workflow_reservations : (unit, exn) Result.t Deferred.t String.Table.t
   }
@@ -303,7 +317,11 @@ let save_registry ?reservation t p =
         ; finalizations = p.finalizations
         ; stage_starts = p.stage_starts
         ; workflows = p.workflows
-        ; preferred_target = p.preferred_target
+        ; preferred_target = p.main.chip_target
+        ; context_targets =
+            Hashtbl.to_alist p.contexts
+            |> List.filter_map ~f:(fun (key, c) ->
+              Option.map c.chip_target ~f:(fun target -> key, target))
         }
       in
       let data = Sexp.to_string (Stored.sexp_of_t stored) in
@@ -339,6 +357,53 @@ let load_config_file ~root ~filename parse =
     ~max_bytes:Hardcaml_workbench_project_integration.Config_location.max_config_bytes
   |> Or_error.ok_exn
   |> Option.map ~f:(fun file -> parse file.contents |> Or_error.ok_exn)
+;;
+
+let launch_context key target =
+  { key
+  ; target_generation = 0
+  ; flows = []
+  ; catalog_attempted = false
+  ; catalog_ready = false
+  ; chips = []
+  ; chip_target = target
+  ; catalog_default = None
+  ; description = None
+  ; preview = None
+  ; desired_plan = None
+  ; desired_description = None
+  ; fresh_intent = None
+  ; fresh_generation = 0
+  }
+;;
+
+let missing_target (target : Asic.Chip_target.t) =
+  sprintf "Saved chip/variant %s / %s is missing; select a launch target explicitly"
+    target.chip target.variant
+;;
+
+let require_current_target p c =
+  Option.iter c.chip_target ~f:(fun target ->
+    if not (List.is_empty c.chips)
+    then Public.require (Public.has_target c.chips target) (missing_target target));
+  Public.require
+    ((c.catalog_ready
+      || (String.is_empty c.key && not c.catalog_attempted && Option.is_none c.chip_target))
+     && (not p.catalog_seen || Option.is_some c.chip_target))
+    "Launch target discovery is incomplete; discover ASIC flows and select a launch target"
+;;
+
+let validate_target p c (selection : Asic.Selection.t) =
+  require_current_target p c;
+  Public.require
+    (Option.equal Asic.Chip_target.equal selection.chip_target c.chip_target)
+    "Chip/variant selection changed; stage the current target";
+  Option.iter selection.chip_target ~f:(fun _ ->
+    Public.require
+      (List.exists c.flows ~f:(fun flow ->
+         String.equal flow.id selection.flow
+         && List.mem flow.profiles selection.profile ~equal:String.equal))
+      "No such named flow/profile for the selected chip/variant")
 ;;
 
 let load_project t ~root ~environment =
@@ -388,7 +453,10 @@ let load_project t ~root ~environment =
   let%bind workloads = In_thread.run (fun () ->
     Asic_workloads_service.create ~state_dir:t.state_dir ~identity) in
   let p =
-    { root
+    { main = launch_context "" None
+    ; contexts = String.Table.create ()
+    ; catalog_seen = false
+    ; root
     ; environment
     ; config
     ; identity
@@ -417,24 +485,12 @@ let load_project t ~root ~environment =
     ; recency = []
     ; tasks = String.Table.create ()
     ; reservations = String.Table.create ()
-    ; flows = []
-    ; catalog_attempted = false
-    ; chips = []
-    ; chip_target = None
-    ; preferred_target = None
-    ; catalog_default = None
-    ; description = None
-    ; preview = None
-    ; desired_plan = None
-    ; desired_description = None
     ; read_tails = String.Table.create ()
     ; provider_check = None
     ; timing_stage = false
     ; cache_error = None
     ; registry_writable = true
     ; save_tail = Deferred.unit
-    ; fresh_intent = None
-    ; fresh_generation = 0
     ; workflows = []
     ; workflow_reservations = String.Table.create ()
     }
@@ -518,8 +574,10 @@ let load_project t ~root ~environment =
                   })
             });
        p.submissions <- s.submissions;
-       p.preferred_target <- s.preferred_target;
-       p.chip_target <- s.preferred_target;
+       List.iter s.context_targets ~f:(fun (key, target) ->
+         Hashtbl.set p.contexts ~key ~data:(launch_context key (Some target)));
+       p.main.chip_target <- s.preferred_target;
+       p.catalog_seen <- Option.is_some s.preferred_target || not (List.is_empty s.context_targets);
        p.workflows
        <- List.map s.workflows ~f:(fun w ->
             let active =
@@ -1206,20 +1264,25 @@ let load_summary t p cancel (run : Run_ref.t) =
        materialize t p cancel run)
 ;;
 
-let snapshot p : Asic.Snapshot.t =
+let snapshot c p : Asic.Snapshot.t =
   { configured = Option.is_some p.config
-  ; flows = p.flows
-  ; chips = p.chips
-  ; chip_target = p.chip_target
-  ; catalog_default = p.catalog_default
-  ; description_json = p.description
-  ; preview = p.preview
+  ; flows = c.flows
+  ; chips = c.chips
+  ; chip_target = c.chip_target
+  ; catalog_default = c.catalog_default
+  ; description_json = c.description
+  ; preview = c.preview
   ; runs = p.runs
   ; launches =
       List.map p.submissions ~f:(fun (key, preview, run_id) ->
         { Asic.Launch.key; preview; run_id })
   ; operations =
-      (Hashtbl.data p.tasks |> List.map ~f:(fun t -> t.pending))
+      (Hashtbl.data p.tasks |> List.filter_map ~f:(fun t ->
+         Option.some_if
+           (Option.value_map t.query_scope ~default:true ~f:(fun (key, generation) ->
+              String.equal key c.key
+              && Option.value_map generation ~default:true ~f:(Int.equal c.target_generation)))
+           t.pending))
       @ (Hashtbl.keys p.reservations
          |> List.filter_map ~f:(fun key ->
            if Hashtbl.mem p.tasks ("run:" ^ key)
@@ -1279,16 +1342,22 @@ let snapshot p : Asic.Snapshot.t =
   ; inspections = p.inspections
   ; inspection_details = p.inspection_details
   ; cache_error = Option.first_some p.cache_error (Asic_resources_service.cache_error p.resources)
-  ; fresh_intent = p.fresh_intent
+  ; fresh_intent = c.fresh_intent
   ; workflows = p.workflows
   ; resources = Some (Asic_resources_service.snapshot p.resources)
   ; workloads = Some (Asic_workloads_service.snapshot p.workloads)
   }
 ;;
 
-let schedule ?run t p ~key ~kind ~execution f =
+let task_key query_scope key =
+  Option.value_map query_scope ~default:key ~f:(fun scope ->
+    "context:" ^ Sexp.to_string_mach (sexp_of_query_scope scope) ^ ":" ^ key)
+;;
+
+let schedule ?query_scope ?run t p ~key ~kind ~execution f =
   Public.require (not t.closing) "ASIC service shutting down";
-  match Hashtbl.find p.tasks key with
+  let storage_key = task_key query_scope key in
+  match Hashtbl.find p.tasks storage_key with
   | Some task
     when String.equal task.pending.state "pending"
          || String.equal task.pending.state "executing" -> ()
@@ -1300,7 +1369,8 @@ let schedule ?run t p ~key ~kind ~execution f =
         || String.equal task.pending.state "executing");
     Public.require (Hashtbl.length p.tasks < 64) "ASIC pending operation budget exhausted";
     let task =
-      { cancel = Ivar.create ()
+      { query_scope
+      ; cancel = Ivar.create ()
       ; completion = Deferred.unit
       ; pending =
           { Asic.Pending.key
@@ -1312,7 +1382,7 @@ let schedule ?run t p ~key ~kind ~execution f =
           }
       }
     in
-    Hashtbl.set p.tasks ~key ~data:task;
+    Hashtbl.set p.tasks ~key:storage_key ~data:task;
     let work () =
       let%bind result =
         Monitor.try_with (fun () ->
@@ -2555,7 +2625,8 @@ let check_resource_lineage p target response =
   | Coarse_run _ | Bundle _ -> ()
 ;;
 
-let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _ -> true) t p operation =
+let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _ -> true)
+  ?(on_target_change = ignore) t p c operation =
   let analysis, operation =
     match operation with
     | Asic.Operation.Inspect_analysis { run; target; refresh } ->
@@ -2569,30 +2640,35 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
   in
   Option.iter analysis ~f:Asic_timing_analysis.validate_target;
   let enqueue ?run ~key ~kind f =
-    schedule ?run t p ~key ~kind ~execution:false (fun task -> f (Ivar.read task.cancel))
+    let query_scope =
+      match kind with
+      | "discover" -> Some (c.key, None)
+      | "describe" | "plan" -> Some (c.key, Some c.target_generation)
+      | _ -> None
+    in
+    schedule ?query_scope ?run t p ~key ~kind ~execution:false (fun task ->
+      f (Ivar.read task.cancel))
   in
   let provider_if_configured cancel =
     if Option.is_some p.config then check_provider t p cancel else Deferred.unit
   in
   let set_target chip_target =
-    if not (Option.equal Asic.Chip_target.equal p.chip_target chip_target) then (
-      p.chip_target <- chip_target;
-      p.desired_description <- None;
-      p.description <- None;
-      p.desired_plan <- None;
-      p.preview <- None;
-      p.fresh_generation <- p.fresh_generation + 1;
-      p.fresh_intent <- None)
-  in
-  let validate_target (selection : Asic.Selection.t) =
-    Public.require
-      (Option.equal Asic.Chip_target.equal selection.chip_target p.chip_target)
-      "Chip/variant selection changed; stage the current target";
-    Option.iter selection.chip_target ~f:(fun _ ->
-      Public.require (List.exists p.flows ~f:(fun flow -> String.equal flow.id selection.flow))
-        "No such named flow for the selected chip/variant")
+    if not (Option.equal Asic.Chip_target.equal c.chip_target chip_target) then (
+      c.chip_target <- chip_target;
+      c.target_generation <- c.target_generation + 1;
+      on_target_change chip_target;
+      c.desired_description <- None;
+      c.description <- None;
+      c.desired_plan <- None;
+      c.preview <- None;
+      c.fresh_generation <- c.fresh_generation + 1;
+      c.fresh_intent <- None;
+      (* The choice is durable even if discovering this variant's flows fails. *)
+      save_registry t p)
+    else return (Ok ())
   in
   match operation with
+  | Asic.Operation.In_context _ -> failwith "Nested launch context"
   | Asic.Operation.Get -> Deferred.unit
   | Workloads (Asic_workloads.Operation.Load { query = workload_query; refresh } as operation) ->
     Asic_workloads_service.select p.workloads workload_query;
@@ -2993,24 +3069,25 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
               8);
     Deferred.unit
   | Stage_fresh { selection; elaboration_only; expected_plan_identity } ->
-    validate_target selection;
-    p.fresh_generation <- p.fresh_generation + 1;
-    let generation = p.fresh_generation in
-    p.fresh_intent <- None;
+    validate_target p c selection;
+    c.fresh_generation <- c.fresh_generation + 1;
+    let generation = c.fresh_generation in
+    c.fresh_intent <- None;
     Preparation_receipt.validate_selection selection expected_plan_identity;
     let%map scope = fresh_scope ~physical:(not elaboration_only) p in
-    Public.require (generation = p.fresh_generation) "Fresh input staging superseded";
+    Public.require (generation = c.fresh_generation) "Fresh input staging superseded";
+    validate_target p c selection;
     let created_at = Timestamp.of_time_ns (Time_ns.now ()) in
     let id =
       "fresh-intent-"
       ^ Public.digest
           (scope
-           ^ Int.to_string generation
+           ^ Sexp.to_string_mach ([%sexp_of: string * int] (c.key, generation))
            ^ Sexp.to_string_mach
                ([%sexp_of: Asic.Selection.t * bool * string option * Timestamp.t]
                   (selection, elaboration_only, expected_plan_identity, created_at)))
     in
-    p.fresh_intent
+    c.fresh_intent
     <- Some
          { Asic.Fresh.Intent.id
          ; selection
@@ -3029,23 +3106,25 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
          "Submission key reused with different intent";
        await_workflow_reservation p key
      | None ->
+       require_current_target p c;
        let intent =
          Option.value_exn
-           p.fresh_intent
+           c.fresh_intent
            ~message:"Fresh input intent unavailable; stage again"
        in
        Public.require
          (String.equal intent.id intent_id)
          "Fresh input intent superseded; stage again";
-       validate_target intent.selection;
-       launch_fresh ~staged:true t p ~key ~intent)
+       validate_target p c intent.selection;
+       launch_fresh ~staged:true t p c ~key ~intent)
   | Cancel_workflow id -> cancel_workflow t p id
   | Cancel key when List.exists p.workflows ~f:(fun w -> workflow_cancel_key w key) ->
     let w = List.find_exn p.workflows ~f:(fun w -> workflow_cancel_key w key) in
     cancel_workflow t p w.id
   | Cancel key ->
     let task =
-      match Hashtbl.find p.tasks key with
+      match List.find_map [ Some (c.key, Some c.target_generation); Some (c.key, None); None ]
+              ~f:(fun scope -> Hashtbl.find p.tasks (task_key scope key)) with
       | Some task -> task
       | None ->
         (match Hashtbl.find p.tasks ("finalize:" ^ key) with
@@ -3060,77 +3139,93 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
           (Hashtbl.find p.tasks (observation_key run))
           ~f:(fun observer -> Ivar.fill_if_empty observer.cancel ()));
     Deferred.unit
-  | Ensure_discovered when p.catalog_attempted -> Deferred.unit
+  | Ensure_discovered when c.catalog_attempted -> Deferred.unit
   | (Discover | Ensure_discovered | Select_chip _) as discovery ->
     (* Retire the previous mapping immediately, including on refresh failure. The
        invocation and publication belong to this immutable captured project config. *)
-    let active = Option.exists (Hashtbl.find p.tasks "discover") ~f:(fun task ->
-      List.mem ["pending"; "executing"] task.pending.state ~equal:String.equal) in
-    (match discovery with
+    let active =
+      Option.exists
+        (Hashtbl.find p.tasks (task_key (Some (c.key, None)) "discover"))
+        ~f:(fun task ->
+          List.mem [ "pending"; "executing" ] task.pending.state ~equal:String.equal)
+    in
+    let saved = match discovery with
      | Select_chip target ->
-       Public.require (Public.has_target p.chips target) "Unknown chip/variant";
-       Public.require (not active || Option.equal Asic.Chip_target.equal (Some target) p.chip_target)
+       Public.require (Public.has_target c.chips target) "Unknown chip/variant";
+       Public.require (not active || Option.equal Asic.Chip_target.equal (Some target) c.chip_target)
          "Chip discovery in progress; retry selection";
        set_target (Some target)
-     | _ -> ());
-    p.catalog_attempted <- true;
+     | _ -> return (Ok ())
+    in
+    c.catalog_attempted <- true;
     let check_automatic_target target =
       if Asic.Operation.equal discovery Ensure_discovered
-         && not (Option.equal Asic.Chip_target.equal (Some target) p.chip_target)
+         && not (Option.equal Asic.Chip_target.equal (Some target) c.chip_target)
       then
         Public.require
-          (Option.is_none p.desired_plan && p.fresh_generation = 0
+          (Option.is_none c.desired_plan && c.fresh_generation = 0
            && preparation_target_compatible target)
           "Catalog target changed while staging; refresh ASIC discovery explicitly"
     in
     if not active then (
-      p.flows <- [];
-      p.catalog_default <- None);
+      c.catalog_ready <- false;
+      (match discovery with Select_chip _ -> () | _ -> c.chips <- []);
+      c.flows <- [];
+      c.catalog_default <- None);
     enqueue ~key:"discover" ~kind:"discover" (fun cancel ->
+      let%bind saved = saved in
+      Result.ok_or_failwith (Result.map_error saved ~f:failure_message);
       let%bind executable = project_executable p in
       let invoke args = Adapter.invocation ~root:p.root ~environment:p.environment executable args in
       let%bind () =
         match discovery with
         | Select_chip _ -> Deferred.unit
         | _ ->
-          let%map output = Throttle.enqueue t.queries (fun () ->
+          let%bind output = Throttle.enqueue t.queries (fun () ->
             Asic_process.run_with_status ~optional_command:true ~max_stdout_bytes:(1024*1024)
               ~seconds:30. ~cancel ~on_process:ignore ~on_line:(fun _ -> Deferred.unit)
               (invoke ["chip"; "list"; "--json"])) in
-          if output.exit_code <> 0 then
-            Public.require (List.is_empty p.chips && Option.is_none p.preferred_target)
-              "Previously supported chip catalog failed"
+          Public.require (not (Deferred.is_determined cancel)) "ASIC discovery cancelled";
+          if output.exit_code <> 0 then (
+            Public.require (not p.catalog_seen && Option.is_none c.chip_target)
+              "Previously supported chip catalog failed";
+            Deferred.unit)
           else (
+            p.catalog_seen <- true;
             let chips, default = Public.chip_catalog (Public.decode output.stdout) in
-            let target = Option.filter (Option.first_some p.chip_target p.preferred_target) ~f:(Public.has_target chips)
-              |> Option.value ~default in
+            let target = Option.value c.chip_target ~default in
+            c.chips <- chips;
+            if not (Public.has_target chips target) then (
+              c.desired_plan <- None;
+              c.preview <- None;
+              c.fresh_generation <- c.fresh_generation + 1;
+              c.fresh_intent <- None;
+              failwith (missing_target target));
             check_automatic_target target;
-            p.chips <- chips;
-            set_target (Some target))
+            let%map saved = set_target (Some target) in
+            Result.ok_or_failwith (Result.map_error saved ~f:failure_message))
       in
       let%bind () = provider_if_configured cancel in
-      let invocation = Adapter.flow_list ~root:p.root ~environment:p.environment executable p.chip_target in
+      let invocation = Adapter.flow_list ~root:p.root ~environment:p.environment executable c.chip_target in
       let%bind j = query ~max_bytes:(1024 * 1024) t p cancel invocation in
       Public.require (not (Deferred.is_determined cancel)) "ASIC discovery cancelled";
       let flows, catalog_default = Public.flow_catalog j in
-      p.flows
+      c.flows
       <- List.map flows ~f:(fun flow ->
            { flow with
              Asic.Flow.fresh_stage_endpoints =
                List.filter flow.fresh_stage_endpoints ~f:(fun endpoint ->
                  p.timing_stage || not (String.equal endpoint "timing"))
            });
-      p.catalog_default <- catalog_default;
-      if Option.equal Asic.Chip_target.equal p.preferred_target p.chip_target
-      then Deferred.unit
-      else (
-        p.preferred_target <- p.chip_target;
-        save_required t p));
+      c.catalog_default <- catalog_default;
+      c.catalog_ready <- true;
+      Deferred.unit);
     Deferred.unit
   | Describe flow ->
-    let chip_target = p.chip_target in
-    p.desired_description <- Some flow;
-    p.description <- None;
+    let chip_target = c.chip_target in
+    let generation = c.target_generation in
+    c.desired_description <- Some flow;
+    c.description <- None;
     enqueue
       ~key:(Asic.Chip_target.describe_key chip_target flow)
       ~kind:"describe"
@@ -3140,14 +3235,16 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
         let%map j = query t p cancel
           (Adapter.flow_describe ~root:p.root ~environment:p.environment executable chip_target flow) in
         let j = Public.envelope j "hardcaml-asic.flow-describe" 1 in
-        if Option.equal Asic.Chip_target.equal p.chip_target chip_target
-           && Option.equal String.equal p.desired_description (Some flow)
-        then p.description <- Some (Yojson.Safe.to_string j));
+        if not (Deferred.is_determined cancel) && generation = c.target_generation
+           && Option.equal Asic.Chip_target.equal c.chip_target chip_target
+           && Option.equal String.equal c.desired_description (Some flow)
+        then c.description <- Some (Yojson.Safe.to_string j));
     Deferred.unit
   | Plan selection ->
-    validate_target selection;
-    p.desired_plan <- Some selection;
-    p.preview <- None;
+    validate_target p c selection;
+    let generation = c.target_generation in
+    c.desired_plan <- Some selection;
+    c.preview <- None;
     enqueue
       ~key:
         ("plan:"
@@ -3180,8 +3277,9 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
         in
         let preview = Public.preview selection j in
         let%map () = check_provider ~plan:(selection, j) t p cancel in
-        if Option.equal Asic.Selection.equal p.desired_plan (Some selection)
-        then p.preview <- Some preview);
+        if not (Deferred.is_determined cancel) && generation = c.target_generation
+           && Option.equal Asic.Selection.equal c.desired_plan (Some selection)
+        then c.preview <- Some preview);
     Deferred.unit
   | Register reference ->
     let%map (_ : Asic.Run.t) = register t p reference in
@@ -3266,7 +3364,10 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
          "Submission key reused with different fresh inputs";
        await_workflow_reservation p key
      | None ->
-       validate_target preview.selection;
+       validate_target p c preview.selection;
+       Option.iter c.chip_target ~f:(fun _ ->
+         Public.require (Option.exists c.preview ~f:(Asic.Preview.equal preview))
+           "Staged plan unavailable for this launch context; stage again");
        let validated =
          Public.preview preview.selection (Public.decode preview.plan_json)
        in
@@ -3284,7 +3385,7 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
          ; created_at
          }
        in
-       launch_fresh t p ~key ~intent)
+       launch_fresh ~preview t p c ~key ~intent)
   | Run { key; preview } ->
     Public.require
       p.registry_writable
@@ -3616,7 +3717,7 @@ and cancel_workflow t p id =
       ()
     | _ -> Deferred.unit)
 
-and launch_fresh ?(staged = false) t p ~key ~(intent : Asic.Fresh.Intent.t) =
+and launch_fresh ?(staged = false) ?preview t p c ~key ~(intent : Asic.Fresh.Intent.t) =
   Public.require
     ((not (String.is_empty key)) && String.length key <= 256)
     "Invalid fresh submission key";
@@ -3650,13 +3751,18 @@ and launch_fresh ?(staged = false) t p ~key ~(intent : Asic.Fresh.Intent.t) =
         (not (List.exists p.submissions ~f:(fun (old, _, _) -> String.equal old key)))
         "Historical submission key already reserved; observe it instead of relaunching";
       let%bind scope = fresh_scope ~physical:(not intent.elaboration_only) p in
+      validate_target p c intent.selection;
+      Option.iter c.chip_target ~f:(fun _ ->
+        Option.iter preview ~f:(fun preview ->
+          Public.require (Option.exists c.preview ~f:(Asic.Preview.equal preview))
+            "Staged plan superseded before reservation; stage again"));
       Public.require
         (String.equal scope intent.scope)
         "Fresh input scope changed; stage again";
       if staged
       then
         Public.require
-          (Option.exists p.fresh_intent ~f:(fun current ->
+          (Option.exists c.fresh_intent ~f:(fun current ->
              String.equal current.id intent.id))
           "Fresh input intent superseded before reservation; stage again";
       ignore
@@ -3703,10 +3809,10 @@ and launch_fresh ?(staged = false) t p ~key ~(intent : Asic.Fresh.Intent.t) =
            ~key:("workflow:" ^ id)
            ~kind:"workflow"
            ~execution:false
-           (fun task -> execute_fresh t p id task);
+           (fun task -> execute_fresh t p c id task);
          Deferred.unit))
 
-and execute_fresh t p id task =
+and execute_fresh t p c id task =
   let check () =
     Public.require
       ((not t.closing) && not (workflow p id).cancel_requested)
@@ -3873,6 +3979,7 @@ and execute_fresh t p id task =
             ~prepared_input:(id, prepared)
             t
             p
+            c
             (Run { key = w.key; preview })
         in
         let task = Hashtbl.find_exn p.tasks ("run:" ^ w.key) in
@@ -3916,7 +4023,7 @@ and execute_fresh t p id task =
   persist t p
 ;;
 
-let handle ?preparation_target_compatible t ~root ~environment operation : Asic.Response.t Deferred.t =
+let handle ?preparation_target_compatible ?on_target_change t ~root ~environment operation : Asic.Response.t Deferred.t =
   Monitor.try_with (fun () ->
     Public.require (not t.closing) "ASIC service shutting down";
     Public.require (Filename.is_absolute root) "ASIC project root must be absolute";
@@ -3934,7 +4041,8 @@ let handle ?preparation_target_compatible t ~root ~environment operation : Asic.
        exists. Retain that failure for polling clients; only explicit refresh
        reopens it. An in-flight retry is shared by subsequent requests. *)
     (match operation, Option.bind (Hashtbl.find t.projects key) ~f:Deferred.peek with
-     | Asic.Operation.Discover, Some (Error _) -> Hashtbl.remove t.projects key
+     | (Asic.Operation.Discover | In_context { operation = Discover; _ }), Some (Error _) ->
+       Hashtbl.remove t.projects key
      | _ -> ());
     let loaded =
       Hashtbl.find_or_add t.projects key ~default:(fun () ->
@@ -3946,8 +4054,30 @@ let handle ?preparation_target_compatible t ~root ~environment operation : Asic.
       | Ok p -> p
       | Error exn -> raise exn
     in
-    let%map () = handle_operation ?preparation_target_compatible t p operation in
-    snapshot p)
+    let c, operation, preparation_target_compatible, save_seed =
+      match operation with
+      | In_context { context; initial_target; operation } ->
+        Public.require (not (String.is_empty context) && String.length context <= 256)
+          "Invalid ASIC launch context";
+        Public.require (Hashtbl.mem p.contexts context || Hashtbl.length p.contexts < 256)
+          "ASIC launch context budget exhausted";
+        (match Hashtbl.find p.contexts context with
+         | Some c -> c, operation, None, false
+         | None ->
+           Option.iter initial_target ~f:(fun target ->
+             List.iter [ target.chip; target.variant ] ~f:(fun id ->
+               Public.require (not (String.is_empty id) && String.length id <= 256)
+                 "Invalid initial chip/variant"));
+           let c = launch_context context initial_target in
+           Hashtbl.set p.contexts ~key:context ~data:c;
+           c, operation, None, Option.is_some initial_target)
+      | operation -> p.main, operation, preparation_target_compatible, false
+    in
+    let seed_saved = if save_seed then save_required t p else Deferred.unit in
+    let on_target_change = if phys_equal c p.main then on_target_change else None in
+    let%bind () = handle_operation ?preparation_target_compatible ?on_target_change t p c operation in
+    let%map () = seed_saved in
+    snapshot c p)
   >>| function
   | Ok snapshot -> Ok snapshot
   | Error exn -> Error (V1.Error.create Invalid_request (Exn.to_string exn))
@@ -3960,7 +4090,7 @@ let peek_snapshot t ~root ~environment =
   in
   Option.bind (Hashtbl.find t.projects key) ~f:(fun loaded ->
     match Deferred.peek loaded with
-    | Some (Ok project) -> Some (snapshot project)
+    | Some (Ok project) -> Some (snapshot project.main project)
     | Some (Error _) | None -> None)
 ;;
 
