@@ -68,8 +68,9 @@ Select a variant that offers the flow you need. Projects without a chip catalog
 continue to use their existing project-level flow commands.
 
 **Testing** uses a separate simulation provider. Choosing an ASIC launch
-target does not populate that catalog. To start a new simulation, focus the
-catalog in Testing and use **Simulation: Discover suites explicitly**. An old
+target does not change that catalog. Silver loads the configured simulation
+suites in the background when the project opens. Select cases in **Testing**
+to launch them, or press **d** in the catalog to refresh. An old
 VCD in Waveforms is a retained result and can still be read even when no
 simulation provider is configured.
 

@@ -67,8 +67,9 @@ The standalone simulation tile also supports the controls below.
 
 1. **Space c c** opens the palette; choose **Add simulation tile** and focus it with
    **Tab**. The tile is explicitly project-scoped, independent of ASIC selection.
-2. Choose **Simulation: Discover suites explicitly**. Discovery is an explicit job;
-   routine polling and rendering do not run tools.
+2. The suite catalog loads in the background when Silver opens a configured
+   project. Use **Simulation: Discover suites explicitly** to refresh it or retry
+   after a failure. Discovery only enumerates suites and cases.
 3. Choose **Simulation: Launch form …** for the desired suite. The form captures
    selected case IDs, canonical uint64 seed, and every declared parameter. **Enter**
    accepts each field, **Ctrl-U** clears, **Backspace** edits, and **Esc** abandons.

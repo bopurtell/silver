@@ -195,9 +195,6 @@ class TestingTerminal(native.Terminal):
 
 
 def cooperative(session, evidence, expected, passed):
-    terminal = TestingTerminal(session)
-    # Exact provenance assertions below deliberately request full display identities.
-    terminal.palette('Strings (global): Show full identifiers')
     checks = []
     result = dict(status='failed', checks=checks)
     focus_index = 0
@@ -208,6 +205,11 @@ def cooperative(session, evidence, expected, passed):
 
     def attempts():
         return field(session.api(), 'attempts')
+
+    def job_ids():
+        reply = session.raw('/api/v1/snapshot', [('instance_id', session.metadata['instance_id'])])
+        require(reply[0] == 'Ok', str(reply))
+        return {field(job, 'id') for job in field(reply[1], 'jobs')}
 
     def focus(index):
         nonlocal focus_index
@@ -251,26 +253,32 @@ def cooperative(session, evidence, expected, passed):
               field(captured, 'environment') == 'Inherit_daemon', 'captured persistent genuine provider and environment')
         return detail
 
+    initial = session.api()
+    initial_jobs = job_ids()
+    terminal = TestingTerminal(session)
     try:
         terminal.capture('cooperative-startup', ['Overview'])
-        terminal.palette('Create Testing workspace')
-        terminal.capture('real-testing-empty-120x40', ['simulation-catalog', 'simulation-detail', 'Project tests'])
-        terminal.wait_viewport('empty-120x40')
+        # Exact provenance assertions below deliberately request full display identities.
+        terminal.palette('Strings (global): Show full identifiers')
+        terminal.palette('Switch to Testing')
+        terminal.capture('real-testing-120x40', ['simulation-catalog', 'simulation-detail', 'Project tests'])
+        terminal.wait_viewport('testing-120x40')
         terminal.resize(180, 55)
-        terminal.capture('real-testing-empty-180x55', ['simulation-catalog', 'simulation-detail', 'Generic project tests'])
+        terminal.capture('real-testing-180x55', ['simulation-catalog', 'simulation-detail', 'Process results only'])
         terminal.resize(120, 40)
         snapshot = session.api(domain='workspace')
         workspace = next(w for w in field(snapshot, 'workspaces') if field(w, 'preset') == ['testing'])
         tiles = [t for t in field(snapshot, 'tiles') if field(t, 'workspace') == field(workspace, 'id')]
         check(all(any(field(t, 'kind') == kind for t in tiles) for kind in
                   ('simulation-catalog', 'simulation-attempts', 'simulation-cases', 'simulation-detail',
-                   'simulation-artifacts', 'simulation-logs')), 'Create Testing installs all six cooperative panes')
+                   'simulation-artifacts', 'simulation-logs')), 'Testing includes all six cooperative panes')
         focus(4)
         terminal.palette('Zoom focused tile')
-        old_job = field(session.api(), 'discovery_job')
-        terminal.key(b'd')
-        support.wait_for(lambda: field(session.api(), 'discovery_job') != old_job, 'explicit catalog discovery', seconds=30)
         terminal.capture('real-catalog-discovered', ['directed', 'seeded', 'Ready for explicit launch'])
+        current = session.api()
+        check(job_ids() == initial_jobs
+              and field(current, 'attempts') == field(initial, 'attempts'),
+              'Testing navigation uses the existing FIFO catalog without rediscovery or a test run')
         terminal.key(b'x')
         terminal.key(b'/'); terminal.key(b'seeded'); terminal.key(b'\r')
         terminal.capture('real-catalog-subset', ['Selected cases: seeded'], absent=['[x] directed'])
@@ -301,9 +309,9 @@ def cooperative(session, evidence, expected, passed):
         for name, key in [('seeded.sexp', None), ('seeded.vcd', b'k')]:
             if key:
                 terminal.key(key)
-            before_exports = set((evidence / 'tmp').glob('*simulation*/artifact*'))
+            before_exports = set((evidence / 'tmp').glob('hardcaml_export_*-verified/artifact*'))
             terminal.key(b'e')
-            files = support.wait_for(lambda: set((evidence / 'tmp').glob('*simulation*/artifact*')) - before_exports,
+            files = support.wait_for(lambda: set((evidence / 'tmp').glob('hardcaml_export_*-verified/artifact*')) - before_exports,
                                      'selected real artifact export', seconds=30)
             check(len(files) == 1, 'one exact selected artifact exported')
             exported = files.pop()

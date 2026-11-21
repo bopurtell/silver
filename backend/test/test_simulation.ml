@@ -512,8 +512,18 @@ let tests fixture =
         Service.simulation service { instance_id; project; operation }
       in
       let get operation = rpc operation >>| ok in
+      let config_path = Filename.concat root Config.filename in
+      Core_unix.unlink config_path;
+      let%bind unconfigured = get Ensure_discovered in
+      require
+        ((not unconfigured.configured)
+         && List.is_empty (ok (Service.snapshot service { instance_id })).jobs)
+        "Opening an unconfigured project launched discovery";
+      Files.atomic config_path (Sexp.to_string_mach (Config.sexp_of_t config));
       let discovery () =
-        let%bind (_ : Snapshot.t) = get Discover in
+        let%bind (_ : Snapshot.t * Snapshot.t) =
+          Deferred.both (get Ensure_discovered) (get Ensure_discovered)
+        in
         bounded
           (wait
              (fun () -> get Get)
@@ -522,6 +532,9 @@ let tests fixture =
                && Option.is_none snapshot.discovery_error))
       in
       let%bind catalog = discovery () in
+      let%bind (_ : Snapshot.t) = get Ensure_discovered in
+      let job_count () = List.length (ok (Service.snapshot service { instance_id })).jobs in
+      require (job_count () = 1) "Startup discovery scheduled duplicate jobs";
       let digest = Option.value_exn catalog.discovery_digest in
       let selection ?(cases = [ "one"; "two" ]) mode =
         { Selection.suite = "demo"
@@ -688,7 +701,12 @@ let tests fixture =
           require
             (Option.is_some failed.discovery_error
              && Option.equal String.equal failed.discovery_digest (Some digest))
-            "Failed refresh discarded catalog or concealed error";
+             "Failed refresh discarded catalog or concealed error";
+           let before = job_count () in
+           let%bind unchanged = get Ensure_discovered in
+           require
+             (Option.is_some unchanged.discovery_error && job_count () = before)
+             "Passive reconnect retried a failed provider";
           let%map blocked = rpc (launch ("blocked-" ^ mode) "pass") in
           expect_error blocked Conflict)
       in

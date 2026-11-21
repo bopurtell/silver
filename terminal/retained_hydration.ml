@@ -26,6 +26,61 @@ let run t ~key f =
     pending
 ;;
 
+module Simulation_discovery = struct
+  (** A connection sends at most one automatic request per opened project. The daemon
+      owns provider configuration and deduplication across connections. *)
+  type t = Project_id.t Hash_set.t
+
+  let create () = Hash_set.create (module Project_id)
+
+  let begin_request t ~capabilities ~instance_id ~project : Simulation.Request.t option =
+    match project with
+    | Some project
+      when List.mem capabilities Simulation.automatic_discovery_capability
+             ~equal:String.equal
+           && not (Hash_set.mem t project) ->
+      Hash_set.add t project;
+      Some { instance_id; project; operation = Ensure_discovered }
+    | _ -> None
+  ;;
+
+  let%test_unit "only an opened project on an advertising daemon opts in" =
+    let t = create () in
+    let project = Project_id.of_string "project" in
+    let instance_id = V1.Daemon_instance_id.of_string "instance" in
+    let begin_request = begin_request t ~instance_id in
+    let capable = [ Simulation.automatic_discovery_capability ] in
+    assert (Option.is_none (begin_request ~capabilities:[] ~project:(Some project)));
+    assert (Option.is_none (begin_request ~capabilities:capable ~project:None));
+    assert (
+      Option.equal
+        Simulation.Request.equal
+        (begin_request ~capabilities:capable ~project:(Some project))
+        (Some { instance_id; project; operation = Ensure_discovered }));
+    assert (Option.is_none (begin_request ~capabilities:capable ~project:(Some project)))
+  ;;
+
+  let%test_unit "automatic receives a single ticket per project and connection" =
+    let t = create () in
+    let capabilities = [ Simulation.automatic_discovery_capability ] in
+    let ensure t instance id =
+      begin_request
+        t
+        ~capabilities
+        ~instance_id:(V1.Daemon_instance_id.of_string instance)
+        ~project:(Some (Project_id.of_string id))
+    in
+    assert (Option.is_some (ensure t "daemon" "first"));
+    assert (Option.is_some (ensure t "daemon" "second"));
+    (* Repeated refreshes do not wait for a receipt or spin if it fails. *)
+    assert (Option.is_none (ensure t "daemon" "first"));
+    assert (Option.is_none (ensure t "daemon" "second"));
+    (* A new transport can ask again, including after an ambiguous lost receipt. *)
+    assert (Option.is_some (ensure (create ()) "daemon" "first"));
+    assert (Option.is_some (ensure (create ()) "replacement" "first"))
+  ;;
+end
+
 (** The caller fences transport/project/workspace identity through [current]. A Get
     may default the selection, but only its own generation may continue to Observe:
     a newer page request or restored selection owns the view even with the same ID. *)

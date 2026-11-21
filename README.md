@@ -221,6 +221,10 @@ reported; an explicit `--project-root` never searches upward). Simulation provid
 configuration can be generated and checked (discovery only, no tests run) with
 `silver-simulation-setup init|check`; see
 [the simulation setup guide](docs/features/project/WB-039-simulation-setup.md).
+When you open a simulation-configured project in the terminal UI, Silver loads
+its suite catalog in the background. You can stay in Overview; the suites will
+be ready in **Testing** when discovery finishes. Press **d** in the catalog
+to refresh it or retry a failed discovery. Discovery does not run tests.
 
 Use the project's actual switch. `--environment inherited` means the daemon's
 startup environment, not necessarily the current client's shell. Add `--plain`

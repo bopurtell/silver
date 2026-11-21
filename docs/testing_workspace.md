@@ -40,13 +40,18 @@ implementation. The helper reopens saved state; tests were executed in private
 acceptance state, so they do not appear as preseeded attempts in your live history.
 
 1. Open **Space c c → Create Testing workspace** for a new default arrangement.
-2. Tab to **simulation-catalog**, press **d** for explicit discovery.
+2. Tab to **simulation-catalog**. Silver loads the configured project's suites
+   in the background after opening it, even if you start in Overview.
 3. Choose cases, then press **Enter** to prepare the normal launch form.
 4. Review cases, seed and parameters; only final confirmation launches simulation.
 
+Reconnecting to the same daemon reuses its catalog. A fresh daemon discovers
+again. If the provider failed, Silver shows the error rather than repeatedly
+running it; **d** retries after you fix it. Clients attached to an older daemon
+without automatic discovery can still use **d**.
+
 From the global palette (`Space c c`), type `test suites` or `verification`
-to open the suite picker. If no suites are listed, choose **Testing: Discover
-suites explicitly**. With a suite selected in the active Testing workspace,
+to open the suite picker. With a suite selected in the active Testing workspace,
 `test` opens the launch form for its selected cases. If there is no current
 suite, `test` opens the picker instead.
 
@@ -88,7 +93,7 @@ selecting an artifact exposes its exact ID, bytes, digest and media type in Deta
 | Focus | Key/action | Effect |
 | --- | --- | --- |
 | Palette | `test` | Review the active Testing suite's selected cases in the launch form, or open the suite chooser if there is no current suite. Only explicit confirmation launches an attempt. |
-| Palette | `test suites` or `verification` | Browse and select suites in Testing without launching. If no suites are known, choose **Discover suites explicitly**, then reopen the chooser. |
+| Palette | `test suites` or `verification` | Browse and select suites in Testing without launching. |
 | Any simulation pane | `d` | Explicitly discover/refresh suites; never implied by rendering |
 | Catalog | `n` / `p` | Choose next/previous declared suite |
 | Catalog | `j` / `k`, arrows | Browse cases without changing attempt investigation |

@@ -55,10 +55,15 @@ def exercise(args, base):
         session.start()
         with closing(native.Terminal(session, width=160, height=45)) as terminal:
             terminal.capture("startup", ["Overview"])
+            session.until("Get", lambda s: bool(field(s, "discovery_digest")))
+            startup_jobs = jobs()
+            assert len(startup_jobs) == 1
             terminal.palette("test")
-            terminal.capture("initial-chooser", ["COMMAND PALETTE", "Discover suites explicitly"])
+            terminal.capture("initial-chooser", ["COMMAND PALETTE", "alpha", "beta"])
             empty_attempts()
-            assert jobs() == [], "test must not implicitly discover or dispatch dune test"
+            assert jobs() == startup_jobs, (
+                "test consumes the background catalog without rediscovery or dune test")
+            terminal.key(b"alpha")
             terminal.key(b"\r")
             terminal.capture("after-discovery", ["Suite: alpha", "Ready for explicit launch"],
                              absent=["COMMAND PALETTE"])

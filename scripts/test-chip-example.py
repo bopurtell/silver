@@ -56,7 +56,7 @@ def main():
                 return session.rpc("asic", action, wait=True)
 
             term = Terminal(session)
-            term.capture("startup", ["Overview"])
+            term.capture("startup", ["Overview", "Project: hardcaml_asic_example"])
             # Open the picker on a fresh session without issuing a Discover RPC.
             deadline = time.monotonic() + args.outer_timeout
             catalog = rpc("Get")
@@ -66,9 +66,9 @@ def main():
                 time.sleep(.1)
                 catalog = rpc("Get")
             chips = {fs.field(c, "id"): c for c in fs.field(catalog, "chips")}
-            assert {"fifo_demo", "program_memory", "sram_budget"} <= chips.keys(), chips
+            assert {"controlled_fifo", "program_memory", "sram_budget"} <= chips.keys(), chips
             fifo = fs.field(catalog, "chip_target")[0]
-            assert fs.field(fifo, "chip") == "fifo_demo"
+            assert fs.field(fifo, "chip") == "controlled_fifo"
 
             def plan(target):
                 selection = [["flow", "standard"], ["profile", "balanced"], ["endpoint", "synthesis"],
@@ -77,11 +77,11 @@ def main():
                 assert dict(fs.field(preview, "selection")) == dict(selection)
                 return json.loads(fs.field(preview, "plan_json"))
 
-            assert plan(fifo)["project_name"] == "controlled_fifo_specimen"
+            assert plan(fifo)["project_name"] == "controlled_fifo"
             chip_id = args.check_registered or "sram_budget"
             assert chip_id in chips, ("missing chip in Silver discovery", chip_id, list(chips))
             target = [["chip", chip_id], ["variant", fs.field(chips[chip_id], "default_variant")]]
-            overview_screen = term.capture("launch-control", ["Launch chip:", "fifo_demo"])
+            overview_screen = term.capture("launch-control", ["Launch chip:", "controlled_fifo"])
             for y, line in enumerate(overview_screen.splitlines(), 1):
                 if "Launch chip:" in line:
                     x = line.index("Launch chip:") + 1
@@ -110,7 +110,9 @@ def main():
                       "Silver's synthesis preview matches the directly invoked chip. No launch.")
                 return
             def overview(chip, variant):
-                screen = term.capture(chip + "-overview", [chip + "/" + variant, "Launch target", "Launch chip", "Endpoint"])
+                # The compact session tile may truncate chip/variant; the launch
+                # controls below expose the entire identity in separate fields.
+                screen = term.capture(chip + "-overview", ["Launch target", "Launch chip", "Endpoint"])
                 starts = []
                 for label, value in [("Launch chip", chip), ("Variant", variant),
                                      ("Flow", "standard"), ("Profile", "balanced"),
@@ -177,7 +179,7 @@ def main():
 
             # Inspect the SRAM evidence while FIFO is the launch target.
             rpc(fs.sexp(["Select_chip", fifo]))
-            overview("fifo_demo", "default")
+            overview("controlled_fifo", "default")
             term.palette("Resources: Import emitted bundle")
             term.capture("import-form", ["exact absolute directory"])
             os.write(term.master, os.fsencode(bundle))
@@ -224,7 +226,10 @@ def main():
                                 absent=["Detail section: inventory", "Section catalog", "Page items:", "Sections: inventory:"])
             columns = []
             for field in ["Synthesis", "Final", "Resource verdict", "Qualification"]:
-                m = re.search(re.escape(field) + r": +(\S)", full)
+                # A split view can also show "Resource verdict" in the inventory.
+                # Compare the occurrences in the detail pane.
+                matches = list(re.finditer(re.escape(field) + r": +(\S)", full))
+                m = matches[-1] if matches else None
                 assert m, (field, full)
                 columns.append(m.start(1) - full.rfind("\n", 0, m.start(1)) - 1)
             assert len(set(columns)) == 1, (columns, full)

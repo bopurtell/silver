@@ -25,7 +25,7 @@ the detail pane.
 
 ## Evidence and selection
 
-The real `controlled_fifo_specimen` example currently supplies ASIC and simulation
+The `hardcaml_asic_example` project supplies ASIC and simulation
 providers, but no generic Workbench hardware driver or structured elaboration
 hierarchy. ASIC runs and their retained RTL/netlists alone do not populate this
 tile. Its hardware driver integration must be added before the Generate RTL/load

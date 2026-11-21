@@ -119,8 +119,19 @@ def exercise(test):
     try:
         terminal = Terminal(test, 'first-client')
         terminal.wait('startup', ['Space c c commands'], ['Loading workspace...'], ready=True)
-        test.check(counts() == dict(discover=0, run=0) and jobs() == [],
-                   'First frontend startup performs no provider discovery or jobs')
+        deadline = time.monotonic() + 20
+        while True:
+            snapshot = api()
+            if field(snapshot, 'discovery_digest'):
+                break
+            require(time.monotonic() < deadline, 'Startup simulation discovery did not complete')
+            terminal.drain(.1)
+        test.check(counts() == dict(discover=1, run=0)
+                   and len(jobs()) == 1
+                   and not field(snapshot, 'attempts'),
+                   'First startup discovers the catalog once and does not start tests')
+        # This oracle checks exact IDs and SHA256 across reconnect, not abbreviations.
+        terminal.palette('Strings (global): Show full identifiers')
         # Fresh startup already instantiates the stock Testing definition. Wait
         # for that atomic initialization instead of fuzzy-matching an obsolete
         # Create shortcut and accidentally adding another same-name workspace.
@@ -150,7 +161,6 @@ def exercise(test):
         test.check(test.workspace() == startup_registry,
                    'Opening existing Testing performs no registry mutation or duplicate workspace creation')
         terminal.focus_catalog()
-        terminal.palette('Simulation: Discover suites explicitly')
         terminal.wait('catalog', ['reconnect-case', 'fixture'])
         terminal.palette('Simulation: Launch selected catalog subset')
         for step in ('CASES', 'SEED', 'CONFIRM'):

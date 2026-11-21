@@ -30,11 +30,12 @@ PANES = ['simulation-catalog', 'simulation-attempts', 'simulation-cases',
 
 
 class Terminal(native.Terminal):
-    width, height = 120, 40
-
-    def drain(self, seconds=.3):
-        super().drain(seconds)
-        return native.fs0.terminal_screen(bytes(self.data), self.width, self.height)
+    def save(self, label, text):
+        if label.startswith('palette-'):
+            # Keep the painted palette, not another copy of the cumulative PTY stream.
+            (self.session.evidence / (label + '.txt')).write_text(text)
+        else:
+            super().save(label, text)
 
     def resize(self, width, height):
         self.width, self.height = width, height
@@ -71,10 +72,12 @@ class Terminal(native.Terminal):
 
 def run(args):
     evidence = args.evidence
-    for name in ('project', 'state', 'home', 'config', 'tmp'):
+    for name in ('project', 'unconfigured', 'state', 'home', 'config', 'tmp'):
         (evidence / name).mkdir()
     root = evidence / 'project'
     (root / 'dune-project').write_text('(lang dune 3.22)\n(name testing_workspace_acceptance)\n')
+    unconfigured = evidence / 'unconfigured'
+    (unconfigured / 'dune-project').write_text('(lang dune 3.22)\n(name no_simulation_provider)\n')
     control, calls = evidence / 'control.json', evidence / 'calls.jsonl'
 
     def mode(value):
@@ -101,6 +104,14 @@ def run(args):
     def workspace():
         return session.api(domain='workspace')
 
+    def job_ids():
+        reply = session.raw('/api/v1/snapshot', [('instance_id', session.metadata['instance_id'])])
+        require(reply[0] == 'Ok', str(reply))
+        return {field(j, 'id') for j in field(reply[1], 'jobs')}
+
+    def discoveries():
+        return [r for r in records() if r['operation'] == 'discover']
+
     def mutate(mutation):
         snapshot = workspace()
         return session.api(domain='workspace', operation=['Mutate',
@@ -114,25 +125,68 @@ def run(args):
                 terminal.drain(.15)
             time.sleep(.1)
 
+    def focus_pane(name):
+        # The active pane can be restored from local navigation on reconnect.
+        for _ in range(12):
+            rows = terminal.drain(.2).splitlines()
+            footer = rows[-1].rstrip() if rows else ''
+            if footer.endswith(name):
+                return
+            terminal.key(b'\t')
+        raise AssertionError('Could not focus ' + name)
+
     try:
         session.start()
+        check(not field(session.api(), 'discovery_job') and not job_ids() and not records(),
+              'opening via HTTP and reading Get stay passive before a terminal attaches')
         terminal = Terminal(session)
         terminal.capture('startup', ['Overview'])
+        initial = session.until('Get', lambda s: bool(field(s, 'discovery_digest')))
+        initial_jobs = job_ids()
+        check([r['operation'] for r in records()] == ['discover'] and not field(initial, 'attempts')
+              and len(initial_jobs) == 1,
+              'startup automatically discovers exactly once and does not start simulation or generic tests')
+
+        # A second root without simulation configuration must not allocate a job.
+        opened = session.raw('/api/v1/open-project', [
+            ('instance_id', session.metadata['instance_id']), ('root', str(unconfigured)),
+            ('environment', 'Inherit_daemon')])
+        require(opened[0] == 'Ok', str(opened))
+        bare_project = field(field(opened[1], 'project'), 'id')
+        bare_client = Terminal(session, argv=[str(args.client), '--connect', session.url,
+                                               '--project-root', str(unconfigured)])
+        try:
+            bare_client.capture('unconfigured-startup', ['Overview'])
+            bare_client.palette('Switch to Testing')
+            for _ in range(4):
+                bare_client.key(b'\t')
+            bare_client.palette('Zoom focused tile')
+            bare_client.capture('unconfigured-catalog', ['No simulation provider configured'])
+        finally:
+            bare_client.close()
+        bare = session.raw('/api/v1/simulation', [
+            ('instance_id', session.metadata['instance_id']), ('project', bare_project),
+            ('operation', 'Get')])
+        require(bare[0] == 'Ok', str(bare))
+        check(not any(field(bare[1], key) for key in
+                      ('discovery_job', 'discovery_error', 'discovery', 'attempts'))
+              and job_ids() == initial_jobs,
+              'attaching Testing to an unconfigured project adds no backend jobs or discovery errors')
+
         # This suite checks exact provenance; compact rendering has its own WB-073 suite.
         terminal.palette('Strings (global): Show full identifiers')
-        terminal.palette('Create Testing workspace')
-        wait_for(lambda: any(field(w, 'preset') == ['testing'] for w in field(workspace(), 'workspaces')),
-                 'Testing bootstrap')
+        terminal.palette('Switch to Testing')
         terminal.capture('testing-layout-120x40', ['simulation-catalog', 'simulation-detail', 'Project tests'])
         terminal.wait_viewport('initial-120x40')
         check(True, 'initial Testing viewport painted at actual 120 columns and 40 rows')
         terminal.resize(180, 55)
-        terminal.capture('testing-layout-180x55', ['simulation-catalog', 'simulation-detail', 'Generic project tests'])
+        terminal.capture('testing-layout-180x55', ['simulation-catalog', 'simulation-detail', 'Process results only'])
         check(True, 'resized Testing viewport painted at actual 180 columns and 55 rows')
         terminal.resize(120, 40)
-        terminal.capture('testing-layout-return-120x40', ['simulation-catalog', 'simulation-detail', 'Generic project tests'])
+        terminal.capture('testing-layout-return-120x40', ['simulation-catalog', 'simulation-detail', 'Process results only'])
         check(True, 'Testing viewport repainted at actual 120 columns and 40 rows after returning')
-        check(not records(), 'render and workspace navigation never invoke discovery or tools')
+        check([r['operation'] for r in records()] == ['discover'],
+              'render and workspace navigation do not repeat startup discovery or launch tests')
         snapshot = workspace()
         testing = next(w for w in field(snapshot, 'workspaces') if field(w, 'preset') == ['testing'])
         wid = field(testing, 'id')
@@ -143,15 +197,14 @@ def run(args):
         for _ in range(4):
             terminal.key(b'\t')
         terminal.palette('Zoom focused tile')
-        terminal.key(b'd')
-        wait_for(lambda: len(records()) == 1, 'explicit Discover reaches provider')
-        terminal.capture('catalog-discovered', ['first', 'second', 'Ready for explicit launch'])
+        terminal.capture('catalog-auto-discovered', ['first', 'second', 'Ready for explicit launch'])
         terminal.key(b'x')  # remove first: exact subset is second
         terminal.key(b'/'); terminal.key(b'second'); terminal.key(b'\r')
         terminal.capture('catalog-filter-subset', ['Selected cases: second'], absent=['[x] first'])
         terminal.key(b'\r')
         terminal.capture('subset-form', ['CASES', 'second'])
-        check(len(records()) == 1, 'filter/subset/form navigation invokes no tools')
+        check(len(records()) == 1 and job_ids() == initial_jobs,
+              'filter/subset/form navigation invokes no tools before confirmation')
         # Cases, seed, then confirmation (the fixture declares no parameters).
         terminal.key(b'\r'); terminal.key(b'\r')
         terminal.capture('subset-confirm', ['CONFIRM', 'second'])
@@ -183,9 +236,8 @@ def run(args):
         terminal.palette('Zoom focused tile')
         terminal.capture('shared-artifacts', ['second-raw'])
         terminal.key(b'e')
-        wait_for(lambda: bool(list((evidence / 'tmp').glob('*simulation*/artifact*'))),
-                 'cooperative exact artifact export')
-        exported = list((evidence / 'tmp').glob('*simulation*/artifact*'))[0]
+        terminal.capture('shared-export-ready', ['Export ready'])
+        exported, = (evidence / 'tmp').glob('hardcaml_export_*-verified/artifact*')
         artifact = next(a for a in field(done, 'artifacts') if field(a, 'id').endswith('-second-raw'))
         check(hashlib.sha256(exported.read_bytes()).hexdigest() == field(artifact, 'sha256')[0],
               'cooperative export retains exact selected artifact bytes and SHA256')
@@ -203,14 +255,19 @@ def run(args):
               'cooperative targeted rerun captures exact parent and original selected case inputs')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
         terminal.palette('Unzoom workspace')
-        # A second workspace with identical definitions must not inherit selection.
+        # A second workspace with identical definitions defaults to the newest
+        # attempt instead of copying the first workspace's explicit selection.
         created = mutate(['Create_workspace', ['window', field(testing, 'window')],
                           ['name', 'Independent Testing'], ['context', field(testing, 'context')]])
         other = next(w for w in field(created, 'workspaces') if field(w, 'name') == 'Independent Testing')
         specs = [[field(t, 'kind'), field(t, 'requested_geometry')] for t in tiles]
         mutate(['Apply_preset', ['workspace', field(other, 'id')], ['preset', 'testing'], ['tiles', specs]])
         terminal.palette('Switch to Independent Testing')
-        terminal.capture('independent-workspace', ['Select an attempt for outcome'])
+        focus_pane('simulation logs')
+        terminal.palette('Zoom focused tile')
+        terminal.capture('independent-workspace', [field(child, 'id'), field(child, 'job')[:25]],
+                         absent=[aid])
+        terminal.palette('Unzoom workspace')
         terminal.palette('Switch to Testing')
         terminal.palette('Zoom focused tile')  # restores Logs focus
         terminal.capture('workspace-selection-retained', [aid, field(done, 'job')[:25]])
@@ -234,33 +291,73 @@ def run(args):
               'additive upgrade preserves saved hidden legacy extras, pins and geometry')
         # Revisit Catalog: failed discovery retains rows but disables launch.
         terminal.palette('Switch to Independent Testing')
-        for _ in range(4):
-            terminal.key(b'\t')
+        focus_pane('simulation catalog')
         terminal.palette('Zoom focused tile')
+        before_refresh = job_ids()
         mode('discovery-malformed')
         terminal.key(b'd')
-        wait_for(lambda: bool(field(session.api(), 'discovery_error')), 'failed discovery completes')
-        terminal.capture('stale-catalog', ['Launch disabled:'])
+        session.until('Get', lambda s: bool(field(s, 'discovery_error')))
+        check(len(job_ids() - before_refresh) == 1
+              and [r['mode'] for r in discoveries()] == ['pass', 'discovery-malformed'],
+              'explicit refresh after startup allocates one fresh discovery job')
+        terminal.capture('stale-catalog', ['Launch disabled:', 'Discovery failed:', 'first', 'second'])
         count = len([r for r in records() if r['operation'] == 'run'])
         terminal.key(b'\r')
         terminal.drain(.6)
         check(len([r for r in records() if r['operation'] == 'run']) == count,
               'failed authoritative discovery blocks Enter launch')
-        check(len([r for r in records() if r['operation'] == 'discover']) == 2,
-              'cooperative panes poll observation only; discovery remains explicit')
+        check(len(discoveries()) == 2,
+              'catalog observation does not retry a failed explicit refresh')
         before_restart = records()
         terminal.close(); terminal = None
         session.stop(); session.start()
         terminal = Terminal(session)
-        terminal.capture('restart-startup', ['Overview'])
+        terminal.capture('restart-startup', ['Space c c commands', 'connected'])
+        cold_failure = session.until('Get', lambda s: bool(field(s, 'discovery_error')))
+        cold_jobs = job_ids()
+        check(not field(cold_failure, 'discovery_digest')
+              and records()[:-1] == before_restart
+              and records()[-1]['operation'] == 'discover'
+              and records()[-1]['mode'] == 'discovery-malformed'
+              and len(cold_jobs) == 1,
+              'fresh daemon automatically attempts discovery once without replaying retained runs')
+        mode('pass')  # Repair alone must not cause observation/navigation to retry.
         terminal.palette('Switch to Testing')
-        # The moved artifact pane was re-added at the end; Logs is now eighth.
-        for _ in range(8):
-            terminal.key(b'\t')
+        focus_pane('simulation logs')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
         terminal.palette('Zoom focused tile')
         terminal.capture('historical-exact-logs-unavailable', ['Job logs unavailable in this daemon'])
-        check(records() == before_restart, 'historical reopen reports absent exact-job logs without replay or discovery')
+        terminal.palette('Unzoom workspace')
+        focus_pane('simulation catalog')
+        terminal.palette('Zoom focused tile')
+        terminal.capture('cold-discovery-blocked', ['Launch disabled:', 'Discovery failed:'])
+        peer = Terminal(session)
+        try:
+            peer.capture('cold-discovery-peer-startup', ['Testing'])
+            peer.drain(2.5)
+        finally:
+            peer.close()
+        check(records()[:-1] == before_restart and len(discoveries()) == 3
+              and job_ids() == cold_jobs,
+              'polling, reopening history and attaching a second client do not retry failed auto discovery')
+        terminal.key(b'd')
+        terminal.capture('explicit-retry-ready', ['first', 'second', 'Ready for explicit launch'])
+        ready = session.api()
+        check(not field(ready, 'discovery_error')
+              and len(discoveries()) == 4 and records()[-1]['mode'] == 'pass'
+              and len([r for r in records() if r['operation'] == 'run']) == 2
+              and len(job_ids() - cold_jobs) == 1,
+              'explicit retry repairs failed auto discovery without starting or replaying tests')
+        before_restart = records()
+        terminal.close(); terminal = None
+        session.stop(); session.start()
+        terminal = Terminal(session)
+        terminal.capture('healthy-restart-startup', ['Space c c commands', 'connected'])
+        restored = session.until('Get', lambda s: bool(field(s, 'discovery_digest')))
+        check(field(restored, 'discovery_digest') == field(ready, 'discovery_digest')
+              and records()[:-1] == before_restart and records()[-1]['operation'] == 'discover'
+              and len(job_ids()) == 1,
+              'healthy restart repopulates the same catalog without any UI input or replay')
         result['status'] = 'passed'
     except BaseException:
         result['traceback'] = traceback.format_exc()
@@ -268,10 +365,12 @@ def run(args):
             terminal.save('failure', terminal.drain(.1))
         raise
     finally:
-        if terminal:
-            terminal.close()
-        session.stop()
-        (evidence / 'verified.json').write_text(json.dumps(result, indent=2))
+        try:
+            if terminal:
+                terminal.close()
+        finally:
+            session.stop()
+            (evidence / 'verified.json').write_text(json.dumps(result, indent=2))
 
 
 def main():

@@ -289,7 +289,7 @@ def native(base, args):
         daemon, url = start()
         client = Client(url, base / 'project', switch=demo.switch_name())
         check(field(client.raw('/api/v1/snapshot', [('instance_id', client.instance)]), 'jobs') == [],
-              'daemon/project startup launches no jobs before explicit seed')
+              'headless HTTP project open launches no jobs before explicit seed')
         # Capture a reservation while active, then emulate an interrupted explicit
         # seed. Retry exact recorded payload after BOTH config and catalog revisions.
         original_poll = demo.simulation_poll

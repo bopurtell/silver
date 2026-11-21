@@ -154,7 +154,8 @@ No daemon client identifier or new project namespace is introduced. Two clients 
 the same state directory share last-saved navigation; they are not independent profiles.
 
 Simulation discovery is still daemon-memory state. Reopening a client on the same daemon
-reuses it; restarting the daemon may still require explicit provider discovery. Saved
+reuses it; after a daemon restart, the interactive client requests discovery
+in the background for a configured project. Saved
 UI state is not evidence and does not establish provider readiness. Quick waveform
 modal reopening is not persisted; its selected Testing artifact and the dedicated
 Waveforms pin are retained through their respective mechanisms.

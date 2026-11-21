@@ -124,6 +124,8 @@ type session =
   ; mutable polling : bool
   ; mutable hydration : Terminal_presentation.Retained_hydration.Coordinator.t
   ; mutable retained_reads : Terminal_presentation.Retained_hydration.t
+  ; mutable simulation_discovery :
+      Terminal_presentation.Retained_hydration.Simulation_discovery.t
   ; navigation_loaded : Terminal_presentation.Retained_hydration.Load.t
   ; mutable navigation_pending : Terminal_presentation.Navigation_preferences.t option
   ; mutable navigation_saved : string option
@@ -343,6 +345,8 @@ let create_session
       ; polling = false
       ; hydration = Terminal_presentation.Retained_hydration.Coordinator.create ()
       ; retained_reads = Terminal_presentation.Retained_hydration.create ()
+      ; simulation_discovery =
+          Terminal_presentation.Retained_hydration.Simulation_discovery.create ()
       ; navigation_loaded = Terminal_presentation.Retained_hydration.Load.create ()
       ; navigation_pending = None
       ; navigation_saved = None
@@ -2501,6 +2505,23 @@ let preparation_request
 
 let hydrate_retained ?(reschedule = false) session =
   let client = session.client in
+  (* Discovery is a project-level background request, not a tile action. In
+     particular, do not take a tile's request ticket or await it in hydration;
+     the existing Simulation Get lane owns publication to the views. *)
+  let discover_simulation_on_idle () =
+    Option.iter
+      (Terminal_presentation.Retained_hydration.Simulation_discovery.begin_request
+         session.simulation_discovery
+         ~capabilities:session.hello.capabilities
+         ~instance_id:session.hello.instance_id
+         ~project:(Option.map (current_project session) ~f:(fun p -> p.id)))
+      ~f:(fun payload ->
+        don't_wait_for
+          (let%map (_ : (Simulation.Snapshot.t, string) Result.t) =
+             request session.diagnostics_file (fun () -> Http.Client.simulation client payload)
+           in
+           ()))
+  in
   let discover_on_open () =
     (* Only native hydration opts in. Get stays passive for API consumers and
        the existing snapshot lane delivers completion without a new poller. *)
@@ -2524,7 +2545,9 @@ let hydrate_retained ?(reschedule = false) session =
     ~reschedule
     ~idle:(fun () ->
       if phys_equal client session.client
-      then save_navigation_preferences session
+      then (
+        discover_simulation_on_idle ();
+        save_navigation_preferences session)
       else return ())
     (fun () ->
       if not (phys_equal client session.client)
@@ -3047,6 +3070,8 @@ and reconnect session =
       session.navigation_loaded
       ~replacement:(instance_changed || project_changed);
     session.retained_reads <- Terminal_presentation.Retained_hydration.create ();
+    session.simulation_discovery
+    <- Terminal_presentation.Retained_hydration.Simulation_discovery.create ();
     (* The same project's authoritative evidence remains valid while the first new
        transport poll is pending; dropping it would reset stage/result browsing. *)
     if instance_changed || project_changed
@@ -4758,6 +4783,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; polling = false
     ; hydration = Terminal_presentation.Retained_hydration.Coordinator.create ()
     ; retained_reads = Terminal_presentation.Retained_hydration.create ()
+    ; simulation_discovery =
+        Terminal_presentation.Retained_hydration.Simulation_discovery.create ()
     ; navigation_loaded = Terminal_presentation.Retained_hydration.Load.create ()
     ; navigation_pending = None
     ; navigation_saved = None

@@ -423,11 +423,11 @@ def run(args):
         else:
             raise AssertionError('cannot focus actual Testing catalog')
         source_only_plan()
-        discovered = session.discover()
+        discovered = session.until('Get', lambda s: bool(field(s, 'discovery_digest')), timeout=60)
         save(evidence / 'discovery.json', discovered)
         suites = field(field(discovered, 'discovery')[0], 'suites')
         check([field(s, 'id') for s in suites] == ['controlled-fifo', 'pt8-memory-workloads'],
-              'same session discovers exact FIFO then PT8 catalog')
+              'startup discovery supplies the exact FIFO then PT8 catalog')
         terminal.capture('combined-catalog', ['controlled-fifo', 'pt8-memory-workloads'])
         passed = launch_form('controlled-fifo', ['directed', 'seeded'], '18446744073709551615',
                              [('checker', 'normal'), ('cycles', '64')])
@@ -585,7 +585,9 @@ def run(args):
         check({field(a, 'id') for a in field(session.api(), 'attempts')} == before_ids,
               'restarted retained waveform/display investigation creates no simulation attempt')
         terminal.key(b'q')
-        session.discover()
+        rediscovered = session.until('Get', lambda s: bool(field(s, 'discovery_digest')), timeout=60)
+        check(field(rediscovered, 'discovery_digest') == field(discovered, 'discovery_digest'),
+              'daemon restart automatically restores the same simulation catalog before rerun')
         terminal.palette('Simulation: Reopen ' + field(failed, 'id') + ' controlled-fifo')
         terminal.palette('Simulation: Select case seeded')
         rerun_before = {field(a, 'id') for a in field(session.api(), 'attempts')}

@@ -34,7 +34,8 @@ the executable path in that file or regenerate it after moving the old file
 aside. The provider finds `counter.exe` beside itself by default. Neither
 Silver nor the provider builds the example.
 
-In Silver, [discover the `counter` suite and launch a simulation](../../docs/structured_simulation.md#terminal-controls).
+In Silver, open **Testing** to see the automatically discovered `counter` suite
+and [launch a simulation](../../docs/structured_simulation.md#terminal-controls).
 Select any of `wrap`, `reset`, `seeded`, a canonical uint64 decimal seed, and all
 parameters:
 

@@ -242,6 +242,7 @@ Terminal fences responses by daemon instance, project, selected attempt and requ
 | Operation | Result and effects |
 |---|---|
 | `Get` | Latest cached catalog and newest <=25 summaries. No tools. |
+| `Ensure_discovered` (capability `simulation-ensure-discovered-v1`) | Used by terminal startup. Schedules discovery if the configured provider and environment have not yet been tried in this daemon for this project. Coalesces concurrent requests. Returns without scheduling if unconfigured, already attempted, or in progress. |
 | `Discover` | Coalesces active discovery for project; schedules supervisor job; returns `discovery_job` promptly. Poll Get. Completed refresh requires another Discover. |
 | `Launch {submission_key; discovery_digest; selection}` | Validate current successful catalog/config, digest fence, explicit inputs; reserve supervisor job and durable attempt. Returns `detail` with captured inputs and queued/running state. |
 | `Rerun {submission_key; attempt_id; cases}` | Nonempty subset of original selected cases; capture same seed, parameter values and ASIC refs, validate against **current** discovery/config/environment; new attempt/job with `parent` containing immediate original attempt ID and job. No archived-build promise. Returns new detail. |

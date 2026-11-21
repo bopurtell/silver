@@ -31,6 +31,7 @@ type project =
   ; mutable discovery_digest : string option
   ; mutable discovery_config : string option
   ; mutable discovery_environment : V1.Environment_selection.t option
+  ; mutable last_discovery_request : (string * V1.Environment_selection.t) option
   ; mutable discovery_job : Job_id.t option
   ; mutable discovering : bool
   ; mutable discovery_error : string option
@@ -261,6 +262,7 @@ let project t root =
       ; discovery_digest = None
       ; discovery_config = None
       ; discovery_environment = None
+      ; last_discovery_request = None
       ; discovery_job = None
       ; discovering = false
       ; discovery_error = None
@@ -708,6 +710,7 @@ let discover p config ~environment ~schedule =
   then return ()
   else (
     p.discovering <- true;
+    p.last_discovery_request <- Some (config_digest config, environment);
     p.discovery_error <- None;
     let output = Buffer.create 4096 in
     let failure = ref None in
@@ -883,6 +886,18 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
         | Discover ->
           let%map () = discover p (config_exn ()) ~environment ~schedule in
           snap ()
+        | Ensure_discovered ->
+          (* Remember failed attempts as well as successes: reconnecting to a
+             daemon must not retry a broken provider. Discover can still retry. *)
+          (match config_result with
+           | Ok (Some config)
+             when not
+                    (Option.exists p.last_discovery_request ~f:(fun (digest, env) ->
+                       String.equal digest (config_digest config)
+                       && V1.Environment_selection.equal env environment)) ->
+             let%map () = discover p config ~environment ~schedule in
+             snap ()
+           | _ -> return (snap ()))
         | (Launch _ | Rerun _) as operation ->
           let submission_key =
             match operation with

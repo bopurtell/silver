@@ -307,6 +307,7 @@ let run ~build_jobs () =
            ; "asic"
            ; Asic.automatic_discovery_capability
            ; "simulation"
+           ; Simulation.automatic_discovery_capability
            ; Preparation.capability
            ; Authoring.capability
            ])

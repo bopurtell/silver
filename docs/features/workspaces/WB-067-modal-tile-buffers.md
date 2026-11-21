@@ -37,10 +37,14 @@ before tile and global bindings, and Space c c is the palette leader.
 ## Scope
 - A shared, tile-local key-sequence layer: numeric count prefixes for motions and
   repeatable actions, with a visible pending-count indicator and Esc to cancel.
+- Route digits by keyboard focus. In normal navigation, a tile that supports counts
+  (initially Waves) consumes digits before workspace shortcuts. Tiles without counts
+  keep their numeric workspace shortcuts, even in the same workspace. Text inputs
+  and modals retain priority; no workspace-wide setting is required.
 - Visual line selection (and block selection where a tile has columns) over a
   tile's rows, with a visible selection range and actions applied to the range.
 - First consumers, so the mechanism is proven on real views:
-  1. Waves cursor motions: `20 l`, `5 h`, counts on j/k signal focus.
+   1. Waves: count `h`/`l` column steps, `H`/`L` exact ticks, or `j`/`k` signal rows.
   2. Signals: `V`, then j/k to extend, then a bulk enable/disable/toggle action.
 - Views declare which actions accept counts or ranges; others ignore the prefix.
 
@@ -49,7 +53,12 @@ Text editing, registers/macros, a full Vim emulation, configurable bindings (WB-
 and mouse selection (WB-013). Ches embedding itself is WB-018.
 
 ## Acceptance criteria
-- [ ] `20 l` in Waves moves the cursor exactly 20 of WB-068's step units, clamped at bounds.
+- [ ] With Waves focused, typing `2` then `0` shows a pending `20` without switching
+  workspaces. At a compressed zoom, `20l` matches 20 single `l` column steps;
+  `20L` moves exactly 20 ticks. Both clamp at trace bounds.
+- [ ] `20j` moves signal focus down as far as 20 single `j` presses would.
+- [ ] After moving focus to a tile without counts in the same workspace, a bound
+  digit switches workspaces on the first press. In a text filter it enters text.
 - [ ] A pending count is visible and cleared by Esc, by a non-count key, or by focus change.
 - [ ] In Signals, a visual range can be extended with j/k and bulk-toggled in one action.
 - [ ] Bulk toggles leave filtered-out signals untouched and persist like single toggles.
@@ -67,8 +76,6 @@ tests. Rolling it out to every tile is not included; each later tile adopts it i
 
 ## Assumptions and decisions needed
 - Which tiles get counts/visual mode first beyond Waves and Signals?
-- Default keys: `v`/`V` for visual, digits for counts. Do digits conflict with any
-  existing tile binding (e.g. numeric workspace switching)?
 - Is "Ches buffer" behavior meant to match a specific Ches keymap? If so, reference it.
 
 ## References

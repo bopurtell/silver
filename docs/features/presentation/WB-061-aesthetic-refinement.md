@@ -34,6 +34,21 @@ and no decorative title dots. These are the review baseline, not immutable rules
 - Agree a finite punch list of spacing, hierarchy, contrast and chrome refinements.
 - Implement that list and return comparable evidence for one completion review.
 
+### Testing workspace: make Simulation Detail easier to scan
+
+The [Testing redesign (WB-063)](WB-063-testing-workspace.md) delivered the
+investigation workflow. This follow-up concerns how its fields read:
+
+- Give labels and values distinguishable theme roles, keeping outcome, lifecycle
+  and artifact availability recognizable by text as well as status color.
+- Align the start of values within each group of `label: value` rows. At narrow
+  widths, reduce padding or stack the value rather than squeezing it out.
+- Replace `Artifact bytes` with `Artifact size`. Use decimal byte units: `0 B`,
+  `513 B`, `1.25 kB`, `2.50 MB`, `3.00 GB`; keep an absent size `unknown`.
+- Make the source of each group apparent: the selected attempt and its captured
+  inputs, case results, and the selected artifact. The Catalog configures the
+  next run; Project Tests lists generic Dune test jobs.
+
 ## Out of scope
 An infinite theme redesign, new investigation capabilities, or silently choosing
 a final default. Separate feature tickets retain their own scope and estimates.
@@ -44,6 +59,9 @@ a final default. Separate feature tickets retain their own scope and estimates.
 - [ ] Narrow-size recovery, semantic statuses and keyboard discoverability remain sound.
 - [ ] Record owner review outcome and explicitly defer any newly requested iteration.
 - [ ] Appearance-only changes preserve identities, contexts and provider behavior.
+- [ ] Compare the same attempt and artifact at normal and narrow widths. Labels,
+  values and statuses remain distinguishable; grouped values align where space
+  permits. Verify zero, unknown and scaled sizes (1,250,000 bytes → `1.25 MB`).
 
 ## Dependencies
 Required: none; existing workspaces and captures support immediate review.
