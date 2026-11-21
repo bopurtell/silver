@@ -81,9 +81,13 @@ files to this project and keeps its `dune-project` and existing sources.
 reference. Creating or adding a starter requires `hardcaml-asic-starter` on
 `PATH`; importing a design does not. None of these actions launches EDA.
 
-**Project browser trial:** Choose **Project ▾ → Manage This Project…** to browse
-libraries, chip targets and profiles without changing the launch target. **Try
-window** keeps the current inspection visible. [Controls and comparison](docs/features/workspaces/WB-086-owner-trial.md).
+**Manage This Project…** opens a centered window over your current workspace.
+Browse libraries, chips, flows and profiles without changing the launch target.
+The **Filter** button and `/` work with shortcuts hidden. To display shortcuts,
+choose **Show project browser control hints** from the command palette.
+Finishing or cancelling an authoring wizard takes you back to the same browser
+selection; **Esc** returns to the inspection you started from.
+[Project browser controls](docs/features/workspaces/WB-086-owner-trial.md).
 
 **Reusable IP:** Click **Project ▾ → New IP Library…**, or type **`new ip`**
 in the palette and press **Enter**. Click the empty or sample template, type a
@@ -144,8 +148,7 @@ silver-author duplicate-profile timing_trial --chip chip_b --flow standard --fro
 Omit `--apply` to preview. New chip starters and the migrated FIFO example
 register those files on build. For a hand-written catalog that hasn't opted
 into this convention, Silver gives you a registration snippet instead of
-rewriting your OCaml. See the [management browser trial](docs/features/workspaces/WB-086-owner-trial.md)
-to compare browsing these objects in a workspace and in a side window.
+rewriting your OCaml.
 
 Standalone command-line submissions (`--plain --action`, `--refresh-integration`
 and `--asic-operation`) wait for the operation; use `--connect` to submit

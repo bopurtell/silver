@@ -1,15 +1,13 @@
-"""WB-086 owner trial. Real PTY, compiled starter targets and bound authoring service.
+"""WB-086: permanent project window, real PTY and compiled mutable starter targets.
 
 Run in the Silver opam switch with hardcaml-asic-starter on PATH. --evidence must
-name a new directory: the two disposable projects contain real generated files.
+name a new directory on disk; set TMPDIR to a disk-backed directory for Dune.
 """
 import argparse
 from contextlib import closing
 import json
-import os
 from pathlib import Path
-import shutil
-import shlex
+import runpy
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -17,7 +15,7 @@ from types import SimpleNamespace
 from test_project_menus_pty import ROOT, Session, Terminal, click, field, inspect_second, send, sexp
 
 
-def setup(base):
+def setup(base, *, extra_profile=False):
     root = base / "project"
     root.mkdir(parents=True)
     for args in [("render", "--name", "fifo_demo"), ("render-target", "--name", "sram"),
@@ -27,6 +25,17 @@ def setup(base):
             path = root / f["path"]
             path.parent.mkdir(exist_ok=True, parents=True)
             path.write_text(f["contents"])
+    if extra_profile:
+        flows = root / "asic_sram/flows"
+        # Both the flow AND the source profile are non-default. Give the
+        # source an assignment so copying balanced instead is observable.
+        (flows / "flow_timing.ml").write_text(
+            (flows / "flow_standard.ml").read_text().replace('~id:"standard"', '~id:"timing"'))
+        profiles = flows / "timing/profiles"
+        profiles.mkdir(parents=True)
+        (profiles / "tuned.ml").write_text(
+            'open Hardcaml_asic\nlet create () = Flow.Profile.create ~id:"tuned" '
+            '~label:"Tuned" ~description:"" ~assignments:[Flow.Parameter.synth_abc_buffering true]\n')
     chips = [dict(id=c, executable=f"asic_{c}/project.exe") for c in ("fifo_demo", "sram")]
     (root / "hardcaml-asic-targets.json").write_text(json.dumps(dict(
         schema_version=1, default_target="fifo_demo", targets=chips)))
@@ -45,17 +54,28 @@ def setup(base):
         ["schema_version", 1], ["provider_executable", sys.executable],
         ["provider_args", [str(ROOT / "scripts/fixtures/fs2_provider.py"), "--control", str(control),
                            "--calls", str(base / "simulation-calls")]],
-        ["discovery_timeout_seconds", 10], ["run_timeout_seconds", 30]]))
+        ["discovery_timeout_seconds", 10], ["run_timeout_seconds", 120]]))
     return root
 
 
-def exercise(s, t, surface):
-    title = {"workspace": "Project workspace", "window": "Management window"}[surface]
-    t.capture("connected", ["Project ▾"])
-    inspect_second(t)
-    inspection = ["> [x] second", "[2 Testing]"]
-    # Stage once before entering either host. Compare the identity and selection
-    # from the daemon after opening the non-active owner's wizard.
+TITLE = "Manage This Project"
+LEGACY = ["[Try ", "Project workspace", "Management window"]
+INSPECTION = ["> [x] second", "[2 Testing]"]
+HINTS = ["[/ filter]", "Enter select", "Esc back"]
+
+
+def open_browser(t, label, keyboard=False, hints=False):
+    if keyboard:
+        send(t, b"\x1bOQ")
+    else:
+        click(t, t.capture(label + "-before", ["Project ▾"]), "Project ▾")
+    click(t, t.capture(label + "-menu", [TITLE]), TITLE)
+    return t.capture(label + "-window", [TITLE, "Objects", "Actions", "New IP Library",
+                                         *(HINTS if hints else ["[Filter]"])],
+                     absent=LEGACY + ([] if hints else HINTS))
+
+
+def stage(s):
     asic = s.rpc("asic")
     target, = field(asic, "chip_target")
     assert field(target, "chip") == "fifo_demo", asic
@@ -65,168 +85,227 @@ def exercise(s, t, surface):
                                 ["elaboration_only", "false"], ["expected_plan_identity", []]]))
     intent, = field(staged, "fresh_intent")
 
-    def check_state():
+    def same_launch():
         after = s.rpc("asic")
-        assert field(after, "chip_target") == [target] and field(after, "fresh_intent") == [intent]
+        assert field(after, "chip_target") == [target]
+        assert field(after, "fresh_intent") == [intent]
+        for key in ("runs", "workflows"):
+            assert field(after, key) == field(staged, key), key
+    return same_launch
 
-    def browser(label, keyboard=False):
-        screen = t.capture(label + "-inspection", inspection)
-        if keyboard:
-            send(t, b"\x1bOQ")
-            send(t, b"/Manage This Project\r")
-        else:
-            click(t, screen, "Project ▾")
-            click(t, t.capture(label + "-menu", ["Manage This Project"]), "Manage This Project")
-        return t.capture(label + "-browser", [title, "New IP Library", "Chip: sram"]
-                         + (inspection if surface == "window" else []),
-                         absent=inspection if surface == "workspace" else [])
 
-    def restored(label):
-        t.capture(label + "-back", inspection, absent=[title])
-        send(t, b"k")
-        t.capture(label + "-focus", ["> [x] first"])
-        send(t, b"j")
+def check_frame(screen, *, right, bottom):
+    # Inclusive, zero-based PTY coordinates. The frame consumes cells of the
+    # original panel, leaving the two-column and one-row workspace margins.
+    left, top = 2, 1
+    rows = screen.splitlines()
+    rule = "─" * (right - left - 1)
+    for y, expected in [(top, "╭" + rule + "╮"), (bottom, "╰" + rule + "╯")]:
+        assert rows[y][left:right + 1] == expected, (y, screen)
+    for y in range(top + 1, bottom):
+        assert rows[y][left:left + 1] == rows[y][right:right + 1] == "│", (y, screen)
+    # Assert complete controls and footer inside the rails, independently of
+    # padding. Adjacent frame cells must not overwrite the first or last glyph.
+    header = rows[top + 1][left + 1:right]
+    assert TITLE in header and "[Back to inspection]" in header, screen
+    assert "For: Project" in rows[bottom - 1][left + 1:right], screen
 
-    # The default (no env setting) must be discoverable on a normal launch.
-    # Switching presentation preserves the exact selected owner and region.
-    screen = browser("switch")
-    click(t, screen, "Chip: sram")
-    send(t, b"\t")
-    screen = t.capture("switch-before", ["For: sram", "▶ Commands", "[Try "])
-    click(t, screen, "[Try ")
-    other = "Management window" if surface == "workspace" else "Project workspace"
-    t.capture("switch-after", [other, "For: sram", "▶ Commands", "New Flow"])
+
+def compact(t):
+    t.capture("compact-inspection", ["Compact: focused tile only"])
+    screen = open_browser(t, "compact", keyboard=True)
+    check_frame(screen, right=77, bottom=22)  # 76×22 panel at 80×24
+    assert "Compact:" in screen.splitlines()[-1], screen
     send(t, b"v")
-    t.capture("switch-return", [title, "For: sram", "▶ Commands"])
-    send(t, b"\x1b")
-    restored("switch")
-
-    screen = browser("ip")
+    screen = t.capture("compact-no-switch", [TITLE, "New IP Library"], absent=LEGACY)
     click(t, screen, "New IP Library")
-    t.capture("ip-command", ["New IP Library", "Sample behavior template"])
+    t.capture("compact-ip-command", ["Sample behavior template"])
     send(t, b"\x1b")
-    restored("ip")
+    screen = t.capture("compact-ip-cancel", [TITLE, "New IP Library", "Back to inspection"])
+    # Probe immediately before the Back hitbox, then its first painted cell.
+    # Together they catch a one-column shift in either direction.
+    back = "[Back to inspection]"
+    row, = [line for line in screen.splitlines() if back in line]
+    click(t, screen, row[row.index(back) - 1:])  # click() uses the first cell
+    screen = t.capture("compact-outside-back", [TITLE, back, "New IP Library"])
+    click(t, screen, back)
+    t.capture("compact-back", ["Compact: focused tile only"], absent=[TITLE])
 
-    browser("module", keyboard=True)
-    send(t, b"99j2k")
-    t.capture("counted-movement", ["▶ Objects"], absent=["For: Project"])
-    send(t, b"/controlled_fifo\t")
-    t.capture("module-destination", ["▶ Commands", "For: ip/controlled_fifo"])
-    send(t, b"\r")
-    t.capture("module-command", ["module name", "ip/controlled_fifo"])
-    send(t, b"trial_module\r")
-    t.capture("module-preview", ["ip/controlled_fifo/trial_module.ml", "[Apply]"])
-    send(t, b"\r")
-    t.capture("module-created", ["created", "[Done]"])
-    assert (s.root / "ip/controlled_fifo/trial_module.ml").is_file()
-    send(t, b"\r")
-    restored("module")
 
-    screen = browser("chip")
-    click(t, screen, "IP library: ip_controlled_fifo")
-    click(t, t.capture("chip-actions", ["New Chip Target", "For: ip/controlled_fifo"]), "New Chip Target")
-    t.capture("chip-mapping", ["explicit pin mapping"])
-    send(t, b"ui_in:uo_out:comb8\r")
-    t.capture("chip-name", ["enter target name"])
-    send(t, b"cancelled_chip\r")
-    screen = t.capture("chip-preview", ["Chip Target Preview", "[Cancel]"])
-    click(t, screen, "[Cancel]")
-    click(t, t.capture("chip-cancel", ["Preview cancelled", "[Done]"]), "[Done]")
-    restored("chip")
-    assert not (s.root / "asic_cancelled_chip").exists()
-
-    screen = browser("flow")
-    click(t, screen, "Chip: sram")
-    screen = t.capture("flow-destination", ["For: sram", "New Flow"])
-    click(t, screen, "New Flow")
-    t.capture("sram-owner-preselected", ["> Owner: sram"])
-    send(t, b"\r")
-    t.capture("sram-wizard", ["owner: sram", "recipe"])
-    check_state()
+def hint_preference(t, *, restarting):
+    # Opt-in must work from the unmodified startup focus, including after restart.
+    t.capture("restart-ready" if restarting else "preference-ready",
+              ["Connection: connected", "Overview › workspaces"])
+    if not restarting:
+        t.palette("Show project browser control hints")
+    screen = open_browser(t, "restart-enabled" if restarting else "enabled", hints=True)
+    click(t, screen, "[/ filter]")
+    t.capture("enabled-editing", ["Filter: ▏"])
     send(t, b"\x1b")
-    restored("flow")
+    screen = t.capture("enabled-committed", HINTS)
+    click(t, screen, "Back to inspection")
+    if restarting:
+        t.palette("Hide project browser control hints")
 
-    browser("copy", keyboard=True)
-    send(t, b"/fifo_demo/standard/balanced\t\r")
-    t.capture("copy-command", ["fifo_demo/standard/balanced", "Next: new profile"])
-    check_state()
-    send(t, b"\x1b")
-    restored("copy")
 
-    screen = browser("browse-sram")
-    click(t, screen, "Chip: sram")
-    click(t, t.capture("browse-sram-actions", ["Browse flows and profiles"]), "Browse flows and profiles")
-    send(t, b"/sram/standard/balanced")
-    t.capture("sram-profile", ["For: sram/standard/balanced", "Duplicate Profile"])
-    check_state()
-    send(t, b"\x1b")
-    send(t, b"\x1b")
-    restored("browse-sram")
+def exercise(s, t):
+    t.capture("wide-connected", ["Connection: connected", "Project ▾"])
+    inspect_second(t)
+    same_launch = stage(s)
 
-    # Start a supervised slow simulation only for the visibility comparison.
-    # The prior tasks prove management itself does not submit it.
+    # Keep the same monitored attempt running throughout both wizards.
     (s.evidence / "simulation.json").write_text('{"mode":"slow"}')
     t.palette("Simulation: Launch selected catalog subset")
     for step in ("CASES", "SEED", "CONFIRM"):
         t.capture("launch-" + step.lower(), ["SIMULATION LAUNCH FORM", step])
         send(t, b"\r")
     t.capture("live-inspection", ["running"])
-    screen = browser("live")
-    if surface == "workspace":
-        assert "running" not in screen.casefold()
-    else:
-        t.capture("live-visible", [title, "running"])
+
+    def running_job():
+        ok, snap = s.raw("/api/v1/snapshot", [["instance_id", s.metadata["instance_id"]]])
+        assert ok == "Ok"
+        job, = [j for j in field(snap, "jobs") if field(j, "state") == "Running"]
+        return field(job, "id")
+
+    job = running_job()
+    screen = open_browser(t, "wide")
+    check_frame(screen, right=117, bottom=38)  # 116×38 panel at 120×40
+    # Behind the panel the live Testing tiles contain text and grid lines.
+    # Neither may bleed through the unused space between the lists and footer.
+    rows = screen.splitlines()
+    last_chip = next(i for i, row in enumerate(rows) if "Chip: sram" in row)
+    footer = next(i for i, row in enumerate(rows) if "For: Project" in row)
+    assert footer > last_chip + 1 and all(not row[3:t.width - 3].strip()
+                                          for row in rows[last_chip + 1:footer]), screen
+    # Blanks rendered with a terminal-default background can look correct in
+    # the text oracle yet become transparent in the user's terminal.
+    Screen = runpy.run_path(str(ROOT / "scripts/test-frontend-composition.py"))["Screen"]
+    cells = Screen(t.data, t.width, t.height)
+    surface = cells.attrs_for(TITLE)[0][0][1]
+    assert surface != "default"
+    for y in range(1, t.height - 1):
+        for x in range(2, t.width - 2):
+            assert cells.cells[y][x][1][1] != "default", (x, y)
+    assert all(attr[1] == surface for row in cells.cells[last_chip + 1:footer]
+               for _, attr in row[3:t.width - 3])
+    click(t, screen, "Chip: sram")
+    browse = "Browse flows and profiles"
+    screen = t.capture("wide-columns", [browse, "Objects", "Actions"])
+    heading, = [r for r in screen.splitlines() if "Objects" in r and "Actions" in r]
+    assert heading.index("Objects") < heading.index("Actions"), screen
+    row, = [r for r in screen.splitlines() if browse in r]
+    # The clicked action's Y coordinate also hits an unrelated object in
+    # the left pane. Row-only hit-testing would silently change the owner.
+    assert "IP library:" in row[:row.index(browse)], screen
+    click(t, screen, browse)
+    t.capture("expanded-owner", ["tuned"])
+    send(t, b"/sram/timing")
+    screen = t.capture("filtered-children", ["balanced", "tuned"])
+    click(t, screen, "tuned")
+    send(t, b"\t")
+    location = [TITLE, "For: sram/timing/tuned", "› Duplicate Profile", "▶ Actions"]
+
+    def location_screen(label):
+        screen = t.capture(label, location)
+        assert any("Filter" in r and "sram/timing" in r for r in screen.splitlines()), screen
+        return screen
+
+    # A successful Apply and a cancelled preview must each return to the
+    # committed filter, expanded owner, selected child and selected action.
+    for name, apply in (("copy_tuned", True), ("discard_tuned", False)):
+        before = location_screen(name + "-before")
+        if apply:
+            click(t, before, "Duplicate Profile")
+        else:
+            send(t, b"\r")  # proves focus was restored to Actions
+        screen = t.capture(name + "-source", ["sram/timing/tuned", "Next: new profile ID"])
+        click(t, screen, "Next: new profile ID")
+        t.capture(name + "-id", ["enter new ID", "Owner chip: sram"])
+        send(t, (name + "\r").encode())
+        screen = t.capture(name + "-preview", ["[Apply]", "[Cancel]", name])
+        path = s.root / f"asic_sram/flows/timing/profiles/{name}.ml"
+        assert not path.exists()
+        click(t, screen, "[Apply]" if apply else "[Cancel]")
+        if apply:
+            screen = t.capture(name + "-receipt", ["Source created", "[Done]"])
+            click(t, screen, "[Done]")
+        location_screen(name + "-resumed")
+        assert path.exists() == apply, path
+        assert running_job() == job
+        same_launch()
     send(t, b"\x1b")
-    t.capture("live-resumed", ["running", *inspection], absent=[title])
+    t.capture("live-resumed", ["running", *INSPECTION], absent=[TITLE])
+    send(t, b"k")
+    t.capture("original-catalog-focus", ["> [x] first", "[2 Testing]"])
+    assert running_job() == job
+    same_launch()
+
+    build = "asic_sram/project.exe"
+    subprocess.run(["dune", "build", "--root", ".", "-j", "2", build], check=True, cwd=s.root)
+    catalog = json.loads(subprocess.check_output(
+        [s.root / "_build/default" / build, "flow", "list", "--chip", "sram", "--json"], cwd=s.root))
+    flow, = [f for f in catalog["declaration"]["entries"] if f["methodology"]["id"] == "timing"]
+    profiles = {p["id"]: p["assignments"] for p in flow["profiles"]}
+    assert profiles["copy_tuned"] == profiles["tuned"] == [{"key": "SYNTH_ABC_BUFFERING", "value": True}]
+    assert "discard_tuned" not in profiles
+
+    # Library commands cover another wizard family and a non-first action.
+    # Click it straight from the editing filter, without tabbing to Actions.
+    screen = open_browser(t, "library")
+    click(t, screen, "[Filter]")
+    t.capture("library-editing", ["Filter: ▏"], absent=HINTS)
+    send(t, b"ip_controlled_fif")
+    t.capture("library-partial", ["Filter: ip_controlled_fif▏"])
+    send(t, b"\x1b")
+    screen = t.capture("library-committed", ["Filter: ip_controlled_fif"], absent=["▏", *HINTS])
+    click(t, screen, "Filter: ip_controlled_fif")
+    send(t, b"o")
+    lib = "For: ip/controlled_fifo"
+    screen = t.capture("library-filter", [lib, "Filter: ip_controlled_fifo▏", "New Chip Target",
+                                          "New Module"], absent=HINTS)
+    click(t, screen, "New Chip Target")
+    t.capture("chip-mapping", ["explicit pin mapping"])
+    send(t, b"ui_in:uo_out:comb8\r")
+    t.capture("chip-name", ["enter target name"])
+    send(t, b"cancelled_chip\r")
+    screen = t.capture("chip-preview", ["Chip Target Preview", "[Cancel]"])
+    click(t, screen, "[Cancel]")
+    screen = t.capture("library-resumed", [TITLE, lib, "Filter: ip_controlled_fifo",
+                                           "▶ Actions", "› New Chip Target"])
+    assert not (s.root / "asic_cancelled_chip").exists()
+    click(t, screen, "New Module")
+    t.capture("module-name", ["module name", "ip/controlled_fifo"])
+    send(t, b"trial_module\r")
+    t.capture("module-preview", ["ip/controlled_fifo/trial_module.ml", "[Apply]"])
+    send(t, b"\r")
+    t.capture("module-created", ["created", "[Done]"])
+    send(t, b"\r")
+    t.capture("module-resumed", [TITLE, lib, "Filter: ip_controlled_fifo", "▶ Actions", "› New Module"])
+    assert (s.root / "ip/controlled_fifo/trial_module.ml").is_file()
+    send(t, b"\x1b")
+    t.capture("library-back", ["> [x] first", "[2 Testing]"], absent=[TITLE])
+    same_launch()
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--recipe-fixture", action="store_true",
-                   help="Older starter: supply only the missing describe-flow-authoring recipe metadata")
     for name in ["client", "daemon", "evidence"]:
         p.add_argument("--" + name, type=lambda s: Path(s).resolve(), required=True)
     args = p.parse_args()
     args.evidence.mkdir()
-    for surface in ["workspace", "window"]:
-        base = args.evidence / surface
-        root = setup(base)
-        s = Session(SimpleNamespace(client=args.client, daemon=args.daemon, outer_timeout=20), base, root)
-        if surface == "window":
-            s.env["SILVER_PROJECT_BROWSER"] = surface
-        else:
-            s.env.pop("SILVER_PROJECT_BROWSER", None)
-        if args.recipe_fixture:
-            bin_dir = base / "bin"
-            bin_dir.mkdir()
-            starter = bin_dir / "hardcaml-asic-starter"
-            desc = json.dumps(dict(schema_version=1, recipes=[dict(id="librelane_classic_v1",
-                              endpoints=["synthesis"])]))
-            starter.write_text("#!/bin/sh\ncase $1 in describe-flow-authoring) echo "
-                               + shlex.quote(desc) + ";; *) exec " +
-                               shlex.quote(shutil.which(starter.name)) + ' "$@";; esac\n')
-            starter.chmod(0o755)
-            s.env["PATH"] = str(bin_dir) + ":" + os.environ["PATH"]
-        try:
-            s.start(daemon_args=["--authoring-root", str(root)])
-            with closing(Terminal(s, width=80, height=32)) as t:
-                exercise(s, t, surface)
-            # Compact mode shows one tile only. Open F2 from it and exercise
-            # all hit coordinates at the common 80x24 size as well.
-            with closing(Terminal(s, width=80, height=24)) as t:
-                t.capture("compact-inspection", ["Compact: focused tile only"])
-                send(t, b"\x1bOQ")
-                click(t, t.capture("compact-menu", ["Manage This Project"]), "Manage This Project")
-                screen = t.capture("compact-browser", ["New IP Library", "[Try "])
-                click(t, screen, "[Try ")
-                other = "Management window" if surface == "workspace" else "Project workspace"
-                screen = t.capture("compact-switched", [other, "New IP Library"])
-                click(t, screen, "New IP Library")
-                t.capture("compact-clicked", ["Sample behavior template"])
-                send(t, b"\x1b")
-                t.capture("compact-back", ["Compact: focused tile only"])
-        finally:
-            s.stop()
+    root = setup(args.evidence, extra_profile=True)
+    s = Session(SimpleNamespace(client=args.client, daemon=args.daemon, outer_timeout=20), args.evidence, root)
+    try:
+        s.start(daemon_args=["--authoring-root", str(root)])
+        with closing(Terminal(s, width=80, height=24)) as t:
+            compact(t)
+        with closing(Terminal(s)) as t:
+            hint_preference(t, restarting=False)
+        with closing(Terminal(s, width=120, height=40)) as t:
+            hint_preference(t, restarting=True)
+            exercise(s, t)
+    finally:
+        s.stop()
 
 
 if __name__ == "__main__":

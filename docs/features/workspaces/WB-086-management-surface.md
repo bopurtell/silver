@@ -3,7 +3,7 @@ id: WB-086
 title: Project management window versus workspace prototype
 category: workspaces
 feature_sets: [FS3, FS5]
-status: partial
+status: closed
 kind: research
 priority: P2
 severity: n/a
@@ -20,7 +20,11 @@ related: [WB-077, WB-085]
 
 # WB-086 — Project management window versus workspace prototype
 
-**Ready for owner trial.** Both presentations are available from the same browser; its permanent host is deliberately undecided. See the [controls and PTY comparison](WB-086-owner-trial.md).
+**Owner decision:** use one large centered floating window. Project management
+is a task entered from an inspection, not a permanent workspace tab. The
+narrow trial window left too little room for paths; the accepted layout uses
+most of an 80-column terminal and puts Objects and Actions side by side when
+space allows. See [controls and comparison findings](WB-086-owner-trial.md).
 
 ## Request
 Try keeping the larger set of authoring controls outside Overview: compare a separate management window with a dedicated Project workspace.
@@ -46,7 +50,7 @@ Shipping both UIs, choosing a permanent layout before trying them, or duplicatin
 - [x] Try the same tasks in both: from Testing find New IP Library by mouse; from a selected library create a module by keyboard; preview then cancel a chip creation and resume the original inspection.
 - [x] At 80 columns compare discoverability, visible destination, keyboard travel and focus restoration. Confirm neither requires a crowded Overview toolbar.
 - [x] In both hosts, with FIFO the launch target, browse a different chip and invoke New Flow. Assert the wizard receives that chip while FIFO and its staged plan remain unchanged. Compare whether an ongoing run stays visible during management and what it takes to resume inspection.
-- [ ] Record owner feedback and recommend window, workspace, both or neither, with a reason. Keep the palette path available regardless of the outcome.
+- [x] Record owner feedback and recommend window, workspace, both or neither, with a reason. Keep the palette path available regardless of the outcome.
 
 ## Dependencies
 No backend blocker for prototypes. Align with [WB-077](../presentation/WB-077-project-action-menu.md) for focus and [WB-085](../project/WB-085-authoring-service.md) for the eventual service interface.
@@ -54,8 +58,10 @@ No backend blocker for prototypes. Align with [WB-077](../presentation/WB-077-pr
 ## Estimate rationale
 5 points for two small demos and a comparison, not a production window-management system.
 
-## Assumptions and decisions needed
-**Needs design through demos:** final management surface and which actions deserve persistent controls. The menu position is a usable default, not a requirement to place everything there.
+## Navigation decision
+An authoring wizard launched from the browser returns to the object it was
+opened on. Dismissing the browser returns to the originating workspace, tile
+and row. Wizards opened directly from the palette keep their normal return path.
 
 ## References
 [Original menu design](../../project_authoring_and_command_design.md#menus-and-keyboard-interaction); owner follow-up, 2026-11-20.

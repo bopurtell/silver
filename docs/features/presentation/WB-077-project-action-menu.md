@@ -45,7 +45,7 @@ Use separators, not nested submenus. Keep synthesis and staged launch in the run
 Project-wide actions prompt for a destination when needed; local actions supply the selected object. For example, New Module from Project asks which library, while New Module on `controlled_fifo` starts there. Tab/Shift-Tab navigate regions, not every action row; list keys move the highlight. Pick and document a free direct-open binding after checking the existing keymap.
 
 ## Out of scope
-Implementing the authoring commands listed in the menus; a new workspace or configurable toolbar. Keep this menu compact: [WB-086](../workspaces/WB-086-management-surface.md) compares two places for the fuller management UI. Both should reuse these command bindings and WB-085's daemon calls rather than putting authoring logic in Overview.
+Implementing the authoring commands listed in the menus; a new workspace or configurable toolbar. Keep this menu compact: [WB-086](../workspaces/WB-086-management-surface.md) provides the management window, reusing these command bindings and WB-085's daemon calls.
 
 ## Acceptance criteria
 - [x] Click or use a documented key to open Project from a tile. The workspace stays selected; Tab/Shift-Tab between tiles works normally after dismissal.

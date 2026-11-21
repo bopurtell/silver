@@ -2,18 +2,6 @@ open! Core
 open Bonsai_term
 module H = Workspace_host
 
-type surface =
-  | Workspace
-  | Window
-
-let trial () =
-  match Sys.getenv "SILVER_PROJECT_BROWSER" with
-  | Some "workspace" -> Some Workspace
-  | Some "window" -> Some Window
-  | Some "off" -> None
-  | _ -> Some Workspace
-;;
-
 type item =
   { label : string
   ; destination : string
@@ -75,8 +63,7 @@ type region =
   | Commands
 
 type t =
-  { surface : surface
-  ; lifetime : unit ref
+  { lifetime : unit ref
   ; message : string
   ; capture : H.capture
   ; items : item list
@@ -84,13 +71,13 @@ type t =
   ; object_index : int
   ; command_index : int
   ; query : string option
+  ; editing : bool
   ; count : int
   ; pasting : bool
   }
 
-let create surface capture items =
-  { surface
-  ; lifetime = ref ()
+let create capture items =
+  { lifetime = ref ()
   ; message = ""
   ; capture
   ; items
@@ -98,6 +85,7 @@ let create surface capture items =
   ; object_index = 0
   ; command_index = 0
   ; query = None
+  ; editing = false
   ; count = 0
   ; pasting = false
   }
@@ -160,20 +148,25 @@ type target =
   | Object of int
   | Command of int
   | Back
-  | Switch_host
+  | Filter
+  | Focus_region of region
+
+let finish_filter t = { t with editing = false; count = 0 }
+
+let commit t (command : H.command) =
+  let command_index =
+    List.findi (commands t) ~f:(fun _ c -> String.equal c.id command.id)
+    |> Option.value_map ~default:t.command_index ~f:fst
+  in
+  { (finish_filter t) with region = Commands; command_index }
+;;
 
 let choose t = function
   | Back -> Close
-  | Switch_host ->
-    Stay
-      { t with
-        surface =
-          (match t.surface with
-           | Workspace -> Window
-           | Window -> Workspace)
-      }
+  | Filter -> Stay { t with editing = true; region = Objects; count = 0 }
+  | Focus_region region -> Stay { (finish_filter t) with region }
   | Object i ->
-    Stay { t with object_index = i; command_index = 0; region = Objects; count = 0 }
+    Stay { (finish_filter t) with object_index = i; command_index = 0; region = Objects }
   | Command i ->
     Option.value_map (List.nth (commands t) i) ~default:(Stay t) ~f:(fun c -> Invoke c)
 ;;
@@ -196,143 +189,398 @@ let input t (key : H.input) =
   let append q text =
     if String.length q + String.length text <= 512 then query (q ^ text) else Stay t
   in
-  match key, t.query with
+  let edit = Option.some_if t.editing (Option.value t.query ~default:"") in
+  match key, edit with
   | Paste_start, _ -> Stay { t with pasting = true }
   | Paste_end, _ -> Stay { t with pasting = false }
   | _, _ when t.pasting -> Stay t
-  | Escape, Some _ ->
-    Stay { t with query = None; object_index = 0; command_index = 0; region = Objects }
+  | Escape, Some _ -> Stay (finish_filter t)
   | Escape, None -> Close
   | (Focus | Focus_previous), _ ->
-    Stay
-      { t with
-        region =
-          (match t.region with
-           | Objects -> Commands
-           | Commands -> Objects)
-      ; count = 0
-      }
-  | Enter, _ when Poly.equal t.region Objects ->
-    Stay { t with region = Commands; count = 0 }
+    choose
+      t
+      (Focus_region
+         (match t.region with
+          | Objects -> Commands
+          | Commands -> Objects))
+  | Enter, _ when Poly.equal t.region Objects -> choose t (Focus_region Commands)
   | Enter, _ -> choose t (Command t.command_index)
   | Character c, Some q when Poly.equal t.region Objects -> append q (String.of_char c)
   | Text s, Some q when Poly.equal t.region Objects -> append q s
   | Backspace, Some q -> query (Text_edit.apply Backspace q)
   | Delete_word, Some q -> query (Text_edit.delete_word q)
   | Clear_filter, Some _ -> query ""
-  | Character '/', _ ->
-    Stay { t with query = Some ""; region = Objects; object_index = 0; command_index = 0 }
+  | Character '/', _ -> choose t Filter
   | Character ('0' .. '9' as ch), _ ->
     Stay { t with count = Int.min 9999 ((10 * t.count) + Char.to_int ch - 48) }
-  | Character 'v', _ -> choose t Switch_host
+  | Character (('g' | 'G') as ch), _ ->
+    let last =
+      match t.region with
+      | Objects -> List.length (objects t)
+      | Commands -> List.length (commands t)
+    in
+    move (if Char.equal ch 'g' then -last else last)
   | (Character 'j' | Next), _ -> move 1
   | (Character 'k' | Previous), _ -> move (-1)
   | _ -> Stay t
 ;;
 
-(* Paint and hit-test precisely the same page. The window leaves the left side of
-   the *live* inspection exposed; the workspace occupies the full viewport. *)
-let page t (d : Dimensions.t) =
-  let width, height =
-    match t.surface with
-    | Workspace -> d.width, d.height
-    | Window -> Int.min 42 d.width, Int.min 20 d.height
-  in
-  let x = d.width - width
-  and y = (d.height - height) / 2 in
-  let heading =
-    match t.surface with
-    | Workspace -> "Project workspace"
-    | Window -> "Management window"
-  in
-  let plain s = s, None in
-  let list_rows items index capacity f =
-    let offset = Int.max 0 (index - capacity + 1) in
-    List.take (List.drop items offset) capacity
-    |> List.mapi ~f:(fun i item -> f (i + offset) item)
-  in
-  let region r = if Poly.equal t.region r then "▶ " else "  " in
-  let marker i n = if i = n then " › " else "   " in
-  let command_rows = commands t in
-  let rows =
-    [ plain ("▣ " ^ heading)
-    ; "[Back to inspection]", Some Back
-    ; ( (match t.surface with
-         | Workspace -> "[Try window · v]"
-         | Window -> "[Try workspace · v]")
-      , Some Switch_host )
-    ; plain
-        (region Objects
-         ^ "Objects"
-         ^ Option.value_map t.query ~default:" · / filter" ~f:(sprintf " · Filter: %s▏"))
-    ]
-    @ list_rows
-        (objects t)
-        t.object_index
-        (Int.max 1 (height - 8 - List.length command_rows))
-        (fun i item -> marker i t.object_index ^ item.label, Some (Object i))
-    @ [ plain
-          ("For: "
-           ^ Host_view.fit_label
-               ~width:(Int.max 0 (width - 5))
-               (Option.value_map (selected t) ~default:"(no match)" ~f:(fun i ->
-                  i.destination)))
-      ; plain (region Commands ^ "Commands")
-      ]
-    @ List.mapi command_rows ~f:(fun i c ->
-      let title =
-        String.substr_index c.H.title ~pattern:" · "
-        |> Option.value_map ~default:c.title ~f:(String.prefix c.title)
-      in
-      marker i t.command_index ^ title, Some (Command i))
-    @ [ plain
-          (if String.is_empty t.message
-           then "Tab regions · ↑↓/jk · Enter · Esc back"
-           else t.message)
-      ]
-  in
-  (x, y, width, height), rows
+(* Half-open cell spans in panel coordinates. Padding and the pane gutter do not acquire a
+   neighbour's target, even when a long label is clipped. *)
+type cell =
+  { col : int
+  ; row : int
+  ; width : int
+  ; text : string
+  ; role : Host_view.Role.t
+  ; target : target option
+  }
+
+let footer_rows ~hints t height =
+  if height < 10 then 0 else 1 + Bool.to_int (hints || not (String.is_empty t.message))
 ;;
 
-let hit t d ~x ~y =
-  let (left, top, width, height), rows = page t d in
-  let col = x - left
-  and row = y - top in
-  if col < 0 || col >= width || row < 0 || row >= height
-  then None
-  else
-    Option.bind (List.nth rows row) ~f:(fun (s, target) ->
-      if col < View.width (View.text s) then target else None)
+let selection_marker = " › "
+
+let geometry ~width ~height =
+  Panel.geometry ~framed:(width >= 32 && height >= 12) ~width ~height
+    ~horizontal_padding:0 ~vertical_padding:0
 ;;
 
-let render t appearance d background =
-  let (x, y, width, height), rows = page t d in
-  let row role text =
-    (* Paint the whole row, not just the glyphs. Otherwise the panel's
-       contrasting surface color shows through at the end of each label. *)
-    let attrs = Host_view.Role.attrs appearance role in
-    let attrs =
-      match role with
-      | Selection -> attrs
-      | _ -> attrs @ [ Attr.bg (Host_view.Role.backdrop appearance Foreground) ]
+let page ?(hints = false) t (d : Dimensions.t) =
+  let axis n margin cap =
+    let size =
+      Int.max 0 (Int.min cap (if n >= margin * 12 then n - (2 * margin) else n))
     in
-    View.zcat [ View.text ~attrs text; View.rectangle ~attrs ~width ~height:1 () ]
+    (n - size) / 2, size
+  in
+  let x, width = axis d.width 2 132
+  and y, height = axis d.height 1 38 in
+  let bounds : Palette_view.bounds = { x; y; width; height } in
+  let g = geometry ~width ~height in
+  let width = g.content_width and height = g.content_height in
+  let pad = if width >= 20 then 1 else 0 in
+  let inner = width - (2 * pad) in
+  let cell col row width role ?target text = { col; row; width; role; target; text } in
+  let back = if inner >= 44 then "[Back to inspection]" else "[Back]" in
+  let bw = Int.min inner (String.length back) in
+  let chrome =
+    [ cell pad 0 (Int.max 0 (inner - bw - 1)) Heading "Manage This Project"
+    ; cell (pad + inner - bw) 0 bw Foreground ~target:Back back
+    ]
+  in
+  let filter =
+    let prefix = "Filter: " in
+    let q = Option.value t.query ~default:"" in
+    let text =
+      if t.editing
+      then prefix ^ Host_view.fit_label ~width:(Int.max 0 (inner - 9)) q ^ "▏"
+      else if String.is_empty q
+      then (if hints then "[/ filter]" else "[Filter]")
+      else prefix ^ q
+    in
+    let width = if t.editing then inner else Int.min inner (View.width (View.text text)) in
+    cell pad 1 width (if t.editing then Heading else Foreground) ~target:Filter text
+  in
+  let top = if height >= 6 || t.editing then 2 else 1 in
+  let footer = footer_rows ~hints t height in
+  let room = Int.max 0 (height - top - footer) in
+  let objs = objects t
+  and cmds = commands t in
+  let pane r col row width lines index label items describe =
+    let capacity = Int.max 0 (lines - 1) in
+    let total = List.length items in
+    let focused = Poly.equal t.region r in
+    let heading =
+      (if focused then "▶ " else "  ")
+      ^ label
+      ^ if total > capacity then sprintf " · %d/%d" (index + 1) total else ""
+    in
+    let offset = Int.max 0 (index - capacity + 1) in
+    let rows =
+      if total = 0 && capacity > 0
+      then
+        [ cell
+            col
+            (row + 1)
+            width
+            Muted
+            (if Poly.equal r Objects then "  (no match)" else "  (no actions)")
+        ]
+      else
+        List.take (List.drop items offset) capacity
+        |> List.mapi ~f:(fun n item ->
+          let i = offset + n in
+          let text, target = describe i item in
+          cell
+            col
+            (row + n + 1)
+            width
+            (if focused && index = i then Selection else Foreground)
+            ~target
+            ((if index = i then selection_marker else "   ") ^ text))
+    in
+    if lines <= 0
+    then []
+    else
+      cell
+        col
+        row
+        width
+        (if focused then Heading else Muted)
+        ~target:(Focus_region r)
+        heading
+      :: rows
+  in
+  let objects col row width lines =
+    pane Objects col row width lines t.object_index "Objects" objs (fun i o ->
+      o.label, Object i)
+  and actions col row width lines =
+    pane Commands col row width lines t.command_index "Actions" cmds (fun i c ->
+      ( String.substr_index c.H.title ~pattern:" · "
+        |> Option.value_map ~default:c.title ~f:(String.prefix c.title)
+      , Command i ))
+  in
+  let body =
+    if inner >= 96
+    then (
+      let left = inner / 2 in
+      objects pad top left room @ actions (pad + left + 1) top (inner - left - 1) room)
+    else if room < 4
+    then
+      (match t.region with
+       | Objects -> objects
+       | Commands -> actions)
+        pad
+        top
+        inner
+        room
+    else (
+      let action_lines = Int.min (room / 2) (1 + Int.max 1 (List.length cmds)) in
+      let obj_lines = room - action_lines in
+      objects pad top inner obj_lines @ actions pad (top + obj_lines) inner action_lines)
+  in
+  let foot =
+    if footer = 0
+    then []
+    else
+      [ cell
+          pad
+           (height - footer)
+          inner
+          Muted
+          ("For: "
+           ^ Option.value_map (selected t) ~default:"(no match)" ~f:(fun i ->
+             Host_view.fit_label ~width:(Int.max 0 (inner - 5)) i.destination))
+       ]
+      @ (if footer = 2
+         then
+           [ cell pad (height - 1) inner Muted
+               (if not (String.is_empty t.message)
+                then t.message
+                else if t.editing
+                then "Type to filter · Tab actions · Esc finish filter"
+                else "Tab switch pane · ↑/↓ move · Enter select · Esc back")
+           ]
+         else [])
+  in
+  ( bounds
+   , List.filter_map
+       (chrome @ (if top = 2 then [ filter ] else []) @ body @ foot)
+       ~f:(fun c ->
+         Option.some_if (c.row < height && c.width > 0)
+           { c with col = c.col + g.border; row = c.row + g.border }) )
+;;
+
+let hit ?(hints = false) t d ~x ~y =
+  let bounds, cells = page ~hints t d in
+  let col = x - bounds.x
+  and row = y - bounds.y in
+  List.find_map cells ~f:(fun c ->
+    if row = c.row && col >= c.col && col < c.col + c.width then c.target else None)
+;;
+
+let scroll ?(hints = false) t d ~x ~y ~direction =
+  let bounds, cells = page ~hints t d in
+  let col = x - bounds.x
+  and row = y - bounds.y in
+  let g = geometry ~width:bounds.width ~height:bounds.height in
+  (* Pane headers mark each rectangle, including blank rows below short lists. *)
+  let region =
+    if row >= bounds.height - g.border - footer_rows ~hints t g.content_height
+    then None
+    else
+      List.fold cells ~init:None ~f:(fun region c ->
+        match c.target with
+        | Some (Focus_region r) when row >= c.row && col >= c.col && col < c.col + c.width
+          -> Some r
+        | _ -> region)
+  in
+  match region with
+  | None -> Stay t
+  | Some region ->
+    input
+      { (finish_filter t) with region }
+      (match direction with
+       | `Up -> Previous
+       | `Down -> Next)
+;;
+
+let render ?(hints = false) t appearance d background =
+  let bounds, cells = page ~hints t d in
+  let g = geometry ~width:bounds.width ~height:bounds.height in
+  let rgb = Host_view.Role.rgb in
+  let surface = rgb 38 40 41
+  and raised = rgb 55 61 63
+  and ink = rgb 228 226 219
+  and secondary = rgb 169 173 171 in
+  let accent = Host_view.Role.foreground appearance Focus in
+  let attrs fg bg = [ Attr.fg fg; Attr.bg bg ] in
+  let paper = attrs ink surface in
+  let label c =
+    match c.role, c.target with
+    | Selection, _ ->
+      (* Only the marker carries the scheme accent; keep the label in ink. *)
+      let text = String.chop_prefix_exn c.text ~prefix:selection_marker in
+      ( View.hcat
+          [ View.text ~attrs:(attrs accent raised) selection_marker
+          ; View.text ~attrs:(attrs ink raised) text
+          ]
+      , attrs ink raised )
+    | role, target ->
+      let style =
+        match role, target with
+        | Heading, Some (Focus_region _) -> Attr.bold :: attrs accent surface
+        | Heading, _ -> Attr.bold :: paper
+        | Muted, _ | _, Some (Back | Filter) -> attrs secondary surface
+        | _ -> paper
+      in
+      View.text ~attrs:style c.text, paper
+  in
+  let paint c =
+    let label, attrs = label c in
+    (* Clip first; the painted rectangle supplies opaque padding for short labels. *)
+    let label = View.crop ~r:(Int.max 0 (View.width label - c.width)) label in
+    View.zcat [ label; View.rectangle ~attrs ~width:c.width ~height:1 () ]
+    |> View.pad ~l:(c.col - g.border) ~t:(c.row - g.border)
+  in
+  let base = View.rectangle ~attrs:paper ~width:g.content_width ~height:g.content_height () in
+  let outline = attrs (rgb 108 119 119) surface in
+  let content = View.zcat (List.map cells ~f:paint @ [ base ]) in
+  let panel =
+    Panel.render ~rounded:true appearance ~attrs:outline ~title:View.none
+      ~geometry:g ~width:bounds.width ~height:bounds.height content
   in
   let panel =
-    List.mapi rows ~f:(fun index (s, target) ->
-      let role : Host_view.Role.t =
-        match target with
-        | Some (Object i) when i = t.object_index && Poly.equal t.region Objects -> Selection
-        | Some (Command i) when i = t.command_index && Poly.equal t.region Commands ->
-          Selection
-        | None when index = 0 || String.is_prefix s ~prefix:"▶" -> Heading
-        | None -> Muted
-        | _ -> Foreground
-      in
-      row role s)
-    |> View.vcat
-    |> Palette_view.box ~width ~height
+    if g.border = 1 && Appearance.Icons.equal appearance.icons Unicode
+    then View.zcat [ View.pad ~l:2 (View.text ~attrs:(attrs accent surface) "───"); panel ]
+    else panel
   in
-  let panel = Host_view.colored appearance Foreground panel in
-  Palette_view.overlay ~background ~panel { x; y; width; height }
+  Palette_view.overlay ~background ~panel bounds
 ;;
+
+module%test Permanent_project_window = struct
+  let state =
+    let capture : H.capture =
+      { session = H.W.Session_id.of_string "browser"
+      ; chip_target = None
+      ; chip_epoch = 0
+      ; revision = 0
+      ; workspace = H.W.Workspace_id.of_string "inspection"
+      }
+    in
+    let cmds =
+      List.init 20 ~f:(fun i ->
+        let label = sprintf "Action %02d" i in
+        H.command label label "" H.Manage_project)
+    in
+    create
+      capture
+      (List.init 40 ~f:(fun i ->
+         let label = sprintf "Object %02d" i in
+         item label label cmds))
+  ;;
+
+  let stay = function
+    | Stay t -> t
+    | _ -> assert false
+  ;;
+
+  let%test_unit "painted labels hit the scrolled selection in either layout" =
+    List.iter
+      [ 80, 24; 120, 30 ]
+      ~f:(fun (width, height) ->
+        let d : Dimensions.t = { width; height } in
+        let t =
+          List.fold [ H.Character 'G'; Focus; Character 'G' ] ~init:state ~f:(fun t key ->
+            stay (input t key))
+        in
+        let buffer = Buffer.create (width * height) in
+        Notty.Render.to_buffer
+          buffer
+          Notty.Cap.dumb
+          (0, 0)
+          (width, height)
+          (View.Private.notty_image (render t Appearance.default d View.none));
+        let lines = Buffer.contents buffer |> String.split_lines in
+        let locate text =
+          List.find_mapi_exn lines ~f:(fun y s ->
+            String.substr_index s ~pattern:text
+            |> Option.map ~f:(fun bytes ->
+              View.width (View.text (String.prefix s bytes)), y))
+        in
+        let check label expected =
+          let x, y = locate label in
+          assert (Poly.equal (hit t d ~x ~y) expected);
+          x, y
+        in
+        let _, oy = check "Object 39" (Some (Object 39))
+        and ax, ay = check "Action 19" (Some (Command 19)) in
+        let ox, oh = check "Objects" (Some (Focus_region Objects))
+        and _, ah = check "Actions" (Some (Focus_region Commands)) in
+        assert (if width = 80 then oy < ah && ay > ah else oh = ah && ox < ax);
+        assert ((stay (scroll t d ~x:ox ~y:oy ~direction:`Up)).object_index = 38);
+        assert ((stay (scroll t d ~x:ax ~y:ay ~direction:`Up)).command_index = 18);
+        let tx, ty = locate "Manage This Project" in
+        assert (tx > 0 && ty > 0);
+        ignore (check "[Back to inspection]" (Some Back) : int * int);
+        ignore (check "[Filter]" (Some Filter) : int * int);
+        assert (Option.is_none (hit t d ~x:0 ~y:ty)))
+  ;;
+
+  let%test_unit "hint choice changes idle help but keeps filters and messages" =
+    let text hints t =
+      snd (page ~hints t { width = 80; height = 24 })
+      |> List.map ~f:(fun cell -> cell.text)
+      |> String.concat ~sep:"\n"
+    in
+    List.iter [ true; false ] ~f:(fun hints ->
+      let contains t substring = String.is_substring (text hints t) ~substring in
+      assert (Bool.equal (contains state "[/ filter]") hints);
+      assert (Bool.equal (contains state "Tab switch pane") hints);
+      let editing = stay (input state (Character '/')) in
+      assert (contains editing "Filter: ▏");
+      let committed = finish_filter (stay (input editing (Text "39"))) in
+      assert (contains committed "Filter: 39");
+      assert (contains { committed with message = "Owner unavailable" } "Owner unavailable"))
+  ;;
+
+  let%test_unit "the first Esc after a filtered action returns to inspection" =
+    let apply keys t = List.fold keys ~init:t ~f:(fun t key -> stay (input t key)) in
+    let editing = apply [ H.Character '/'; Text "39" ] state in
+    (match choose editing (Command 7) with
+     | Invoke command ->
+       let returned = commit editing command in
+       assert (returned.command_index = 7 && Poly.equal returned.query (Some "39"));
+       assert (Poly.equal (input returned Escape) Close)
+     | _ -> assert false);
+    let committed = stay (input editing Escape) in
+    assert (List.length (objects committed) = 1);
+    assert (Poly.equal (input committed Escape) Close);
+    let actions = stay (input editing Focus) in
+    assert (Poly.equal actions.query (Some "39"));
+    match input actions Enter with
+    | Invoke command -> assert (Poly.equal (input (commit actions command) Escape) Close)
+    | _ -> assert false
+  ;;
+end

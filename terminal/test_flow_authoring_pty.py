@@ -125,6 +125,27 @@ def exercise(base, client, daemon):
             original[Path("asic_program_memory/flows/standard/profiles/trial.ml")] = b'let id = "standard/trial"\n'
             assert files() == original
             same_launch()
+            # The hermetic suite exercises the same return path without an
+            # installed starter. Enter from a specific non-active chip profile
+            # and compare with the direct palette invocation above.
+            choose("Project ▾")
+            choose("Manage This Project")
+            send(t, b"/Chip: program_memory\tj\r")
+            t.capture("expanded-memory", ["New Flow"], absent=["Browse flows and profiles"])
+            # Start editing the current filter again, replace it with the
+            # destination, then commit to Actions.
+            send(t, b"/\x15program_memory/standard/balanced\t")
+            place = ["Manage This Project", "▶ Actions", "For: program_memory/standard/balanced",
+                     "Filter: program_memory/standard/balanced", "› Duplicate Profile"]
+            t.capture("controlled-profile", place)
+            send(t, b"\r")
+            choose("Next: new profile ID", "TUNE = area")
+            t.capture("controlled-name", ["enter new ID"])
+            send(t, b"\x1b")
+            t.capture("controlled-cancel", place)
+            send(t, b"\x1b")
+            t.capture("controlled-back", ["Synthesis: available"], absent=["Manage This Project"])
+            same_launch()
             t.palette("Run Flow")
             choose("fifo-flow/fast")
             choose("[Launch]", "synthesis")

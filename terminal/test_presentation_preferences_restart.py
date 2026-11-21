@@ -38,9 +38,10 @@ def main():
         run("write")
         run("read")
 
-        # WB-019: every main/palette hint combination survives a fresh process,
+        # Every main/palette/browser hint combination survives a fresh process,
         # without disturbing the global chrome choice.
-        for combo in ("11", "10", "01", "00"):
+        for choices in itertools.product("01", repeat=3):
+            combo = "".join(choices)
             run("hints-write", state, combo)
             run("hints-read", state, combo)
         # Schema 2 (before WB-048 tile appearance) and schema 1 (before WB-019

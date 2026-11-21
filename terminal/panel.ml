@@ -52,7 +52,7 @@ let geometry ~framed ~width ~height ~horizontal_padding ~vertical_padding =
   }
 ;;
 
-let render appearance ~attrs ~title ~geometry:g ~width ~height content =
+let render ?rounded appearance ~attrs ~title ~geometry:g ~width ~height content =
   let content =
     box ~width:g.content_width ~height:g.content_height content
     |> View.pad
@@ -66,8 +66,11 @@ let render appearance ~attrs ~title ~geometry:g ~width ~height content =
   then box ~width ~height content
   else (
     let tl, tr, bl, br, horizontal, vertical =
-      match appearance.Appearance.icons, appearance.preset with
-      | Unicode, Instrument -> "╭", "╮", "╰", "╯", "─", "│"
+      let rounded =
+        Option.value rounded ~default:(Appearance.Preset.equal appearance.Appearance.preset Instrument)
+      in
+      match appearance.icons, rounded with
+      | Unicode, true -> "╭", "╮", "╰", "╯", "─", "│"
       | Unicode, _ -> "┌", "┐", "└", "┘", "─", "│"
       | (None_ | Ascii), _ -> "+", "+", "+", "+", "-", "|"
     in

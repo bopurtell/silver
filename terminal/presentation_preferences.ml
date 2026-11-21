@@ -44,6 +44,7 @@ type t =
   ; layout_mode : Host.layout_mode
   ; chrome : bool
   ; main_hints : bool option [@sexp.option]
+  ; browser_hints : bool option [@sexp.option]
   ; palette_hints : bool option [@sexp.option]
   ; timing_preload : bool option [@sexp.option]
   ; quick_launch_view : bool option [@sexp.option]
@@ -101,6 +102,7 @@ let capture ~project_key (host : Host.t) =
   ; layout_mode = host.layout_mode
   ; chrome = host.chrome
   ; main_hints = Some host.main_hints
+  ; browser_hints = Option.some_if host.browser_hints true (* absent in older files: off *)
   ; palette_hints = Some host.palette_hints
   ; timing_preload = Some host.timing_preload
   ; quick_launch_view = Some host.quick_launch_view
@@ -282,6 +284,7 @@ let apply t (host : Host.t) =
     ; layout_mode = t.layout_mode
     ; chrome = t.chrome
     ; main_hints = Option.value t.main_hints ~default:true
+    ; browser_hints = Option.value t.browser_hints ~default:false
     ; palette_hints = Option.value t.palette_hints ~default:true
     ; timing_preload = Option.value t.timing_preload ~default:true
     ; quick_launch_view = Option.value t.quick_launch_view ~default:true

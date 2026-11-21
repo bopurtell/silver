@@ -166,6 +166,7 @@ type action =
   | Resume_log
   | Toggle_chrome
   | Toggle_main_hints
+  | Toggle_browser_hints
   | Toggle_palette_hints
   | Set_timing_preload of bool
   | Set_appearance of Appearance.t
@@ -273,6 +274,7 @@ type t =
   ; inspection_paste : W.Tile_id.t option
   ; chrome : bool
   ; main_hints : bool
+  ; browser_hints : bool
   ; palette_hints : bool
   ; timing_preload : bool
   ; quick_launch_view : bool
@@ -312,6 +314,7 @@ let empty =
   ; inspection_paste = None
   ; chrome = true
   ; main_hints = true
+  ; browser_hints = false
   ; palette_hints = true
   ; timing_preload = true
   ; quick_launch_view = true
@@ -3504,6 +3507,48 @@ let policy t (tile : W.Tile.t) =
   }
 ;;
 
+let project_browser_hints t =
+  let workspace_allows =
+    Option.bind (active t) ~f:(fun workspace ->
+      List.Assoc.find t.workspace_presentation
+        (W.Workspace_id.to_string workspace.id) ~equal:String.equal)
+    |> Option.bind ~f:(fun o -> o.hints)
+    |> Option.value ~default:true
+  in
+  (* The overlay is opt-in; a narrower tile setting cannot undo a broader hide. *)
+  t.browser_hints
+  && t.main_hints
+  && Option.value t.presentation.hints ~default:true
+  && workspace_allows
+  (* Stock tile layout defaults (e.g. the one-line workspace tabs) describe that
+     tile's own content, not a modal opened from it. Honor the user's tile override. *)
+  && Option.value_map (focused t) ~default:true ~f:(fun tile ->
+    Option.value (local t tile.id).presentation.hints ~default:true)
+;;
+
+let%test_unit "project browser opt-in respects main, global, workspace and tile hides" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "manage") in
+  let host =
+    W.apply registry (Initialize_config P.Presets.stock_config)
+    |> Result.ok
+    |> Option.value_exn
+    |> receive empty
+  in
+  let tile = List.find_exn (tiles host) ~f:(fun t -> String.equal t.kind "workspace-tabs") in
+  let host = { host with focus = Some tile.id } in
+  assert (not (project_browser_hints host));
+  let host = { host with browser_hints = true } in
+  assert (not (policy host tile).hints);
+  assert (project_browser_hints host);
+  let host, _ = set_presentation host tile.id { T.inherit_ with hints = Some true } in
+  let hide = { T.inherit_ with hints = Some false } in
+  assert (not (project_browser_hints { host with main_hints = false }));
+  assert (not (project_browser_hints { host with presentation = hide }));
+  let workspace_presentation = [ W.Workspace_id.to_string tile.workspace, hide ] in
+  assert (not (project_browser_hints { host with workspace_presentation }));
+  assert (not (project_browser_hints (fst (set_presentation host tile.id hide))))
+;;
+
 let compression_hint t =
   Option.value_map (focused t) ~default:"" ~f:(fun tile ->
     let source =
@@ -3835,6 +3880,11 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
          ^ " main window control hints (Space c h)")
         "toggle bottom footer keys help hints show restore"
         Toggle_main_hints
+    ; command
+        "host.hints.project-browser"
+        ((if t.browser_hints then "Hide" else "Show") ^ " project browser control hints")
+        "manage this project navigation filter keys help"
+        Toggle_browser_hints
     ; command
         "host.hints.palette"
         ((if t.palette_hints then "Hide" else "Show")

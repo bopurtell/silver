@@ -136,7 +136,9 @@ type session =
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
   ; mutable painted_palette : Host.t option
   ; mutable browser : Browser.t option
-  ; mutable painted_browser : Browser.t option
+  ; mutable browser_epoch : int
+  ; mutable owner_read : unit ref
+  ; mutable painted_browser : (Browser.t * bool) option
   ; mutable show_connection_details : bool
   ; mutable connection_details_scroll : int
   ; mutable host : Host.t
@@ -353,6 +355,8 @@ let create_session
       ; last_dimensions = None
       ; painted_palette = None
       ; browser = None
+      ; browser_epoch = 0
+      ; owner_read = ref ()
       ; painted_browser = None
       ; show_connection_details = false
       ; connection_details_scroll = 0
@@ -728,6 +732,7 @@ let load_presentation_preferences session =
              ; resource_orientations = []
              ; chrome = true
              ; main_hints = true
+             ; browser_hints = false
              ; palette_hints = true
              ; timing_preload = true
              ; quick_launch_view = true
@@ -4622,12 +4627,29 @@ let select_pointer_row session (tile : Workspace.Tile.t) dimensions ~column ~row
              ~row)
 ;;
 
+(* A management window retains its immutable catalog and the original host. A
+   child palette is the only surface above it. Never restore a saved host record:
+   it contains live provider state as well as the inspection cursor. *)
+let browser_current session (b : Browser.t) =
+  session.browser_epoch = session.context_epoch && Host.current session.host b.capture
+;;
+
+let retire_stale_browser session =
+  match session.browser with
+  | Some b when not (browser_current session b) ->
+    session.browser <- None;
+    session.host <- { session.host with palette = None; paste = false };
+    true
+  | _ -> false
+;;
+
 let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
+  ignore (retire_stale_browser session : bool);
   session.painted_palette <- None;
   session.painted_browser <- None;
   let remember_palette (host : Host.t) =
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
-    host
+    if Option.is_some session.browser then { host with palette = None } else host
   in
   let render_host () =
     session.last_dimensions <- Some dimensions;
@@ -4690,8 +4712,12 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
   match session.browser with
   | None -> background
   | Some browser ->
-    session.painted_browser <- Some browser;
-    Browser.render browser session.host.appearance dimensions background
+    let hints = Host.project_browser_hints session.host in
+    session.painted_browser <- Some (browser, hints);
+    let window = Browser.render ~hints browser session.host.appearance dimensions background in
+    let host = displayed_host session in
+    session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
+    Host_view.render_palette host dimensions window
 ;;
 
 (* Baseline capture.
@@ -4741,6 +4767,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; last_dimensions = None
     ; painted_palette = None
     ; browser = None
+    ; browser_epoch = 0
+    ; owner_read = ref ()
     ; painted_browser = None
     ; show_connection_details = fixture.show_connection_details
     ; connection_details_scroll = 0
@@ -4927,9 +4955,8 @@ let host_catalog_base session =
      ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
      ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
      ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
+     ; Host.command "project.manage" "Manage This Project…" "project browser" Manage_project
      ]
-     @ Option.to_list (Option.map (Browser.trial ()) ~f:(fun _ ->
-         Host.command "project.manage" "Manage This Project…" "project browser" Manage_project))
      @ library_commands session ~f:(fun label dir ->
        Host.command ("project.library." ^ label ^ ":" ^ dir)
          (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
@@ -6586,25 +6613,39 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
     | Manage_project ->
-      Option.iter (Browser.trial ()) ~f:(fun surface ->
-        let ip = List.find_exn (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip") in
-        let libraries = library_commands session ~f:(fun label dir -> label,dir) in
-        session.browser <- Some (Browser.create surface captured
-          (Browser.catalog ~ip ~libraries session.asic)));
+      Option.iter
+        (List.find (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip"))
+        ~f:(fun ip ->
+          let libraries = library_commands session ~f:(fun label dir -> label, dir) in
+          (* Entering management commits to the inspection currently on screen.
+             A preference read begun during startup must not replace that origin. *)
+          let origin = Workspace.Workspace_id.to_string captured.workspace in
+          let pin touched =
+            if List.mem touched origin ~equal:String.equal then touched else origin :: touched
+          in
+          session.navigation_revision <- session.navigation_revision + 1;
+          session.navigation_focus_touched <- pin session.navigation_focus_touched;
+          session.navigation_touched <- pin session.navigation_touched;
+          session.host <- Host.cancel_navigation_timing session.host origin;
+          session.browser_epoch <- session.context_epoch;
+          session.browser <- Some (Browser.create captured (Browser.catalog ~ip ~libraries session.asic)));
       Effect.Ignore
     | Browse_chip_profiles chip ->
       (match session.browser, session.opened with
        | Some browser, Some opened ->
          let selected = Browser.selected browser in
+         let intent = session.owner_read in
+         let instance_id = session.hello.instance_id in
          session.browser <- Some { browser with message = "Reading " ^ Artifact_view.safe chip ^ "…" };
          async (fun () ->
            let owner : Authoring.Owner.t =
              { project = opened.project.id; destination = Project_root.to_absolute_path opened.project.root; chip } in
            let%map reply = request session.diagnostics_file (fun () ->
              Http.Client.authoring captured_client
-               { instance_id = session.hello.instance_id; operation = Describe_owner owner }) in
+               { instance_id; operation = Describe_owner owner }) in
            match session.browser, selected with
-           | Some current, Some selected when Host.current session.host captured
+           | Some current, Some selected when browser_current session current
+              && phys_equal intent session.owner_read
              && phys_equal current.lifetime browser.lifetime ->
              session.browser <- Some (Browser.receive_owner current ~chip ~parent:selected reply)
            | _ -> ())
@@ -6647,6 +6688,28 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            request session.diagnostics_file (fun () ->
              Http.Client.authoring captured_client { instance_id; operation })
          in
+         let epoch = session.context_epoch in
+         let scope_current () =
+           phys_equal captured_client session.client && epoch = session.context_epoch
+           && Host.current session.host captured
+         in
+         let owns_wait token =
+           match session.host.palette with
+           | Some { argument = Some (Starter_wait active); _ } -> phys_equal token active
+           | _ -> false
+         in
+         (* Install the wait synchronously, before the deferred dispatch. Escape
+            may dismiss it even before the service call starts. *)
+         let wait f =
+           let token = ref () in
+           form (Some (Starter_wait token));
+           let reject () =
+             if owns_wait token then session.host <- { session.host with palette = None }
+           in
+           async ~on_rejected:reject (fun () ->
+             if scope_current () && owns_wait token then f token
+             else (reject (); return ()))
+         in
          let flow_choices (heading, choices) =
            let commands = List.mapi choices ~f:(fun i (title, step) ->
              Host.command ("flow.choice." ^ Int.to_string i) (Artifact_view.safe title)
@@ -6670,13 +6733,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             execute_host ~validate session captured
               (Flow_step (Describe (chip, Copy (Some (flow, source))))) ~exit
           | Flow_step (Describe (chip, intent)) ->
-            let token = ref () in
-            async (fun () ->
-              form (Some (Starter_wait token));
+            wait (fun token ->
               let%map response = call (Describe_owner { destination = root; project = opened.project.id; chip }) in
               match session.host.palette with
               | Some { argument = Some (Starter_wait active); _ }
-                when phys_equal token active && Host.current session.host captured ->
+                when phys_equal token active && scope_current () ->
                 let step = match response with
                   | Ok (Owner_described d) -> Flow_authoring.after_describe chip intent d
                   | Error msg | Ok (Failed {message = msg; _}) -> Error msg
@@ -6732,9 +6793,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               | Toggle_chip (p, source, register) -> Chip (source, register), p.operation.name, Some p.preview_id
               | _ -> assert false
             in
-            let token = ref () in
-            async (fun () ->
-              form (Some (Starter_wait token));
+            wait (fun token ->
               let target : Authoring.Target.t =
                 { destination = root; project = Some opened.project.id
                 ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
@@ -6750,10 +6809,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 | _ -> Preview { recipe = Host.starter_recipe starter; name; target })
               in
               let waiting =
-                Host.current session.host captured
-                && (match session.host.palette with
-                    | Some { argument = Some (Starter_wait active); _ } -> phys_equal active token
-                    | _ -> false)
+                scope_current () && owns_wait token
               in
               match response with
               | Ok (Previewed preview) when not waiting ->
@@ -6767,11 +6823,22 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 in
                 form (Some (Starter_name starter)) ~query:name ~notice;
                 return ())
+          | Finish_starter (`Cancel, preview) when Option.is_some session.browser ->
+            (* The preview is bound to this service/ID. Release it even if the
+               user closes the window while cancellation is in flight. *)
+            let origin = Option.value_exn session.browser in
+            let intent = session.owner_read in
+            Effect.of_deferred_thunk (fun () ->
+              let%map reply = call (Cancel { preview_id = preview.preview_id }) in
+              match session.browser, reply with
+              | Some current, (Error message | Ok (Failed { message; _ }))
+                when scope_current () && phys_equal current.lifetime origin.lifetime
+                     && phys_equal intent session.owner_read ->
+                session.browser <- Some { current with message = Artifact_view.safe message }
+              | _ -> ())
           | Finish_starter (decision, preview) ->
-            async (fun () ->
+            wait (fun token ->
               let preview_id = preview.preview_id in
-              let token = ref () in
-              form (Some (Starter_wait token));
               let%map response =
                 call (match decision with `Apply -> Apply { preview_id } | `Cancel -> Cancel { preview_id })
               in
@@ -6782,7 +6849,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                   let for_module = String.equal recipe Authoring.module_recipe in
                   let flow = List.mem [Authoring.new_flow_recipe; Authoring.duplicate_profile_recipe]
                       recipe ~equal:String.equal in
-                  if asic then session.adopted_root <- Some root;
+                  if asic && scope_current () then session.adopted_root <- Some root;
                   [ (if asic then "ASIC starter added."
                      else if flow then (if List.is_empty created_files then "Manual registration required."
                                         else "Source created. Build the owner before running.")
@@ -6815,7 +6882,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               in
               match session.host.palette with
               | Some { argument = Some (Starter_wait active); _ }
-                when phys_equal token active && Host.current session.host captured ->
+                when phys_equal token active && scope_current () ->
                 let selectable = match response with
                   | Ok (Applied { registration = Registered _; _ })
                     when String.equal preview.operation.recipe Authoring.chip_recipe ->
@@ -6825,11 +6892,10 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 form (Some (Starter_result (rows, selectable)))
               | _ -> ())
           | Select_created_chip name ->
-            async (fun () ->
+            let origin = session.browser in
+            wait (fun token ->
               (* Discovery retains the active chip. Only a second explicit selection
                  changes it, using the variant actually advertised by the catalog. *)
-              let token = ref () in
-              form (Some (Starter_wait token));
               let current () = phys_equal captured_client session.client &&
                 V1.Daemon_instance_id.equal instance_id session.hello.instance_id &&
                 Option.exists (current_project session) ~f:(fun p -> Project_id.equal p.id opened.project.id) &&
@@ -6843,14 +6909,17 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                  | Some { argument = Some (Starter_wait active); _ } -> phys_equal token active
                  | _ -> false)
               in
+              let may_select () =
+                current () && Option.for_all origin ~f:(browser_current session)
+              in
               let rec select remaining =
-                if not (current ()) then return ()
+                if not (may_select ()) then return ()
                 else if remaining > 0 && Option.exists session.asic ~f:(fun s ->
                   List.exists s.operations ~f:(fun op ->
                     String.equal op.kind "discover" && Plain_rpc.active op))
                 then (
                   let%bind () = Clock.after (Time_float.Span.of_ms 100.) in
-                  if not (current ()) then return () else
+                  if not (may_select ()) then return () else
                     let%bind () = asic_request session Get in
                     select (remaining - 1))
                 else match Option.bind session.asic ~f:(fun s ->
@@ -7880,6 +7949,9 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               else "Main window control hints hidden; Space c h restores")
          };
       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+    | Toggle_browser_hints ->
+      session.host <- { session.host with browser_hints = not session.host.browser_hints };
+      Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
     | Toggle_palette_hints ->
       let palette_hints = not session.host.palette_hints in
       session.host
@@ -8622,7 +8694,8 @@ let browser_result session browser result ~exit =
   | Browser.Stay b -> session.browser <- Some b; Bonsai_term.Effect.Ignore
   | Close -> session.browser <- None; Bonsai_term.Effect.Ignore
   | Invoke command ->
-    (match command.action with Browse_chip_profiles _ -> () | _ -> session.browser <- None);
+    session.owner_read <- ref ();
+    session.browser <- Some (Browser.commit browser command);
     execute_host session browser.Browser.capture command.action ~exit
 ;;
 
@@ -8630,6 +8703,10 @@ let menu_key session event ~exit =
   let host = session.host in
   let input = Host.decode_event event in
   match host.menu, input with
+  | _, _ when retire_stale_browser session -> Some Bonsai_term.Effect.Ignore
+  | _, input when Option.is_some session.browser && Option.is_some host.palette ->
+    Some (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun key ->
+      modal_input session key ~exit))
   | _, input when Option.is_some session.browser ->
     let browser = Option.value_exn session.browser in
     Some (Option.value_map input ~default:Bonsai_term.Effect.Ignore ~f:(fun key ->
@@ -9023,12 +9100,7 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
   in
   match session.last_dimensions with
   | None -> Effect.Ignore
-  | Some d when Option.is_some session.browser || Option.is_some session.painted_browser ->
-    (match session.browser, session.painted_browser, (kind : Event.mouse_kind), mods with
-     | Some b, Some painted, Left, [] when phys_equal b painted ->
-       Option.value_map (Browser.hit b d ~x ~y) ~default:Effect.Ignore ~f:(fun target ->
-         browser_result session b (Browser.choose b target) ~exit)
-     | _ -> Effect.Ignore)
+  | Some _ when retire_stale_browser session -> Effect.Ignore
   | Some dimensions
     when Option.is_some session.painted_palette || Option.is_some session.host.palette ->
     (* Interpret coordinates on the painted surface. If a keyboard edit or service
@@ -9036,9 +9108,10 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
     (match session.painted_palette, session.host.palette with
      | Some host, Some palette
        when Option.exists host.palette ~f:(phys_equal palette)
-            && not (session.show_connection_details || session.host.paste || session.host.editing_filter)
-            && (session.waveform_visible
-                || (Option.is_none session.hierarchy_view && Option.is_none session.artifact_view))
+            && not (session.host.paste || session.host.editing_filter)
+            && (Option.is_some session.browser ||
+                (not session.show_connection_details && (session.waveform_visible
+                 || (Option.is_none session.hierarchy_view && Option.is_none session.artifact_view))))
             && Option.is_none session.host.menu ->
       let input =
         match (kind : Event.mouse_kind), mods with
@@ -9051,6 +9124,14 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
       in
       Option.value_map input ~default:Effect.Ignore ~f:(fun input ->
         modal_input session input ~exit)
+     | _ -> Effect.Ignore)
+  | Some d when Option.is_some session.browser || Option.is_some session.painted_browser ->
+    (match session.browser, session.painted_browser, (kind : Event.mouse_kind), mods with
+     | Some b, Some (painted, hints), Left, [] when phys_equal b painted ->
+       Option.value_map (Browser.hit ~hints b d ~x ~y) ~default:Effect.Ignore ~f:(fun target ->
+         browser_result session b (Browser.choose b target) ~exit)
+     | Some b, Some (painted, hints), Scroll direction, [] when phys_equal b painted ->
+       browser_result session b (Browser.scroll ~hints b d ~x ~y ~direction) ~exit
      | _ -> Effect.Ignore)
   | Some dimensions when Option.is_some session.host.menu ->
     (match (kind : Event.mouse_kind), mods with

@@ -26,7 +26,8 @@ val geometry
 (** [title] is already visibility-filtered by the caller. It may contain an independently
     visible pin badge even when the heading is hidden. *)
 val render
-  :  Appearance.t
+  :  ?rounded:bool
+  -> Appearance.t
   -> attrs:Attr.t list
   -> title:View.t
   -> geometry:geometry

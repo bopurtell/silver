@@ -35,7 +35,7 @@ def inspect_second(t):
     ready = t.capture("testing", ["[2 Testing]", "simulation-catalog", "Project ▾"])
     top = ready.splitlines()[0]
     assert top.index("Project ▾") < top.index("Overview") < top.index("[2 Testing]"), top
-    assert len(ready.splitlines()[1]) == 80 and os.get_terminal_size(t.master).columns == 80
+    assert len(ready.splitlines()[1]) == t.width == os.get_terminal_size(t.master).columns
     click(t, ready, "simulation-catalog")
     send(t, b"d")
     t.capture("discovered", ["> [x] first", "[x] second"])

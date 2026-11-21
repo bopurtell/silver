@@ -186,20 +186,22 @@ let () =
       Bool.equal (Host.policy restored tile).header (Host.policy inherited tile).header);
     assert (Terminal_presentation.Appearance.equal restored.appearance expected.appearance)
   | "hints-write" | "hints-read" ->
-    (* argv.(3) is "<main><palette>" with 1 = visible, 0 = hidden. *)
+    (* argv.(3) is "<main><palette><browser>" with 1 = visible, 0 = hidden. *)
     let combo = argv.(3) in
     let main_hints = Char.equal combo.[0] '1'
-    and palette_hints = Char.equal combo.[1] '1' in
+    and palette_hints = Char.equal combo.[1] '1'
+    and browser_hints = Char.equal combo.[2] '1' in
     if String.equal mode "hints-write"
     then
       P.save
         ~state_directory
-        (P.capture ~project_key { expected with main_hints; palette_hints })
+        (P.capture ~project_key { expected with main_hints; palette_hints; browser_hints })
     else (
       let preferences = Option.value_exn (P.load ~state_directory ~project_key) in
       let restored = P.apply preferences host in
       assert (Bool.equal restored.main_hints main_hints);
       assert (Bool.equal restored.palette_hints palette_hints);
+      assert (Bool.equal restored.browser_hints browser_hints);
       (* Hint choices never alter the existing global chrome choice. *)
       assert (not restored.chrome);
       assert (Host.equal_layout_mode restored.layout_mode expected.layout_mode))
@@ -223,10 +225,11 @@ let () =
     assert (preferences.schema_version = version);
     assert (Option.is_none preferences.tile_appearance);
     let restored =
-      P.apply preferences { host with main_hints = false; palette_hints = false }
+      P.apply preferences { host with main_hints = false; palette_hints = false; browser_hints = true }
     in
     assert (not restored.chrome);
     assert (restored.main_hints && restored.palette_hints);
+    assert (not restored.browser_hints);
     (* Missing appearance fields inherit; the legacy header choice is kept. *)
     assert (
       T.equal_overrides
