@@ -64,6 +64,14 @@ val changes : t -> signal -> change array
     value. Foreign signal handles raise Invalid_argument. *)
 val value_at : t -> signal -> time:int64 -> string option
 
+(** Find the [count]th distinct effective value transition strictly after [time] when
+    [forward] is true, or strictly before it otherwise. The first initialized tick is not
+    a transition; only the last assignment at each tick counts. X/Z are values. A positive
+    count beyond the available transitions returns the farthest one, if any; nonpositive
+    counts and directions with no target return None. Queries use a binary search over a
+    per-history index shared by aliases. Foreign signals raise Invalid_argument. *)
+val transition : t -> signal -> time:int64 -> forward:bool -> count:int -> int64 option
+
 val values_at : t -> time:int64 -> (signal * string option) array
 
 type projected_lane =

@@ -7,6 +7,7 @@ type action =
   | Host
   | Host_boundary
   | Waveform of View.input
+  | Waves of View.input
   | Signals of View.input
   | Pane of View.input
   | Close_quick
@@ -66,7 +67,7 @@ let route (host : Host.t) ~quick ~editing_text ~identity_modal event =
     else (
       let pane = Option.bind (Host.focused host) ~f:(fun tile -> Waveforms.pane tile.kind) in
       match pane, key with
-      | Some Waves, Some (Char ('0' .. '9') as key) -> Waveform key
+       | Some Waves, Some (Char ('0' .. '9' | 'w' | 'b') as key) -> Waves key
       | Some Signals, Some (Char ('0' .. '9' | 'V') as key) -> Signals key
       | ( Some (Session | Signals | Waves)
         , Some
@@ -74,7 +75,10 @@ let route (host : Host.t) ~quick ~editing_text ~identity_modal event =
                  ('j' | 'k' | 'h' | 'l' | 'H' | 'L' | '[' | ']' | '+' | '=' | '-' | ':'
                  | '/' | 'g' | 'G' | 'i' | '{' | '}')
              | Up | Down | Left | Right | Enter | Escape ) as key) ) ->
-        (match pane with Some Signals -> Signals key | _ -> Waveform key)
+         (match pane with
+          | Some Waves -> Waves key
+          | Some Signals -> Signals key
+          | _ -> Waveform key)
       | Some Picker, Some ((Char ('j' | 'k') | Down | Up | Enter) as key)
       | Some Logs, Some ((Char ('j' | 'k' | 'G') | Down | Up) as key) -> Pane key
       | _ -> Host))
@@ -109,7 +113,7 @@ let%test_unit "focused pane owns bare digits independently of trace availability
     route (focus pane) ~quick:false ~editing_text:false ~identity_modal:false (ascii c)
   in
   List.iter [ '0'; '2'; '9' ] ~f:(fun c ->
-    assert (Poly.equal (route Waves c) (Waveform (Char c)));
+    assert (Poly.equal (route Waves c) (Waves (Char c)));
     assert (Poly.equal (route Signals c) (Signals (Char c)));
     List.iter [ Waveforms.Session; Picker; Logs ] ~f:(fun pane ->
       assert (Poly.equal (route pane c) Host)));
@@ -134,6 +138,23 @@ let%test_unit "leaders and editors take precedence; Signals gets visual and togg
   assert (Poly.equal (route ~editing_text:true (ascii ' ')) (Waveform (Char ' ')));
   assert (Poly.equal (route ~identity_modal:true (ascii '2')) (Waveform (Char '2')));
   assert (Poly.equal (route ~host:Host.empty (ascii '2')) Host)
+;;
+
+let%test_unit "transition keys belong only to focused Waves outside modals" =
+  let focus = test_host () in
+  let route ?(quick = false) ?(editing_text = false) ?(identity_modal = false) host c =
+    route host ~quick ~editing_text ~identity_modal (ascii c)
+  in
+  List.iter [ 'w'; 'b' ] ~f:(fun c ->
+    let host = focus Waves in
+    assert (Poly.equal (route host c) (Waves (Char c)));
+    assert (Poly.equal (route ~quick:true host c) (Waveform (Char c)));
+    assert (Poly.equal (route ~editing_text:true host c) (Waveform (Char c)));
+    assert (Poly.equal (route ~identity_modal:true host c) (Waveform (Char c)));
+    assert (Poly.equal (route { host with prefix = 1 } c) Host_boundary);
+    assert (Poly.equal (route Host.empty c) Host);
+    List.iter [ Waveforms.Session; Signals; Picker; Logs ] ~f:(fun pane ->
+      assert (Poly.equal (route (focus pane) c) Host)))
 ;;
 
 let%test_unit "leaving Waves discards its count; Signals applies and cancels a visual range" =
@@ -161,6 +182,7 @@ let%test_unit "leaving Waves discards its count; Signals applies and cancels a v
     let identity_modal = Option.is_some view.identity_scroll in
     match route host ~quick:false ~editing_text ~identity_modal event with
     | Waveform key -> View.input view key
+    | Waves key -> View.waves_input view key
     | Signals key -> View.signals_input view key
     | Host_boundary -> clear_view view
     | _ -> assert false
@@ -183,6 +205,9 @@ let%test_unit "leaving Waves discards its count; Signals applies and cancels a v
   assert (Option.is_none view.pending_count);
   let view = step waves (move_focus signals waves view) (ascii 'L') in
   assert (Int64.equal view.cursor 1L);
+  let jumped = step waves (step waves view (ascii '3')) (ascii 'w') in
+  assert (Int64.equal jumped.cursor 9L && Option.is_none jumped.pending_count);
+  assert (Int64.equal (step waves jumped (ascii 'b')).cursor 9L);
   let visual = step signals (step signals view (ascii 'V')) (ascii 'j') in
   assert (Option.is_some visual.visual_selection);
   assert (Option.is_none (move_focus signals waves visual).visual_selection);

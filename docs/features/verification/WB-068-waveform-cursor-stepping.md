@@ -162,6 +162,13 @@ checks therefore remain unverified in this session. Evidence:
 `/tmp/opencode/wb028-accept-fuguu886/`. The dedicated WB-068 real-PTY matrix above
 completed using its own bounded fixtures.
 
+## Follow-up — focused signal transitions
+
+The optional value-change jump above is available in the dedicated Waves tile:
+`w` / `b` jump forward / backward through the actual transitions of the row
+highlighted in Signals. Like column and tick motions, they accept a numeric
+count. See the [Waveforms controls](../../testing_workspace.md#dedicated-waveforms-workspace).
+
 ## References
 - [Cursor handling](../../../terminal/waveform_view.ml)
 - [Time mapping](../../../terminal/waveform_time.ml)

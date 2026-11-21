@@ -220,6 +220,7 @@ let edit_key event =
    wider than the viewport. Accumulation and the indicator stay bounded too. *)
 let max_count = 9_999
 let count_indicator t = Option.map t.pending_count ~f:(sprintf "Count: %d")
+let transition_hint = "w/b next/prev transition · focused signal"
 
 let input t key =
   match t.identity_scroll with
@@ -374,6 +375,45 @@ let input t key =
                   { t with notice = "Selection limit: 16 signals; deselect a lane first" }
                 else { t with selected = Set.add t.selected s.index; notice = "" })
            | _ -> t)))
+;;
+
+let waves_input t key =
+  match key with
+  | Char (('w' | 'b') as motion)
+    when Option.is_none t.editing && Option.is_none t.identity_scroll ->
+    let count = Option.value t.pending_count ~default:1 in
+    let t = clear_count t in
+    if count = 0
+    then t
+    else (
+      match t.loaded with
+      | Loading | Failed _ -> t
+      | Ready data ->
+        (match List.nth (filtered t data) t.focus with
+         | None -> { t with notice = "No focused signal" }
+         | Some signal ->
+           let forward = Char.equal motion 'w' in
+           let lookup ~count ~time = D.transition data signal ~time ~forward ~count in
+           (match lookup ~count ~time:t.cursor with
+            | None ->
+              { t with
+                notice = (if forward then "No next transition" else "No previous transition")
+              }
+            | Some target ->
+              let last = snd (D.time_bounds data) in
+              let stop = stop t data in
+              let visible time = Int64.(t.start <= time && time <= stop) in
+              let t = { t with notice = "" } in
+              if count = 1 || (visible t.cursor && visible target)
+              then move_cursor t ~last ~count:1 ~step:(fun ~start:_ ~stop:_ _ -> target)
+              else
+                (* Moving directly to the final target can skip an intermediate follow.
+                   If either endpoint is off-screen, match repeated key presses. *)
+                move_cursor t ~last ~count ~step:(fun ~start:_ ~stop:_ time ->
+                  if Int64.equal time target
+                  then time
+                  else Option.value (lookup ~count:1 ~time) ~default:time))))
+  | _ -> input t key
 ;;
 
 let signals_input t key =
@@ -1148,12 +1188,17 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
           "Compressed edges · # dense (ordering hidden) · exact cursor off-screen"
         | _ -> "Exact tick cells · joined edges, # dense; cursor values exact"
       in
-      let description =
-        if Int64.equal (Time.stop mapping) (snd (D.time_bounds data))
-        then description ^ " · end of trace"
-        else description
-      in
-      View.vcat
+       let description =
+         if Int64.equal (Time.stop mapping) (snd (D.time_bounds data))
+         then description ^ " · end of trace"
+         else description
+       in
+       let short_notice =
+         height <= 4 + graph_height
+         && Option.is_none t.editing
+         && not (String.is_empty t.notice)
+       in
+       View.vcat
         [ status_line
             (if Option.is_some status then R.Warning else R.Muted)
             (sprintf
@@ -1163,14 +1208,17 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
                (D.timescale_to_string (D.timescale data))
                t.start
                (Time.stop mapping))
-        ; text
-            R.Muted
-            (sprintf
-               "%s · extent %s"
-               t.extent_basis
-               (Time.format_compact
-                  (D.timescale data)
-                  Int64.(Time.stop mapping - t.start)))
+         ; (if short_notice
+            then text R.Warning t.notice
+            else
+              text
+                R.Muted
+                (sprintf
+                   "%s · extent %s"
+                   t.extent_basis
+                   (Time.format_compact
+                      (D.timescale data)
+                      Int64.(Time.stop mapping - t.start))))
         ; ruler_row "Time" ruler_labels
         ; ruler_row "absolute" ruler_marks
         ; View.hcat
@@ -1190,10 +1238,13 @@ let render_waves ?(appearance = Appearance.default) ?(hints = true) t ~width ~he
             (Option.value
                (editing_prompt ~width t)
                ~default:(if String.is_empty t.notice then description else t.notice))
-        ; (if Option.is_some t.editing && not (String.is_empty t.notice)
-           then text R.Warning t.notice
-           else View.none)
-        ]
+         ; (if Option.is_some t.editing && not (String.is_empty t.notice)
+            then text R.Warning t.notice
+            else View.none)
+         ; (if hints && Option.is_none t.editing
+            then text R.Muted transition_hint
+            else View.none)
+         ]
   in
   body |> box ~width ~height |> Host_view.colored appearance R.Foreground
 ;;
@@ -1569,19 +1620,19 @@ module%test Counts = struct
     [%equal: int64 * int64 * int64 * string * int * int] (navigation a) (navigation b)
   ;;
 
+  let screen ?(hints = false) ?(width = 30) ?(height = 12) t =
+    let view = render_waves ~hints t ~width ~height in
+    let buf = Buffer.create 1024 in
+    Notty.Render.to_buffer
+      buf
+      Notty.Cap.dumb
+      (0, 0)
+      (width, height)
+      (Bonsai_term.View.Private.notty_image view);
+    Buffer.contents buf
+  ;;
+
   let%test_unit "Waves counts are visible before and after load, without applying motion" =
-    let screen t =
-      let width, height = 30, 12 in
-      let view = render_waves ~hints:false t ~width ~height in
-      let buf = Buffer.create 1024 in
-      Notty.Render.to_buffer
-        buf
-        Notty.Cap.dumb
-        (0, 0)
-        (width, height)
-        (Bonsai_term.View.Private.notty_image view);
-      Buffer.contents buf
-    in
     let shows_count t = String.is_substring (screen t) ~substring:"Count: 20" in
     List.iter
       [ loading; ready ~last:1000L ]
@@ -1651,6 +1702,54 @@ module%test Counts = struct
     let inspector = type_keys pending "i20" in
     assert (Option.equal Int.equal inspector.identity_scroll (Some 0));
     assert (Option.is_none inspector.pending_count)
+  ;;
+
+  let%test_unit "Waves transition counts follow the focused signal without changing it" =
+    let data =
+      D.parse
+        "$timescale 1ns $end $var wire 1 ! other $end $var wire 1 @ target $end \
+         $enddefinitions $end #0 0! 0@ #4 1! #10 1@ #32 0@ #36 1@ #90"
+    in
+    let t =
+      { (receive loading data) with
+        focus = 1
+      ; selected = Int.Set.singleton 0
+      ; value_offset = 5
+      ; start = 30L
+      ; span = 10L
+      }
+    in
+    let keys t keys = String.fold keys ~init:t ~f:(fun t c -> waves_input t (Char c)) in
+    let next = keys t "3w" in
+    assert (Int64.equal next.cursor 36L && Int64.equal next.start 32L);
+    assert (same_navigation next (keys t "www"));
+    assert (same_navigation next (keys t "9999w"));
+    assert (Option.is_none next.pending_count);
+    assert (Int.equal next.focus t.focus && Int.equal next.value_offset t.value_offset);
+    assert (Set.equal next.selected t.selected && phys_equal next.artifact t.artifact);
+    let prev = keys next "2b" in
+    assert (Int64.equal prev.cursor 10L && Int64.equal prev.start 10L);
+    assert (same_navigation prev (keys next "bb"));
+    assert (same_navigation prev (keys next "9999b"));
+    let next_stuck = keys next "w" and prev_stuck = keys prev "b" in
+    assert (same_navigation next next_stuck && same_navigation prev prev_stuck);
+    List.iter [ 6; 12 ] ~f:(fun height ->
+      assert (String.is_substring (screen ~height next_stuck) ~substring:"No next transition");
+      assert
+        (String.is_substring (screen ~height prev_stuck) ~substring:"No previous transition"));
+    assert (String.is_empty (keys next_stuck "b").notice);
+    let zero = keys next "0b" in
+    assert (same_navigation next zero && String.is_empty zero.notice);
+    assert (Option.is_none zero.pending_count);
+    let no_focus = keys { t with filter = "unmatched" } "w" in
+    assert (same_navigation no_focus t);
+    assert (String.is_substring (screen no_focus) ~substring:"No focused signal");
+    assert (String.is_substring (screen ~hints:true ~width:80 t) ~substring:transition_hint);
+    assert (not (String.is_substring (screen ~width:80 t) ~substring:transition_hint));
+    assert (same_navigation t (input t (Char 'w')));
+    assert (same_navigation t (signals_input t (Char 'w')));
+    let editor = keys t "/wb" in
+    assert (same_navigation t editor && String.equal editor.query "wb")
   ;;
 end
 

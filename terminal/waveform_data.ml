@@ -42,9 +42,14 @@ type limits =
   ; max_value_bytes : int
   }
 
+type history =
+  { changes : change array
+  ; transition_times : int64 array
+  }
+
 type t =
   { declarations : signal array
-  ; histories : change array String.Map.t
+  ; histories : history String.Map.t
   ; scale : timescale
   ; last_time : int64
   ; count : int
@@ -118,6 +123,23 @@ let parse_scale parts =
     | _ -> unsupported "timescale unit (expected s/ms/us/ns/ps/fs)"
   in
   { magnitude; unit_ }
+;;
+
+let index_history changes =
+  let length = Array.length changes in
+  let previous = ref None
+  and transition_times = ref [] in
+  Array.iteri changes ~f:(fun i change ->
+    (* A tick's last assignment is the value visible to [value_at]. Keep original events
+       for projection, but only compare effective values for navigation. *)
+    if i = length - 1 || not (Int64.equal change.time changes.(i + 1).time)
+    then (
+      (match !previous with
+       | Some value when not (String.equal value change.value) ->
+         transition_times := change.time :: !transition_times
+       | _ -> ());
+      previous := Some change.value));
+  { changes; transition_times = Array.of_list_rev !transition_times }
 ;;
 
 let parse ?(limits = default_limits) bytes =
@@ -367,7 +389,8 @@ let parse ?(limits = default_limits) bytes =
     data false;
     let histories =
       Hashtbl.to_alist histories
-      |> List.map ~f:(fun (identifier, changes) -> identifier, Array.of_list_rev changes)
+      |> List.map ~f:(fun (identifier, changes) ->
+        identifier, index_history (Array.of_list_rev changes))
       |> String.Map.of_alist_exn
     in
     Ok
@@ -381,15 +404,42 @@ let parse ?(limits = default_limits) bytes =
   | Invalid_vcd message -> Or_error.error_string message
 ;;
 
-let history t signal =
+let empty_history = { changes = [||]; transition_times = [||] }
+
+let signal_history t signal =
   if signal.index < 0
      || signal.index >= Array.length t.declarations
      || not (phys_equal signal t.declarations.(signal.index))
   then invalid_arg "Waveform_data: signal does not belong to this trace";
-  Map.find t.histories signal.identifier |> Option.value ~default:[||]
+  Map.find t.histories signal.identifier |> Option.value ~default:empty_history
 ;;
 
+let history t signal = (signal_history t signal).changes
 let changes t signal = Array.copy (history t signal)
+
+let transition t signal ~time ~forward ~count =
+  let times = (signal_history t signal).transition_times in
+  if count <= 0
+  then None
+  else (
+    let length = Array.length times in
+    let low = ref 0
+    and high = ref length in
+    (* Forward starts at the upper bound; backward starts just before the lower bound.
+       Comparing directly handles both int64 extremes. *)
+    while !low < !high do
+      let mid = !low + ((!high - !low) / 2) in
+      let order = Int64.compare times.(mid) time in
+      if order < 0 || (forward && order = 0) then low := mid + 1 else high := mid
+    done;
+    let boundary = !low in
+    let available = if forward then length - boundary else boundary in
+    if available = 0
+    then None
+    else (
+      let count = Int.min count available in
+      Some times.(if forward then boundary + count - 1 else boundary - count)))
+;;
 
 let value_in_history changes time =
   let low = ref 0
@@ -900,6 +950,49 @@ let%test_unit "VCD repeated timestamps, uninitialized state and terminal time" =
   assert (Int64.equal (snd (time_bounds t)) 10L);
   assert (Or_error.is_error (to_waveterm t ~signals:[ s ] ~start:0L ~stop:10L));
   assert (Or_error.is_ok (to_waveterm t ~signals:[ s ] ~start:5L ~stop:10L))
+;;
+
+let%test_unit "Transition navigation uses effective scalar and bus values" =
+  let t =
+    parse
+      ("$timescale 1ns $end $var wire 1 ! scalar $end $var wire 4 @ bus $end "
+       ^ "$var wire 4 @ alias $end $var wire 1 % unset $end $enddefinitions $end "
+       ^ "#2 1! 0! bz @ b1 @ #3 0! b0001 @ #4 1! bx @ #4 0! b1 @ "
+       ^ "#5 X! bZ @ #6 x! bzzzz @ bX @ #7 Z! "
+       ^ "#8 1! z! b10 @ bxxxx @ #9223372036854775807 1! b10 @")
+    |> Or_error.ok_exn
+  in
+  let ss = signals t in
+  let check signal time forward count expected =
+    assert (Option.equal Int64.equal (transition t signal ~time ~forward ~count) expected)
+  in
+  let last = Int64.max_value in
+  Array.iteri ss ~f:(fun i signal ->
+    if i = 3
+    then (
+      check signal 5L true 1 None;
+      check signal 5L false 1 None)
+    else (
+      let middle = if i = 0 then 7L else 6L in
+      check signal Int64.min_value true 1 (Some 5L);
+      check signal 0L true 2 (Some middle);
+      check signal 0L true 3 (Some last);
+      check signal 0L true Int.max_value (Some last);
+      check signal 0L false 1 None;
+      check signal 5L true 1 (Some middle);
+      check signal 5L false 1 None;
+      check signal 6L false 1 (Some 5L);
+      check signal 7L true 1 (Some last);
+      check signal last true 1 None;
+      check signal last false 1 (Some middle);
+      check signal last false 2 (Some 5L);
+      check signal last false Int.max_value (Some 5L);
+      check signal 7L false 0 None;
+      check signal 5L true (-1) None));
+  assert (Array.length (changes t ss.(0)) = 11);
+  assert (Option.equal String.equal (value_at t ss.(0) ~time:4L) (Some "0"));
+  assert (Option.equal String.equal (value_at t ss.(1) ~time:5L) (Some "zzzz"));
+  assert (Option.equal String.equal (value_at t ss.(1) ~time:7L) (Some "xxxx"))
 ;;
 
 let%test_unit "VCD explicit malformed, unsupported and resource rejection" =

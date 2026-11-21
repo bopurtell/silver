@@ -232,6 +232,14 @@ raw ticks, and `20j` / `20k` move down / up signal rows. Esc cancels an unused
 count; moving focus clears it too. In **Signals**, numbers stay local:
 typing `2` in the list keeps you there, and typing it in `/` enters filter text.
 
+To inspect a FIFO flag, highlight `full` in **Signals**, then focus **Waves**.
+Press `w` (next change) or `b` (previous change) to land on the exact tick where
+`full` changed value. The highlighted row is the target, even if its lane is
+unchecked. On a binary flag these motions visit both rising and falling edges;
+on a bus they visit changes to the whole value. `3w` jumps three changes ahead,
+or to the last change if fewer remain. The initial sample is not an edge, and
+zoom does not affect the destination.
+
 To toggle several signals, press `V` in **Signals**, extend the marked rows
 with `j` / `k`, then press Enter. If every marked signal is enabled, Enter
 disables them; otherwise it enables them all. Only rows matching the current

@@ -36,11 +36,18 @@ def handoff_vcd(case):
              '$var wire 1 ! clk $end']
     # More than twenty rows, and a sparse time range that starts compressed.
     # Keep the original clock reference so the handoff identity checks still apply.
-    signals = range(1, 25) if case == 'flops256' else ()
+    signals = range(1, 24) if case == 'flops256' else ()
     lines.extend(f'$var wire 1 s{i} s{i:02d} $end' for i in signals)
+    if signals:
+        lines.append('$var wire 1 f fifo_full $end')
     lines.extend(('$upscope $end', '$enddefinitions $end', '#0', '0!'))
     lines.extend(f'0s{i}' for i in signals)
-    lines.extend(('#5', '1!', '#8192' if signals else '#10', '0!'))
+    if signals:
+        # Two FIFO edges share a compressed column, and none is a clock edge.
+        lines.extend(('0f', '#5', '1!', '#131', '1f', '#133', '0f',
+                      '#347', '1f', '#8192', '0!'))
+    else:
+        lines.extend(('#5', '1!', '#10', '0!'))
     return '\n'.join(lines) + '\n'
 
 
@@ -233,6 +240,33 @@ def check_waveform_modal_keys(terminal, check):
     state('visual-leaves-filtered-out-signal-enabled', 3, expected=[
         '25 matching · 7 enabled', signal_row('clk', enabled=True)], absent=[visual])
     check(True, 'Signals visual mode expands in both directions, toggles only the range, and cancels')
+
+    # The narrow Signals name column may elide the start of the scope.
+    fifo_full = re.compile(r'>\[ \] (?:flops256|…256)\.fifo_full\b')
+    terminal.key(b'/fifo\r')
+    state('edge-fixture', 3, expected=['1 matching · 7 enabled', fifo_full, 'Compressed edges'])
+    terminal.key(b'\t')  # Signals → Waves, leaving fifo_full focused but disabled.
+    terminal.key(b'w')
+    state('edge-next-fifo-full-asserts', 131, expected=[fifo_full])
+    terminal.key(b'2')
+    state('edge-count-pending', 131, pending=2, expected=[fifo_full])
+    terminal.key(b'w')
+    state('edge-counted-forward', 347, expected=[fifo_full])
+    terminal.key(b'2b')
+    state('edge-counted-backward', 131, expected=[fifo_full])
+    terminal.key(b'w')
+    state('edge-next-within-compressed-column', 133, expected=[fifo_full])
+    terminal.key(b'b')
+    state('edge-previous-within-compressed-column', 131, expected=[fifo_full])
+    terminal.key(b'\x1b[Z')  # Shift-Tab: Waves → Signals.
+    terminal.key(b'/\x17\r')
+    state('edge-focus-clock-at-same-tick', 131, expected=[active_signal('clk')])
+    terminal.key(b'\t')
+    terminal.key(b'w')
+    state('edge-next-clock', 8192, expected=[active_signal('clk')])
+    terminal.key(b'b')
+    state('edge-previous-clock', 5, expected=[active_signal('clk')])
+    check(True, 'Waves w/b follows exact transitions of the signal focused in Signals, even disabled')
 
     focus('Session')
     terminal.key(b'2')
