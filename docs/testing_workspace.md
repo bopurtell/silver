@@ -15,29 +15,13 @@ Owner visual review of the new composition remains separate from automated accep
 
 ## Open it in the real example
 
-The FIFO provider is already installed persistently and the root companion config
-is present. Start matching refreshed Workbench binaries after active jobs finish:
-
-Binary refresh receipt under the example's `.dev/workbench-real-demo/`:
-`receipts/refresh-binaries-3dc29d7ad10a45c58a856bab877984b4/`.
-
-**Terminal 1:**
-
-```sh
-cd /home/wayne/devel/jane/silver
-python3 -B scripts/real-asic-example-demo.py daemon
-```
-
-**Terminal 2:**
-
-```sh
-cd /home/wayne/devel/jane/silver
-python3 -B scripts/real-asic-example-demo.py client
-```
-
-No reseed or ASIC rerun is needed. Existing live processes were not restarted by
-implementation. The helper reopens saved state; tests were executed in private
-acceptance state, so they do not appear as preseeded attempts in your live history.
+For fresh runs, use the example's
+[checkout-backed launcher](../../hardcaml_asic_example/docs/workbench_main.md).
+The current catalog includes `controlled-fifo` and **Memory workloads**
+(`memory-workloads`). For the fixed memory cases and seed, see
+[Run the example workload](workloads.md#run-the-example-workload).
+The [earlier real-demo setup](real_asic_example_demo.md) remains available as
+historical context for retained FIFO acceptance.
 
 1. Open **Space c c → Create Testing workspace** for a new default arrangement.
 2. Tab to **simulation-catalog**. Silver loads the configured project's suites
@@ -74,8 +58,18 @@ execution        cases            selected attempt job logs
 The compact utility column and two investigation columns use **2:3:3** width
 weights from `terminal/workspaces/stock.sexp`. Cases and artifacts refer to the selected simulation
 attempt, not the ASIC run selected in Overview. Full IDs and captured provenance
-remain inspectable in Detail. The artifact list prioritizes labels/case ownership;
-selecting an artifact exposes its exact ID, bytes, digest and media type in Detail.
+remain inspectable in Detail.
+
+- **Simulation Catalog** is for the next run: choose a suite and cases, then
+  review the launch form. Browsing the catalog does not retarget Detail.
+- **Simulation Detail** follows the selected **Simulation Attempts** row. Suite,
+  seed and parameters are the inputs captured for that attempt. Case outcomes
+  and diagnostics are results from that same attempt. Selecting an artifact adds
+  its identity, availability, digest, media type and size. Size uses decimal
+  bytes (`1.25 MB` = 1,250,000 bytes); `unknown` means no size was reported.
+- **Project Tests** lists jobs from **Run project tests** (the project's Dune
+  test alias). Look here for the generic test process result; use **Simulation
+  Attempts** for provider-reported case results, seeds and artifacts.
 
 - The six panes share one **client/workspace-local** investigation and one polling
   stream. A second Testing workspace/client has its own selection.

@@ -37,7 +37,8 @@ def provider():
     p.add_argument('--artifact-dir', type=Path)
     a = p.parse_args(sys.argv[2:])
     if a.operation == 'discover':
-        print(wire.sexp(wire.catalog(cases=['flops256', 'exact256'])))
+        suite = Path('suite-id').read_text().strip()
+        print(wire.sexp(wire.catalog(suite=suite, cases=['flops256', 'exact256'])))
         return
     request = dict(wire.parse(a.request.read_text()))
     selection = dict(request['selection'])
@@ -100,12 +101,16 @@ def run(args, evidence):
 
     try:
         session.start()
-        catalog = session.discover()
         attempts = []
-        for seed in ('1', '2'):
+        # Retain a capture from the old catalog before switching to the renamed suite.
+        for seed, suite in [('1', 'pt8-memory-workloads'), ('2', 'memory-workloads')]:
+            (root / 'suite-id').write_text(suite)
+            catalog = session.discover()
+            check([field(s, 'id') for s in field(field(catalog, 'discovery')[0], 'suites')]
+                == [suite], 'discovery advertises only ' + suite)
             snap = session.api(operation=['Launch', ['submission_key', 'seed-' + seed],
                 ['discovery_digest', field(catalog, 'discovery_digest')[0]], ['selection', [
-                    ('suite', 'fixture'), ('cases', ['flops256', 'exact256']), ('seed', seed),
+                    ('suite', suite), ('cases', ['flops256', 'exact256']), ('seed', seed),
                     ('parameters', []), ('asic_inputs', [])]]])
             attempts.append(session.done(field(field(snap, 'attempts')[0], 'id')))
         proxy = embedded.DelayedBytesProxy(session.url, evidence)
@@ -131,8 +136,17 @@ def run(args, evidence):
             terminal.key(b'\t')
 
         def reopen(attempt):
-            terminal.palette('Simulation: Reopen ' + field(attempt, 'id') + ' fixture')
+            suite = field(field(field(attempt, 'captured'), 'selection'), 'suite')
+            terminal.palette('Simulation: Reopen ' + field(attempt, 'id') + ' ' + suite)
             terminal.palette('Simulation: Select case flops256')
+
+        def check_inspect_action(label):
+            # Exercise discovery of the action without executing nonexistent retained paths.
+            for key in (b' ', b'c', b'c'):
+                terminal.key(key)
+            terminal.key(b'Inspect workload result (selected Testing case)')
+            terminal.capture(label, ['Inspect workload result'], absent=['No matching commands'])
+            terminal.key(b'\x1b')
 
         reopen(attempts[0])
         for _ in range(3):
@@ -141,14 +155,11 @@ def run(args, evidence):
         terminal.capture('json-only-no-vcd', ['No available supported VCD'],
             absent=['Embedded viewer supports VCD only', 'Captured waveform identity'])
         check(not proxy.records, 'JSON-only w does not fetch/pin a JSON waveform')
-        # Workload inspection stays discoverable without executing nonexistent retained paths.
-        for key in (b' ', b'c', b'c'):
-            terminal.key(key)
-        terminal.key(b'Inspect workload result (selected Testing case)')
-        terminal.capture('json-inspect-action', ['Inspect workload result'], absent=['No matching commands'])
-        terminal.key(b'\x1b')
-        check(True, 'JSON-only case retains Inspect workload result action')
+        check_inspect_action('legacy-json-inspect-action')
+        check(True, 'legacy JSON-only case retains Inspect workload result action')
         reopen(attempts[1])
+        check_inspect_action('current-json-inspect-action')
+        check(True, 'current mixed case exposes Inspect workload result action')
         terminal.key(b'w')
         terminal.capture('mixed-flops-quick', ['flops256.clk', 'Cursor'], absent=['exact256.clk'])
         check(all('flops256-waveform' in r['request']['artifact_id'] for r in proxy.records),
@@ -231,6 +242,9 @@ def run(args, evidence):
         check(True, 'pinned case picker excludes another case VCD')
         check(all(r['request']['artifact_id'].endswith('-waveform') for r in proxy.records),
             'production byte requests never target result-reference JSON')
+        terminal.palette('Workloads: Launch fresh memory workload')
+        terminal.capture('memory-workload-launch', ['Suite: memory-workloads'])
+        check(True, 'Workloads launch opens Testing with the renamed suite')
     finally:
         # A deadline interrupts the scenario, not its bounded cleanup. ExitStack
         # still attempts every cleanup if a preceding callback raises.
@@ -271,9 +285,9 @@ def main():
     try:
         with ExitStack() as cleanup:
             if args.ephemeral:
-                evidence = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='pt8-waveform-pty-')))
+                evidence = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='workload-waveform-pty-')))
             else:
-                evidence = Path(tempfile.mkdtemp(prefix='pt8-waveform-pty-', dir='/tmp/opencode'))
+                evidence = Path(tempfile.mkdtemp(prefix='workload-waveform-pty-', dir='/tmp/opencode'))
             signal.alarm(args.timeout_seconds)
             run(args, evidence)
     finally:

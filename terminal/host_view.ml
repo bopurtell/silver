@@ -13,6 +13,7 @@ module Role = struct
     | Foreground
     | Surface
     | Muted
+    | Field_label
     | Border
     | Focus
     | Selection
@@ -39,7 +40,7 @@ module Role = struct
       (match role with
        | Selection | Active_tab -> p.selection
        | Surface | Matched -> p.surface
-       | Foreground ->
+       | Foreground | Field_label ->
          (match appearance.preset with
           | Studio | Structured_studio -> p.card
           | _ -> p.background)
@@ -61,7 +62,7 @@ module Role = struct
     in
     color
       (match role with
-       | Muted | Inactive_tab -> p.muted
+       | Muted | Field_label | Inactive_tab -> p.muted
        | Border ->
          (match appearance.color with
           | Vivid -> p.border
@@ -1658,9 +1659,23 @@ let indicator_role : Indicator.t -> Role.t = function
   | Info -> Muted
 ;;
 
-let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width host data tile =
+let detail_field_gutter appearance ~width =
+  (* Align fields with and without icons; leave the text room on very narrow panes. *)
+  let icon_width = View.width (indicator_view appearance Muted Seed) in
+  if width > icon_width then icon_width else 0
+;;
+
+let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width ?width host data tile
+  =
   match Testing_workspace.pane tile.W.Tile.kind with
   | Some pane ->
+    let width =
+      match pane with
+      | Detail ->
+        Option.map width ~f:(fun width ->
+          width - detail_field_gutter host.H.appearance ~width)
+      | _ -> width
+    in
     (match pane with
      | Catalog ->
        [ Simulation_view.row ~hint:true "d discover | n/p suite | j/k case | x toggle"
@@ -1676,6 +1691,7 @@ let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width host data t
         ~now
         ~string_compression:(H.policy host tile).string_compression
         ?identifier_width
+        ?width
         (H.testing_state host tile.id)
         pane
         ~log_lines:data.log_lines
@@ -1687,18 +1703,52 @@ let simulation_annotations ?(now = Time_ns.now ()) ?identifier_width host data t
       ~log_lines:data.log_lines
 ;;
 
-let annotated_physical_rows ?indicator_frames host ~width annotations =
+let annotated_physical_rows
+  ?indicator_frames
+  ?(detail_fields = false)
+  host
+  ~width
+  annotations
+  =
+  let field_gutter =
+    if detail_fields then detail_field_gutter host.H.appearance ~width else 0
+  in
   annotations
   |> List.concat_map
        ~f:
          (fun
-           { Simulation_view.text; indicator = kind; value_start; selected; spans; target; _ } ->
-         let role = Option.value_map kind ~default:Role.Foreground ~f:indicator_role in
+           { Simulation_view.text
+           ; indicator = kind
+           ; value_start
+           ; selected
+           ; spans
+           ; target
+           ; heading
+           ; _
+           }
+         ->
+         let indicator_role =
+           Option.value_map kind ~default:Role.Foreground ~f:indicator_role
+         in
+         let label_role = if detail_fields then Role.Field_label else Foreground in
+         let value_role =
+           (* Detail field icons like Seed do not give their value a status color. *)
+           match kind with
+           | Some (Pending | Running | Completed | Failed | Skipped | Unknown) ->
+             indicator_role
+           | _ when detail_fields -> Role.Foreground
+           | _ -> indicator_role
+         in
          let icon =
            Option.value_map
              kind
              ~default:View.none
-             ~f:(indicator_view ?indicator_frames host.H.appearance role)
+             ~f:(indicator_view ?indicator_frames host.H.appearance indicator_role)
+         in
+         let icon =
+           if detail_fields && Option.is_some value_start
+           then box ~width:field_gutter ~height:1 icon
+           else icon
          in
          let used = ref 0 in
          wrap_cells ~width:(width - View.width icon) text
@@ -1730,10 +1780,10 @@ let annotated_physical_rows ?indicator_frames host ~width annotations =
                  | Some { tone = Running; _ } -> Running
                  | Some { tone = Muted; _ } -> Muted
                  | None ->
-                   if Option.value_map value_start ~default:false ~f:(fun n ->
-                        position >= n)
-                   then role
-                   else Foreground
+                   (match value_start with
+                    | Some n when position >= n -> value_role
+                    | Some _ -> label_role
+                    | None -> if heading then Heading else Foreground)
                in
                View.text ~attrs:(Role.attrs host.appearance role) text
                |> View.crop ~l:start
@@ -1758,10 +1808,21 @@ let annotated_view_rows ?indicator_frames host ~width annotations =
 ;;
 
 let simulation_physical_rows ?indicator_frames ?now host data tile ~width =
-  simulation_annotations ?now ~identifier_width:(Int.max 1 (width - 8)) host data tile
+  let detail_fields =
+    match Testing_workspace.pane tile.W.Tile.kind with
+    | Some Detail -> true
+    | _ -> false
+  in
+  simulation_annotations
+    ?now
+    ~identifier_width:(Int.max 1 (width - 8))
+    ~width
+    host
+    data
+    tile
   |> List.filter ~f:(fun row ->
     (not row.Simulation_view.hint) || (H.policy host tile).hints)
-  |> annotated_physical_rows ?indicator_frames host ~width
+  |> annotated_physical_rows ?indicator_frames ~detail_fields host ~width
 ;;
 
 let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~width =
@@ -1808,14 +1869,16 @@ let execution_annotations host data (tile : W.Tile.t) =
       (List.map jobs ~f:(fun job -> Job_id.to_string job.Job.id))
   in
   (if H.compact_summary host tile
-   then [ row "Process results only" ]
+   then [ row (if project_tests then "Dune test jobs" else "Process results only") ]
    else
      List.map
        [ (if project_tests
-          then "Project tests (not ASIC-run scoped)"
+           then "Project tests (not ASIC-run scoped)"
           else "Project execution attempts")
-       ; "Environment: " ^ data.environment
-       ; "Case details / progress: unavailable (generic command runner)"
+        ; "Environment: " ^ data.environment
+        ; (if project_tests
+           then "Dune test jobs: process results only"
+           else "Case details / progress: unavailable (generic command runner)")
        ]
        ~f:row)
   @ (if (H.policy host tile).hints then [ row ~hint:true "b build | t test" ] else [])
@@ -2072,7 +2135,7 @@ let rows host data tile ~width ~height =
             ; "Use Inspect timing paths for this exact run"
             ])
        | kind when H.simulation_kind kind ->
-         simulation_annotations host data tile
+         simulation_annotations ~width host data tile
          |> List.filter ~f:(fun row ->
            (not row.Simulation_view.hint) || (H.policy host tile).hints)
          |> List.map ~f:(fun row -> row.Simulation_view.text)
@@ -5578,7 +5641,7 @@ let%test_unit "cooperative Testing renderer keeps project scope and bounded pane
     tile_view host data (find "project-tests") ~width:24 ~height:8 |> plain_text
   in
   assert (not (String.is_substring text ~substring:"Generic project tests"));
-  assert (String.is_substring text ~substring:"Process results only")
+  assert (String.is_substring text ~substring:"Dune test jobs")
 ;;
 
 let%test_unit "long cooperative lists follow typed wrapped cursors and respect manual \
@@ -5830,10 +5893,54 @@ let%test_unit "project command hints follow tile policy in compact and full imag
           String.is_substring
             image
             ~substring:
-              (if compact then "Process results only" else "Environment: fixture")))))
+              (if not compact
+               then "Environment: fixture"
+               else if String.equal kind "project-tests"
+               then "Dune test jobs"
+               else "Process results only")))))
 ;;
 
-let%test_unit "cooperative detail artifacts and logs paint typed values only" =
+let%test_unit "detail field ink follows light and dark themes across wrapped cells" =
+  let host, _, _ = refinement_fixture P.Testing.definition in
+  let ansi view =
+    let buffer = Buffer.create 200 in
+    Notty.Render.to_buffer
+      buffer
+      Notty.Cap.ansi
+      (0, 0)
+      (View.width view, View.height view)
+      (View.Private.notty_image view);
+    Buffer.contents buffer
+  in
+  let label = "鍵: " in
+  let row =
+    Simulation_view.row ~indicator:Seed ~value_start:(cell_width label) (label ^ "value")
+  in
+  List.iter [ Appearance.Scheme.silver_dark; Appearance.Scheme.silver_light ] ~f:(fun scheme ->
+    let appearance = { host.appearance with scheme; preset = Studio; icons = Ascii } in
+    let palette = Appearance.Scheme.palette scheme in
+    let ink fg text =
+      View.text ~attrs:[ Attr.fg (Role.color fg); Attr.bg (Role.color palette.card) ] text
+    in
+    assert (palette.muted <> palette.foreground);
+    let host = { host with appearance } in
+    let actual =
+      annotated_physical_rows ~detail_fields:true host ~width:8 [ row ]
+      |> List.map ~f:(fun (_, (_, view)) -> View.crop ~l:2 view)
+    in
+    let expected =
+      [ View.hcat [ ink palette.muted label; ink palette.foreground "va" ]
+      ; ink palette.foreground "lue"
+      ]
+    in
+    List.iter2_exn actual expected ~f:(fun actual expected ->
+      assert (
+        String.equal
+          (ansi (box ~width:(View.width expected) ~height:1 actual))
+          (ansi expected))))
+;;
+
+let%test_unit "cooperative detail artifacts and logs paint fields and typed statuses" =
   let host, data, find = refinement_fixture P.Testing.definition in
   let host = { host with appearance = { host.appearance with icons = None_ } } in
   let logs = [ "Passed Failed report artifact"; "Failed / Finished"; "case: Passed" ] in
@@ -5944,20 +6051,20 @@ let%test_unit "cooperative detail artifacts and logs paint typed values only" =
           let available =
             Simulation_view.atom Simulation.Artifact.Availability.sexp_of_t availability
           in
-          let check kind text segments =
-            let source = simulation_annotations host data (find kind) in
-            let index =
-              List.findi_exn source ~f:(fun _ r ->
-                String.equal r.Simulation_view.text text)
-              |> fst
-            in
-            let expected =
-              List.concat_map segments ~f:(fun (text, role) ->
-                Overview_tiles.display_clusters text
-                |> List.map ~f:(fun text -> text, role))
-            in
-            List.iter [ 7; 120 ] ~f:(fun width ->
-              let images = simulation_view_rows host data (find kind) ~width in
+           let check ~widths kind find_segments =
+             List.iter widths ~f:(fun width ->
+               let tile = find kind in
+               let source = simulation_annotations ~width host data tile in
+               let index, segments =
+                 List.find_mapi_exn source ~f:(fun i row ->
+                   Option.map (find_segments row) ~f:(fun segments -> i, segments))
+               in
+               let expected =
+                 List.concat_map segments ~f:(fun (text, role) ->
+                   Overview_tiles.display_clusters text
+                   |> List.map ~f:(fun text -> text, role))
+               in
+               let images = simulation_view_rows host data tile ~width in
               let offset =
                 List.take source index
                 |> List.sum (module Int) ~f:(fun r ->
@@ -5969,41 +6076,74 @@ let%test_unit "cooperative detail artifacts and logs paint typed values only" =
                   |> View.crop ~l:(i mod width)
                   |> box ~width:1 ~height:1
                 in
-                let expected = View.text ~attrs:(Role.attrs host.appearance role) text in
-                assert (String.equal (ansi actual) (ansi expected))))
-          in
-          check
-            "simulation-detail"
-            (result ^ " / " ^ life)
-            [ result, outcome_role; " / ", Foreground; life, lifecycle_role ];
-          check
-            "simulation-detail"
-            "Passed-case: Failed"
-            [ "Passed-case: ", Foreground; "Failed", Failure ];
-          check
-            "simulation-detail"
-            "Passed Failed diagnostic"
-            [ "Passed Failed diagnostic", Foreground ];
-          check
-            "simulation-detail"
-            ("Availability: " ^ available)
-            [ "Availability: ", Foreground; available, availability_role ];
-          check
-            "simulation-detail"
-            "Attempt: Failed-ID"
-            [ "Attempt: Failed-ID", Foreground ];
-          check
-            "simulation-artifacts"
+                 let expected = View.text ~attrs:(Role.attrs host.appearance role) text in
+                 assert (String.equal (ansi actual) (ansi expected))))
+           in
+           let check_text ?(widths = [ 7; 120 ]) kind text segments =
+             check ~widths kind (fun row ->
+               Option.some_if (String.equal row.Simulation_view.text text) segments)
+           in
+           let check_field ~label ~value ~role =
+             check ~widths:[ 120 ] "simulation-detail" (fun row ->
+               let text = row.Simulation_view.text in
+               if String.is_prefix text ~prefix:label && String.is_suffix text ~suffix:value
+               then
+                 let prefix = String.drop_suffix text (String.length value) in
+                 Some [ prefix, Role.Field_label; value, role ]
+               else None);
+             check_text ~widths:[ 7 ] "simulation-detail" label [ label, Field_label ];
+             check_text ~widths:[ 7 ] "simulation-detail" value [ value, role ]
+           in
+           check_text
+             "simulation-detail"
+             "selected attempt"
+             [ "selected attempt", Heading ];
+           check_text
+             "simulation-detail"
+             (result ^ " / " ^ life)
+             [ result, outcome_role; " / ", Foreground; life, lifecycle_role ];
+           check_field ~label:"Passed-case:" ~value:"Failed" ~role:Failure;
+           check_text
+             "simulation-detail"
+             "Passed Failed diagnostic"
+             [ "Passed Failed diagnostic", Foreground ];
+           check_field ~label:"Availability:" ~value:available ~role:availability_role;
+           check_field ~label:"Attempt:" ~value:"Failed-ID" ~role:Foreground;
+           List.iter Appearance.Icons.all ~f:(fun icons ->
+             let host = { host with appearance = { host.appearance with icons } } in
+             let images = simulation_view_rows host data (find "simulation-detail") ~width:80 in
+             let find_value ~label ~value =
+               List.find_map_exn images ~f:(fun image ->
+                 let text = plain_text image in
+                 if String.is_substring text ~substring:label
+                 then (
+                   let byte = String.substr_index_exn text ~pattern:value in
+                   let x = cell_width (String.prefix text byte) in
+                   let cell = View.crop ~l:x image |> box ~width:1 ~height:1 in
+                   let expected =
+                     View.text
+                       ~attrs:(Role.attrs host.appearance Foreground)
+                       (String.prefix value 1)
+                   in
+                   assert (String.equal (ansi cell) (ansi expected));
+                   Some x)
+                 else None)
+             in
+             let suite_x = find_value ~label:"Suite:" ~value:"suite" in
+             let seed_x = find_value ~label:"Seed:" ~value:"42" in
+             assert (suite_x = seed_x));
+           check_text
+             "simulation-artifacts"
             ("> Failed report — Passed-case [" ^ available ^ "]")
             [ "> Failed report — Passed-case [", Foreground
             ; available, availability_role
             ; "]", Foreground
             ];
-          check
+           check_text
             "simulation-logs"
             (life ^ "/" ^ result)
             [ life, lifecycle_role; "/", Foreground; result, outcome_role ];
-          check
+           check_text
             "simulation-logs"
             "Attempt: Failed-ID; job: Passed-job"
             [ "Attempt: Failed-ID; job: Passed-job", Foreground ];
@@ -6016,7 +6156,7 @@ let%test_unit "cooperative detail artifacts and logs paint typed values only" =
               logs
               (List.map projected ~f:(fun r -> r.Simulation_view.text)));
           List.iter logs ~f:(fun text ->
-            check "simulation-logs" text [ text, Foreground ])))
+             check_text "simulation-logs" text [ text, Foreground ])))
 ;;
 
 let%test_unit "Testing paints readiness and independent attempt facts in actual images" =
@@ -6448,7 +6588,7 @@ let%test_unit "generic job icons retain exact identity and completion vocabulary
           a
           ~substring:(Overview_tiles.short_id (Job_id.to_string job.id)));
       assert (String.is_substring a ~substring:(Job.State.to_string state));
-      assert (String.is_substring a ~substring:"Case details / progress: unavailable");
+      assert (String.is_substring a ~substring:"Dune test jobs: process results only");
       assert (not (String.is_substring a ~substring:"Passed"));
       List.iter
         [ 0, 0; 1, 1; 32, 8 ]

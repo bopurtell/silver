@@ -176,14 +176,14 @@ def run(args):
         # This suite checks exact provenance; compact rendering has its own WB-073 suite.
         terminal.palette('Strings (global): Show full identifiers')
         terminal.palette('Switch to Testing')
-        terminal.capture('testing-layout-120x40', ['simulation-catalog', 'simulation-detail', 'Project tests'])
+        terminal.capture('testing-layout-120x40', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
         terminal.wait_viewport('initial-120x40')
         check(True, 'initial Testing viewport painted at actual 120 columns and 40 rows')
         terminal.resize(180, 55)
-        terminal.capture('testing-layout-180x55', ['simulation-catalog', 'simulation-detail', 'Process results only'])
+        terminal.capture('testing-layout-180x55', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
         check(True, 'resized Testing viewport painted at actual 180 columns and 55 rows')
         terminal.resize(120, 40)
-        terminal.capture('testing-layout-return-120x40', ['simulation-catalog', 'simulation-detail', 'Process results only'])
+        terminal.capture('testing-layout-return-120x40', ['simulation-catalog', 'simulation-detail', 'Dune test jobs'])
         check(True, 'Testing viewport repainted at actual 120 columns and 40 rows after returning')
         check([r['operation'] for r in records()] == ['discover'],
               'render and workspace navigation do not repeat startup discovery or launch tests')

@@ -15,6 +15,8 @@ import time
 import traceback
 
 sys.dont_write_bytecode = True
+from fixtures.example_simulation_suites import captured_suite_ids
+
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('capture_smoke_support', HERE / 'test-development-session.py')
 c = importlib.util.module_from_spec(spec)
@@ -49,7 +51,9 @@ def main():
             check(path.is_file() and not path.is_symlink(), 'private current-closure regular config ' + kind)
         session.start()
         discovered = session.discover()
-        check([c.field(s, 'id') for s in c.field(c.field(discovered, 'discovery')[0], 'suites')] == ['controlled-fifo', 'pt8-memory-workloads'], 'private production native Discover exact two-suite union')
+        suites = c.field(c.field(discovered, 'discovery')[0], 'suites')
+        check([c.field(s, 'id') for s in suites] == captured_suite_ids(manifest),
+              'private production native Discover exact two-suite union')
         c.save(args.evidence / 'native-discovery.json', discovered)
         snapshot = session.api(domain='asic', operation='Discover')
         deadline = time.monotonic() + 30

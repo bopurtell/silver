@@ -7222,8 +7222,8 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           <- { session.host with
                focus = Some tile.id
              ; notice =
-                 "Testing: Discover suites; select pt8-memory-workloads, then Launch \
-                  selected subset form"
+                  "Testing: Discover suites; select memory-workloads, then Launch \
+                   selected subset form"
              };
           simulation_request session tile.id Discover)
     | Workload_reference (tile_id, artifact) ->

@@ -64,6 +64,7 @@
   asic_intents
   simulation_view
   simulation_catalog
+  testing_artifact_size
   testing_workspace
   simulation_export
   export_clipboard

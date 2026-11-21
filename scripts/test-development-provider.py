@@ -16,6 +16,8 @@ import sys
 import traceback
 
 sys.dont_write_bytecode = True
+from fixtures.example_simulation_suites import FIFO_SUITE, captured_suite_ids
+
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('development_provider_wire', HERE / 'test-native-simulation.py')
 wire = importlib.util.module_from_spec(spec)
@@ -75,7 +77,7 @@ def main():
             check(not result.stdout, label + ': no partial catalog emitted')
         return result
 
-    def request(label, suite='controlled-fifo', seed='42', cases=None, parameters=None):
+    def request(label, suite=FIFO_SUITE, seed='42', cases=None, parameters=None):
         directory = output / label
         directory.mkdir()
         artifacts = directory / 'artifacts'
@@ -90,36 +92,42 @@ def main():
                                        '--events', str(events), '--artifact-dir', str(artifacts)]
 
     try:
-        children = {}
+        suite_ids = captured_suite_ids(manifest)
+        fifo_suite, memory_suite = suite_ids
         union = []
-        for suite, command in manifest['provider_commands'].items():
+        for suite in suite_ids:
+            command = manifest['provider_commands'][suite]
             result = invoke(command + ['discover', '--protocol-version', '1'])
             check(result.returncode == 0, 'real child discovery ' + suite)
             (output / (suite + '.sexp')).write_bytes(result.stdout)
-            children[suite] = wire.parse(result.stdout.decode())
-            union.extend(wire.field(children[suite], 'suites'))
+            suites = wire.field(wire.parse(result.stdout.decode()), 'suites')
+            check([wire.field(item, 'id') for item in suites] == [suite],
+                  'real child owns exact suite ID ' + suite)
+            union.extend(suites)
         real = discover(manifest, 'real-composite')
         check(wire.field(wire.parse(real.stdout.decode()), 'suites') == union,
-              'exact FIFO-then-PT8 union preserves all seeds/cases/options/labels')
+               'exact FIFO-then-memory union preserves all seeds/cases/options/labels')
         copied = json.loads(json.dumps(manifest))
         fake_commands = {}
         record = output / 'exec-record.json'
-        for suite in manifest['provider_commands']:
+        for suite in suite_ids:
             fake_commands[suite] = [sys.executable, '-B', str(Path(__file__).resolve()), '_child',
                 '--catalog', str(output / (suite + '.sexp')), '--mode', 'valid', '--record', str(record)]
         for mode in ('failure', 'invalid', 'oversize'):
             copied['provider_commands'] = dict(fake_commands)
-            command = list(fake_commands['pt8-memory-workloads'])
+            command = list(fake_commands[memory_suite])
             command[command.index('valid')] = mode
-            copied['provider_commands']['pt8-memory-workloads'] = command
+            copied['provider_commands'][memory_suite] = command
             discover(copied, mode, success=False)
         copied['provider_commands'] = dict(fake_commands)
-        copied['provider_commands']['pt8-memory-workloads'] = fake_commands['controlled-fifo']
+        copied['provider_commands'][memory_suite] = fake_commands[fifo_suite]
         discover(copied, 'duplicate-child-suite', success=False)
         copied['provider_commands'] = fake_commands
         current.write_text(json.dumps(copied))
         for suite in fake_commands:
-            path, events, artifacts, tail = request('route-' + suite, suite=suite)
+            selection = (dict(seed='34097', cases=['exact256'], parameters=[])
+                         if suite == memory_suite else {})
+            path, events, artifacts, tail = request('route-' + suite, suite=suite, **selection)
             proc = subprocess.Popen(router + ['--manifest=' + str(current), *tail], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = proc.communicate(timeout=30)
             observed = json.loads(record.read_text())
@@ -131,8 +139,8 @@ def main():
         invalid = [('unknown-suite', dict(suite='unknown')),
             ('fifo-invalid-uint64', dict(seed='18446744073709551616')),
             ('fifo-duplicate-case', dict(cases=['directed', 'directed'])),
-            ('pt8-invalid-seed', dict(suite='pt8-memory-workloads', seed='42', cases=['exact256'], parameters=[])),
-            ('pt8-unknown-case', dict(suite='pt8-memory-workloads', seed='34097', cases=['unknown'], parameters=[]))]
+            ('pt8-invalid-seed', dict(suite=memory_suite, seed='42', cases=['exact256'], parameters=[])),
+            ('pt8-unknown-case', dict(suite=memory_suite, seed='34097', cases=['unknown'], parameters=[]))]
         for label, values in invalid:
             path, events, artifacts, tail = request(label, **values)
             result = invoke(router + ['--manifest', str(current), *tail])

@@ -7,7 +7,7 @@ module V = Terminal_presentation.Simulation_view
 module S = Simulation
 
 let main () =
-  let root = Core_unix.mkdtemp "/tmp/opencode/pt8-handoff-capture-" in
+  let root = Core_unix.mkdtemp "/tmp/opencode/memory-workload-handoff-capture-" in
   let backend = Backend.create ~state_dir:(Filename.concat root "state") in
   let project = Backend.project backend root in
   let dir = Filename.concat project.dir "entry" in
@@ -21,7 +21,7 @@ let main () =
     ; parent = None
     ; captured =
         { selection =
-            { suite = "pt8-memory-workloads"
+            { suite = "memory-workloads"
             ; cases = [ "flops256"; "exact256" ]
             ; seed = "34097"
             ; parameters = []
@@ -388,8 +388,8 @@ let main () =
      bad metadata, restored digest, late replies and production catalog/shortcuts passed\n\
      %!";
   printf
-    "PT8 handoff: actual FS2 capture/read, both cases and attempt/case namespace \
-     negatives passed\n\
+    "Memory workload handoff: actual FS2 capture/read, both cases and attempt/case \
+     namespace negatives passed\n\
      %!";
   Deferred.unit
 ;;

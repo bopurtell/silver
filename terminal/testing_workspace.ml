@@ -94,6 +94,8 @@ let artifact_identity t =
 ;;
 
 let workload_artifact t =
+  (* Bind retained references to captured case and artifact identity, not to the
+     provider's current catalog or suite name. *)
   match Simulation_view.detail t.view with
   | _ when Option.is_some t.restored_artifact && Option.is_none (artifact t) -> None
   | Some d
@@ -135,7 +137,7 @@ let waveform_restore_available t =
   | Some _ ->
     Option.value_map (artifact t) ~default:false ~f:(fun a ->
       (* Legacy sidecars lack role metadata. Only an admitted same-case VCD or the typed
-         PT8 JSON reference may authorize waveform selection. *)
+          workload result reference may authorize waveform selection. *)
       Option.equal String.equal a.case_id t.view.case_id
       && (Or_error.is_ok (Simulation_export.embedded_vcd a)
           || Option.exists (workload_artifact t) ~f:(S.Artifact.equal a)))
@@ -373,89 +375,165 @@ let atom = Simulation_view.atom
 let row = Simulation_view.row
 let attempt_label id = Presentation.identifier ~compress:true id
 
-let artifact_details ~identity (a : S.Artifact.t) =
-  [ row ("Selected artifact: " ^ identity a.id)
-  ; row ("Artifact label: " ^ a.label)
-  ; row ("Artifact attempt: " ^ identity a.attempt_id)
-  ; row ("Artifact case: " ^ Option.value a.case_id ~default:"suite")
-  ; row
-      ~spans:
-        [ Simulation_view.span
-            ~start:(Simulation_view.text_width "Availability: ")
-            (Simulation_view.availability_tone a.availability)
-            (atom S.Artifact.Availability.sexp_of_t a.availability)
-        ]
-      ("Availability: " ^ atom S.Artifact.Availability.sexp_of_t a.availability)
-  ; row ("Kind: " ^ a.kind ^ "; media type: " ^ a.media_type)
-  ; row ("SHA256: " ^ Option.value_map a.sha256 ~default:"unavailable" ~f:identity)
-  ; row ("Artifact bytes: " ^ Option.value_map a.size ~default:"unknown" ~f:Int.to_string)
-  ]
+type detail_field =
+  { label : string
+  ; value : string
+  ; indicator : Indicator.t option
+  ; value_spans : Simulation_view.span list
+  ; notes : string list
+  }
+
+let field ?indicator ?(value_spans = []) ?(notes = []) label value =
+  { label = Artifact_view.safe label ^ ":"; value; indicator; value_spans; notes }
 ;;
 
-let detail_rows ?(now = Time_ns.now ()) ~identity t (d : S.Attempt.t) =
-  [ row
-      ~indicator:(Simulation_view.attempt_indicator d.lifecycle d.outcome)
-      ~spans:
+let detail_column ?width fields =
+  (* Keep ten cells for values (enough for most status words). Stack labels that do not
+     fit this budget without pushing the other fields out of alignment. *)
+  List.fold fields ~init:0 ~f:(fun column field ->
+    let start = Simulation_view.text_width field.label + 1 in
+    if Option.value_map width ~default:true ~f:(fun width -> start <= width - 10)
+    then Int.max column start
+    else column)
+;;
+
+let field_rows ~column { label; value; indicator; value_spans; notes } =
+  let first, rest =
+    match String.split_lines value with
+    | [] -> "", []
+    | first :: rest -> first, rest
+  in
+  let first = Artifact_view.safe first in
+  let label_width = Simulation_view.text_width label in
+  let rows =
+    if label_width < column
+    then (
+      let spans =
+        List.map value_spans ~f:(fun (s : Simulation_view.span) ->
+          { s with start = column + s.start })
+      in
+      [ row
+          ?indicator
+          ~value_start:column
+          ~spans
+          (label ^ String.make (column - label_width) ' ' ^ first)
+      ])
+    else
+      [ row ~value_start:label_width label
+      ; row ?indicator ~value_start:0 ~spans:value_spans first
+      ]
+  in
+  rows @ List.map rest ~f:(row ~value_start:0) @ List.map notes ~f:row
+;;
+
+let detail_group ?width heading ?(intro = []) fields =
+  let column = detail_column ?width fields in
+  row ~heading:true heading :: (intro @ List.concat_map fields ~f:(field_rows ~column))
+;;
+
+let artifact_details ?width ~identity (a : S.Artifact.t) =
+  let availability = atom S.Artifact.Availability.sexp_of_t a.availability in
+  [ field "Artifact label" a.label
+  ; field "Artifact size" (Testing_artifact_size.format a.size)
+  ; field
+      ~value_spans:
         [ Simulation_view.span
             ~start:0
-            (Simulation_view.outcome_tone d.outcome)
-            (atom S.Outcome.sexp_of_t d.outcome)
-        ; Simulation_view.span
-            ~start:
-              (Simulation_view.text_width (atom S.Outcome.sexp_of_t d.outcome ^ " / "))
-            (Simulation_view.lifecycle_tone d.lifecycle)
-            (atom S.Lifecycle.sexp_of_t d.lifecycle)
+            (Simulation_view.availability_tone a.availability)
+            availability
         ]
-      (atom S.Outcome.sexp_of_t d.outcome ^ " / " ^ atom S.Lifecycle.sexp_of_t d.lifecycle)
+      "Availability"
+      availability
+  ; field "Artifact ID" (identity a.id)
+  ; field "Artifact attempt" (identity a.attempt_id)
+  ; field "Artifact case" (Option.value a.case_id ~default:"suite")
+  ; field "Kind" a.kind
+  ; field "Media type" a.media_type
+  ; field "SHA256" (Option.value_map a.sha256 ~default:"unavailable" ~f:identity)
   ]
-  @ [ row (Execution_time_view.line ~now d.execution_timing) ]
-  @ List.concat_map d.cases ~f:(fun c ->
-    if Option.equal String.equal t.view.case_id (Some c.case_id)
-       || S.Case_status.equal c.status Failed
-    then
-      [ row
-          ~indicator:(Simulation_view.case_indicator ~lifecycle:d.lifecycle c.status)
-          ~value_start:(Simulation_view.text_width (c.case_id ^ ": "))
-          (c.case_id ^ ": " ^ atom S.Case_status.sexp_of_t c.status)
-      ]
-      @ List.map (Option.to_list c.message) ~f:row
-    else [])
-  @ List.map (Option.to_list d.diagnostic) ~f:row
-  @ Option.value_map (artifact t) ~default:[] ~f:(artifact_details ~identity)
-  @ [ row ("Attempt: " ^ identity d.id)
-    ; row ("Project: " ^ d.project_root)
-    ; row ("Job: " ^ identity (Job_id.to_string d.job))
-    ; row ("Created: " ^ d.created_at)
-    ; row ("Suite: " ^ d.captured.selection.suite)
-    ; row ~indicator:Seed ("Seed: " ^ d.captured.selection.seed)
-    ; row ("Captured cases: " ^ String.concat ~sep:", " d.captured.selection.cases)
-    ; row
-        ("Parameters: "
-         ^ Sexp.to_string_mach
-             ([%sexp_of: (string * string) list] d.captured.selection.parameters))
-    ; row ("Discovery: " ^ identity d.captured.discovery_digest)
-    ; row ("Provider: " ^ d.captured.provider_executable)
-    ; row
-        ("Provider arguments: "
-         ^ Sexp.to_string_mach ([%sexp_of: string list] d.captured.provider_args))
-    ; row
-        ("Environment: " ^ atom V1.Environment_selection.sexp_of_t d.captured.environment)
-    ; row
-        ("Process exit: "
-         ^ Option.value_map d.exit_code ~default:"unreported" ~f:Int.to_string)
+  |> detail_group ?width "selected artifact"
+;;
+
+let detail_rows ~now ?width ~identity t (d : S.Attempt.t) =
+  let outcome = atom S.Outcome.sexp_of_t d.outcome in
+  let lifecycle = atom S.Lifecycle.sexp_of_t d.lifecycle in
+  let status =
+    row
+      ~indicator:(Simulation_view.attempt_indicator d.lifecycle d.outcome)
+      ~spans:
+        [ Simulation_view.span ~start:0 (Simulation_view.outcome_tone d.outcome) outcome
+        ; Simulation_view.span
+            ~start:(Simulation_view.text_width (outcome ^ " / "))
+            (Simulation_view.lifecycle_tone d.lifecycle)
+            lifecycle
+        ]
+      (outcome ^ " / " ^ lifecycle)
+  in
+  let summary =
+    [ field "Time" (Execution_time_view.value ~now d.execution_timing)
+    ; field
+        "Process exit"
+        (Option.value_map d.exit_code ~default:"unreported" ~f:Int.to_string)
     ]
-  @ Option.value_map d.parent ~default:[] ~f:(fun p ->
-    [ row ("Rerun parent attempt: " ^ identity p.attempt_id)
-    ; row ("Rerun parent job: " ^ identity (Job_id.to_string p.job))
-    ])
-  @ List.map d.captured.selection.asic_inputs ~f:(fun input ->
-    row ("Explicit ASIC reference: " ^ atom S.Asic_input.sexp_of_t input))
+  in
+  let attempt =
+    [ field "Attempt" (identity d.id)
+    ; field "Project" d.project_root
+    ; field "Job" (identity (Job_id.to_string d.job))
+    ; field "Created" d.created_at
+    ]
+    @ Option.value_map d.parent ~default:[] ~f:(fun p ->
+      [ field "Rerun parent attempt" (identity p.attempt_id)
+      ; field "Rerun parent job" (identity (Job_id.to_string p.job))
+      ])
+  in
+  let cases =
+    List.filter_map d.cases ~f:(fun c ->
+      if Option.equal String.equal t.view.case_id (Some c.case_id)
+         || S.Case_status.equal c.status Failed
+      then
+        Some
+          (field
+             ~indicator:(Simulation_view.case_indicator ~lifecycle:d.lifecycle c.status)
+             ~notes:(Option.to_list c.message)
+             c.case_id
+             (atom S.Case_status.sexp_of_t c.status))
+      else None)
+  in
+  let captured =
+    [ field "Suite" d.captured.selection.suite
+    ; field ~indicator:Seed "Seed" d.captured.selection.seed
+    ; field "Captured cases" (String.concat ~sep:", " d.captured.selection.cases)
+    ; field
+        "Parameters"
+        (Sexp.to_string_mach
+           ([%sexp_of: (string * string) list] d.captured.selection.parameters))
+    ; field "Discovery" (identity d.captured.discovery_digest)
+    ; field "Provider" d.captured.provider_executable
+    ; field
+        "Provider arguments"
+        (Sexp.to_string_mach ([%sexp_of: string list] d.captured.provider_args))
+    ; field "Environment" (atom V1.Environment_selection.sexp_of_t d.captured.environment)
+    ]
+    @ List.map d.captured.selection.asic_inputs ~f:(fun input ->
+      field "Explicit ASIC reference" (atom S.Asic_input.sexp_of_t input))
+  in
+  detail_group ?width "selected attempt" ~intro:[ status ] summary
+  @ (if List.is_empty cases then [] else detail_group ?width "case results" cases)
+  @ Option.value_map (artifact t) ~default:[] ~f:(artifact_details ?width ~identity)
+  @ detail_group
+      ?width
+      "attempt details"
+      ~intro:(List.map (Option.to_list d.diagnostic) ~f:row)
+      attempt
+  @ detail_group ?width "captured inputs" captured
 ;;
 
 let rows
   ?(now = Time_ns.now ())
   ?(string_compression = true)
   ?identifier_width
+  ?width
   t
   pane
   ~log_lines
@@ -547,7 +625,7 @@ let rows
       Option.value_map
         detail
         ~default:[ row "Select an attempt for outcome and captured inputs" ]
-        ~f:(detail_rows ~now ~identity t)
+        ~f:(detail_rows ~now ?width ~identity t)
     | Artifacts ->
       Option.value_map
         detail
@@ -693,8 +771,8 @@ module Test_data = struct
   ;;
 end
 
-let%test_unit "PT8 result handoff resolves only the selected completed case and exact \
-               artifact"
+let%test_unit "workload result handoff resolves only the selected completed case and \
+               exact artifact"
   =
   let reference =
     { Test_data.artifact with
@@ -803,14 +881,17 @@ let%test_unit "detail resolves typed identities together without rewriting provi
     |> List.map ~f:(fun r -> r.Simulation_view.text)
   in
   let compact = project true in
-  let token prefix = List.find_map_exn compact ~f:(String.chop_prefix ~prefix) in
-  let tokens = [ token "Attempt: "; token "Job: "; token "Discovery: " ] in
+  let token lines prefix =
+    List.find_map_exn lines ~f:(String.chop_prefix ~prefix) |> String.lstrip
+  in
+  let tokens = List.map [ "Attempt:"; "Job:"; "Discovery:" ] ~f:(token compact) in
   assert (not (List.contains_dup tokens ~compare:String.compare));
   assert (List.for_all tokens ~f:(fun s -> String.is_substring s ~substring:"…"));
-  assert (List.mem compact ("Artifact label: " ^ label) ~equal:String.equal);
+  assert (String.equal (token compact "Artifact label:") label);
+  let full = project false in
   List.iter
-    [ "Attempt: " ^ aid; "Job: " ^ jid; "Discovery: " ^ digest ]
-    ~f:(fun line -> assert (List.mem (project false) line ~equal:String.equal));
+    [ "Attempt:", aid; "Job:", jid; "Discovery:", digest ]
+    ~f:(fun (prefix, value) -> assert (String.equal (token full prefix) value));
   assert (Option.equal String.equal t.view.attempt (Some aid));
   assert (S.Attempt.equal (Option.value_exn (Simulation_view.detail t.view)) d);
   assert (String.equal (Option.value_exn (artifact t)).attempt_id aid)
@@ -1125,10 +1206,13 @@ let%test_unit "cooperative rows keep facts typed full provenance and logs separa
     ; "/project"
     ; "/provider"
     ; "digest"
-    ; "Process exit: 0"
     ]
     ~f:(fun substring -> assert (String.is_substring text ~substring));
   assert (String.is_substring text ~substring:"artifact-full-id");
+  assert (
+    List.exists detail ~f:(fun r ->
+      Option.exists (String.chop_prefix r.text ~prefix:"Process exit:") ~f:(fun value ->
+        String.equal (String.lstrip value) "0")));
   let cases = rows t Cases ~log_lines:no_logs in
   assert (Option.equal Poly.equal (List.nth_exn cases 0).indicator (Some Indicator.Failed));
   assert (Option.is_some (List.nth_exn cases 0).value_start);
@@ -1145,6 +1229,24 @@ let%test_unit "cooperative rows keep facts typed full provenance and logs separa
   assert (Option.is_none (List.nth_exn logs 2).indicator);
   assert (List.is_empty (List.nth_exn logs 2).spans);
   assert (not (String.contains (List.nth_exn logs 3).text '\027'))
+;;
+
+let%test_unit "narrow detail stacks long labels without losing artifact identity" =
+  let t = Test_data.loaded () |> fun t -> select_case t "a" in
+  let artifact_id ~width =
+    let detail = rows ~width ~string_compression:false t Detail ~log_lines:(fun _ -> []) in
+    List.drop_while detail ~f:(fun r ->
+      not (String.is_prefix r.text ~prefix:"Artifact ID:"))
+  in
+  (match artifact_id ~width:16 with
+   | label :: value :: _ ->
+     [%test_result: string] label.text ~expect:"Artifact ID:";
+     [%test_result: string] value.text ~expect:"artifact-full-id"
+   | _ -> assert false);
+  let wide = List.hd_exn (artifact_id ~width:60) in
+  [%test_result: string]
+    (String.strip (String.chop_prefix_exn wide.text ~prefix:"Artifact ID:"))
+    ~expect:"artifact-full-id"
 ;;
 
 let%test_unit "large navigators expose a unique typed cursor; artifact identity stays \
@@ -1236,13 +1338,12 @@ let%test_unit "large navigators expose a unique typed cursor; artifact identity 
     |> String.concat ~sep:"\n"
   in
   List.iter
-    [ "artifact-31-exact-id"
-    ; "attempt-24-full-identity"
-    ; "full-sha256"
-    ; "text/plain"
-    ; "Artifact case: case-1023"
-    ]
+    [ "artifact-31-exact-id"; "attempt-24-full-identity"; "full-sha256"; "text/plain" ]
     ~f:(fun substring -> assert (String.is_substring detail ~substring));
+  assert (
+    List.exists (String.split_lines detail) ~f:(fun line ->
+      Option.exists (String.chop_prefix line ~prefix:"Artifact case:") ~f:(fun value ->
+        String.equal (String.lstrip value) "case-1023")));
   assert (String.equal (Option.value_exn (artifact t)).id "artifact-31-exact-id");
   assert (Option.is_some (artifact (select_case t "case-1023")));
   assert (Option.is_none (artifact (select_case t "case-0000")));
@@ -1294,7 +1395,9 @@ let%test_unit "compact attempt labels preserve short and non-ASCII identities" =
   assert (
     List.exists
       (rows t Detail ~log_lines:(fun _ -> assert false))
-      ~f:(fun r -> String.equal r.text ("Attempt: " ^ attempt_label id)))
+      ~f:(fun r ->
+        Option.exists (String.chop_prefix r.text ~prefix:"Attempt:") ~f:(fun value ->
+          String.equal (String.lstrip value) (attempt_label id))))
 ;;
 
 let%test_unit "attempts show durable durations independently of selected detail and clock"

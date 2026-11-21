@@ -26,6 +26,8 @@ import time
 import traceback
 
 sys.dont_write_bytecode = True
+from fixtures.example_simulation_suites import inspection_case
+
 HERE = Path(__file__).resolve().parent
 PRIVATE = Path('/tmp/opencode')
 EXAMPLE = HERE.parent.parent / 'hardcaml_asic_example'
@@ -324,10 +326,15 @@ def inspect_simulations(session, terminal, evidence, native_evidence, attempts):
         require(detail == original, 'retained exact original simulation attempt ' + aid)
         suite = field(field(field(detail, 'captured'), 'selection'), 'suite')
         terminal.palette('Simulation: Reopen ' + aid + ' ' + suite)
-        case = 'exact256' if suite == 'pt8-memory-workloads' else 'seeded'
+        case = inspection_case(suite)
         terminal.palette('Simulation: Select case ' + case)
         focus(terminal, 'simulation-detail')
-        terminal.capture('simulation-detail-' + aid, ['Seed:', 'Parameters:', 'Process exit: 0'])
+        def check_exit_row(label, fields=()):
+            text = terminal.capture(label, [*fields, 'Process exit:'])
+            require(any('Process exit: 0' in ' '.join(line.split()) for line in text.splitlines()),
+                    'Detail shows the selected attempt exited successfully')
+
+        check_exit_row('simulation-detail-' + aid, ['Seed:', 'Parameters:'])
         for artifact in field(detail, 'artifacts'):
             if field(artifact, 'case_id') != [case] or not field(artifact, 'label').endswith('.sexp'):
                 continue
@@ -347,7 +354,7 @@ def inspect_simulations(session, terminal, evidence, native_evidence, attempts):
                         break
                 require(time.monotonic() < deadline, 'production report export deadline')
                 terminal.drain(.1)
-            terminal.capture('report-export-' + aid, ['Process exit: 0'])
+            check_exit_row('report-export-' + aid)
         focus(terminal, 'simulation-catalog')
     save(evidence / 'simulation-inspection.json', dict(attempts=attempts,
         path='TUI/PTY detail/provenance and FIFO report export; original report bytes API-verified by native harness'))
@@ -750,7 +757,7 @@ def restart(args, evidence, report):
             terminal.capture('reopened-' + aid, [suite])
             for index, artifact in enumerate(field(detail, 'artifacts')):
                 artifact_bytes(session, detail, artifact, target / ('artifact-%d' % index))
-            case = 'exact256' if suite == 'pt8-memory-workloads' else 'seeded'
+            case = inspection_case(suite)
             terminal.palette('Simulation: Select case ' + case)
             wave = next(a for a in field(detail, 'artifacts') if field(a, 'case_id') == [case]
                         and field(a, 'media_type') in ('text/vcd', 'text/x-vcd'))

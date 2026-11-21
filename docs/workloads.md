@@ -26,7 +26,7 @@ covers rules normally distributed across test configuration, checking and monito
 | Waveform | Recorded signal activity; not the entire verification result |
 
 ```text
-pt8-memory-workloads suite
+memory-workloads suite
 ├── flops256 case → fixed memory workload on the Flops implementation
 └── exact256 case → same logical workload on the supported SRAM implementation
 ```
@@ -44,6 +44,10 @@ Use absolute result paths as seen by the Silver daemon. The paths below are
 relative to the example checkout and refer to a previously captured pair; if
 those retained files aren't available, [run the two example cases](#run-the-example-workload)
 and capture their fresh results instead.
+
+Older Testing attempts may show the original suite ID `pt8-memory-workloads`.
+Keep that ID when reopening an attempt; only the current catalog uses
+`memory-workloads`.
 
 1. Press **Space c c**, choose **Open Workloads workspace**.
 2. Choose **Workloads: Import exact retained result.json** and enter the absolute
@@ -75,8 +79,9 @@ its selected opam environment. If its daemon is already running, use `client`
 instead of `open`. In Silver:
 
 1. From the palette choose **Workloads: Launch fresh memory workload… (Testing)**.
-2. Select suite **pt8-memory-workloads** and open the existing launch form.
-3. Select **flops256**, **exact256**, or both positive cases.
+2. Select **Memory workloads** (`memory-workloads`) and open the launch form.
+3. Select **flops256** (256-word flip-flop memory), **exact256** (256-word SRAM
+   macro), or both.
 4. Keep seed **34097** (`0x8531`), then confirm **launch**.
 
 This is the supported fixed directed workload; the seed records its identity and

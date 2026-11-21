@@ -250,7 +250,7 @@ let digest_and_selection () =
     (Option.is_none warm.document)
 ;;
 
-let attempt id : S.Attempt.t =
+let attempt ~suite id : S.Attempt.t =
   { id
   ; job = Job_id.of_string "job-review"
   ; project_root = "/review"
@@ -258,7 +258,7 @@ let attempt id : S.Attempt.t =
   ; parent = None
   ; captured =
       { selection =
-          { suite = "pt8-memory-workloads"
+          { suite
           ; cases = [ "flops256"; "exact256" ]
           ; seed = "34097"
           ; parameters = []
@@ -310,7 +310,7 @@ let testing detail =
   T.Testing_workspace.set_view T.Testing_workspace.empty view
 ;;
 
-let production_artifact () =
+let production_artifact suite =
   (* Obtain the real backend-generated artifact identity, rather than assuming a provider
      declaration's ID is the public RPC ID. No provider/daemon is spawned. *)
   let root =
@@ -327,7 +327,7 @@ let production_artifact () =
       (d 'a')
   in
   Out_channel.write_all (Filename.concat source "reference.json") ~data:bytes;
-  let attempt = attempt "sim-review" in
+  let attempt = attempt ~suite "sim-review" in
   let record : Backend.Record.t =
     { schema_version = 1; submission_key = "review"; payload = ""; attempt }
   in
@@ -352,11 +352,11 @@ let production_artifact () =
   let detail = { attempt with artifacts = [ artifact ] } in
   let state = testing detail in
   expect
-    "Testing discovers a real backend-prefixed PT8 reference artifact"
+    ("Testing discovers a real backend-prefixed workload reference for " ^ suite)
     (Option.is_some (T.Testing_workspace.workload_artifact state));
   let explicitly = T.Testing_workspace.select_artifact state artifact.id in
   expect
-    "explicit artifact selection also enables the PT8 result handoff"
+    ("explicit artifact selection also enables the workload result handoff for " ^ suite)
     (Option.is_some (T.Testing_workspace.workload_artifact explicitly));
   expect
     "other case cannot borrow the captured reference"
@@ -655,7 +655,7 @@ let full_fs2_binding () =
   let source = Filename.concat dir "work/artifacts" in
   Core_unix.mkdir_p source;
   Out_channel.write_all (Filename.concat source "reference.json") ~data:"{}";
-  let detail = attempt "sim-review-binding" in
+  let detail = attempt ~suite:"memory-workloads" "sim-review-binding" in
   let entry : Backend.entry =
     { dir
     ; record =
@@ -765,7 +765,7 @@ let full_fs2_binding () =
 
 let () =
   digest_and_selection ();
-  production_artifact ();
+  List.iter [ "memory-workloads"; "pt8-memory-workloads" ] ~f:production_artifact;
   state_and_layout ();
   metadata_and_locator ();
   full_fs2_binding ();

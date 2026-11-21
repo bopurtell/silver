@@ -24,6 +24,7 @@ import time
 import traceback
 
 sys.dont_write_bytecode = True
+from fixtures.example_simulation_suites import captured_suite_ids
 from fixtures.memory_workload_oracle import verify_result
 
 HERE = Path(__file__).resolve().parent
@@ -214,6 +215,8 @@ def run(args):
         (evidence / name).mkdir()
     binaries = {str(p): sha(p) for p in (args.daemon, args.client)}
     manifest = json.loads((args.store / 'manifest.json').read_bytes())
+    suite_ids = captured_suite_ids(manifest)
+    fifo_suite, memory_suite = suite_ids
     identities = validate_capture(args.store, args.root, manifest)
     for kind in ('daemon', 'client'):
         app = manifest['apps'][kind]
@@ -260,7 +263,7 @@ def run(args):
 
     def launch_form(suite, cases, seed, parameters=(), expected='Passed'):
         before = {field(a, 'id') for a in field(session.api(), 'attempts')}
-        terminal.key(b'pp' + (b'n' if suite == 'pt8-memory-workloads' else b''))
+        terminal.key(b'pp' + (b'n' if suite == memory_suite else b''))
         terminal.capture('selected-catalog-' + suite, ['> ' + suite])
         terminal.palette('Simulation: Launch selected catalog subset')
         for label, value in [('CASES', ' '.join(cases)), ('SEED', seed), *[
@@ -426,12 +429,12 @@ def run(args):
         discovered = session.until('Get', lambda s: bool(field(s, 'discovery_digest')), timeout=60)
         save(evidence / 'discovery.json', discovered)
         suites = field(field(discovered, 'discovery')[0], 'suites')
-        check([field(s, 'id') for s in suites] == ['controlled-fifo', 'pt8-memory-workloads'],
-              'startup discovery supplies the exact FIFO then PT8 catalog')
-        terminal.capture('combined-catalog', ['controlled-fifo', 'pt8-memory-workloads'])
-        passed = launch_form('controlled-fifo', ['directed', 'seeded'], '18446744073709551615',
+        check([field(s, 'id') for s in suites] == suite_ids,
+              'startup discovery supplies the exact FIFO then memory workload catalog')
+        terminal.capture('combined-catalog', suite_ids)
+        passed = launch_form(fifo_suite, ['directed', 'seeded'], '18446744073709551615',
                              [('checker', 'normal'), ('cycles', '64')])
-        failed = launch_form('controlled-fifo', ['directed', 'seeded'], '18446744073709551615',
+        failed = launch_form(fifo_suite, ['directed', 'seeded'], '18446744073709551615',
                              [('checker', 'mismatch'), ('cycles', '64')], expected='Failed')
         by_run = {}
         for label, detail in [('normal', passed), ('mismatch', failed)]:
@@ -454,7 +457,7 @@ def run(args):
             terminal.save('fifo-waveform-blocker', terminal.drain(.1))
             report['blockers'] = ['FIFO embedded waveform admission/action unavailable; see fifo-waveform-blocker.txt']
             terminal.key(b'\x1b')
-        pt8 = launch_form('pt8-memory-workloads', ['flops256', 'exact256'], '34097')
+        pt8 = launch_form(memory_suite, ['flops256', 'exact256'], '34097')
         references = {}
         for artifact in field(pt8, 'artifacts'):
             raw = artifact_bytes(pt8, artifact)
@@ -572,7 +575,7 @@ def run(args):
         save(evidence / 'client-preference-restoration.json', dict(preserved=preferences_preserved,
              exact_same_case_enrichments=enrichments))
         check(preferences_preserved, 'restart retained client navigation/pair/display preferences with verified same-case hydration')
-        terminal.palette('Simulation: Reopen ' + field(pt8, 'id') + ' pt8-memory-workloads')
+        terminal.palette('Simulation: Reopen ' + field(pt8, 'id') + ' ' + memory_suite)
         terminal.palette('Simulation: Select case exact256')
         terminal.palette('Simulation: Open embedded waveform ' + field(wave, 'label'))
         terminal.capture('restarted-wave-default', ['Cursor 0 ticks', '80000'])
@@ -588,7 +591,7 @@ def run(args):
         rediscovered = session.until('Get', lambda s: bool(field(s, 'discovery_digest')), timeout=60)
         check(field(rediscovered, 'discovery_digest') == field(discovered, 'discovery_digest'),
               'daemon restart automatically restores the same simulation catalog before rerun')
-        terminal.palette('Simulation: Reopen ' + field(failed, 'id') + ' controlled-fifo')
+        terminal.palette('Simulation: Reopen ' + field(failed, 'id') + ' ' + fifo_suite)
         terminal.palette('Simulation: Select case seeded')
         rerun_before = {field(a, 'id') for a in field(session.api(), 'attempts')}
         terminal.palette('Simulation: Rerun case seeded (original inputs; current project)')

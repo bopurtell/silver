@@ -3,7 +3,7 @@ id: WB-061
 title: Bounded workspace aesthetic refinement
 category: presentation
 feature_sets: [FS5]
-status: needs-design
+status: partial
 kind: enhancement
 priority: P2
 severity: n/a
@@ -49,17 +49,29 @@ investigation workflow. This follow-up concerns how its fields read:
   inputs, case results, and the selected artifact. The Catalog configures the
   next run; Project Tests lists generic Dune test jobs.
 
+The Testing changes are implemented in the terminal client. The compact view
+puts the outcome, case results and selected artifact ahead of the longer attempt
+identifiers and captured inputs. The Project Tests tile now identifies its rows
+as Dune test jobs. See [layout and selection](../../testing_workspace.md#layout-and-selection).
+
+The [native reconnect test](../../../scripts/test-client-reconnect.py) checks that
+the artifact label and size are visible without scrolling at 120×40. It compares
+the painted artifact fields against the daemon response before and after narrowing,
+widening and reconnecting. Local before/after captures of the same fixture and
+dimensions: `/tmp/opencode/{wb061-before,wb061-final}/first-client-selected.txt`
+(with `.ansi` alongside for color).
+
 ## Out of scope
 An infinite theme redesign, new investigation capabilities, or silently choosing
 a final default. Separate feature tickets retain their own scope and estimates.
 
 ## Acceptance criteria
-- [ ] Record the selected workspaces, visual goals and bounded punch list up front.
+- [x] Record the selected workspaces, visual goals and bounded punch list up front.
 - [ ] Show before/after terminal captures with the same content and dimensions.
 - [ ] Narrow-size recovery, semantic statuses and keyboard discoverability remain sound.
 - [ ] Record owner review outcome and explicitly defer any newly requested iteration.
 - [ ] Appearance-only changes preserve identities, contexts and provider behavior.
-- [ ] Compare the same attempt and artifact at normal and narrow widths. Labels,
+- [x] Compare the same attempt and artifact at normal and narrow widths. Labels,
   values and statuses remain distinguishable; grouped values align where space
   permits. Verify zero, unknown and scaled sizes (1,250,000 bytes → `1.25 MB`).
 

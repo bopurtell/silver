@@ -294,8 +294,12 @@ def cooperative(session, evidence, expected, passed):
         terminal.palette('Unzoom workspace')
         focus(7)
         terminal.palette('Zoom focused tile')
-        terminal.capture('real-cooperative-detail', ['seeded: Failed', 'CHECK_FAILED', aid,
-                         '18446744073709551615', 'Captured cases: seeded', 'checker mismatch', 'cycles 64'])
+        detail_text = terminal.capture('real-cooperative-detail', ['CHECK_FAILED', aid,
+                         '18446744073709551615', 'Captured cases:', 'checker mismatch', 'cycles 64'])
+        detail_lines = [' '.join(line.split()) for line in detail_text.splitlines()]
+        check(all(any(pair in line for line in detail_lines)
+                  for pair in ('seeded: Failed', 'Captured cases: seeded')),
+              'Detail pairs the failed case and captured case selection with their values')
         terminal.palette('Unzoom workspace')
         terminal.capture('real-testing-failure-120x40', ['simulation-cases', 'simulation-detail', 'simulation-artifacts', 'simulation-logs'])
         terminal.wait_viewport('failure-120x40')

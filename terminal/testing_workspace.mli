@@ -45,7 +45,7 @@ type artifact_identity =
     the original observed artifact, persisted separately from the legacy three-field
     identity. Its attempt/case/kind/media and byte identity must still match. Legacy
     waveform cursors cannot authorize fallback from an ineligible saved artifact; typed
-    PT8 JSON references keep their separate same-case waveform handoff. *)
+    workload result references keep their separate same-case waveform handoff. *)
 val restore_selection
   :  ?metadata:Simulation.Artifact.t
   -> t
@@ -81,11 +81,14 @@ val receive
     Detail carries the selected artifact's identity, digest and provenance, using the
     effective compression choice (full mode reveals exact values). [identifier_width]
     reserves a stable list-local ordinal for long attempt tokens that cannot fit.
+    [width] is the Detail text width, excluding any host indicator gutter. Labels
+    align by group where possible; otherwise values stack on the next row.
     Selection/export helpers always use exact source IDs. *)
 val rows
   :  ?now:Time_ns.t
   -> ?string_compression:bool
   -> ?identifier_width:int
+  -> ?width:int
   -> t
   -> pane
   -> log_lines:(Job_id.t -> string list)

@@ -90,10 +90,12 @@ context, not a matched physical Flops/Exact area/speed comparison.
 
 **Workloads: Launch fresh memory workload… (Testing)** opens/creates Testing and
 explicitly requests suite discovery. It then uses the existing catalog subset
-selection and launch form. Select C's `pt8-memory-workloads` suite and positive
+selection and launch form. Select the example's `memory-workloads` suite and positive
 `flops256` and/or `exact256` cases. Supported seed is `34097`, no parameters or
 ASIC inputs. The provider enforces these fixed options; changing a view never
 launches the workload. The existing form's final `launch` confirmation submits it.
+Retained attempts display the suite ID captured at launch, including
+`pt8-memory-workloads` for earlier attempts.
 
 Status, logs, cancellation, rerun, durable history and submission retry remain
 FS2-owned. After completion select the intended case in Testing and invoke
@@ -110,11 +112,10 @@ requires that exact selected-attempt namespace and its matching case attachment,
 not an arbitrary suffix. Both paths are tested with actual backend artifact capture
 and byte reads.
 
-Artifact transport, PT.8 simulation attempt, hardware/bundle identity and any ASIC
-physical execution remain separate. The result closure stays in C's durable
-retention directory; copying a reference does not copy/reinterpret the workload.
-Root FIFO/ASIC configurations are unchanged. Use C's isolated session setup for
-fresh PT.8 execution.
+Artifact transport, simulation attempt, hardware/bundle identity and any ASIC
+physical execution remain separate. The result files stay in the provider's
+retention directory; copying a reference does not copy the workload evidence.
+For fresh runs, follow the [checkout-backed example launch steps](workloads.md#run-the-example-workload).
 
 ## Async, cache and restoration
 

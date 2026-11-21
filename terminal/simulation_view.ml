@@ -271,23 +271,26 @@ type row =
   ; indicator : Indicator.t option
   ; value_start : int option
   ; hint : bool
+  ; heading : bool
   ; selected : bool
   ; target : row_target option
   ; spans : span list
   }
 
 (** [selected] marks a navigator cursor for viewport following. It belongs only to the
-    first physical line of a row; legacy rows default to [false]. *)
+    first physical line of a row. [heading] marks a typed section title. Legacy rows
+    default to [false] for both. *)
 let row
   ?indicator
   ?value_start
   ?(hint = false)
+  ?(heading = false)
   ?(selected = false)
   ?target
   ?(spans = [])
   text
   =
-  { text; indicator; value_start; hint; selected; target; spans }
+  { text; indicator; value_start; hint; heading; selected; target; spans }
 ;;
 
 let plain_rows texts = List.map texts ~f:(fun text -> row text)

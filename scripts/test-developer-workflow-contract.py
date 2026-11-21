@@ -26,6 +26,23 @@ launcher = importlib.util.module_from_spec(launcher_spec)
 launcher_spec.loader.exec_module(launcher)
 
 
+class SimulationSuites(unittest.TestCase):
+    def test_known_capture_generations_have_exact_catalog_and_inspection_case(self):
+        for memory in ('memory-workloads', 'pt8-memory-workloads'):
+            with self.subTest(memory=memory):
+                # Intentionally list FIFO second in the manifest.
+                manifest = dict(provider_commands={memory: [], 'controlled-fifo': []})
+                self.assertEqual(w.legacy.captured_suite_ids(manifest), ['controlled-fifo', memory])
+                self.assertEqual(w.inspection_case(memory), 'exact256')
+        self.assertEqual(w.inspection_case('controlled-fifo'), 'seeded')
+
+    def test_invalid_capture_catalog_is_not_normalized(self):
+        for suites in (('controlled-fifo',), ('controlled-fifo', 'unrecognized'),
+                       ('controlled-fifo', 'memory-workloads', 'pt8-memory-workloads')):
+            with self.subTest(suites=suites), self.assertRaises(AssertionError):
+                w.legacy.captured_suite_ids(dict(provider_commands=dict.fromkeys(suites, [])))
+
+
 class Contract(unittest.TestCase):
     def setUp(self):
         # Reuse the resource owner's synthetic transport/kernel proof fixture;

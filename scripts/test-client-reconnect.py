@@ -7,14 +7,18 @@ Reuses the FS3 PTY/screen oracle and tool guards. Evidence is retained under
 Timing attachment is deliberately outside this simulation-only fixture.
 """
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
+import struct
 import sys
 import tempfile
+import termios
 import time
 import traceback
 
@@ -33,6 +37,25 @@ def load(name, path):
 harness = load('reconnect_fs3', HERE / 'test-project-adoption.py')
 wire = load('reconnect_wire', HERE / 'fixtures/simulation_fixture_wire.py')
 field, require = harness.field, harness.require
+
+
+def pane_rows(screen, pane):
+    """Extract only the currently visible interior, preserving value columns."""
+    rows = screen.splitlines()
+    title = '╭ ' + pane + ' '
+    for top, row in enumerate(rows):
+        left = row.find(title)
+        if left < 0:
+            continue
+        right = row.index('╮', left + len(title))
+        for body in rows[top + 1:]:
+            if body[left:left + 1] == '╰' and body[right:right + 1] == '╯':
+                return
+            require(body[left:left + 1] == body[right:right + 1] == '│',
+                    'Missing visible ' + pane + ' border:\n' + screen)
+            yield body[left + 1:right]
+        raise AssertionError('Unclosed visible ' + pane + ' pane:\n' + screen)
+    raise AssertionError('Missing visible ' + pane + ' pane:\n' + screen)
 
 
 def provider():
@@ -66,13 +89,35 @@ def provider():
 
 
 class Terminal(harness.Terminal):
+    width, height = 120, 40
+
+    def __init__(self, test, label, *, tall=False):
+        super().__init__(test, label)
+        # Keep stock column widths, but fit the grouped Detail and full IDs on
+        # screen together, including on reconnect before any keys are sent.
+        if tall:
+            self.resize(120, 96)
+
+    def resize(self, width, height):
+        self.width, self.height = width, height
+        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
+        self.process.send_signal(signal.SIGWINCH)
+
+    def screen(self):
+        return harness.fs0.terminal_screen(bytes(self.data), width=self.width, height=self.height)
+
+    def drain(self, seconds=.15):
+        text = super().drain(seconds)
+        if (self.width, self.height) == (120, 40):
+            return text
+        return self.screen()
+
     def wait(self, label, expected=(), absent=(), ready=False):
         try:
             return super().wait(label, expected, absent, ready)
         finally:
             (self.test.evidence / (self.label + '-' + label + '.ansi')).write_bytes(self.data)
-            (self.test.evidence / (self.label + '-' + label + '.txt')).write_text(
-                harness.fs0.terminal_screen(bytes(self.data), width=120, height=40))
+            (self.test.evidence / (self.label + '-' + label + '.txt')).write_text(self.screen())
 
     def focus_catalog(self):
         for _ in range(11):
@@ -181,21 +226,65 @@ def exercise(test):
         label = field(artifact, 'label')
 
         def painted_identity(text, phase):
-            rows = text.splitlines()
-            left = rows[1].index('╭ simulation-detail')
-            content = ''.join(row[left + 1:-1].strip() for row in rows[2:18])
-            test.check(all(value in content for value in (
-                'Selected artifact: ' + field(artifact, 'id'),
-                'Artifact attempt: ' + aid,
-                'SHA256: ' + field(artifact, 'sha256')[0],
-                'Artifact bytes: ' + field(artifact, 'size')[0])),
-                phase + ': actual painted frontend exposes exact artifact ID, attempt ID, SHA256 and size')
+            rows = list(pane_rows(text, 'simulation-detail'))
+            headings = [row.strip() for row in rows]
+            require('selected artifact' in headings,
+                    phase + ': missing visible selected artifact group:\n' + text)
+            expected = {
+                'Artifact ID': field(artifact, 'id'),
+                'Artifact label': label,
+                'Artifact attempt': aid,
+                'Artifact case': field(artifact, 'case_id')[0],
+                'Availability': field(artifact, 'availability'),
+                'Kind': field(artifact, 'kind'),
+                'Media type': field(artifact, 'media_type'),
+                'SHA256': field(artifact, 'sha256')[0],
+                'Artifact size': field(artifact, 'size')[0] + ' B',
+            }
+            values, columns = {}, []
+            current = None
+            for row in rows[headings.index('selected artifact') + 1:]:
+                # Section headings are bare lowercase phrases; wrapped values
+                # in this fixture are ID/digest fragments, not phrases.
+                if re.fullmatch(r'[a-z]+(?: [a-z]+)+', row.strip()):
+                    break
+                key, colon, value = row.partition(':')
+                if colon and key.strip() in expected:
+                    current = key.strip()
+                    require(current not in values, phase + ': duplicate visible ' + current)
+                    values[current] = value.strip()
+                    if value.strip():
+                        columns.append(len(key) + 1 + len(value) - len(value.lstrip()))
+                elif current is not None:
+                    # The renderer breaks long identifiers across physical rows.
+                    values[current] += row.strip()
+            test.check(values == expected, phase + ': exact scoped artifact metadata as painted'
+                       + ('' if values == expected else '\nExpected: ' + str(expected) + '\nGot: ' + str(values)))
+            test.check(len(columns) == len(expected) and len(set(columns)) == 1,
+                       phase + ': artifact values start in the same column')
+            test.check('Passed / Finished' in '\n'.join(rows)
+                       and any(row.strip().endswith('reconnect-case: Passed') for row in rows),
+                       phase + ': attempt and case statuses remain visible as text')
+            return len(rows[0])
 
         # Explicit attempt selection is a frontend action; artifact is its default.
         terminal.key(b'\t')
         terminal.palette('Simulation: Reopen ' + aid + ' fixture')
         selected = ['> reconnect-case: Passed', '> ' + label, 'Finished/Passed']
-        painted_identity(terminal.wait('selected', selected), 'First client')
+        painted = ['selected artifact', 'Artifact size:']
+        stock = terminal.wait('selected', [*selected, 'selected attempt', *painted])
+        stock_detail = '\n'.join(pane_rows(stock, 'simulation-detail'))
+        size = re.escape(field(artifact, 'size')[0])
+        test.check(label in stock_detail and bool(re.search(r'Artifact size:\s+' + size + r' B\b', stock_detail)),
+                   'Stock 120x40 Detail shows selected artifact label and size without scrolling')
+        terminal.resize(120, 96)
+        normal = painted_identity(terminal.wait('selected-full-detail', [*selected, *painted]), 'First client')
+        terminal.resize(96, 96)
+        narrow = painted_identity(terminal.wait('selected-narrow', [*selected, *painted]), 'First client at 96 columns')
+        terminal.resize(120, 96)
+        recovered = painted_identity(terminal.wait('selected-recovered', [*selected, *painted]),
+                                     'First client after widening')
+        test.check(narrow < normal == recovered, 'Detail pane narrows and recovers its original width')
         test.check(counts() == dict(discover=1, run=1), 'First client discovers once and launches one cheap synthetic run')
         deadline = time.monotonic() + 10
         while True:
@@ -211,13 +300,14 @@ def exercise(test):
             jobs=before_jobs, counts=counts()), indent=2))
         terminal.close()
         terminal = None
-        terminal = Terminal(test, 'second-client')
+        terminal = Terminal(test, 'second-client', tall=True)
         # No input at all to the second client: only drain the actual PTY output.
         painted_identity(terminal.wait('restored-no-input',
-            [testing_tab, 'Ready for explicit launch', 'simulation-catalog', 'simulation-artifacts', *selected],
+            [testing_tab, 'Ready for explicit launch', 'simulation-catalog', 'simulation-artifacts',
+             *selected, *painted],
             ['Loading workspace...', 'Select an attempt'], ready=True), 'Second client without input')
         terminal.drain(2.5)
-        terminal.wait('restored-after-poll', selected)
+        painted_identity(terminal.wait('restored-after-poll', [*selected, *painted]), 'Second client after polling')
         hello = test.raw('hello')
         test.check(test.process.pid == daemon_pid and test.process.poll() is None and
                    field(hello, 'instance_id') == instance, 'Both frontend processes use the same live daemon PID and instance')
