@@ -71,6 +71,37 @@ let () =
     (W.Case.sexp_of_t { id = "unicode"; label = "é 中文 🧪\n\r\t\001" });
   check (module F.Suite) (module W.Suite) suite;
   check (module F.Discovery) (module W.Discovery) discovery;
+  let catalog = Validation.parse_catalog discovery |> Or_error.ok_exn in
+  assert (List.is_empty catalog.declarations);
+  assert (Sexp.equal (W.Catalog.sexp_of_t catalog) (Sexp.of_string discovery));
+  let position : W.Declaration.t =
+    { suite_id = "suite"
+    ; case_id = "first"
+    ; relative_path = "test/provider.ml"
+    ; line = 3
+    ; column = 12
+    }
+  in
+  let parse_with declarations =
+    { catalog with declarations }
+    |> W.Catalog.sexp_of_t
+    |> Sexp.to_string_mach
+    |> Validation.parse_catalog
+  in
+  let extended = parse_with [ position ] |> Or_error.ok_exn in
+  assert (List.equal W.Declaration.equal extended.declarations [ position ]);
+  assert (W.Discovery.equal (W.Catalog.discovery extended) (W.Catalog.discovery catalog));
+  List.iter
+    [ [ position; position ]
+    ; [ { position with case_id = "other" } ]
+    ; [ { position with suite_id = "other" } ]
+    ; [ { position with relative_path = "../test/provider.ml" } ]
+    ; [ { position with relative_path = "/test/provider.ml" } ]
+    ; [ { position with relative_path = "test/\000provider.ml" } ]
+    ; [ { position with line = 0 } ]
+    ; [ { position with column = 0 } ]
+    ]
+    ~f:(fun declarations -> assert (Or_error.is_error (parse_with declarations)));
   check (module F.Asic_input) (module W.Asic_input) input;
   check (module F.Selection) (module W.Selection) selection;
   check (module F.Provider.Request) (module W.Provider.Request) request;

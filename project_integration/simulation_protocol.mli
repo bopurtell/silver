@@ -3,6 +3,7 @@ open Hardcaml_workbench_protocol.Simulation
 
 (** Bounded whole-stdout discovery decode and structural validation. *)
 val parse_discovery : string -> Discovery.t Or_error.t
+val parse_catalog : string -> Catalog.t Or_error.t
 
 (** Validates explicit inputs and returns cases in catalog order and parameters in key
     order. ASIC evidence resolution is the backend's responsibility. *)

@@ -12,6 +12,13 @@ let mutate s mutation =
 
 let%test_unit "legacy snapshot migration is once-only and rename-stable" =
   let s = initial () in
+  let is_default_editor id = W.Workspace_id.equal id W.Editor.workspace_id in
+  let s =
+    { s with
+      workspaces = List.filter s.workspaces ~f:(fun w -> not (is_default_editor w.id))
+    ; tiles = List.filter s.tiles ~f:(fun t -> not (is_default_editor t.workspace))
+    }
+  in
   let rec remove = function
     | Sexp.Atom _ as s -> s
     | Sexp.List xs ->

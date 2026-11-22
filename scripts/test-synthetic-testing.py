@@ -341,18 +341,21 @@ def native(base, args):
         presets = demo.workspace_presets(args.preset_export)
         starter_mappings = field(layout, 'config_workspaces')
         starter_windows = field(layout, 'config_windows')
+        stock_order = ('overview', 'testing', 'waveforms', 'timing', 'resources')
         expected_instances = [(field(window, 'key'), field(instance, 'key'),
                                field(instance, 'definition'))
                               for window in field(presets.config, 'windows')
                               for instance in field(window, 'workspaces')]
         check(field(layout, 'defaults_initialized') == 'true' and
               field(layout, 'configuration_pending') == 'false' and
+              [field(w, 'preset') for w in field(layout, 'workspaces')] ==
+              [[identity] for identity in stock_order] and
               [(field(p, 'window_key'), field(p, 'workspace_key'), field(p, 'reference'))
                for p in starter_mappings] == expected_instances and
               {field(p, 'workspace') for p in starter_mappings} ==
               {field(w, 'id') for w in field(layout, 'workspaces')},
-               'fresh seed initializes exactly the canonical four workspace instances and their provenance')
-        for identity in ('overview', 'testing', 'waveforms', 'timing'):
+              'fresh seed initializes exactly the ordered stock workspace instances and their provenance')
+        for identity in stock_order:
             workspaces = [w for w in field(layout, 'workspaces') if field(w, 'preset') == [identity]]
             check(len(workspaces) == 1, 'one stable ' + identity + ' workspace')
             definition = next(d for d in field(presets.config, 'definitions')

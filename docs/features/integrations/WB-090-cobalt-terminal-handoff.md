@@ -34,3 +34,15 @@ the same action locally. Only the focused surface interprets raw keystrokes.
   Exercise numbered chords, slow literal prefixes and pasted chord text.
   Pending input never lands in a newly focused shell or buffer.
 - Repeat standalone Cobalt's toggle/reopen flow without a Silver host.
+
+## Cobalt handoff
+
+Pass `~on_toggle_terminal` to `Cobalt_hosted.component`: `Some 2` selects
+terminal 2; `None` toggles the most recently selected terminal **in Silver**,
+including one selected from Timing. Cobalt recognizes the chord and emits
+the action. While the editor owns input, do not also match that chord in the
+Silver router. Silver should open its WB-089 overlay, move focus, and return
+focus to the mounted editor when the overlay closes. See Cobalt's
+`ui/HOSTED.md` for the component contract. From the Cobalt checkout, run
+`dune runtest -j 4 hosted/test` for the fake-host acceptance test and
+`dune build -j 4 @scripts/smoke-embedded-terminal` for standalone regression.

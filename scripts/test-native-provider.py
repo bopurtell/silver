@@ -107,7 +107,11 @@ def equivalent(kind, commands, evidence):
     for name, command in commands.items():
         result = invoke(command, ['discover', '--protocol-version', '1'], directory, name + '-discover')
         require(result.returncode == 0, result.stderr.decode(errors='replace'))
-        catalogs.append(parse(result.stdout.decode()))
+        # Source positions are advisory and intentionally absent from the Python reference.
+        # The headless declaration acceptance verifies the native positions independently.
+        discovery = record(parse(result.stdout.decode()))
+        discovery.pop('declarations', None)
+        catalogs.append([list(pair) for pair in discovery.items()])
     require(canonical(catalogs[0]) == canonical(catalogs[1]), kind + ' parsed discovery equality')
     cases = ['directed', 'seeded'] if kind == 'fifo' else ['wrap', 'reset', 'seeded']
     scenarios = [('all', selection(kind)), ('max-seed', selection(kind, seed=str(2**64 - 1))),

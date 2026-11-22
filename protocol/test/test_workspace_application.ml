@@ -138,7 +138,7 @@ let mutate (s : W.Snapshot.t) mutation =
 let%test_unit "close and delete count only open siblings in the same window" =
   let s = initial () in
   let overview = List.hd_exn s.workspaces in
-  let timing = List.last_exn s.workspaces in
+  let timing = List.find_exn s.workspaces ~f:(fun w -> String.equal w.name "Timing") in
   let custom (s : W.Snapshot.t) window =
     mutate s (Create_workspace { window; name = "Desk"; context = s.main_context })
   in
@@ -148,6 +148,7 @@ let%test_unit "close and delete count only open siblings in the same window" =
   let s = custom s (List.last_exn s.windows).id in
   let s = mutate s (Close_workspace overview.id) in
   let s = mutate s (Close_workspace timing.id) in
+  let s = mutate s (Close_workspace W.Editor.workspace_id) in
   let check_rejected (s : W.Snapshot.t) mutation =
     match W.apply s (Mutate { expected_revision = s.revision; mutation }) with
     | Error { kind = Invalid_request; _ } -> ()
@@ -198,6 +199,10 @@ let%test_unit "deletion follows live tile ownership, not authoring origin" =
   let right = List.last_exn s.config_workspaces in
   let left_window = (W.workspace s left.workspace).window in
   let right_window = (W.workspace s right.workspace).window in
+  let s = mutate s (Close_workspace W.Editor.workspace_id) in
+  let editor_tiles =
+    List.filter s.tiles ~f:(fun t -> W.Workspace_id.equal t.workspace W.Editor.workspace_id)
+  in
   let delete (s : W.Snapshot.t) id =
     W.apply s (Mutate { expected_revision = s.revision; mutation = Delete_workspace id })
   in
@@ -221,7 +226,7 @@ let%test_unit "deletion follows live tile ownership, not authoring origin" =
     List.equal
       W.Tile_id.equal
       (List.map after.tiles ~f:(fun t -> t.id))
-      [ moves_out; snd survives ]);
+       ([ moves_out; snd survives ] @ List.map editor_tiles ~f:(fun t -> t.id)));
   let remaining = List.hd_exn after.config_workspaces in
   assert (List.length after.config_workspaces = 1);
   assert (List.equal [%equal: string * W.Tile_id.t] remaining.tiles [ survives ]);
@@ -244,8 +249,8 @@ let%test_unit "deletion follows live tile ownership, not authoring origin" =
 let%test_unit "initialize replaces only placeholders and persists complete keyed policy" =
   let s = initialize (initial ()) (config [ "logs"; "logs" ]) in
   assert (s.revision = 1);
-  assert (List.length s.windows = 2 && List.length s.workspaces = 2);
-  assert (List.length s.tiles = 4);
+  assert (List.length s.windows = 2 && List.length s.workspaces = 3);
+  assert (List.length s.tiles = 6);
   List.iter s.workspaces ~f:(fun w ->
     assert (W.Context_id.equal w.context s.main_context));
   List.iter s.tiles ~f:(fun t -> assert (W.Binding.equal t.binding Follow));
@@ -256,6 +261,37 @@ let%test_unit "initialize replaces only placeholders and persists complete keyed
   assert (W.Snapshot.equal s (initialize restored (config [ "different" ])));
   let reapplied = mutate restored (Apply_config (config [ "logs"; "logs" ])) in
   assert (W.Snapshot.equal { s with revision = reapplied.revision } reapplied)
+;;
+
+let%test_unit "stock Editor has a stable target for fresh and migrated compositions" =
+  let base =
+    let c = config [ "logs" ] in
+    let window = List.hd_exn c.windows in
+    { c with id = "stock"; windows = [ { window with key = "main" } ] }
+  in
+  let stock = C.with_stock_editor base in
+  let old = initialize (initial ()) base in
+  let fresh = initialize (initial ()) stock in
+  let editor_id = W.Editor.workspace_id in
+  let without_editor (s : W.Snapshot.t) =
+    let is_editor id = W.Workspace_id.equal id editor_id in
+    { s with
+      workspaces = List.filter s.workspaces ~f:(fun w -> not (is_editor w.id))
+    ; tiles = List.filter s.tiles ~f:(fun t -> not (is_editor t.workspace))
+    }
+  in
+  assert (W.Snapshot.equal (without_editor old) (without_editor fresh));
+  assert (List.length fresh.workspaces = 2);
+  let legacy = without_editor old in
+  let migrated = W.migrate_default_editor legacy |> ok in
+  assert (W.Snapshot.equal { legacy with revision = migrated.revision } (without_editor migrated));
+  let migrated = mutate migrated (Rename_workspace { workspace = editor_id; name = "Source" }) in
+  let migrated = mutate migrated (Close_workspace editor_id) in
+  let reapplied = mutate migrated (Apply_config stock) in
+  assert (W.Snapshot.equal { migrated with revision = reapplied.revision } reapplied);
+  let reopen = mutate reapplied (Reopen_workspace editor_id) in
+  assert (W.is_workspace_open reopen editor_id);
+  assert (String.equal (W.workspace reopen editor_id).name "Source")
 ;;
 
 let%test_unit "any accepted edit consumes config initialization even if reverted" =
@@ -344,8 +380,8 @@ let%test_unit "additive reapply preserves moved edited pinned independent instan
   assert (W.Tile.equal before_tile (W.tile next tile));
   assert (List.equal W.Tile.equal s.tiles (List.take next.tiles (List.length s.tiles)));
   assert (List.equal W.Context.equal contexts next.contexts);
-  assert (List.length next.tiles = 6);
-  assert (List.length next.windows = 2 && List.length next.workspaces = 2);
+  assert (List.length next.tiles = 8);
+  assert (List.length next.windows = 2 && List.length next.workspaces = 3);
   List.iter next.config_workspaces ~f:(fun p ->
     let added = W.tile next (snd (List.last_exn p.tiles)) in
     assert (String.equal added.kind "new-kind");
@@ -406,13 +442,13 @@ let%test_unit "new keys add objects while renamed and removed keys keep identity
   in
   let next = mutate s (Apply_config changed) in
   assert (List.length next.windows = 3);
-  assert (List.length next.workspaces = 4);
+  assert (List.length next.workspaces = 5);
   List.iter s.workspaces ~f:(fun w ->
     assert (W.Arrangement.equal w (W.workspace next w.id)));
   let again = mutate next (Apply_config changed) in
   assert (W.Snapshot.equal { next with revision = again.revision } again);
   let distinct = mutate again (Apply_config { c with id = "another-config" }) in
-  assert (List.length distinct.windows = 5 && List.length distinct.workspaces = 6)
+  assert (List.length distinct.windows = 5 && List.length distinct.workspaces = 7)
 ;;
 
 let%test_unit "changed definition reference cannot reset an existing keyed instance" =
@@ -527,7 +563,7 @@ let%test_unit "same-builtin Restore detaches frozen policy but retains additive 
   let extended = mutate repeated (Apply_config expanded_config) in
   let origin = List.hd_exn extended.config_workspaces in
   assert origin.policy_detached;
-  assert (List.length extended.windows = 1 && List.length extended.workspaces = 1);
+  assert (List.length extended.windows = 1 && List.length extended.workspaces = 2);
   assert (List.length extended.tiles = List.length repeated.tiles + 1);
   assert (
     List.equal

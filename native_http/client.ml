@@ -207,7 +207,10 @@ let asic t request =
 
 let simulation t request =
   post
-    ~extra_headers:[ Execution_timing.header, Execution_timing.version ]
+    ~extra_headers:
+      [ Execution_timing.header, Execution_timing.version
+      ; Simulation.declarations_header, Simulation.declarations_version
+      ]
     t
     ~path:Simulation.rpc_path
     ~sexp_of_request:Simulation.Request.sexp_of_t

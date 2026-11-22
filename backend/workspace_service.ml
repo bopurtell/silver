@@ -140,9 +140,19 @@ let handle t ~project_key operation : Workspace.Response.t Deferred.t =
         let%bind () = previous in
         Monitor.try_with (fun () ->
           let%bind loaded =
-            match entry.snapshot with
-            | Some snapshot -> return (Ok (Some snapshot))
-            | None -> In_thread.run (fun () -> read_snapshot t ~project_key)
+             match entry.snapshot with
+             | Some snapshot -> return (Ok (Some snapshot))
+             | None ->
+               In_thread.run (fun () ->
+                 let open Result.Let_syntax in
+                 let%bind stored = read_snapshot t ~project_key in
+                 match stored with
+                 | None -> Ok None
+                 | Some snapshot ->
+                   let%map migrated = Workspace.migrate_default_editor snapshot in
+                   if migrated.revision <> snapshot.revision
+                   then save_snapshot t ~project_key migrated;
+                   Some migrated)
           in
           match loaded with
           | Error error -> return (Error error)

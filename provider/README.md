@@ -5,12 +5,13 @@ ppx_jane are required. Tests remain independent executables; this is adapter plu
 
 The actual public modules are `Hardcaml_workbench_provider.Wire`, `Validation`,
 and `Runner`. Wire exposes the simulation protocol types, Limits, Backend_id, Build_ref,
-Run_ref, Parameter, Case, Suite, Discovery, Asic_input, Selection, Progress,
+Run_ref, Parameter, Case, Suite, Discovery, Declaration, Catalog, Asic_input, Selection, Progress,
 Case_status, Outcome and Provider.{Request,Artifact,Event}.
 
 ```ocaml
 val Runner.main :
   ?argv:string array ->
+  ?declarations:Wire.Declaration.t list ->
   discovery:Wire.Discovery.t ->
   validate_selection:(Wire.Selection.t -> unit Core.Or_error.t) ->
   run:(Runner.context -> unit Core.Or_error.t) -> unit -> unit
@@ -42,6 +43,15 @@ original request's case and parameter order is preserved for both project callba
 emitter assigns sequence numbers, validates lifecycle/progress and flushes every
 line. Callback errors/exceptions and incomplete streams exit nonzero with stderr.
 Validation exposes the daemon's existing pure validators (same signatures).
+
+For Testing's “Declaration” action, pass optional `declarations` keyed by
+`suite_id` and `case_id`. Each declaration names the project-relative source file
+and a one-based line and display-cell column. OCaml `[%here]` provides a byte
+offset; it can be used directly only when the preceding bytes occupy one cell
+each, as in the FIFO provider's ASCII registration lines. Capture it at each
+registration, not inside the helper. Omit positions that cannot be reported in
+these units. Providers without declarations emit the original discovery format;
+the `Wire.Discovery` type and launch selection are unchanged.
 
 No generic seed-to-PRNG mapping is imposed. Projects must preserve their existing
 full uint64 interpretation; do not convert through a signed OCaml int or float.

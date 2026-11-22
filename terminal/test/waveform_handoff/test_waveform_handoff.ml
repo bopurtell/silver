@@ -62,6 +62,7 @@ let attempt artifacts : S.Attempt.t =
 let snapshot artifacts : S.Snapshot.t =
   { configured = true
   ; discovery = None
+  ; declarations = []
   ; discovery_digest = None
   ; discovery_job = None
   ; discovery_error = None

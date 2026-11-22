@@ -79,6 +79,7 @@ let main () =
     let snapshot : S.Snapshot.t =
       { configured = true
       ; discovery = None
+      ; declarations = []
       ; discovery_digest = None
       ; discovery_job = None
       ; discovery_error = None

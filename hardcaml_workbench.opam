@@ -18,6 +18,7 @@ depends: [
   "bonsai"
   "bonsai_term"
   "bonsai_term_components"
+  "cobalt"
   "notty-community"
   "async"
   "cohttp-async"

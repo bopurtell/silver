@@ -97,6 +97,9 @@ type action =
   | Refresh_integration
   | Project_entry of [ `New | `Open ]
   | Manage_project
+  | Editor_prompt of Project_id.t
+  | Editor_open of Editor_location.Location.t
+  | Module_jump of Hardcaml_workbench_backend.Module_jump.Offer.t
   | Browse_chip_profiles of string
   | Setup_project
   | Setup_asic
@@ -249,6 +252,7 @@ type argument =
   | Preparation_inputs of string * string
   | Finalization_attempt of Run_ref.t
   | Resource_path of bool
+  | Editor_file of Project_id.t
   | Design_executable
   | Starter_name of starter
   | Module_directory
@@ -1157,6 +1161,13 @@ let active t =
       if W.is_workspace_open s id then Some (W.workspace s id) else None))
 ;;
 
+let editor_workspace (w : W.Arrangement.t) =
+  W.Workspace_id.equal w.id W.Editor.workspace_id
+;;
+
+let editor_kind kind = String.equal kind W.Editor.tile_kind
+let editor_context_kind kind = String.equal kind "editor-context"
+
 let workspace_at_index t index =
   Option.bind t.registry ~f:(fun s -> List.nth (W.open_workspaces s) index)
 ;;
@@ -1476,7 +1487,15 @@ let receive t (s : W.Snapshot.t) =
       Option.filter t.focus ~f:(fun id ->
         List.exists (tiles t) ~f:(fun tile -> W.Tile_id.equal tile.id id))
       |> fun selected ->
-      Option.first_some selected (Option.map (List.hd (tiles t)) ~f:(fun tile -> tile.id))
+      let visible = tiles t in
+      let default =
+        match active with
+        | Some id when W.Workspace_id.equal id W.Editor.workspace_id ->
+          Option.first_some (List.find visible ~f:(fun tile -> editor_kind tile.kind))
+            (List.hd visible)
+        | _ -> List.hd visible
+      in
+      Option.first_some selected (Option.map default ~f:(fun tile -> tile.id))
     in
     { t with focus }
 ;;
@@ -3007,6 +3026,7 @@ let asic_cancel_commands (snapshot : Asic.Snapshot.t) =
 let project_scoped_kind kind =
   Testing_workspace.is_pane kind
   || P.Waveforms.is_pane kind
+  || editor_kind kind || editor_context_kind kind
   || List.mem
        [ "simulation"
        ; "workloads"
@@ -5463,6 +5483,10 @@ let decode_event (event : Bonsai_term.Event.t) : input option =
        when Uchar.equal value (Uchar.of_char 'r') || Uchar.equal value (Uchar.of_char 'R')
        -> Some (Character 'R')
      | Key_press { key = ASCII ('u' | 'U'); mods = [ Ctrl ] } -> Some Clear_filter
+     (* Silver keeps CR and LF distinct on its shared physical terminal so
+        Cobalt can distinguish physical Enter from Ctrl-J. In Silver panes both
+        spellings continue to submit the active form. *)
+     | Key_press { key = ASCII ('m' | 'M'); mods = [ Ctrl ] } -> Some Enter
      | Key_press { key = ASCII ('y' | 'Y'); mods = [ Ctrl ] } -> Some Scroll_up
      | Key_press { key = ASCII ('e' | 'E'); mods = [ Ctrl ] } -> Some Scroll_down
      | Key_press { key = Uchar value; mods = [ Ctrl ] }
@@ -5553,6 +5577,7 @@ let finalization_form t =
     | Some
         ( Finalization_attempt _
         | Resource_path _
+        | Editor_file _
         | Design_executable
         | Starter_name _
         | Flow_field _
@@ -6330,6 +6355,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                | Some
                    ( Finalization_attempt _
                     | Resource_path _
+                    | Editor_file _
                     | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
@@ -6377,13 +6403,17 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                          | _ -> false))
           then
             ( { t with
-                notice = "An explicit endpoint or exact finalization attempt is required"
+                notice =
+                  (match p.argument with
+                   | Some (Editor_file _) -> "Enter a project-relative file path"
+                   | _ -> "An explicit endpoint or exact finalization attempt is required")
               }
             , No_effect )
           else if match p.argument with
                   | Some
                       ( Finalization_attempt _
                        | Resource_path _
+                       | Editor_file _
                         | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
@@ -6404,6 +6434,8 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
               Or_error.try_with (fun () ->
                 match Option.value_exn p.argument with
                  | Resource_path bundle -> Resource_import_path (bundle, p.query)
+                 | Editor_file project ->
+                   Editor_open (Editor_location.parse ~project p.query |> Or_error.ok_exn)
                      | Delete_workspace_confirmation _ | Rename_workspace_name _ | Theme_picker _ | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Catalog_configuration _ -> assert false
                   | Starter_name starter -> Preview_starter (starter, p.query)
@@ -7064,6 +7096,7 @@ let%test_unit "catalog reducer browses filters and captures subset without launc
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "exact-digest"
     ; discovery_job = Some (Job_id.of_string "discovery")
     ; discovery_error = None
@@ -7230,6 +7263,7 @@ let%test_unit "catalog configuration saves locally and rejects stale form or wor
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "digest"
     ; discovery_job = None
     ; discovery_error = None
@@ -7317,6 +7351,7 @@ let%test_unit "catalog launch captures exact inputs and rejects changed catalog 
     { configured = true
     ; discovery =
         Some { protocol_version = 1; suites = [ suite; { suite with id = "other" } ] }
+    ; declarations = []
     ; discovery_digest = Some "captured-digest"
     ; discovery_job = None
     ; discovery_error = None
@@ -7403,6 +7438,7 @@ let%test_unit "launch palette retains captured subset across model refresh and f
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "digest"
     ; discovery_job = None
     ; discovery_error = None

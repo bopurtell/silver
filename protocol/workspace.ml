@@ -7,7 +7,7 @@
 
     RPC: validate instance/project before passing [operation] to the workspace service
     with a stable root/environment project key. [Get] also bootstraps a session with
-    Overview and Timing linked to Main. *)
+    Overview, Timing and Editor linked to Main. *)
 open! Core
 
 module Session_id = Id.Make (struct
@@ -21,6 +21,15 @@ module Window_id = Id.Make (struct
 module Workspace_id = Id.Make (struct
     let module_name = "Workspace.Workspace_id"
   end)
+
+module Editor = struct
+  (** The built-in project's Editor arrangement, independent of its label, window,
+      order, or open/closed state. IDs assigned by the registry use a numeric suffix
+      and cannot collide with this reserved ID. *)
+  let workspace_id = Workspace_id.of_string "workspace-editor"
+  let preset = Workspace_config.editor_preset
+  let tile_kind = Workspace_config.editor_tile_kind
+end
 
 module Tile_id = Id.Make (struct
     let module_name = "Workspace.Tile_id"
@@ -174,6 +183,45 @@ module Snapshot = struct
     }
   [@@deriving bin_io, compare, equal, sexp]
 end
+
+let append_default_editor ?name (s : Snapshot.t) ~window ~binding_revision =
+  if List.exists s.workspaces ~f:(fun w -> Workspace_id.equal w.id Editor.workspace_id)
+  then s
+  else (
+    let window, windows =
+      match window, s.windows with
+      | Some id, _ -> id, s.windows
+      | None, primary :: _ -> primary.id, s.windows
+      | None, [] ->
+        let id = Window_id.of_string "window-editor" in
+        id, [ { Window.id; name = "Main" } ]
+    in
+    let template = Workspace_config.editor_definition.template in
+    let arrangement : Arrangement.t =
+      { id = Editor.workspace_id
+      ; window
+      ; name = Option.value name ~default:template.name
+      ; context = s.main_context
+      ; binding_revision
+      ; zoomed_tile = None
+      ; preset = template.preset
+      ; closed = false
+      }
+    in
+    let tiles =
+      List.map template.views ~f:(fun view ->
+        let geometry = view.geometry in
+        { Tile.id = Tile_id.of_string ("tile-default-editor-" ^ view.kind)
+        ; workspace = arrangement.id
+        ; kind = view.kind
+        ; binding = Follow
+        ; hidden = view.hidden
+        ; requested_geometry =
+            { x = geometry.x; y = geometry.y; width = geometry.width; height = geometry.height }
+        })
+    in
+    { s with windows; workspaces = s.workspaces @ [ arrangement ]; tiles = s.tiles @ tiles })
+;;
 
 module Mutation = struct
   type t =
@@ -476,6 +524,21 @@ let validate (s : Snapshot.t) =
       List.iter p.tiles ~f:(fun (_, id) -> ignore (tile s id : Tile.t))))
 ;;
 
+(** Disk upgrade only. Do not infer Editor from a display name/preset, reopen it if
+    closed, or rebuild any existing arrangement. Ordinary mutations cannot allocate
+    its reserved workspace/tile IDs. A persisted upgrade advances the CAS revision. *)
+let migrate_default_editor (s : Snapshot.t) =
+  let with_editor = append_default_editor s ~window:None ~binding_revision:0 in
+  if phys_equal with_editor s
+  then Ok s
+  else
+    Result.bind
+      (protect (fun () ->
+         require (s.revision < Int.max_value) "Snapshot revision exhausted";
+         { with_editor with revision = s.revision + 1 }))
+      ~f:(fun next -> Result.map (validate next) ~f:(fun () -> next))
+;;
+
 (** Pure initial template. The caller supplies a globally unique session seed, once, and
     persists it. No provider run is chosen implicitly. *)
 let initial ~session_id : Snapshot.t =
@@ -503,6 +566,7 @@ let initial ~session_id : Snapshot.t =
     ; requested_geometry = { x = 0; y = 0; width; height }
     }
   in
+  let legacy : Snapshot.t =
   { schema_version
   ; session_id
   ; revision = 0
@@ -519,6 +583,8 @@ let initial ~session_id : Snapshot.t =
   ; workspaces = [ arrangement overview "Overview"; arrangement timing "Timing" ]
   ; tiles = [ selector "tile-5" overview 80 20; selector "tile-6" timing 40 8 ]
   }
+  in
+  append_default_editor legacy ~window:(Some window) ~binding_revision:0
 ;;
 
 let update_workspace (s : Snapshot.t) id ~f =
@@ -615,6 +681,12 @@ let apply_config (s : Snapshot.t) (config : Workspace_config.Resolved.t) =
           } )
     in
     List.fold configured_window.workspaces ~init:s ~f:(fun s instance ->
+      if Workspace_config.is_stock_editor_instance
+           ~config_id:config.id ~window_key:configured_window.key instance
+      then
+        append_default_editor
+          ~name:instance.name s ~window:(Some window_id) ~binding_revision:s.revision
+      else (
       let definition_key =
         match instance.Workspace_config.Instance.definition with
         | Builtin key | Custom key -> key
@@ -728,8 +800,8 @@ let apply_config (s : Snapshot.t) (config : Workspace_config.Resolved.t) =
              List.map s.config_workspaces ~f:(fun p ->
                if Workspace_id.equal p.workspace provenance.workspace
                then provenance
-               else p))
-      }))
+                else p))
+       })))
 ;;
 
 let has_other_open_workspace (s : Snapshot.t) (w : Arrangement.t) =
@@ -1158,8 +1230,8 @@ let apply (s : Snapshot.t) (operation : Operation.t) : Response.t =
             (Snapshot.equal s { prototype with revision = s.revision })
             "Configuration initialization requires untouched initial placeholders";
           require (s.revision < Int.max_value) "Snapshot revision exhausted";
-          let next =
-            apply_config
+           let next =
+             apply_config
               { s with
                 windows = []
               ; workspaces = []
@@ -1167,9 +1239,10 @@ let apply (s : Snapshot.t) (operation : Operation.t) : Response.t =
               ; defaults_initialized = true
               ; configuration_pending = false
               ; revision = s.revision + 1
-              }
-              config
-          in
+               }
+               config
+           in
+           let next = append_default_editor next ~window:None ~binding_revision:next.revision in
           match validate next with
           | Ok () -> next
           | Error error -> raise (Invalid_state error))
@@ -1181,15 +1254,18 @@ let apply (s : Snapshot.t) (operation : Operation.t) : Response.t =
         let prototypes = initial ~session_id:s.session_id in
         List.iter templates ~f:valid_template;
         let defaults =
-          List.map prototypes.workspaces ~f:(fun original ->
-            let template =
+           List.filter_map prototypes.workspaces ~f:(fun original ->
+             if Workspace_id.equal original.id Editor.workspace_id
+             then None
+             else
+             let template =
               find
                 templates
                 ~f:(fun t ->
                   Option.equal String.equal t.Workspace_template.preset original.preset)
                 "bootstrap preset definition"
             in
-            original, template)
+             Some (original, template))
         in
         require (s.revision < Int.max_value) "Snapshot revision exhausted";
         let next =

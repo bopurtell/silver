@@ -6,6 +6,13 @@
  (lint (pps ppx_js_style)))
 
 (test
+ (name test_module_jump)
+ (modules test_module_jump)
+ (libraries async core hardcaml_workbench_backend hardcaml_workbench_protocol)
+ (preprocess (pps ppx_jane))
+ (lint (pps ppx_js_style)))
+
+(test
  (name test_service)
  (modules test_service)
  (libraries

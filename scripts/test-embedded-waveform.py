@@ -856,7 +856,7 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.key(b'kkkk')
         registry_before_w = session.api(domain='workspace')
         terminal.key(b'W')
-        terminal.capture('workspace-created', ['Waveforms', 'Session', 'Signals', 'Waves', 'VCD picker', 'Logs',
+        terminal.capture('workspace-stock-handoff', ['Waveforms', 'Session', 'Signals', 'Waves', 'VCD picker', 'Logs',
                          'Cursor 0 ticks'], absent=['Esc/q Back to Testing'])
 
         def workspace_registry():
@@ -874,10 +874,11 @@ def pty_acceptance(args, evidence, fixture, check):
                       if field(t, 'workspace') == wave_workspace_id and field(t, 'kind') in pane_kinds}
         check(set(pane_tiles) == pane_kinds and len({field(t, 'id') for t in pane_tiles.values()}) == 5 and
               len([t for t in field(registry, 'tiles') if field(t, 'workspace') == wave_workspace_id]) == 6,
-              'W creates five independent registered Session/Signals/Waves/Picker/Logs panes plus tabs')
-        check(len(field(registry, 'workspaces')) == len(field(registry_before_w, 'workspaces')) + 1 and
-              all(w in field(registry, 'workspaces') for w in field(registry_before_w, 'workspaces')),
-              'W adds a real workspace and preserves existing Testing/Overview/Timing identities')
+              'W opens five independent registered Session/Signals/Waves/Picker/Logs panes plus tabs')
+        check(field(wave_workspace(registry_before_w), 'id') == wave_workspace_id and
+              field(registry, 'workspaces') == field(registry_before_w, 'workspaces') and
+              field(registry, 'tiles') == field(registry_before_w, 'tiles'),
+              'W reuses stock Waveforms and leaves every workspace and tile unchanged')
 
         def focus_pane(title):
             for _ in range(7):

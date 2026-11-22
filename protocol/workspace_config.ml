@@ -123,15 +123,74 @@ let max_dimension = 1_000_000
 let max_sexp_nesting = 256
 let max_sexp_comments = 256
 
+let editor_preset = "editor"
+let editor_tile_kind = "editor"
+
+let editor_definition : Definition.t =
+  let view kind y height : Workspace_template.View.t =
+    { kind; hidden = false; geometry = { x = 0; y; width = 80; height } }
+  in
+  let leaf tile min_width min_height weight : Tree.t =
+    Leaf { tile; min_width; min_height; weight }
+  in
+  let unframed : Presentation.t =
+    { Presentation.inherit_defaults with
+      title = Some false
+    ; binding_badge = Some "hidden"
+    ; run_reference = Some false
+    ; hints = Some false
+    ; frame = Some false
+    ; padding = Some 0
+    }
+  in
+  { key = editor_preset
+  ; template =
+      { version = Workspace_template.version
+      ; name = "Editor"
+      ; preset = Some editor_preset
+      ; views = [ view "workspace-tabs" 0 1; view editor_tile_kind 1 23 ]
+      }
+  ; tiles =
+      [ { key = "workspace-tabs"; presentation = Some unframed }
+      ; { key = editor_tile_kind; presentation = Some unframed }
+      ]
+  ; layout = Some (Stack [ leaf "workspace-tabs" 24 1 0; leaf editor_tile_kind 24 6 1 ])
+  }
+;;
+
+let editor_instance : Instance.t =
+  { key = editor_preset; name = editor_definition.template.name; definition = Builtin editor_preset }
+;;
+
+(** Extend the shipped stock catalog without duplicating the portable definition in
+    renderer data. User-authored catalog files are not rewritten. *)
+let with_stock_editor (stock : t) =
+  { stock with
+    definitions = stock.definitions @ [ editor_definition ]
+  ; windows =
+      List.map stock.windows ~f:(fun window ->
+        if String.equal window.key "main"
+        then { window with workspaces = window.workspaces @ [ editor_instance ] }
+        else window)
+  }
+;;
+
+let is_stock_editor_instance ~config_id ~window_key (instance : Instance.t) =
+  String.equal config_id "stock"
+  && String.equal window_key "main"
+  && String.equal instance.key editor_instance.key
+  && Reference.equal instance.definition editor_instance.definition
+;;
+
 let builtin_ids =
-  [ "overview"; "timing"; "testing"; "waveforms"; "resources"; "workloads" ]
+  [ "overview"; "timing"; "testing"; "waveforms"; "resources"; "workloads"; editor_preset ]
 ;;
 
 let is_builtin key = List.mem builtin_ids key ~equal:String.equal
 
-(** Version 1 already permitted user definitions named [resources]. Adding a builtin is
-    not permission to expand that version's reserved custom namespace. References and
-    template ancestry distinguish the new builtin from an unchanged custom key. Changing
+(** Version 1 already permitted user definitions named [resources] and [editor]. Adding
+    a builtin is not permission to expand the reserved custom namespace. References and
+    template ancestry distinguish new builtins from unchanged custom keys. Changing
     these reservations requires an authoring-version migration. *)
 let custom_key_allowed key =
   not (List.mem [ "overview"; "timing"; "testing"; "waveforms" ] key ~equal:String.equal)

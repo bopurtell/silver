@@ -36,3 +36,16 @@ run selection must not silently change where commands execute.
 - Resize the overlay, hide it and restore the invoking tile. A workspace switch
   does not stop the shell. Shell exit/restart affects only that number, and
   closing the frontend cleans up its PTYs and children.
+
+## Cobalt handoff
+
+Link `cobalt.terminal` from the terminal frontend. Its `Cobalt_terminal_pool`
+module is the same numbered PTY pool standalone Cobalt uses; it does not
+depend on the editor UI. Create it once per frontend, pass the local project
+directory and dimensions on `Start`, keep consuming updates while the overlay
+is hidden, and await `shutdown` on frontend exit.
+
+Cobalt's `examples/terminal_pool/README.md` gives the pool-only example and
+isolated install check. The example verifies persistent hidden output, shell
+reuse and child cleanup. The Testing → Timing overlay check above is still
+Silver-side acceptance.

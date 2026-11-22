@@ -335,6 +335,8 @@ let handle_post t ~path ~headers ~body =
            operation_response
              (Service.simulation t.service request)
              (Simulation.Response.sexp_of_negotiated
+                ?declarations_header_value:
+                  (Cohttp.Header.get headers Simulation.declarations_header)
                 ~execution_timing_header_value:
                   (Cohttp.Header.get headers Execution_timing.header)))
       | Ok _ -> boundary_error `Not_found Not_found "unknown operation")

@@ -3,7 +3,7 @@ id: WB-092
 title: Module-provided jump actions for Silver tiles
 category: infrastructure
 feature_sets: [FS3, FS4]
-status: needs-design
+status: delivered
 kind: feature
 priority: P2
 severity: n/a
@@ -41,3 +41,35 @@ retained evidence when supplied.
   remains identified with A; an obsolete response cannot satisfy a newer request.
 - A recording destination receives the same resolved location regardless of
   editor choice. Keybindings and live editor transport remain frontend concerns.
+
+## Implementation and verification
+
+[`Module_jump`](../../../backend/module_jump.mli) binds each offered action to
+the provider, project and selection that produced it. Capture the offer once per
+invocation; before acting on a completion, compare it with the current request
+using `Response.matches`. Two invocations of the same offer are distinct.
+
+Run the headless acceptance test from Silver:
+
+```sh
+opam exec --switch=5.2.0+ox -- dune exec backend/test/test_module_jump.exe
+```
+
+It exercises a second provider, late completions, and two recording editor
+destinations without starting Cobalt or a Testing workspace.
+
+## Backend handoff
+
+[`Hardcaml_workbench_backend.Module_jump`](../../../backend/module_jump.mli)
+binds each offer to its provider, project, and stable selection reference. Capture
+a fresh request for each invocation. When it resolves, use `Response.matches`
+against the frontend's current request before opening a direct result or offering
+candidate choice. The hook does not open files; pass the chosen `Location.t`
+unchanged to the selected destination. Its optional line and display-cell column
+are both one-based, matching Cobalt's hosted open-location action.
+
+Run the editor-free acceptance test with:
+
+```sh
+opam exec --switch=5.2.0+ox -- dune exec backend/test/test_module_jump.exe
+```

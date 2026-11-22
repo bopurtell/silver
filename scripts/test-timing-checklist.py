@@ -145,8 +145,8 @@ def acceptance(t, check, http, runs, presets):
     original_ids = [field(x, 'id') for x in field(original, 'tiles')]
     original_count = len(field(original, 'workspaces'))
     check([field(w, 'name') for w in field(original, 'workspaces')] ==
-          ['Overview', 'Testing', 'Waveforms', 'Timing'],
-          'Fresh native stock order is exactly Overview, Testing, Waveforms, Timing')
+          ['Overview', 'Testing', 'Waveforms', 'Timing', 'Resources'],
+          'Fresh native stock order is exactly Overview, Testing, Waveforms, Timing, Resources')
     t.command('Inspect timing paths asic/%s' % field(run, 'id'))
     generic = t.capture('wb069-generic-legacy-palette', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
     exact_generic = [a for a in calls()[len(baseline):] if a[:1] == ['inspect']]

@@ -20,6 +20,7 @@ val suites : t -> Simulation.Suite.t list
 val suite : t -> Simulation.Suite.t option
 val suite_id : t -> string option
 val case_id : t -> string option
+val declarations : t -> Simulation.Declaration.t list
 val selected_cases : t -> string list
 val filter : t -> string
 val set_filter : t -> string -> t

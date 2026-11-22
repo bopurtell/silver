@@ -27,8 +27,10 @@ This builds the native app and installs its commands under `~/.local/bin`; no
 `export PATH="$HOME/.local/bin:$PATH"` to your shell configuration.
 `command -v silver` shows which installation your shell will launch.
 This is a **source installer**: it expects an opam switch with Silver's native
-build dependencies installed (this workspace uses `5.2.0+ox`). Run the installer
-again after updating the checkout to replace your installed commands.
+build dependencies installed (this workspace uses `5.2.0+ox`), including
+[`cobalt.hosted`](docs/features/workspaces/WB-087-cobalt-editor.md#build-and-verify)
+for the terminal Editor. Run the installer again after updating the checkout
+to replace your installed commands.
 
 **Which dependencies belong where?** Silver builds against Hardcaml and its UI
 and server libraries. It calls `hardcaml_asic` as a separate executable for
@@ -59,6 +61,11 @@ you leave. Use `silver --project-root /path/to/project` to select a different
 project. Sessions for the same checkout reuse state under
 `${XDG_STATE_HOME:-$HOME/.local/state}/silver/projects`; only one standalone
 session can own that project's state at a time.
+
+Use the **Editor** workspace tab to reach the project's Cobalt buffers. With
+a FIFO case selected in **Testing → Catalog**, `gd` opens its declaration in
+Editor. **Alt+Left** takes you back to that case without closing the buffer;
+`Ctrl+O` navigates Cobalt's own jump history.
 
 Outside a Dune project, interactive local `silver` opens with a floating project
 setup dialog. Create an ASIC starter in the empty directory, choose a new

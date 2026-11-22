@@ -506,6 +506,7 @@ let concurrent_runs ~root ~config ~create =
         wait_job (Option.value_exn started.discovery_job) Job.is_terminal
       in
       let%bind catalog = get Get in
+      require (List.is_empty catalog.declarations) "Legacy provider invented declarations";
       let digest = Option.value_exn catalog.discovery_digest in
       let launch ?(mode = "pass") key : Operation.t =
         Launch

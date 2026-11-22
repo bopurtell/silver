@@ -76,6 +76,7 @@ packages=(hardcaml_workbench_provider hardcaml_workbench)
 deps_hint() {
   printf 'If build dependencies are missing, install them in the selected switch with:\n  cd %q && opam install --switch=%q --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam\n' \
     "$repo" "$switch" >&2
+  printf 'For cobalt.hosted, see docs/features/workspaces/WB-087-cobalt-editor.md#build-and-verify.\n' >&2
 }
 "${run[@]}" dune --version >/dev/null || { deps_hint; die "dune is unavailable in switch '$switch'"; }
 printf 'Building native Silver in switch %s for %s\n' "$switch" "$prefix"

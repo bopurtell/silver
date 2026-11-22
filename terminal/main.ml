@@ -40,6 +40,7 @@ module Resources_view = Terminal_presentation.Resources_view
 module Workloads_view = Terminal_presentation.Workloads_view
 module Planned_run = Terminal_presentation.Planned_run
 module Stage_action = Terminal_presentation.Stage_action
+module Jump = Hardcaml_workbench_backend.Module_jump
 
 let console_limit = 500
 let minimum_width = 68
@@ -97,6 +98,8 @@ type waveform_runtime =
 type session =
   { requested_endpoint : string option
   ; local_project_files : bool
+  ; editor : Editor_workspace.t
+  ; mutable painted_editor : Editor_workspace.placement option
   ; mutable project_entry : [ `New | `Open ] option
   ; mutable adopted_root : string option
   ; project_root : string option
@@ -324,6 +327,8 @@ let create_session
     let session =
       { requested_endpoint = endpoint
       ; local_project_files
+      ; editor = Editor_workspace.create ()
+      ; painted_editor = None
       ; project_entry = None
       ; adopted_root = None
       ; project_root
@@ -438,6 +443,17 @@ let adoption_complete =
 
 let current_project session =
   State.current_project ~opened:session.opened session.snapshot
+;;
+
+let editor_project session : Editor_workspace.project option =
+  if not session.local_project_files
+  then None
+  else (
+    match session.project_root, current_project session with
+    | Some root, Some project
+      when String.equal root (Project_root.to_absolute_path project.root) ->
+      Some { id = project.id; root }
+    | _ -> None)
 ;;
 
 let launch_context session =
@@ -2666,6 +2682,19 @@ let hydrate_retained ?(reschedule = false) session =
 let activate_workspace session id =
   if Option.exists session.host.registry ~f:(fun s -> Workspace.is_workspace_open s id)
   then (
+    if not (Option.equal Workspace.Workspace_id.equal session.host.active (Some id))
+    then (
+      Editor_workspace.cancel session.editor;
+      session.painted_editor <- None;
+      if Workspace.Workspace_id.equal id Workspace.Editor.workspace_id
+      then (
+        session.editor.origin <-
+          Option.map (Host.capture session.host) ~f:(fun capture ->
+            { Editor_workspace.registry = capture.session; workspace = capture.workspace });
+        session.show_connection_details <- false;
+        session.hierarchy_view <- None;
+        session.artifact_view <- None;
+        session.browser <- None));
     clear_waveform_transients session;
     session.navigation_revision <- session.navigation_revision + 1;
     session.timing_demand <- None;
@@ -4748,7 +4777,7 @@ let retire_stale_browser session =
   | _ -> false
 ;;
 
-let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
+let render ?(now = Time_ns.now ()) ?indicator_frames ?extra_pane session dimensions =
   ignore (retire_stale_browser session : bool);
   session.host <- Host.dismiss_stale_theme_picker session.host;
   session.painted_palette <- None;
@@ -4767,9 +4796,12 @@ let render ?(now = Time_ns.now ()) ?indicator_frames session dimensions =
       ~now
       ?indicator_frames
       ~render_pane:(fun tile ~width ~height ->
-        match hierarchy_pane session tile ~width ~height with
+        match Option.bind extra_pane ~f:(fun render -> render tile ~width ~height) with
         | Some pane -> Some pane
-        | None -> waveform_pane session tile ~width ~height)
+        | None ->
+          match hierarchy_pane session tile ~width ~height with
+          | Some pane -> Some pane
+          | None -> waveform_pane session tile ~width ~height)
       (remember_palette (displayed_host session))
       data
       dimensions
@@ -4839,6 +4871,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
   let session =
     { requested_endpoint = Some fixture.endpoint
     ; local_project_files = false
+    ; editor = Editor_workspace.create ()
+    ; painted_editor = None
     ; project_entry = None
     ; adopted_root = None
     ; project_root = Some (Project_root.to_absolute_path fixture.opened.project.root)
@@ -5051,6 +5085,40 @@ let inspected_run session =
   | _ -> Terminal_presentation.Stage_launch_commands.inspected_run session.host
 ;;
 
+let testing_catalog_tile (tile : Workspace.Tile.t) =
+  String.equal tile.kind (Testing_workspace.pane_kind Catalog)
+;;
+
+let declaration_command session =
+  Option.bind (Host.focused session.host) ~f:(fun tile ->
+    if not (testing_catalog_tile tile)
+    then None
+    else (
+      let offer =
+        match editor_project session, Host.testing session.host tile.id with
+        | None, _ -> Error "Open the project locally to jump to a declaration"
+        | Some project, Some (_, scope, state)
+          when String.equal scope (Project_id.to_string project.id) ->
+          let catalog = Testing_workspace.catalog state in
+          (match Simulation_catalog.suite_id catalog, Simulation_catalog.case_id catalog with
+           | Some suite_id, Some case_id
+             when List.exists (Simulation_catalog.visible_cases catalog) ~f:(fun c ->
+               String.equal c.id case_id) ->
+             Hardcaml_workbench_backend.Testing_declaration.offer
+               ~project:project.id ~declarations:(Simulation_catalog.declarations catalog)
+               ~suite_id ~case_id
+           | _ -> Error "Select a test in the Testing catalog first")
+        | _ -> Error "The project's Testing catalog is not available yet"
+      in
+      let unavailable, action =
+        match offer with
+        | Ok offer -> None, Host.Module_jump offer
+        | Error reason -> Some reason, Host.Unavailable reason
+      in
+      Some (Host.command ?unavailable "testing.declaration" "Open declaration"
+              "gd selected test source" action)))
+;;
+
 let host_catalog_base session =
   (if session.local_project_files && Option.is_some session.opened
    then Host.project_entry_commands
@@ -5089,6 +5157,10 @@ let host_catalog_base session =
     session.host
     ~project:(current_project session)
     ~jobs:(project_jobs session)
+  @ Option.to_list (declaration_command session)
+  @ Option.value_map (editor_project session) ~default:[] ~f:(fun project ->
+    [ Host.command "editor.open" "Open project file…" "editor path line column cobalt"
+        (Editor_prompt project.id) ])
   @ Option.value_map (waveform_context session) ~default:[] ~f:(fun (view, _) ->
     List.map
       [ "toggle", "Toggle focused signal (Enter)"
@@ -6393,6 +6465,53 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     Effect.Ignore)
   else (
     match action with
+    | Host.Editor_prompt project ->
+      Editor_workspace.cancel session.editor;
+      session.host
+      <- { session.host with
+           notice = ""
+         ; palette = Some
+             { capture = captured; commands = []; query = ""; index = 0
+             ; viewport = `Follow 0; argument = Some (Editor_file project) }
+         };
+      Effect.Ignore
+    | Editor_open location ->
+      Editor_workspace.open_location session.editor ~revision:session.navigation_revision location;
+      Effect.Ignore
+    | Module_jump offer ->
+      let jump = Jump.capture offer in
+      let token = ref () in
+      session.editor.intent <- token;
+      let navigation_revision = session.navigation_revision in
+      async (fun () ->
+        let%map response = Jump.resolve jump in
+        if Jump.Response.matches response jump
+           && phys_equal token session.editor.intent
+           && phys_equal captured_client session.client
+           && navigation_revision = session.navigation_revision
+           && Host.current session.host captured
+           && Option.is_none session.host.palette
+           && Option.is_none session.host.menu
+           && Option.is_none session.browser
+        then (
+          match Jump.Response.resolution response with
+          | Direct location ->
+            session.editor.pending <- Some (token, navigation_revision, location)
+          | Unavailable reason -> session.host <- { session.host with notice = reason }
+          | Ambiguous candidates ->
+            let commands = List.mapi candidates ~f:(fun i (candidate : Jump.Candidate.t) ->
+              Host.command ("editor.candidate." ^ Int.to_string i)
+                (Artifact_view.safe candidate.label)
+                (Artifact_view.safe candidate.location.relative_path)
+                (Editor_open candidate.location))
+            in
+            session.host
+            <- { session.host with
+                 notice = "Choose a source location"
+               ; palette = Some
+                   { capture = captured; commands; query = ""; index = 0
+                   ; viewport = `Follow 0; argument = None }
+               }))
     | Host.Launch_elaboration_bundle selection ->
       let validate () =
         Result.bind (validate ()) ~f:(fun () ->
@@ -9524,7 +9643,7 @@ let handle_pointer session ~exit ~kind ~mods ~x ~y =
      | _ -> Effect.Ignore)
 ;;
 
-let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
+let tui ?on_entry session ~no_mouse ~exit ~dimensions mounts editors (local_ graph) =
   let open Bonsai_term in
   let open Bonsai.Let_syntax in
   (* Session navigation is currently mutable. Give those mutations a reactive invalidation
@@ -9533,6 +9652,76 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
   let revision, update_revision = Bonsai.state' 0 graph in
   let write_to_tty = Expert.Write_to_tty.write_string_to_tty graph in
   let invalidate update = update (fun revision -> revision + 1) in
+  let editor_for session (editors : Cobalt_hosted.t Int.Map.t) =
+    Option.bind session.editor.key ~f:(Map.find editors)
+  in
+  let editor_active session =
+    Option.exists (Host.active session.host) ~f:Host.editor_workspace
+  in
+  let origin_workspace session =
+    Option.bind session.host.registry ~f:(fun registry ->
+      let others = Workspace.open_workspaces registry |> List.filter ~f:(Fn.non Host.editor_workspace) in
+      match session.editor.origin with
+      | Some origin when Workspace.Session_id.equal origin.registry registry.session_id
+                         && Workspace.is_workspace_open registry origin.workspace ->
+        Some origin.workspace
+      | _ ->
+        Option.first_some
+          (List.find others ~f:(fun w -> Option.equal String.equal w.preset (Some "overview")))
+          (List.hd others)
+        |> Option.map ~f:(fun w -> w.id))
+  in
+  let back session =
+    Editor_workspace.cancel session.editor;
+    Option.iter (origin_workspace session) ~f:(activate_workspace session)
+  in
+  let companion session =
+    Option.bind (origin_workspace session) ~f:(fun origin ->
+      let host = Host.switch session.host origin in
+      let tile =
+        match Host.focused host with
+        | Some tile when not (String.equal tile.kind "workspace-tabs") -> Some tile
+        | _ ->
+          List.find (Host.tiles host) ~f:(fun tile ->
+            testing_catalog_tile tile || String.equal tile.kind "live-status")
+      in
+      Option.map tile ~f:(fun tile -> { host with focus = Some tile.id }, tile))
+  in
+  let modal session =
+    let host = session.host in
+    Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
+    || host.editing_filter || host.paste || Option.is_some host.inspection_paste
+  in
+  let workspace_layer session =
+    not (session.show_connection_details || session.waveform_visible)
+    && Option.is_none session.hierarchy_view && Option.is_none session.artifact_view
+  in
+  let hosted_body session kind dimensions =
+    if editor_active session && workspace_layer session
+    then
+      Host_view.hosted_body (displayed_host session) dimensions ~f:(fun tile -> kind tile.kind)
+    else None
+  in
+  let placement session dimensions : Editor_workspace.placement option =
+    Option.bind session.editor.key ~f:(fun key ->
+      Option.map (hosted_body session Host.editor_kind dimensions) ~f:(fun (tile, bounds) ->
+        { key; bounds
+        ; focused = not (modal session) && Option.equal Workspace.Tile_id.equal session.host.focus (Some tile.id)
+        }))
+  in
+  let focus_editor session =
+    Option.iter (List.find (Host.tiles session.host) ~f:(fun tile -> Host.editor_kind tile.kind))
+      ~f:(fun tile -> session.host <- { session.host with focus = Some tile.id })
+  in
+  let report_editor_error ?relative_path session error =
+    let path = Option.value_map relative_path ~default:"" ~f:(fun path ->
+      Artifact_view.safe path ^ " — ")
+    in
+    session.host
+    <- { session.host with
+         notice = "Cannot open in Editor: " ^ path ^ (Error.to_string_hum error |> Artifact_view.safe)
+       }
+  in
   let poll =
     Bonsai.map2 session update_revision ~f:(fun session update ->
       Effect.bind
@@ -9578,8 +9767,158 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
   in
   let view =
     let%arr dimensions, _, now, _revision = display
-    and indicator_frames and session in
-    render ~now ?indicator_frames session dimensions
+    and indicator_frames and session and editors in
+    let appearance = Host.effective_appearance session.host in
+    session.painted_editor <- None;
+    let extra_pane (tile : Workspace.Tile.t) ~width ~height =
+      if Host.editor_kind tile.kind
+      then (
+        let notice text = Some (Host_view.lines ~appearance ~width ~height [ text ]) in
+        match editor_project session, editor_for session editors with
+        | None, _ -> notice "Embedded editing requires a local Silver project."
+        | Some _, Some editor when not editor.closed ->
+          session.painted_editor <- placement session dimensions;
+          Some editor.view
+        | Some _, _ -> notice "Opening project in Cobalt…")
+      else if Host.editor_context_kind tile.kind
+      then
+        Some
+          (match companion session with
+           | None -> Host_view.lines ~appearance ~width ~height [ "No originating Silver tile" ]
+           | Some (host, origin) ->
+             Host_view.tile_view ~now ?indicator_frames host (host_data session) origin ~width ~height)
+      else None
+    in
+    render ~now ?indicator_frames ~extra_pane session dimensions
+  in
+  Bonsai.Edge.after_display
+    (let%arr session and editors and dimensions and update_revision in
+     let%bind.Effect next =
+       Effect.of_thunk (fun () ->
+         let owner = session.editor in
+         let current = editor_for session editors in
+         let active_project = editor_project session in
+         let bound = Editor_workspace.binding mounts owner in
+         match bound, current with
+         | Some bound, Some editor
+           when editor.closed
+                || not (Option.exists active_project ~f:(Editor_workspace.equal_project bound.project)) ->
+           owner.key <- None;
+           if editor_active session then back session;
+           Editor_workspace.place mounts None;
+           `Release (bound.key, editor)
+         | _ ->
+           Editor_workspace.place mounts (placement session dimensions);
+           (match owner.pending with
+            | None ->
+              (match active_project with
+               | Some project when editor_active session && Option.is_none bound ->
+                 (match Editor_workspace.mount mounts owner project with
+                  | Ok _ -> `Idle
+                  | Error error ->
+                    back session;
+                    report_editor_error session error;
+                    `Changed)
+               | _ -> `Idle)
+            | Some _ when session.host.paste || Option.is_some session.host.inspection_paste ->
+              `Idle
+            | Some (token, revision, _)
+              when not (phys_equal token owner.intent) || revision <> session.navigation_revision ->
+              owner.pending <- None;
+              `Idle
+            | Some (token, revision, location) ->
+              let request =
+                let open Or_error.Let_syntax in
+                let%bind project =
+                  Result.of_option active_project
+                    ~error:(Error.of_string "Embedded editing requires a local Silver project")
+                in
+                let%bind request = Editor_workspace.request ~project location in
+                let%map entry = Editor_workspace.mount mounts owner project in
+                entry, request
+              in
+              (match request with
+               | Error error ->
+                 owner.pending <- None;
+                 report_editor_error ~relative_path:location.relative_path session error;
+                 `Changed
+               | Ok (entry, request) ->
+                 (match Map.find editors entry.key with
+                  | None -> `Idle (* The new graph slot stabilizes in the next frame. *)
+                  | Some editor ->
+                    owner.pending <- None;
+                    `Open (token, revision, request, editor)))))
+     in
+     match next with
+     | `Idle -> Effect.Ignore
+     | `Changed -> invalidate update_revision
+     | `Release (key, editor) ->
+       Effect.Many [ invalidate update_revision; Editor_workspace.release mounts key editor ]
+     | `Open (token, revision, request, editor) ->
+       let%bind.Effect result =
+         editor.open_location request
+       in
+       let current () =
+         phys_equal token session.editor.intent
+         && revision = session.navigation_revision
+         && not (modal session)
+       in
+       if not (current ()) then Effect.Ignore
+       else
+         (match result with
+          | Error failure ->
+            report_editor_error ~relative_path:request.relative_file session
+              (Cobalt_hosted.Open_location.to_error failure);
+            invalidate update_revision
+          | Ok _ ->
+            let id = Workspace.Editor.workspace_id in
+            let select () =
+              if current ()
+              then (
+                activate_workspace session id;
+                focus_editor session;
+                session.host <- { session.host with notice = "" })
+            in
+            let%bind.Effect () =
+              Effect.of_deferred_thunk (fun () ->
+                (match session.host.registry with
+                 | Some registry when Workspace.is_workspace_open registry id ->
+                   select ();
+                   return ()
+                 | Some registry when List.exists registry.workspaces ~f:Host.editor_workspace ->
+                   mutate_workspace session ~current (Reopen_workspace id)
+                     ~on_snapshot:(fun snapshot ->
+                       if Workspace.is_workspace_open snapshot id then select ())
+                 | _ ->
+                   session.host <- { session.host with notice = "Editor workspace is not available" };
+                   return ())
+                >>= fun () -> save_navigation_preferences session)
+            in
+            invalidate update_revision))
+    graph;
+  let declaration_key session event ~exit =
+    let host = session.host in
+    let prefix = session.editor.prefix in
+    session.editor.prefix <- None;
+    if Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
+       || host.paste || host.editing_filter || host.prefix > 0 || Option.is_some host.inspection_paste
+       || session.waveform_visible || session.show_connection_details
+       || Option.is_some session.hierarchy_view || Option.is_some session.artifact_view
+    then None
+    else (
+      match Host.focused host, event with
+      | Some tile, Event.Key_press { key; mods = [] } when testing_catalog_tile tile ->
+        if key_is 'g' key
+        then (
+          session.editor.prefix <- Some tile.id;
+          Some Effect.Ignore)
+        else if key_is 'd' key && Option.exists prefix ~f:(Workspace.Tile_id.equal tile.id)
+        then
+          Some (match Host.capture host, declaration_command session with
+            | Some capture, Some command -> execute_host session capture command.action ~exit
+            | _ -> Effect.Ignore)
+        else None
+      | _ -> None)
   in
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
@@ -9618,13 +9957,15 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
       Effect.Ignore)
     else (
       let hosted =
-        if (not session.show_connection_details)
+        match declaration_key session event ~exit with
+        | Some _ as handled -> handled
+        | None when (not session.show_connection_details)
            && (session.waveform_visible
                || (Option.is_some session.host.registry
                    && Option.is_none session.hierarchy_view
                    && Option.is_none session.artifact_view))
-        then host_handler session event ~exit
-        else None
+          -> host_handler session event ~exit
+        | None -> None
       in
       match hosted with
       | Some effect -> effect
@@ -9725,11 +10066,28 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
                 ~f:(fun () -> invalidate update)))
       ]
   in
+  let companion_input session event =
+    match companion session, Host.decode_event event with
+    | Some (host, _), Some (Host.Next | Previous | Character ('j' | 'k') as input) ->
+      let projected, effect = Host.input host input ~commands:[] in
+      (match effect with
+       | Host.No_effect ->
+         session.host <- Host.switch projected Workspace.Editor.workspace_id
+       | _ -> ());
+      Effect.Ignore
+    | _ -> Effect.Ignore
+  in
   let handler =
     let on_entry =
       Option.value on_entry ~default:(Bonsai.return (fun _ _ -> Effect.Ignore))
     in
-    Bonsai.map3 (Bonsai.both session on_entry) update_revision write_to_tty ~f:(fun (session, on_entry) update write event ->
+    let paste_owner = ref None in
+    let%arr session and on_entry and update_revision and write_to_tty and editors and dimensions in
+    fun event ->
+      (match event with
+       | Event.Key_press { key; mods = [] } when key_is 'g' key || key_is 'd' key -> ()
+       | _ -> session.editor.prefix <- None);
+      let update = update_revision and write = write_to_tty in
       let previous = session.host in
       let publish effect =
         let effect = publish session ~update ~write previous effect in
@@ -9737,13 +10095,82 @@ let tui ?on_entry session ~no_mouse ~exit ~dimensions (local_ graph) =
         | None -> effect
         | Some mode ->
           session.project_entry <- None;
+          Editor_workspace.cancel session.editor;
+          Editor_workspace.place mounts None;
+          session.painted_editor <- None;
           Effect.Many [ effect; on_entry session mode ]
       in
-      match event with
-      | Event.Mouse { kind = (Left | Right | Scroll _) as kind; mods; position = { x; y } }
-        when not no_mouse -> publish (handle_pointer session ~exit ~kind ~mods ~x ~y)
-      | Mouse _ -> Effect.Ignore
-      | _ -> publish (handle_keyboard session event))
+      let send_editor event =
+        Option.value_map (editor_for session editors) ~default:Effect.Ignore ~f:(fun editor ->
+          editor.handle_event event)
+      in
+      let host_event event =
+        match event with
+        | Event.Mouse { kind = (Left | Right | Scroll _) as kind; mods; position = { x; y } }
+          when not no_mouse ->
+          session.editor.prefix <- None;
+          publish (handle_pointer session ~exit ~kind ~mods ~x ~y)
+        | Mouse _ -> Effect.Ignore
+        | _ -> publish (handle_keyboard session event)
+      in
+      let editor_layer = editor_active session && workspace_layer session in
+      let focused_kind kind =
+        editor_layer && Option.exists (Host.focused session.host) ~f:(fun tile -> kind tile.kind)
+      in
+      let editor_focus = focused_kind Host.editor_kind && Option.is_some (editor_project session) in
+      let sibling_focus = focused_kind Host.editor_context_kind in
+      let captured = modal session in
+      let owner =
+        if captured then `Host
+        else if editor_focus then `Cobalt session.editor.key
+        else `Host
+      in
+      let pasted = Option.is_some !paste_owner in
+      let lost = Option.exists !paste_owner ~f:(fun start -> not (Poly.equal start owner)) in
+      (match event with
+       | Event.Paste `Start when not pasted -> paste_owner := Some owner
+       | Event.Paste `End -> paste_owner := None
+       | _ when lost -> paste_owner := Some `Discard
+       | _ -> ());
+      if Host.is_interrupt event then exit ()
+      else if lost then Effect.Ignore
+      else if pasted then
+        (match owner, event with
+         | _, Event.Mouse _ -> Effect.Ignore
+         | `Cobalt _, _ -> send_editor event
+         | _ -> host_event event)
+      else if captured || not editor_layer then host_event event
+      else
+        (match event with
+         | Key_press { key = Function 7; mods = [] }
+         | Key_press { key = Arrow `Left; mods = [ Meta ] } ->
+           back session;
+           publish Effect.Ignore
+         | Key_press { key = Function 6; mods = [] } ->
+           if focused_kind Host.editor_kind
+           then (
+             Option.first_some
+               (hosted_body session Host.editor_context_kind dimensions)
+               (hosted_body session (String.equal "workspace-tabs") dimensions)
+             |> Option.iter ~f:(fun (tile, _) ->
+               session.host <- { session.host with focus = Some tile.id }))
+           else focus_editor session;
+           publish Effect.Ignore
+         | Mouse { kind; mods; position = { x; y } } when not no_mouse ->
+           (match session.painted_editor, placement session dimensions with
+            | Some painted, Some current
+              when editor_focus && Editor_workspace.equal_placement painted current
+                   && x >= painted.bounds.x && x < painted.bounds.x + painted.bounds.width
+                   && y >= painted.bounds.y && y < painted.bounds.y + painted.bounds.height ->
+              send_editor (Mouse
+                { kind; mods; position = { x = x - painted.bounds.x; y = y - painted.bounds.y } })
+            | _ -> host_event event)
+         | Mouse _ -> Effect.Ignore
+         | _ when editor_focus -> send_editor event
+         | Key_press { key = (Arrow (`Up | `Down) | ASCII ('j' | 'k')); mods = [] }
+           when sibling_focus ->
+           publish (companion_input session event)
+         | _ -> host_event event)
   in
   ~view, ~handler
 ;;
@@ -10222,8 +10649,13 @@ let run_legacy
             let%bind result =
               Bonsai_term.start_with_exit
                 ~dispose:true
+                ~bpaste:true
                 ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-                 (tui (Bonsai.return session) ~no_mouse)
+                (fun ~exit ~dimensions graph ->
+                  Editor_workspace.with_editors ~exit
+                    (fun mounts editors ~exit graph ->
+                      tui (Bonsai.return session) ~no_mouse ~exit ~dimensions mounts editors graph)
+                    graph)
             in
             let%map () = session.preference_saves in
             result)
@@ -10557,7 +10989,7 @@ let local_workspace
     | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
     | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
   in
-  let app ~exit ~dimensions (local_ graph) =
+  let project_app ~dimensions mounts editors ~exit (local_ graph) =
     let open Bonsai.Let_syntax in
     let page, set_page = Bonsai.state initial graph in
     let result =
@@ -10573,7 +11005,9 @@ let local_workspace
               let screen = match mode with `New -> Startup_entry.Name "" | `Open -> Existing "" in
               set_page (`Entry (Startup_entry.entry ~original ~start screen, Some s))
         in
-        let ~view, ~handler = tui ~on_entry session ~no_mouse ~exit ~dimensions graph in
+        let ~view, ~handler =
+          tui ~on_entry session ~no_mouse ~exit ~dimensions mounts editors graph
+        in
         let%arr view and handler in
         ~view, ~handler
       | `Entry (entry, previous) ->
@@ -10603,10 +11037,13 @@ let local_workspace
   in
   let%bind result =
     Monitor.try_with_or_error (fun () ->
-      Bonsai_term.start_with_exit
-        ~dispose:true
-        ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-        app)
+      Editor_workspace.with_terminal_mode (fun () ->
+        Bonsai_term.start_with_exit
+          ~dispose:true
+          ~bpaste:true
+          ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+          (fun ~exit ~dimensions graph ->
+            Editor_workspace.with_editors ~exit (project_app ~dimensions) graph)))
   in
   let%map () =
     Deferred.all_unit (List.map (Hashtbl.data sessions) ~f:(fun s -> s.preference_saves))

@@ -77,7 +77,7 @@ let read_request path =
   |> Provider.Request.t_of_sexp
 ;;
 
-let execute ~argv ~discovery ~validate_selection ~run =
+let execute ~argv ~declarations ~discovery ~validate_selection ~run =
   let discovery = Validation.validate_discovery discovery in
   let absolute path =
     Validation.check (Filename.is_absolute path) "Expected absolute provider path";
@@ -85,7 +85,8 @@ let execute ~argv ~discovery ~validate_selection ~run =
   in
   match Array.to_list argv with
   | [ _; "discover"; "--protocol-version"; "1" ] ->
-    let output = Sexp.to_string_mach (Discovery.sexp_of_t discovery) ^ "\n" in
+    let catalog = Catalog.create discovery ~declarations |> Validation.validate_catalog in
+    let output = Sexp.to_string_mach (Catalog.sexp_of_t catalog) ^ "\n" in
     Validation.check
       (String.length output <= Limits.discovery_bytes)
       "Discovery exceeds 1 MiB";
@@ -208,9 +209,17 @@ let execute ~argv ~discovery ~validate_selection ~run =
   | _ -> failwith "Expected discover/run --protocol-version 1 with the simulation protocol arguments"
 ;;
 
-let main ?(argv = Sys.get_argv ()) ~discovery ~validate_selection ~run () =
+let main
+  ?(argv = Sys.get_argv ())
+  ?(declarations = [])
+  ~discovery
+  ~validate_selection
+  ~run
+  ()
+  =
   match
-    Or_error.try_with (fun () -> execute ~argv ~discovery ~validate_selection ~run)
+    Or_error.try_with (fun () ->
+      execute ~argv ~declarations ~discovery ~validate_selection ~run)
   with
   | Ok () -> ()
   | Error error ->

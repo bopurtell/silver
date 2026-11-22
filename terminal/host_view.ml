@@ -3521,6 +3521,26 @@ let pointer_hit host dimensions ~x ~y =
     tile, cell)
 ;;
 
+(** Screen-space body bounds for hosted tiles, using the same fit/zoom,
+    frame, padding and chrome calculation as rendering and hit testing. *)
+let hosted_body host dimensions ~f =
+  let _, _, cells = tile_layout host dimensions in
+  List.find_map cells ~f:(fun (tile, (cell : W.Geometry.t)) ->
+    if not (f tile) then None
+    else (
+      let panel = panel_geometry host tile ~width:cell.width ~height:cell.height in
+      let body = body_bounds host tile panel in
+      if body.width <= 0 || body.height <= 0
+      then None
+      else
+        Some
+          ( tile
+          , { body with
+              x = cell.x + body.x
+            ; y = cell.y + body.y + Bool.to_int (show_global_header host)
+            } )))
+;;
+
 let menu_trigger_at host _data dimensions ~x ~y =
   match pointer_geometry host dimensions ~x ~y with
   | Some (tile, body, Some (column, row)) ->
@@ -3839,25 +3859,29 @@ let main_hint_text host =
       Option.bind (H.timing_pane host tile) ~f:(fun pane ->
         Option.map (H.timing host tile) ~f:(fun view -> pane, view)))
   in
-  match timing with
-  | Some ((Timing_workspace.Detail | Context), view) when Inspection_view.detail_mode view
+  match H.active host, timing with
+  | Some workspace, _ when H.editor_workspace workspace ->
+    (if Option.exists (H.focused host) ~f:(fun tile -> H.editor_kind tile.kind)
+     then "Cobalt focus | Alt+Left / F7 Back | F6 Focus pane | Ctrl-C exit"
+     else "Silver focus | Alt+Left / F7 Back | F6 Focus editor | Space c c commands")
+  | _, Some ((Timing_workspace.Detail | Context), view) when Inspection_view.detail_mode view
     ->
     "Space c c commands | Tab/Shift-Tab focus | j/k scroll | Esc or Space c x close \
      detail | Ctrl-C exit"
-  | Some ((Timing_workspace.Detail | Context), _) ->
+  | _, Some ((Timing_workspace.Detail | Context), _) ->
     "Space c c commands | Tab/Shift-Tab focus | j/k scroll | Ctrl-C exit"
-  | Some (Paths, _) ->
+  | _, Some (Paths, _) ->
     "Space c c commands | Tab/Shift-Tab focus | j/k select | Enter detail | / filter | \
      Ctrl-C exit"
-  | None
+  | _, None
     when Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind "timing")
     -> "Space c c | Tab focus | Enter paths | d details | r refresh | Esc back | q exit"
-  | None
+  | _, None
     when Option.exists (H.focused host) ~f:(fun tile ->
       String.equal tile.kind "simulation-catalog") ->
     "R run checked cases | e edit settings | Enter review | x toggle case | n/p suite | \
      Space c c commands"
-  | None ->
+  | _, None ->
     "Space c c commands | Tab/Shift-Tab focus | j/k browse | Enter inspect | F8 details | \
      q exit"
 ;;
@@ -4040,6 +4064,7 @@ let palette_controls host (p : H.palette) =
   | Some (Chip_directory | Module_directory) -> submit "Next" (nonblank && not (Filename.is_absolute p.query))
   | Some (Chip_mapping _) -> submit "Next" (String.equal p.query "ui_in:uo_out:comb8")
   | Some Design_executable -> submit "Import" nonblank
+  | Some (Editor_file _) -> submit "Open" nonblank
   | Some (Workload_bundle _ | Workload_path | Resource_path _ | Finalization_attempt _) ->
     submit "Read" nonblank
   | Some (Acceptance _) -> submit "Submit" nonblank
@@ -4133,6 +4158,8 @@ let palette_page host dimensions =
         ^ " — exact absolute directory; Enter reads; no run allocation"
       | Some H.Workload_path ->
         "IMPORT WORKLOAD RESULT — exact absolute result.json; Enter reads; no execution"
+      | Some (H.Editor_file _) ->
+        "OPEN PROJECT FILE — path[:line[:column]]; Enter opens in Cobalt"
       | Some H.Design_executable -> "IMPORT EXISTING ASIC DESIGN — existing project executable"
       | Some (H.Starter_name Asic_starter) -> "ADD ASIC STARTER — enter starter name"
       | Some (H.Flow_field field) -> Flow_authoring.field_prompt field
@@ -6036,6 +6063,7 @@ let long_testing_fixture () =
           { protocol_version = 1
           ; suites = List.init 30 ~f:(fun i -> { suite with id = sprintf "suite-%02d" i })
           }
+    ; declarations = []
     ; discovery_digest = Some (String.make 64 'd')
     ; discovery_job = None
     ; discovery_error = None
@@ -6483,6 +6511,7 @@ let%test_unit "cooperative detail artifacts and logs paint fields and typed stat
           let snapshot : Simulation.Snapshot.t =
             { configured = true
             ; discovery = None
+            ; declarations = []
             ; discovery_digest = None
             ; discovery_job = None
             ; discovery_error = None
@@ -6631,6 +6660,7 @@ let%test_unit "Testing paints readiness and independent attempt facts in actual 
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "digest"
     ; discovery_job = None
     ; discovery_error = None
@@ -6824,6 +6854,7 @@ let%test_unit "simulation annotations preserve typed rows, logs and terminal cas
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None
@@ -7098,6 +7129,7 @@ let%test_unit "execution labels reuse simulation history from their own workspac
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None
@@ -11071,6 +11103,7 @@ let%test_unit "WB-054 production selection catalog promotes original runnable id
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None

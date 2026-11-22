@@ -81,13 +81,42 @@ let validate_discovery (discovery : Discovery.t) =
   discovery
 ;;
 
-let parse_discovery output =
+let valid_declaration (declaration : Declaration.t) =
+  let path = declaration.relative_path in
+  String.length path <= Limits.string_bytes
+  && Driver_protocol.valid_relative_path path
+  && (not
+        (String.exists path ~f:(fun c ->
+           Char.to_int c < 32 || Char.to_int c = 127 || Char.equal c '\\')))
+  && declaration.line > 0
+  && declaration.column > 0
+;;
+
+let validate_catalog (catalog : Catalog.t) =
+  let discovery = validate_discovery (Catalog.discovery catalog) in
+  check
+    (List.length catalog.declarations <= Limits.cases)
+    "Too many simulation declarations";
+  let cases = Hash_set.Poly.create () in
+  List.iter discovery.suites ~f:(fun suite ->
+    List.iter suite.cases ~f:(fun case -> Hash_set.add cases (suite.id, case.id)));
+  List.iter catalog.declarations ~f:(fun declaration ->
+    let identity = declaration.Declaration.suite_id, declaration.case_id in
+    check (valid_declaration declaration) "Invalid simulation declaration position";
+    check (Hash_set.mem cases identity) "Undeclared or duplicate simulation declaration";
+    Hash_set.remove cases identity);
+  catalog
+;;
+
+let parse_catalog output =
   Or_error.try_with (fun () ->
     check
       (String.length output <= Limits.discovery_bytes)
       "Simulation discovery exceeds 1 MiB";
-    Sexp.of_string output |> Discovery.t_of_sexp |> validate_discovery)
+    Sexp.of_string output |> Catalog.t_of_sexp |> validate_catalog)
 ;;
+
+let parse_discovery output = Or_error.map (parse_catalog output) ~f:Catalog.discovery
 
 let validate_selection (discovery : Discovery.t) (selection : Selection.t) =
   Or_error.try_with (fun () ->

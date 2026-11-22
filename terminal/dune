@@ -54,6 +54,7 @@
    palette_view
    project_browser
   host_view
+  editor_location
   evidence_session_test
   execution_duration_test
   timing_analysis_test
@@ -82,6 +83,7 @@
   core_unix.filename_unix
   core_unix.sys_unix
   hardcaml_workbench_protocol
+  hardcaml_workbench_backend
   hardcaml_workbench_workspaces
   bonsai_term
   notty-community
@@ -164,7 +166,7 @@
 
 (executable
  (name main)
- (modules main startup_entry)
+ (modules main startup_entry editor_workspace)
  (public_name silver)
  (package hardcaml_workbench)
  (libraries
@@ -173,7 +175,9 @@
   bonsai
   bonsai_term
   bonsai_term_components.spinner
+  cobalt.hosted
   core
+  core_unix
   core_unix.command_unix
   hardcaml_workbench_native_http
   hardcaml_workbench_backend
@@ -192,6 +196,16 @@
  (deps test_startup_entry_pty.py ip_starter_fixture.py ../test/support/__init__.py
   ../test/support/screen.py ../test/support/terminal.py)
  (action (run python3 -B %{dep:test_startup_entry_pty.py} %{exe:main.exe})))
+
+(rule
+ (alias test-editor-pty)
+ (deps test_editor_pty.py ../test/support/__init__.py
+   ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_editor_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-editor-pty)))
 
 (rule
  (alias test-theme-picker-pty)

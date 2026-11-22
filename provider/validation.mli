@@ -7,6 +7,9 @@ open! Core
 val validate_discovery : Wire.Discovery.t -> Wire.Discovery.t
 
 val parse_discovery : string -> Wire.Discovery.t Or_error.t
+val valid_declaration : Wire.Declaration.t -> bool
+val validate_catalog : Wire.Catalog.t -> Wire.Catalog.t
+val parse_catalog : string -> Wire.Catalog.t Or_error.t
 
 val validate_selection
   :  Wire.Discovery.t

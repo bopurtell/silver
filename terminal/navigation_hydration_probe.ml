@@ -302,6 +302,7 @@ let suite_artifact_regression () =
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "digest"
     ; discovery_job = None
     ; discovery_error = None
@@ -429,6 +430,7 @@ let simulation_refresh_regressions () =
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None

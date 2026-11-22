@@ -601,7 +601,8 @@ def main():
     smoke(base)
     if args.preset_export:
         presets = demo.workspace_presets(args.preset_export)
-        require(set(presets) == {'overview', 'timing', 'testing', 'waveforms'}, 'Shared stable exported preset identities')
+        require(set(presets) == {'overview', 'testing', 'waveforms', 'timing', 'resources', 'workloads'},
+                'Shared stable exported preset identities')
         for definition in presets.values():
             tiles = field(definition, 'tiles')
             require(len({field(t, 'kind') for t in tiles}) == len(tiles), 'Unique default tile kinds')

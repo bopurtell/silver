@@ -9,6 +9,7 @@ type overrides =
 
 type t =
   { discovery : S.Discovery.t option
+  ; declarations : S.Declaration.t list
   ; digest : string option
   ; configured : bool
   ; blocked : string option
@@ -24,6 +25,7 @@ type t =
 
 let empty =
   { discovery = None
+  ; declarations = []
   ; digest = None
   ; configured = false
   ; blocked = Some "Discover a simulation catalog first"
@@ -41,6 +43,7 @@ let empty =
 let suites t = Option.value_map t.discovery ~default:[] ~f:(fun d -> d.suites)
 let suite_id t = t.suite_id
 let case_id t = t.case_id
+let declarations t = if Option.is_some t.blocked then [] else t.declarations
 let selected_cases t = t.selected
 let filter t = t.filter
 let set_filter t filter = { t with filter }
@@ -87,6 +90,9 @@ let update t (s : S.Snapshot.t) =
   let t =
     { t with
       discovery = Option.first_some s.discovery t.discovery
+    (* A source-only edit can move declarations without changing the launch digest.
+       Retained browse rows never authorize a jump using older metadata. *)
+    ; declarations = s.declarations
     ; digest = (if Option.is_none blocked then s.discovery_digest else None)
     ; configured = s.configured
     ; blocked
@@ -327,6 +333,7 @@ module Test_data = struct
   let snapshot ?(digest = "d1") suites : S.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites }
+    ; declarations = []
     ; discovery_digest = Some digest
     ; discovery_job = None
     ; discovery_error = None
@@ -338,6 +345,23 @@ module Test_data = struct
     }
   ;;
 end
+
+let%test_unit "source-only rediscovery replaces declarations but preserves launch selection" =
+  let snapshot = Test_data.snapshot [ Test_data.suite ] in
+  let declaration : S.Declaration.t =
+    { suite_id = "fifo"; case_id = "seeded"; relative_path = "test/fifo.ml"; line = 20; column = 8 }
+  in
+  let t = update empty { snapshot with declarations = [ declaration ] } in
+  let t = select_case t "seeded" |> fun t -> toggle_case t "directed" in
+  let moved = { declaration with line = 25 } in
+  let t = update t { snapshot with declarations = [ moved ] } in
+  assert (List.equal S.Declaration.equal (declarations t) [ moved ]);
+  assert (Option.equal String.equal (case_id t) (Some "seeded"));
+  assert (List.equal String.equal (selected_cases t) [ "seeded" ]);
+  assert (Result.is_ok (launch t));
+  assert (List.is_empty (declarations (invalidate t)));
+  assert (List.is_empty (declarations (update t snapshot)))
+;;
 
 let%test_unit "catalog captures exact subset defaults and digest; filter only browses" =
   let s = Test_data.suite in

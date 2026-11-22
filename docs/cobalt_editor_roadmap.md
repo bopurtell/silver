@@ -1,7 +1,10 @@
 # Cobalt in Silver: recommended delivery order
 
 Target the terminal frontend first. A project has one live editor session across
-workspace switches; one numbered terminal pool belongs to the Silver frontend.
+workspace switches. The Editor should be a default Silver workspace: opening a
+declaration selects its tab, while Back (`Alt+Left`, with `F7` as an alias)
+returns to the workspace and selection that issued the jump. `Ctrl+O` remains
+Cobalt's own jump-history command. One numbered terminal pool belongs to the Silver frontend.
 These are proposed lifetimes. Today each `cobalt` invocation runs its own editor:
 `bin/cli/cobalt_cli.ml` calls `Cobalt_ui.Editor_view.run` directly. There is no
 Cobalt session daemon for Silver to attach to.

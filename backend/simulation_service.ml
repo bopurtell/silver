@@ -28,6 +28,7 @@ type project =
   ; dir : string
   ; entries : (string, entry) Hashtbl.t
   ; mutable discovery : Discovery.t option
+  ; mutable declarations : Declaration.t list
   ; mutable discovery_digest : string option
   ; mutable discovery_config : string option
   ; mutable discovery_environment : V1.Environment_selection.t option
@@ -260,6 +261,7 @@ let project t root =
       ; dir
       ; entries = Hashtbl.create (module String)
       ; discovery = None
+      ; declarations = []
       ; discovery_digest = None
       ; discovery_config = None
       ; discovery_environment = None
@@ -408,6 +410,7 @@ let snapshot
   let page = List.take entries limit in
   { Snapshot.configured
   ; discovery = p.discovery
+  ; declarations = (if Option.is_some discovery_digest then p.declarations else [])
   ; discovery_digest
   ; discovery_job = (if p.discovering then p.discovery_job else None)
   ; discovery_error
@@ -766,10 +769,12 @@ let discover p config ~environment ~schedule =
                  | _ -> fail "Discovery provider did not exit successfully");
                 if Option.is_none !failure
                 then (
-                  match Codec.parse_discovery (Buffer.contents output) with
+                  match Codec.parse_catalog (Buffer.contents output) with
                   | Error error -> fail (Error.to_string_hum error)
-                  | Ok discovery ->
+                  | Ok catalog ->
+                    let discovery = Catalog.discovery catalog in
                     p.discovery <- Some discovery;
+                    p.declarations <- catalog.declarations;
                     p.discovery_digest
                     <- Some
                          (Files.digest

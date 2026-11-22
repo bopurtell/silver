@@ -622,11 +622,134 @@ let workspace_lifecycle_persistence () =
       expect_error Not_found missing)
 ;;
 
+let editor_migration_persistence () =
+  let module C = Workspace_config in
+  let state_dir = Filename_unix.temp_dir "workspace-editor-migration-" "" in
+  Monitor.protect
+    ~finally:(fun () -> In_thread.run (fun () -> remove_tree state_dir))
+    (fun () ->
+      let project_key = "/fixture/workspace|editor" in
+      let offline = W.initial ~session_id:(W.Session_id.of_string "legacy-editor") in
+      let editor_id = W.Editor.workspace_id in
+      let is_editor = W.Workspace_id.equal editor_id in
+      let remove_editor (s : W.Snapshot.t) =
+        { s with
+          workspaces = List.filter s.workspaces ~f:(fun w -> not (is_editor w.id))
+        ; tiles = List.filter s.tiles ~f:(fun t -> not (is_editor t.workspace))
+        }
+      in
+      let save_legacy snapshot =
+        In_thread.run (fun () ->
+          Service.save_snapshot (Service.create ~state_dir) ~project_key snapshot)
+      in
+      let handle = Service.handle (Service.create ~state_dir) ~project_key in
+      let fresh () = Service.handle (Service.create ~state_dir) ~project_key Get >>| ok in
+      let editor_tiles (s : W.Snapshot.t) =
+        List.filter s.tiles ~f:(fun t -> is_editor t.workspace)
+      in
+      let require_editor (s : W.Snapshot.t) =
+        let editor = W.workspace s editor_id in
+        require (W.is_workspace_open s editor_id) "Editor is not an open registry workspace";
+        require (W.Context_id.equal editor.context s.main_context) "Editor did not link Main";
+        require (Option.equal String.equal editor.preset (Some W.Editor.preset)) "Wrong Editor preset";
+        require
+          (List.equal String.equal (List.map (editor_tiles s) ~f:(fun t -> t.kind))
+             [ "workspace-tabs"; W.Editor.tile_kind ])
+          "Editor has no usable default tiles"
+      in
+      require_editor offline;
+      (* An old Get-only placeholder remains eligible for Initialize_config after upgrade. *)
+      let%bind () = save_legacy (remove_editor offline) in
+      let%bind pending = fresh () in
+      require (pending.configuration_pending && pending.revision = 1)
+        "Migration consumed untouched initialization or skipped its CAS revision";
+      let custom_template =
+        { Workspace_template.generic with name = "Editor"; views = [] }
+      in
+      let custom_definition = C.definition_of_template ~key:"editor" custom_template |> Or_error.ok_exn in
+      let authored : C.Resolved.t =
+        { version = C.version
+        ; id = "saved-custom"
+        ; definitions = [ custom_definition ]
+        ; windows =
+            [ { key = "primary"
+              ; name = "Customized shell"
+              ; workspaces =
+                  [ { key = "my-editor"; name = "Editor"; definition = Custom "editor" } ]
+              }
+            ]
+        }
+      in
+      let authored = W.apply pending (Initialize_config authored) |> ok in
+      require_editor authored;
+      let custom = (List.hd_exn authored.config_workspaces).workspace in
+      let authored = select authored custom (Some (run "retained-selection")) in
+      let authored = mutate authored (Make_independent custom) in
+      let authored = select authored custom (Some (run "independent-selection")) in
+      let authored =
+        mutate authored
+          (Create_tile
+             { workspace = custom
+             ; kind = "custom-evidence"
+             ; geometry = { x = 3; y = 4; width = 41; height = 7 }
+             })
+      in
+      let evidence = List.last_exn authored.tiles in
+      let authored =
+        mutate authored (Set_tile_binding { tile = evidence.id; binding = Pin_run (run "pin") })
+      in
+      let authored = mutate authored (Set_zoom { workspace = custom; tile = Some evidence.id }) in
+      let legacy = remove_editor authored in
+      let%bind () = save_legacy legacy in
+      let%bind stale =
+        handle
+          (Mutate
+             { expected_revision = legacy.revision
+             ; mutation = Rename_workspace { workspace = custom; name = "stale edit" }
+             })
+      in
+      expect_error Conflict stale;
+      let%bind migrated = fresh () in
+      require_editor migrated;
+      require
+        (W.Snapshot.equal { legacy with revision = legacy.revision + 1 } (remove_editor migrated))
+        "Editor migration rewrote existing workspace IDs, order, configuration, or selection";
+      let%bind restarted = fresh () in
+      require (W.Snapshot.equal migrated restarted) "Editor migration was not persisted exactly once";
+      let edit (s : W.Snapshot.t) mutation =
+        handle (Mutate { expected_revision = s.revision; mutation }) >>| ok
+      in
+      let%bind renamed = edit restarted (Rename_workspace { workspace = editor_id; name = "Code" }) in
+      let%bind closed = edit renamed (Close_workspace editor_id) in
+      let%bind loaded_closed = fresh () in
+      require (W.Snapshot.equal closed loaded_closed) "Restart reopened or renamed the Editor";
+      let%bind reopened = edit loaded_closed (Reopen_workspace editor_id) in
+      let main_tile = List.last_exn (editor_tiles reopened) in
+      let%bind hidden = edit reopened (Set_tile_hidden { tile = main_tile.id; hidden = true }) in
+      let restore_tiles =
+        List.map C.editor_definition.template.views ~f:(fun view ->
+          let g = view.geometry in
+          view.kind, ({ x = g.x; y = g.y; width = g.width; height = g.height } : W.Geometry.t))
+      in
+      let%bind restored =
+        edit hidden (Restore_default_layout { workspace = editor_id; preset = W.Editor.preset; tiles = restore_tiles })
+      in
+      let%map loaded = fresh () in
+      require (W.Snapshot.equal restored loaded) "Restart lost the restored Editor workspace";
+      require
+        (W.Tile.equal (W.tile reopened main_tile.id) (W.tile loaded main_tile.id))
+        "Editor restore replaced its tile identity";
+      require
+        (W.Snapshot.equal { legacy with revision = loaded.revision } (remove_editor loaded))
+        "Restoring the desired Editor disturbed the unrelated custom workspace named Editor")
+;;
+
 let run_tests () =
   pure_transitions ();
   let%bind () = persistence () in
   let%bind () = workspace_lifecycle_persistence () in
-  composition_persistence ()
+  let%bind () = composition_persistence () in
+  editor_migration_persistence ()
 ;;
 
 let () =

@@ -200,8 +200,9 @@ def pty_check(session):
         drain(2)
         after = session.rpc('workspace')
         require(int(field(after, 'revision')) > int(field(before, 'revision')), 'PTY Enter did not submit mutation')
-        require(field(field(after, 'workspaces')[0], 'context') != field(after, 'main_context'),
-                'PTY command did not make Overview independent')
+        overview = next(w for w in field(after, 'workspaces') if field(w, 'preset') == ['overview'])
+        require(field(overview, 'context') != field(after, 'main_context'),
+                 'PTY command did not make Overview independent')
         # Appearance is client-local: exercise real palette dispatch for every skin,
         # then verify its active marker and unchanged authoritative workspace state.
         appearance_before = after
@@ -236,7 +237,9 @@ def pty_check(session):
                 'Appearance changed authoritative contexts/layout/pins')
         require((calls_path.read_bytes() if calls_path.exists() else b'') == calls_before,
                 'Appearance dispatched provider commands')
-        for key in (b'2', b'\t', b'j', b'k', b'1'):
+        timing_number = next(i for i, w in enumerate(field(after, 'workspaces'), 1)
+                             if field(w, 'preset') == ['timing'])
+        for key in (str(timing_number).encode(), b'\t', b'j', b'k', b'1'):
             os.write(master, key)
             drain(.15)
         os.write(master, b'q')
@@ -302,19 +305,22 @@ def exercise(session, fixture):
             duplicate = session.rpc('asic', f'(Run (key fs0-{profile}) (preview {sexp(preview)}))', wait=True)
             require(len(field(duplicate, 'runs')) == len(runs), 'Duplicate launch allocated another run')
         ws = session.rpc('workspace')
-        overview, timing = field(ws, 'workspaces')[:2]
+        overview = next(w for w in field(ws, 'workspaces') if field(w, 'preset') == ['overview'])
+        timing = next(w for w in field(ws, 'workspaces') if field(w, 'preset') == ['timing'])
         main = field(ws, 'main_context')
         ws = session.mutate(ws, f'(Link_context (workspace {field(overview, "id")}) (context {main}))')
         ws = session.mutate(ws, f'(Link_context (workspace {field(timing, "id")}) (context {main}))')
         context = next(c for c in field(ws, 'contexts') if field(c, 'id') == main)
         ws = session.mutate(ws, f'(Select_run (workspace {field(overview, "id")}) (context {main}) (expected_selection_revision {field(context, "selection_revision")}) (run ({sexp(runs[0])})))')
         ws = session.mutate(ws, f'(Make_independent {field(timing, "id")})')
-        independent = field(field(ws, 'workspaces')[1], 'context')
+        independent = field(next(w for w in field(ws, 'workspaces')
+                                 if field(w, 'id') == field(timing, 'id')), 'context')
         ws = session.mutate(ws, f'(Select_run (workspace {field(timing, "id")}) (context {independent}) (expected_selection_revision 0) (run ({sexp(runs[1])})))')
-        tile = field(field(ws, 'tiles')[0], 'id')
+        tile = next(field(t, 'id') for t in field(ws, 'tiles')
+                    if field(t, 'workspace') == field(overview, 'id') and field(t, 'kind') == 'run-selector')
         ws = session.mutate(ws, f'(Set_tile_binding (tile {tile}) (binding (Pin_run {sexp(runs[0])})))')
         ws = session.mutate(ws, f'(Move_tile (tile {tile}) (workspace {field(timing, "id")}))')
-        conflict = session.rpc('workspace', '(Mutate (expected_revision 0) (mutation (Make_independent workspace-4)))', success=False)
+        conflict = session.rpc('workspace', f'(Mutate (expected_revision 0) (mutation (Make_independent {field(timing, "id")})))', success=False)
         require(field(conflict, 'kind') == 'Conflict', 'Stale workspace CAS was not rejected')
         calls = session.root / 'calls'
 

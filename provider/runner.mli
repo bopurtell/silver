@@ -10,6 +10,7 @@ type context =
     order. Daemon submissions are already normalized upstream. *)
 val main
   :  ?argv:string array
+  -> ?declarations:Wire.Declaration.t list
   -> discovery:Wire.Discovery.t
   -> validate_selection:(Wire.Selection.t -> unit Or_error.t)
   -> run:(context -> unit Or_error.t)

@@ -288,6 +288,7 @@ let attempt ~suite id : S.Attempt.t =
 let sim_snapshot detail : S.Snapshot.t =
   { configured = true
   ; discovery = None
+  ; declarations = []
   ; discovery_digest = None
   ; discovery_job = None
   ; discovery_error = None

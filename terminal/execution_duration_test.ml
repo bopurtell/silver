@@ -439,6 +439,7 @@ let%test_unit "Testing attempts paint duration on the list and advance with the 
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None

@@ -64,6 +64,42 @@ module Discovery = struct
   [@@deriving bin_io, compare, equal, sexp]
 end
 
+module Declaration = struct
+  (** Advisory source coordinates, keyed by stable catalog IDs. The file is relative to
+      the project root; the line and display-cell column are one-based. *)
+  type t =
+    { suite_id : string
+    ; case_id : string
+    ; relative_path : string
+    ; line : int
+    ; column : int
+    }
+  [@@deriving bin_io, compare, equal, sexp]
+end
+
+module Catalog = struct
+  (** The serialized discovery envelope. No extension field is emitted for a provider
+      without positions, so its existing discovery bytes and [Discovery] types remain
+      unchanged. Declarations do not affect which inputs can be launched. *)
+  type t =
+    { protocol_version : int
+    ; suites : Suite.t list
+    ; declarations : Declaration.t list [@sexp.default []] [@sexp_drop_default.equal]
+    }
+  [@@deriving sexp]
+
+  let create (discovery : Discovery.t) ~declarations =
+    { protocol_version = discovery.protocol_version
+    ; suites = discovery.suites
+    ; declarations
+    }
+  ;;
+
+  let discovery t : Discovery.t =
+    { protocol_version = t.protocol_version; suites = t.suites }
+  ;;
+end
+
 module Asic_input = struct
   type t =
     { run : Run_ref.t

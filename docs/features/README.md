@@ -1,8 +1,12 @@
 # Feature ticket catalog
 
 **Cobalt integration intake (2026-11-21):** [Editor workspace, shared ToggleTerm,
-and timing navigation — recommended order](../cobalt_editor_roadmap.md). WB-087–092
-are proposed tickets; WB-021 remains the ticket for hardware source mapping.
+and timing navigation — recommended order](../cobalt_editor_roadmap.md).
+[WB-092](infrastructure/WB-092-module-jump-hook.md) (jump resolution),
+[WB-087](workspaces/WB-087-cobalt-editor.md) (hosted editor), and
+[WB-088](verification/WB-088-test-declaration.md) (Testing declarations) are
+implemented and automatically verified. WB-089–091 remain proposed; WB-021
+tracks hardware source mapping.
 
 Updated 2026-10-17 from the owner's feature intake and current delivery records.
 **Cataloging a ticket does not authorize implementation.** Delivery is claimed only

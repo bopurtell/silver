@@ -663,6 +663,7 @@ let%test_unit "history, selection, normalized failure and captured rerun inputs 
   let snapshot : S.Snapshot.t =
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
+    ; declarations = []
     ; discovery_digest = Some "digest"
     ; discovery_job = None
     ; discovery_error = None

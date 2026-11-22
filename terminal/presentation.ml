@@ -461,6 +461,7 @@ let%test_unit "simulation execution context belongs to each job, not the selecti
   let snapshot : Simulation.Snapshot.t =
     { configured = true
     ; discovery = None
+    ; declarations = []
     ; discovery_digest = None
     ; discovery_job = None
     ; discovery_error = None
