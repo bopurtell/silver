@@ -3,7 +3,7 @@ id: WB-090
 title: Delegate embedded editor terminal requests to Silver
 category: integrations
 feature_sets: [FS3]
-status: needs-design
+status: proposed
 kind: feature
 priority: P2
 severity: n/a
@@ -19,6 +19,12 @@ related: []
 ---
 
 # WB-090 — Delegate Cobalt terminal toggles to its host
+
+**Design agreed (2026-11-22); Silver wiring pending.** One input owner per
+keystroke: Cobalt recognizes the chord while editing; Silver selects the
+number and owns overlay focus. Verify the unnumbered case across workspaces:
+select shell 2 in Timing, hide it, toggle from Cobalt Insert mode, see the same
+shell 2, hide it, then type at the original editor cursor in Insert mode.
 
 **Cross-repo ownership:** WB-090 owns both the Cobalt input/host-action change
 and the Silver handler. Acceptance below covers both repositories under this ID.

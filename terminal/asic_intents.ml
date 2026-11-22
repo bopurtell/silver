@@ -107,7 +107,7 @@ let validate_cached_summary (snapshot : Asic.Snapshot.t) ~selected =
             | Some { freshness = (Validated | Missing_source | Refresh_failed _); _ } -> None)))
 ;;
 
-let plan t ~now (snapshot : Asic.Snapshot.t) ~visible =
+let plan t ?timing_summary_run ~now (snapshot : Asic.Snapshot.t) ~visible =
   let visible = List.dedup_and_sort visible ~compare:Run_ref.compare in
   let t =
     { observed = List.filter t.observed ~f:(fun (run, _) -> mem visible run)
@@ -161,14 +161,21 @@ let plan t ~now (snapshot : Asic.Snapshot.t) ~visible =
         then due
         else (not cached) && not (mem t.unknown_probed reference)
       in
-      let summary =
-        terminal run
-        && (not cached)
-        && (not owned_reader)
-        && Option.is_none run.error
-        && (not
-              (active_key summary_key || active_key refresh_key || active_key observe_key
-               || active_key validation_key))
+       let timing_ready =
+         (not (terminal run))
+         && Option.equal Run_ref.equal timing_summary_run (Some reference)
+         && List.exists [ "timing"; "signoff" ] ~f:(fun stage ->
+           Overview_tiles.completed_timing_stage run ~stage)
+       in
+       let summary =
+         (terminal run || timing_ready)
+         && (not cached)
+         && ((not owned_reader) || timing_ready)
+         && Option.is_none run.error
+         && (not
+               (active_key summary_key || active_key refresh_key
+                || (active_key observe_key && not timing_ready)
+                || active_key validation_key))
         && (not (failed_key summary_key || failed_key refresh_key))
         && not (mem t.summary_requested reference)
       in
@@ -259,6 +266,33 @@ let fixture_summary : Asic.Summary.t =
   ; observed_at = "fixture"
   ; freshness = Cached_unverified
   }
+;;
+
+let%test_unit "visible completed Timing may read one summary while Signoff is live" =
+  let run =
+    { (fixture_run ~execution_file:fixture_summary.execution_file "observing") with
+      stages =
+        [ { id = "timing"
+          ; name = "Timing"
+          ; status = Completed
+          ; requested = true
+          ; reason = None
+          ; action = None
+          ; execution_timing = None
+          } ]
+    }
+  in
+  let owner = fixture_operation ~run:fixture_reference "run:launch" "run" "executing" in
+  let snapshot = fixture_snapshot ~operations:[ owner ] [ run ] in
+  let plan t ?timing_summary_run snapshot =
+    plan t ?timing_summary_run ~now:Time_ns.epoch snapshot ~visible:[ fixture_reference ]
+  in
+  assert (List.is_empty (snd (plan empty snapshot)));
+  let t, intents = plan empty ~timing_summary_run:fixture_reference snapshot in
+  assert (List.equal Asic.Operation.equal intents [ Load_summary fixture_reference ]);
+  assert (List.is_empty (snd (plan t ~timing_summary_run:fixture_reference snapshot)));
+  let missing = { snapshot with runs = [ { run with execution_file = None } ] } in
+  assert (List.is_empty (snd (plan empty ~timing_summary_run:fixture_reference missing)))
 ;;
 
 let%test_unit "visible history never schedules observation, summary loads or Refresh for \

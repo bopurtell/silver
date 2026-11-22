@@ -3,7 +3,7 @@ id: WB-089
 title: Numbered ToggleTerm sessions across Silver workspaces
 category: integrations
 feature_sets: [FS3]
-status: needs-design
+status: delivered
 kind: feature
 priority: P2
 severity: n/a
@@ -19,6 +19,14 @@ related: [WB-090]
 ---
 
 # WB-089 — One ToggleTerm pool across Silver workspaces
+
+**Delivered and automatically verified; awaiting owner acceptance.** A number identifies
+a live local shell shared by **all workspaces** in the project. Keep number
+selection project-local by default. An unnumbered toggle uses the most recent
+number (1 initially); requesting a different number while visible switches
+shells without changing the overlay's focus-return target. Hiding or switching
+workspaces preserves the shell, cwd and output. On exit, retain the final screen
+and status until explicit restart. A dedicated terminal/AI workspace is deferred.
 
 **Cross-repo ownership:** WB-089 owns Silver's terminal pool and overlay plus
 any Cobalt library extraction or packaging needed to reuse its terminal runtime.
@@ -47,5 +55,13 @@ is hidden, and await `shutdown` on frontend exit.
 
 Cobalt's `examples/terminal_pool/README.md` gives the pool-only example and
 isolated install check. The example verifies persistent hidden output, shell
-reuse and child cleanup. The Testing → Timing overlay check above is still
-Silver-side acceptance.
+reuse and child cleanup.
+
+## Verification
+
+The Cobalt `dune runtest -j 1 examples/terminal_pool` check and the Silver serial
+terminal build passed. From Silver, run
+`python3 -B terminal/test_shared_terminal_pty.py _build/default/terminal/main.exe`.
+The PTY test exercises Testing → Timing shell reuse, independent numbered shells,
+hidden output, resize, focus return, explicit restart and frontend-exit cleanup.
+It uses the shipped F10 toggle and F12 restart bindings.

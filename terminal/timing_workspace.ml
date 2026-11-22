@@ -23,6 +23,10 @@ type path_item =
   ; label : string
   }
 
+let is_path (row : Asic_inspection.Row.t) =
+  List.mem [ "timing_path"; "path" ] row.category ~equal:String.equal
+;;
+
 let path_items ?(presentation = Tile_presentation.defaults) (t : t) =
   Inspection_view.visible t
   |> List.map ~f:(fun row ->
@@ -132,6 +136,34 @@ let row_status_role (row : Asic_inspection.Row.t) =
     | _ -> Metadata)
 ;;
 
+(* Clip a single display row without expanding the hidden suffix into continuations. *)
+let clip_line ?(ellipsis = false) ~width line =
+  if width <= 0
+  then ""
+  else (
+    let line = Artifact_view.safe line in
+    let rec end_offset limit offset cells =
+      if offset = String.length line
+      then offset
+      else (
+        let decoded = Stdlib.String.get_utf_8_uchar line offset in
+        let size =
+          Bonsai_term.View.uchar_tty_width (Stdlib.Uchar.utf_decode_uchar decoded)
+          |> Int.max 0
+        in
+        if size > limit - cells
+        then offset
+        else
+          end_offset limit (offset + Stdlib.Uchar.utf_decode_length decoded) (cells + size))
+    in
+    let offset = end_offset width 0 0 in
+    if offset = String.length line
+    then line
+    else if ellipsis
+    then String.prefix line (end_offset (width - 1) 0 0) ^ "…"
+    else String.prefix line offset)
+;;
+
 (** The compact prefix is width-bounded; complete values live in Context. Provider payload
     is deliberately outside this prefix and is never semantically styled. *)
 let semantic_prefix
@@ -179,18 +211,7 @@ let semantic_prefix
            ^ Option.value row.group ~default:"—" )
        ; Metadata, "Endpoints: " ^ endpoint "startpoint" ^ " → " ^ endpoint "endpoint"
        ])
-    |> List.map ~f:(fun (role, line) ->
-      let lines =
-        Artifact_view.wrap ~width:(Int.max 1 (width - 1)) (Artifact_view.safe line)
-      in
-      ( role
-      , if width <= 0
-        then ""
-        else (
-          match lines with
-          | [] -> ""
-          | [ line ] -> line
-          | line :: _ -> if width = 1 then "…" else line ^ "…") ))
+    |> List.map ~f:(fun (role, line) -> role, clip_line ~ellipsis:true ~width line)
   | Context ->
     let observation =
       match t.index with
@@ -198,7 +219,7 @@ let semantic_prefix
         [ ( Pending
           , if t.index_loading
             then "Loading timing index…"
-            else "No loaded observation; Inspect/refresh to load" )
+             else "No loaded Timing observation" )
         ]
       | Some i ->
         [ (if i.cached_unverified
@@ -278,7 +299,8 @@ let empty_paths_message (t : t) =
   | Some error -> "ERROR: " ^ error
   | None ->
     (match t.index with
-     | None -> "No loaded index · explicit Inspect/refresh required"
+      | None when t.index_loading -> "Loading timing index…"
+      | None -> "No loaded index for this run and stage"
      | Some index when List.is_empty index.rows ->
        "No timing paths reported for stage "
        ^ t.stage
@@ -305,11 +327,11 @@ let rows
       | None ->
         if t.index_loading
         then "Loading timing index…"
-        else "No loaded index · Inspect/refresh to load"
+         else "No loaded index"
       | Some index ->
         sprintf
           "%d paths · %s%s%s"
-          (List.length items)
+          (List.count items ~f:(fun item -> is_path item.row))
           t.stage
           (if index.cached_unverified then " · CACHED UNVERIFIED" else " · observed cache")
           (if index.truncated then " · TRUNCATED" else "")
@@ -375,23 +397,23 @@ let rows
          |> List.map ~f:(fun item -> item.label))
       (Int.max 0 height)
   | Detail | Context ->
+    let prefix = List.map (semantic_prefix ~presentation ?now ~pane ~width t) ~f:snd in
     let lines =
-      List.map (semantic_prefix ~presentation ?now ~pane ~width t) ~f:snd
-      @
       if equal_pane pane Detail
-      then
-        List.mapi (detail_body t) ~f:(fun index line ->
-          if index = 0 && String.is_prefix line ~prefix:"/"
-          then Presentation.source_path ~compress:presentation.string_compression line
-          else
-            Presentation.report_source_header
-              ~compress:presentation.string_compression
-              line)
-      else []
-    in
-    let lines =
-      List.concat_map lines ~f:(fun line ->
-        Artifact_view.wrap ~width (Artifact_view.safe line))
+      then (
+        (* Width must not change the row indices used to page through a report. *)
+        let compress = presentation.string_compression in
+        prefix
+        @ List.mapi (detail_body t) ~f:(fun index line ->
+          let line =
+            if index = 0 && String.is_prefix line ~prefix:"/"
+            then Presentation.source_path ~compress line
+            else Presentation.report_source_header ~compress line
+          in
+          clip_line ~width line))
+      else
+        List.concat_map prefix ~f:(fun line ->
+          Artifact_view.wrap ~width (Artifact_view.safe line))
     in
     List.take
       (List.drop lines (Int.min scroll (Int.max 0 (List.length lines - height))))
@@ -535,6 +557,35 @@ let%test_unit "ten-row selected detail leads with provider text and retains full
   in
   let t = Inspection_view.reconcile t { snapshot with inspection_details = [ detail ] } in
   let visible = rows ~pane:Detail ~scroll:0 ~width:68 ~height:10 t in
+  let numbered_line = "42: ab界é" ^ String.make 120 'r' ^ " tail" in
+  let report = numbered_line ^ "\n43: next cell\n\n45: last cell" in
+  let loaded = { t with detail = Some { detail with text = report } } in
+  let detail_rows ~width = rows ~pane:Detail ~scroll:0 ~width ~height:20 loaded in
+  let narrow = detail_rows ~width:7 in
+  let wide = detail_rows ~width:240 in
+  assert (List.length narrow = 8 && List.length wide = 8);
+  assert (
+    List.equal String.equal (List.drop narrow 4) [ "42: ab"; "43: nex"; ""; "45: las" ]);
+  assert (
+    List.equal
+      String.equal
+      (List.drop wide 4)
+      [ numbered_line; "43: next cell"; ""; "45: last cell" ]);
+  assert (String.equal (List.hd_exn wide) ("Path: " ^ row.name));
+  List.iter [ 0; 1; 7; 8; 9; 240 ] ~f:(fun width ->
+    List.iter (detail_rows ~width) ~f:(fun line ->
+      assert (Bonsai_term.View.width (Bonsai_term.View.text line) <= width)));
+  List.iter [ 7; 240 ] ~f:(fun width ->
+    let step scroll action = input ~pane:Detail ~scroll ~width ~height:2 loaded action in
+    let unchanged, scroll, operation = step 3 Page_down in
+    assert (phys_equal loaded unchanged && scroll = 5 && Option.is_none operation);
+    let _, scroll, _ = step scroll Down in
+    assert (scroll = 6);
+    let _, scroll, _ = step scroll Down in
+    assert (scroll = 6);
+    let _, scroll, _ = step scroll Up in
+    assert (scroll = 5));
+  assert (String.equal (Option.value_exn loaded.detail).text report);
   let report_path =
     "/retained/timing-817177-2eeaceb51e3413c008ecd50516122412/reports/sta/max.rpt"
   in

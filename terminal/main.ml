@@ -99,6 +99,8 @@ type waveform_runtime =
 type session =
   { requested_endpoint : string option
   ; local_project_files : bool
+  ; mutable terminal : Shared_terminal.t option
+  ; mutable terminal_workspace : (Workspace.Session_id.t * Workspace.Workspace_id.t) option
   ; editor : Editor_workspace.t
   ; mutable painted_editor : Editor_workspace.placement option
   ; mutable project_entry : [ `New | `Open ] option
@@ -329,6 +331,8 @@ let create_session
     let session =
       { requested_endpoint = endpoint
       ; local_project_files
+      ; terminal = None
+      ; terminal_workspace = None
       ; editor = Editor_workspace.create ()
       ; painted_editor = None
       ; project_entry = None
@@ -457,6 +461,70 @@ let editor_project session : Editor_workspace.project option =
       when String.equal root (Project_root.to_absolute_path project.root) ->
       Some { id = project.id; root }
     | _ -> None)
+;;
+
+(* As with embedded editing, use the root supplied to this local Silver
+   invocation, never a daemon-only path or the selected run's environment. *)
+let terminal_project_root session = Option.map (editor_project session) ~f:(fun p -> p.root)
+
+let terminal_workspace session =
+  Option.map (Host.capture session.host) ~f:(fun capture -> capture.session, capture.workspace)
+;;
+
+let hide_terminal session =
+  session.terminal_workspace <- None;
+  Option.iter session.terminal ~f:Shared_terminal.hide
+;;
+
+let terminal_workspace_is_current session =
+  let equal (session_a, workspace_a) (session_b, workspace_b) =
+    Workspace.Session_id.equal session_a session_b
+    && Workspace.Workspace_id.equal workspace_a workspace_b
+  in
+  Option.is_some (terminal_project_root session)
+  && Option.equal equal session.terminal_workspace (terminal_workspace session)
+;;
+
+let terminal_visible session =
+  Option.is_some session.terminal_workspace
+  && Option.exists session.terminal ~f:Shared_terminal.is_visible
+  && terminal_workspace_is_current session
+;;
+
+let sync_terminal_workspace session =
+  if Option.is_some session.terminal_workspace
+     && not (terminal_workspace_is_current session)
+  then hide_terminal session
+;;
+
+(* Leave the top of the dashboard (including its usual workspace strip) on
+   screen. On small terminals give the shell the full allocation instead. *)
+let terminal_allocation (dimensions : Bonsai_term.Dimensions.t) =
+  let top = if dimensions.height < 10 then 0 else dimensions.height / 3 in
+  top, { dimensions with height = dimensions.height - top }
+;;
+
+let terminal_action session ~dimensions action =
+  sync_terminal_workspace session;
+  match session.terminal, terminal_project_root session, terminal_workspace session with
+  | Some terminal, Some project_root, Some workspace ->
+    session.host <- { session.host with prefix = 0 };
+    let _, dimensions = terminal_allocation dimensions in
+    let toggle number =
+      Shared_terminal.toggle terminal ~project_root ~number ~dimensions
+    in
+    (match action with
+     | `Toggle number -> toggle number
+     | `Restart ->
+       if not (Shared_terminal.is_visible terminal) then toggle None;
+       Shared_terminal.resize terminal ~dimensions;
+       Shared_terminal.restart terminal);
+    (* Unlike a regular tile, the overlay never edits Host.focus. Hiding it
+       restores input to the invoking tile (or Editor companion) as-is. *)
+    session.terminal_workspace <- Option.some_if (Shared_terminal.is_visible terminal) workspace
+  | _ ->
+    session.host
+    <- { session.host with notice = "Terminal requires an open local Silver project" }
 ;;
 
 let launch_context session =
@@ -1220,67 +1288,25 @@ let terminal_result_context session tile =
 ;;
 
 let reconcile_synthesis session =
-  session.host <- Host.reconcile_builtin_timing session.host session.asic;
+  session.host <- Host.reconcile_visible_and_builtin_timing session.host session.asic;
   Option.iter session.host.registry ~f:(fun registry ->
-    (* A fresh terminal has no local Timing state. Resolve the exact tile binding and
-       choose only a retained index for that run; activation never asks a provider. *)
-    List.iter registry.tiles ~f:(fun tile ->
-      if Option.is_some (Timing_workspace.pane tile.kind)
-         && (not
-               (List.exists (Host.builtin_timing_workspaces registry) ~f:(fun w ->
-                  Workspace.Workspace_id.equal w.id tile.workspace)))
-         && Option.is_none (Host.timing session.host tile)
-      then
-        Option.iter session.asic ~f:(fun snapshot ->
-          Workspace.resolve_tile registry tile.id
-          |> Result.ok
-          |> Option.bind ~f:(fun reference -> reference.run)
-          |> Option.iter ~f:(fun run ->
-            List.find snapshot.inspections ~f:(fun index ->
-              Run_ref.equal index.run run && String.equal index.domain "timing")
-            |> Option.iter ~f:(fun index ->
-              let view = Timing_workspace.create ~generation:0 ~run ~stage:index.stage in
-              session.host <- Host.set_timing session.host tile view))));
     let timing =
       List.filter_map session.host.timing ~f:(fun (id, view) ->
-        let workspace =
-          List.find registry.workspaces ~f:(fun w ->
-            String.equal id (Workspace.Workspace_id.to_string w.id))
-        in
-        Option.bind workspace ~f:(fun workspace ->
-          let resolved_run =
-            List.find registry.tiles ~f:(fun tile ->
-              Workspace.Workspace_id.equal tile.workspace workspace.id
-              && String.equal tile.kind "timing-paths")
-            |> Option.bind ~f:(fun tile ->
-              Workspace.resolve_tile registry tile.id |> Result.ok)
-            |> Option.bind ~f:(fun reference -> reference.run)
-          in
-          Option.map resolved_run ~f:(fun run ->
-            let view =
-              if Run_ref.equal run view.Inspection_view.run
-                 && Option.equal
-                      String.equal
-                      view.workspace_epoch
-                      (Some (Host.timing_epoch registry workspace.id))
-              then view
-              else
-                Timing_workspace.create
-                  ~generation:(view.generation + 1)
-                  ~run
-                  ~stage:view.stage
-            in
-            let view =
-              { view with
-                Inspection_view.workspace_epoch =
-                  Some (Host.timing_epoch registry workspace.id)
-              }
-            in
-            ( id
-            , Option.value_map session.asic ~default:view ~f:(fun snapshot ->
-                if Option.is_none view.index
-                then Timing_workspace.attach_retained view snapshot
-                else Inspection_view.reconcile view snapshot) ))))
+        List.find registry.tiles ~f:(fun tile ->
+          String.equal id (Workspace.Workspace_id.to_string tile.workspace)
+          && Option.is_some (Timing_workspace.pane tile.kind))
+        |> Option.bind ~f:(fun tile ->
+          if Option.is_none (Host.timing session.host tile)
+             || Option.is_none
+                  (Host.coherent_timing_run registry (Host.timing_panes registry tile.workspace))
+          then None
+          else
+            Some
+              ( id
+              , Option.value_map session.asic ~default:view ~f:(fun snapshot ->
+                  if Option.is_none view.index
+                  then Timing_workspace.attach_retained view snapshot
+                  else Inspection_view.reconcile view snapshot) )))
     in
     session.host <- { session.host with timing };
     List.iter registry.tiles ~f:(fun tile ->
@@ -1636,10 +1662,13 @@ let rec asic_request
   session
   operation
   =
+  let scope = timing_preload_scope session in
   let key =
     match operation with
     | Asic.Operation.Inspect_analysis { run; target; _ } ->
-      Some (timing_preload_scope session ^ Asic_inspection.analysis_index_key ~run ~target)
+      Some (scope ^ Asic_inspection.analysis_index_key ~run ~target)
+    | Inspect { run; domain; stage; refresh = false } when String.equal domain "timing" ->
+      Some (scope ^ Asic_inspection.index_key ~run ~domain ~stage)
     | _ -> None
   in
   match
@@ -1939,8 +1968,8 @@ and drive_timing_demand session =
 
 and drive_timing_preload session =
   let scope = timing_preload_scope session in
-  (* The HTTP receipt only acknowledges queued work. Keep the speculative lane occupied
-     until a later snapshot publishes the index or a terminal failure. *)
+  (* The HTTP receipt only acknowledges queued work. The shared automatic index lane
+     stays occupied until a later snapshot publishes the index or a terminal failure. *)
   Option.iter session.timing_preload_receipt ~f:(fun (flight_scope, key, floor) ->
     if not (String.equal scope flight_scope)
     then session.timing_preload_receipt <- None
@@ -1985,38 +2014,41 @@ and drive_timing_preload session =
                    else id, view)
              })));
   let candidates =
-    Option.value_map session.host.registry ~default:[] ~f:(fun registry ->
-      Host.builtin_timing_workspaces registry
-      |> List.filter_map ~f:(fun workspace ->
-        List.find registry.tiles ~f:(fun tile ->
-          Workspace.Workspace_id.equal tile.workspace workspace.id
-          && String.equal tile.kind "timing-paths"
-          && not tile.hidden)
-        |> Option.bind ~f:(fun tile ->
-          Host.timing session.host tile
-          |> Option.bind ~f:(fun view ->
-            let completed =
-              Option.exists session.asic ~f:(fun snapshot ->
-                List.exists snapshot.summaries ~f:(fun summary ->
-                  Run_ref.equal summary.run view.run
-                  && Option.exists summary.timing_analysis ~f:(fun analysis ->
-                    Asic.Timing_analysis.Status.equal analysis.status Completed
-                    && Option.equal
-                         Asic_inspection.Analysis_target.equal
-                         (Some analysis.target)
-                         view.analysis)))
-            in
-            if (not completed) || Option.is_some view.index
+    let visible = Host.visible_timing session.host |> Option.map ~f:fst in
+    let candidate tile ~visible =
+      Option.bind (Host.timing session.host tile) ~f:(fun view ->
+        if Option.is_none view.index
+           && Option.exists session.asic ~f:(fun snapshot ->
+             Terminal_presentation.Overview_tiles.timing_index_available snapshot view ~visible)
+        then Some (Inspection_view.index_key view, (tile, view))
+        else None)
+    in
+    let hidden =
+      (* The preference identity is set when its read starts. Do not speculate
+         until hydration has applied the saved policy and navigation. *)
+      if not session.host.timing_preload
+         || Option.is_none session.presentation_preferences_loaded
+         || Terminal_presentation.Retained_hydration.Coordinator.busy session.hydration
+      then []
+      else
+        Option.value_map session.host.registry ~default:[] ~f:(fun registry ->
+          Host.builtin_timing_workspaces registry
+          |> List.filter_map ~f:(fun workspace ->
+            let panes = Host.timing_panes registry workspace.id in
+            if Option.is_none (Host.coherent_timing_run registry panes)
             then None
-            else Some (Inspection_view.index_key view, (tile, view))))))
+            else
+              List.find panes ~f:(fun tile ->
+                String.equal tile.kind "timing-paths" && not tile.hidden)
+              |> Option.bind ~f:(candidate ~visible:false)))
+    in
+    Option.to_list (Option.bind visible ~f:(candidate ~visible:true)) @ hidden
   in
   let planner, next =
     Terminal_presentation.Timing_preload.step
       session.timing_preload
       ~scope
-      ~enabled:
-        (session.host.timing_preload
-         && Option.is_some session.presentation_preferences_loaded)
+       ~enabled:(not session.selecting_chip)
       ~interactive:
         ((not (List.is_empty session.timing_index_inflight))
          || Option.is_some session.timing_demand
@@ -2034,14 +2066,15 @@ and drive_timing_preload session =
     session.host
     <- Host.set_timing session.host tile { view with index_loading = true; error = None };
     let timing_receipt response =
-      (match response with
-       | Ok () ->
-         session.timing_preload_receipt <- Some (scope, key, session.asic_request_id + 1)
-       | Error _ ->
-         session.timing_preload
-         <- Terminal_presentation.Timing_preload.finish session.timing_preload ~scope ~key);
-      if phys_equal client session.client
-         && String.equal scope (timing_preload_scope session)
+      if String.equal scope (timing_preload_scope session)
+      then
+        (match response with
+         | Ok () ->
+           session.timing_preload_receipt <- Some (scope, key, session.asic_request_id + 1)
+         | Error _ ->
+           session.timing_preload
+           <- Terminal_presentation.Timing_preload.finish session.timing_preload ~scope ~key);
+      if phys_equal client session.client && String.equal scope (timing_preload_scope session)
       then
         Option.iter (Host.timing session.host tile) ~f:(fun current ->
           if String.equal (Inspection_view.index_key current) key
@@ -2688,6 +2721,7 @@ let activate_workspace ?(browse = false) session id =
   then (
     if not (Option.equal Workspace.Workspace_id.equal session.host.active (Some id))
     then (
+      hide_terminal session;
       Editor_workspace.cancel session.editor;
       session.painted_editor <- None;
       if Workspace.Workspace_id.equal id Workspace.Editor.workspace_id
@@ -2707,17 +2741,8 @@ let activate_workspace ?(browse = false) session id =
     if browse then session.editor.companion_focused <- false;
     session.host <- Host.switch ~browse session.host id;
     Option.iter (current_project session) ~f:(reconcile_launch_context session);
-    reconcile_synthesis session;
-    Option.iter session.asic ~f:(fun snapshot ->
-      List.iter (Host.tiles session.host) ~f:(fun tile ->
-        Option.iter (Host.timing session.host tile) ~f:(fun view ->
-          session.host
-          <- Host.set_timing
-               session.host
-               tile
-               (Timing_workspace.attach_retained view snapshot))));
-    session.host <- Host.reconcile_navigation_timing session.host session.asic;
-    don't_wait_for (refresh_simulation session);
+     reconcile_synthesis session;
+     don't_wait_for (refresh_simulation session);
     don't_wait_for (hydrate_retained ~reschedule:true session))
 ;;
 
@@ -3036,6 +3061,7 @@ let refresh_host session =
     | _ -> return ()
   in
   let%bind () = verify_selected_summary_on_open session in
+  drive_timing_preload session;
   (* Visible evidence and active runs share the same bounded read-intent scheduler. *)
   let runs =
     Host.evidence_runs session.host
@@ -3046,8 +3072,18 @@ let refresh_host session =
   match session.asic with
   | None -> return ()
   | Some snapshot ->
+    let timing_summary_run =
+      if session.selecting_chip
+      then None
+      else Option.map (Host.visible_timing session.host) ~f:snd
+    in
     let state, intents =
-      Asic_intents.plan session.asic_reads ~now:(Time_ns.now ()) snapshot ~visible:runs
+      Asic_intents.plan
+        session.asic_reads
+        ?timing_summary_run
+        ~now:(Time_ns.now ())
+        snapshot
+        ~visible:runs
     in
     session.asic_reads <- state;
     Deferred.List.iter intents ~how:`Sequential ~f:(asic_request session)
@@ -4905,6 +4941,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
   let session =
     { requested_endpoint = Some fixture.endpoint
     ; local_project_files = false
+    ; terminal = None
+    ; terminal_workspace = None
     ; editor = Editor_workspace.create ()
     ; painted_editor = None
     ; project_entry = None
@@ -5216,6 +5254,21 @@ let host_catalog_base session =
   @ Option.value_map (editor_project session) ~default:[] ~f:(fun project ->
     [ Host.command "editor.open" "Open project file…" "editor path line column cobalt"
         (Editor_prompt project.id) ])
+  @ (match session.terminal, terminal_project_root session with
+     | Some _, Some _ ->
+       [ Host.command "terminal.toggle" "Toggle Terminal (F10)" "shell toggleterm"
+           (Toggle_terminal None)
+       ; Host.command "terminal.restart" "Restart Exited Terminal (F12)" "shell toggleterm restart"
+           Restart_terminal
+       ]
+       @ List.init 9 ~f:(fun i ->
+         let number = i + 1 in
+         Host.command
+           (sprintf "terminal.toggle.%d" number)
+           (sprintf "Toggle Terminal %d (Alt+%d)" number number)
+           (sprintf "shell %d toggleterm %d" number number)
+           (Toggle_terminal (Some number)))
+     | _ -> [])
   @ Option.value_map (waveform_context session) ~default:[] ~f:(fun (view, _) ->
     List.map
       [ "toggle", "Toggle focused signal (Enter)"
@@ -6520,6 +6573,14 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     Effect.Ignore)
   else (
     match action with
+    | Host.Toggle_terminal number ->
+      Option.iter session.last_dimensions ~f:(fun dimensions ->
+        terminal_action session ~dimensions (`Toggle number));
+      Effect.Ignore
+    | Restart_terminal ->
+      Option.iter session.last_dimensions ~f:(fun dimensions ->
+        terminal_action session ~dimensions `Restart);
+      Effect.Ignore
     | Host.Editor_prompt project ->
       Editor_workspace.cancel session.editor;
       session.host
@@ -9716,6 +9777,7 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
 let tui
   ?on_entry
   session
+  ~terminal
   ~no_mouse
   ~exit
   ~dimensions
@@ -9769,11 +9831,12 @@ let tui
         in
         Option.map tile ~f:(fun tile -> { host with focus = Some tile.id }, tile))
   in
-  let modal session =
+  let host_modal session =
     let host = session.host in
     Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
     || host.editing_filter || host.paste || Option.is_some host.inspection_paste
   in
+  let modal session = terminal_visible session || host_modal session in
   let workspace_layer session =
     not (session.show_connection_details || session.waveform_visible)
     && Option.is_none session.hierarchy_view && Option.is_none session.artifact_view
@@ -9887,7 +9950,8 @@ let tui
   let allocated_editor = Bonsai.Expert.Var.value mounts.selected in
   let view =
     let%arr dimensions, _, now, _revision = display
-    and indicator_frames and session and editors and allocated_editor in
+    and indicator_frames and session and editors and allocated_editor
+    and _terminal_revision = Shared_terminal.revision terminal in
     let appearance = Host.effective_appearance session.host in
     let origin = companion session in
     session.painted_editor <- None;
@@ -9908,10 +9972,26 @@ let tui
            | Some _, _ -> notice "Opening project in Cobalt…")
       else None
     in
-    render ~now ?indicator_frames ~extra_pane
-      ?editor_companion:origin
-      ~editor_companion_focused:(companion_focused session dimensions origin) session dimensions
+    let background =
+      render ~now ?indicator_frames ~extra_pane
+        ?editor_companion:origin
+        ~editor_companion_focused:(companion_focused session dimensions origin) session dimensions
+    in
+    if not (terminal_visible session)
+    then background
+    else (
+      let top, dimensions = terminal_allocation dimensions in
+      match Shared_terminal.render terminal ~dimensions with
+      | None -> background
+      | Some overlay -> View.zcat [ View.pad ~t:top overlay; background ])
   in
+  Bonsai.Edge.after_display
+    (let%arr session and dimensions in
+     Effect.of_thunk (fun () ->
+       sync_terminal_workspace session;
+       if terminal_visible session
+       then Shared_terminal.resize terminal ~dimensions:(snd (terminal_allocation dimensions))))
+    graph;
   Bonsai.Edge.after_display
     (let%arr session and editors and dimensions and update_revision in
      let%bind.Effect next =
@@ -10195,11 +10275,13 @@ let tui
       ]
   in
   let publish_with_entry session ~update ~write ~on_entry previous effect =
+    sync_terminal_workspace session;
     let effect = publish session ~update ~write previous effect in
     match session.project_entry with
     | None -> effect
     | Some mode ->
       session.project_entry <- None;
+      hide_terminal session;
       Editor_workspace.cancel session.editor;
       Editor_workspace.place mounts None;
       session.painted_editor <- None;
@@ -10326,6 +10408,7 @@ let tui
     let paste_owner = ref None in
     let%arr session and on_entry and update_revision and write_to_tty and editors and dimensions in
     fun event ->
+      sync_terminal_workspace session;
       (match event with
        | Event.Key_press { key; mods = [] } when key_is 'g' key || key_is 'd' key -> ()
        | _ -> session.editor.prefix <- None);
@@ -10356,9 +10439,40 @@ let tui
        in
       let captured = modal session in
       let owner =
-        if captured then `Host
+        if terminal_visible session then `Terminal
+        else if captured then `Host
         else if editor_focus then `Cobalt session.editor.key
         else `Host
+      in
+      let terminal_event event =
+        Shared_terminal.resize terminal ~dimensions:(snd (terminal_allocation dimensions));
+        Shared_terminal.input terminal event;
+        Effect.Ignore
+      in
+      let terminal_command action =
+        terminal_action session ~dimensions action;
+        publish Effect.Ignore
+      in
+      let terminal_pointer ~x ~y =
+        let top, _ = terminal_allocation dimensions in
+        if y >= top
+           || not (workspace_layer session)
+           || not (Option.equal Dimensions.equal session.last_dimensions (Some dimensions))
+        then Effect.Ignore
+        else (
+          let host = displayed_host session in
+          match Host_view.pointer_geometry ?editor_companion:origin host dimensions ~x ~y with
+          | Some (tile, body, Some (column, row)) ->
+            let choice =
+              Host_view.workspace_tab_at host (host_data session) tile
+                ~width:body.width ~height:body.height ~column ~row
+            in
+            (match choice with
+             | Some id when not (Option.equal Workspace.Workspace_id.equal session.host.active (Some id)) ->
+               activate_workspace session id;
+               publish Effect.Ignore
+             | _ -> Effect.Ignore)
+          | _ -> Effect.Ignore)
       in
       let pasted = Option.is_some !paste_owner in
       let lost = Option.exists !paste_owner ~f:(fun start -> not (Poly.equal start owner)) in
@@ -10367,15 +10481,7 @@ let tui
        | Event.Paste `End -> paste_owner := None
        | _ when lost -> paste_owner := Some `Discard
        | _ -> ());
-      if Host.is_interrupt event then exit ()
-      else if lost then Effect.Ignore
-      else if pasted then
-        (match owner, event with
-         | _, Event.Mouse _ -> Effect.Ignore
-         | `Cobalt _, _ -> send_editor event
-         | _ -> host_event event)
-      else if captured || not editor_layer then host_event event
-      else
+      let editor_event () =
         (match event with
          (* The xterm Alt+Left sequence decodes as Meta+Left. Ctrl-O is left
             entirely to Cobalt, where it browses the editor's jump history. *)
@@ -10439,8 +10545,57 @@ let tui
                 (match key with Arrow `Up | ASCII 'k' -> -1 | _ -> 1));
             publish Effect.Ignore
          | _ -> host_event event)
+      in
+      let dispatch_event () =
+        if captured || not editor_layer then host_event event else editor_event ()
+      in
+      let in_terminal = Poly.equal owner `Terminal in
+      (* A workspace can change asynchronously in the middle of a paste. The
+         terminal owner still needs the End marker to discard that paste. *)
+      if Shared_terminal.is_pasting terminal then terminal_event event
+      else if Host.is_interrupt event && not in_terminal
+         && not (Option.exists !paste_owner ~f:(Poly.equal `Discard))
+      then exit ()
+      else if lost then Effect.Ignore
+      else if pasted then
+        (match owner, event with
+         | _, Event.Mouse _ -> Effect.Ignore
+         | `Terminal, _ -> terminal_event event
+         | `Cobalt _, _ -> send_editor event
+         | _ -> host_event event)
+      else if in_terminal
+        || (not (host_modal session) && workspace_layer session
+            && Option.is_some (terminal_project_root session))
+      then
+        (match event with
+         | Key_press { key = Function 10; mods = [] } -> terminal_command (`Toggle None)
+         | Key_press { key = Function 12; mods = [] } when in_terminal || not editor_focus ->
+           terminal_command `Restart
+         | Key_press { key = ASCII ('1' .. '9' as c); mods = [ Meta ] }
+           when in_terminal || not editor_focus ->
+           terminal_command (`Toggle (Some (Char.to_int c - Char.to_int '0')))
+         | Mouse { kind = Left; mods = []; position = { x; y } }
+           when in_terminal && not no_mouse -> terminal_pointer ~x ~y
+         | Mouse _ when in_terminal -> Effect.Ignore
+         | _ when in_terminal -> terminal_event event
+         | _ -> dispatch_event ())
+      else dispatch_event ()
   in
   ~view, ~handler
+;;
+
+let with_shared_terminal f =
+  let terminal = Shared_terminal.create () in
+  let active = ref (Some terminal) in
+  (* Standalone's signal handler enters Async shutdown without returning from
+     the display loop. Await PTY cleanup on that path as well as on UI exit. *)
+  Async.Shutdown.at_shutdown (fun () ->
+    Option.value_map !active ~default:Deferred.unit ~f:Shared_terminal.shutdown);
+  Monitor.protect
+    (fun () -> f terminal)
+    ~finally:(fun () ->
+      let%map () = Shared_terminal.shutdown terminal in
+      active := None)
 ;;
 
 let print_opened session =
@@ -10915,15 +11070,18 @@ let run_legacy
         else
           Monitor.try_with_or_error (fun () ->
             let%bind result =
-              Bonsai_term.start_with_exit
-                ~dispose:true
-                ~bpaste:true
-                ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-                (fun ~exit ~dimensions graph ->
-                  Editor_workspace.with_editors ~exit
-                    (fun mounts editors ~exit graph ->
-                      tui (Bonsai.return session) ~no_mouse ~exit ~dimensions mounts editors graph)
-                    graph)
+              with_shared_terminal (fun terminal ->
+                session.terminal <- Some terminal;
+                Bonsai_term.start_with_exit
+                  ~dispose:true
+                  ~bpaste:true
+                  ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+                  (fun ~exit ~dimensions graph ->
+                    Editor_workspace.with_editors ~exit
+                      (fun mounts editors ~exit graph ->
+                        tui (Bonsai.return session) ~terminal ~no_mouse ~exit
+                          ~dimensions mounts editors graph)
+                      graph))
             in
             let%map () = session.preference_saves in
             result)
@@ -11257,7 +11415,7 @@ let local_workspace
     | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
     | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
   in
-  let project_app ~dimensions mounts editors ~exit (local_ graph) =
+  let project_app ~terminal ~dimensions mounts editors ~exit (local_ graph) =
     let open Bonsai.Let_syntax in
     let page, set_page = Bonsai.state initial graph in
     let result =
@@ -11274,7 +11432,7 @@ let local_workspace
               set_page (`Entry (Startup_entry.entry ~original ~start screen, Some s))
         in
         let ~view, ~handler =
-          tui ~on_entry session ~no_mouse ~exit ~dimensions mounts editors graph
+          tui ~on_entry session ~terminal ~no_mouse ~exit ~dimensions mounts editors graph
         in
         let%arr view and handler in
         ~view, ~handler
@@ -11292,7 +11450,9 @@ let local_workspace
               (Effect.of_deferred_thunk (fun () -> bind root))
               ~f:(function
                 | Error e -> Effect.return (Error e)
-                | Ok s -> Effect.map (set_page (`Bound s)) ~f:(fun () -> Ok ()))
+                | Ok s ->
+                  s.terminal <- Some terminal;
+                  Effect.map (set_page (`Bound s)) ~f:(fun () -> Ok ()))
         in
         let ~view, ~handler =
           Startup_entry.component ~no_mouse ~entry ~exit ~on_open ~on_cancel ~dimensions graph
@@ -11305,13 +11465,17 @@ let local_workspace
   in
   let%bind result =
     Monitor.try_with_or_error (fun () ->
-      Editor_workspace.with_terminal_mode (fun () ->
-        Bonsai_term.start_with_exit
-          ~dispose:true
-          ~bpaste:true
-          ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-          (fun ~exit ~dimensions graph ->
-            Editor_workspace.with_editors ~exit (project_app ~dimensions) graph)))
+      with_shared_terminal (fun terminal ->
+        (match initial with
+         | `Bound session -> session.terminal <- Some terminal
+         | `Entry _ -> ());
+        Editor_workspace.with_terminal_mode (fun () ->
+          Bonsai_term.start_with_exit
+            ~dispose:true
+            ~bpaste:true
+            ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+            (fun ~exit ~dimensions graph ->
+              Editor_workspace.with_editors ~exit (project_app ~terminal ~dimensions) graph))))
   in
   let%map () =
     Deferred.all_unit (List.map (Hashtbl.data sessions) ~f:(fun s -> s.preference_saves))
@@ -11415,8 +11579,8 @@ let command =
               | "explicit-only" -> false
               | _ -> failwith "expected background-index|explicit-only")))
          ~doc:
-           "background-index|explicit-only initial project policy override (saved \
-            preference otherwise; palette changes persist)"
+            "background-index|explicit-only hidden Timing index policy (visible Timing \
+             loads on entry in either mode; overrides saved preference initially)"
      and api =
        flag
          "--api"

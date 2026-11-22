@@ -3,7 +3,7 @@ id: WB-021
 title: Evidence-backed RTL/OCaml source navigation
 category: evidence
 feature_sets: [FS1, FS4]
-status: needs-design
+status: proposed
 kind: feature
 priority: P2
 severity: n/a
@@ -19,6 +19,13 @@ related: []
 ---
 
 # WB-021 — Navigate real source mappings
+
+**Interaction design agreed (2026-11-22); producer design follows WB-091.**
+`gd` on a whole path offers launch or capture; on a selected endpoint it follows
+that end directly. Open a unique verified span with endpoint/instance context,
+or offer labeled candidates without preemptively opening one. For changed
+source, offer retained bytes if available; otherwise report the mismatch. When
+unmapped, stay on the path and offer the original report span if retained.
 
 **Cobalt integration ownership:** If opening a retained artifact needs a new
 read-only buffer or range-selection hook in Cobalt, track that change and its
@@ -69,7 +76,9 @@ No additional ticket blocker; related: none required for the first navigation se
 Exclude editor embedding, graphical physical inspection and general compiler debug metadata.
 
 ## Assumptions and decisions needed
-TBD: first producer and mapping format, source-root resolution and initial editor action.
+After WB-091, choose the first producer, mapping format and source-root resolution.
+The existing jump location carries a project-relative point and opaque identity;
+use the trace to scope read-only artifact opening and verified range support.
 Default: exact provenance or explicit unmapped; no jump inferred from similar names.
 If no producer mapping exists, include its bounded generation in the chosen first slice.
 

@@ -17,7 +17,8 @@ on the Silver ticket; no matching Cobalt ticket is required.
 For asynchronous implementation, the **Cobalt repo** has a module-level work
 queue at `docs/backlog/silver_integration.md`. C1/C2 hand off the editor and
 generic open action; C3 hands off ToggleTerm. C4 addresses a separately running
-main editor; C5/C6 cover a standalone Cobalt overview and test-launch command.
+main editor; C5 covers standalone monitoring. [WB-093 — Cobalt quick launch](features/integrations/WB-093-cobalt-quick-launch.md)
+owns C6's two live demos: test tile/`test` alias first, then checklist/stage aliases.
 The latter tracks can proceed independently of the embedded editor demo. The
 Cobalt harnesses prove module readiness; the live two-app demos remain Silver
 acceptance work.
@@ -34,5 +35,8 @@ acceptance work.
 
 This order gets a useful editing loop in hand before taking on terminal input or
 synthesis provenance. WB-089 and WB-091 can be investigated independently.
+As of 2026-11-22, the terminal behavior (WB-089/090), retained-path research
+plan (WB-091), and navigation behavior (WB-021) are agreed working designs.
+WB-091's findings will guide WB-021's mapping format and artifact handoff.
 Only revisit daemon-owned sessions if reconnect/reattach or remote shell execution
 becomes a requirement; neither demo needs those semantics.

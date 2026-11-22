@@ -29,7 +29,9 @@ This builds the native app and installs its commands under `~/.local/bin`; no
 This is a **source installer**: it expects an opam switch with Silver's native
 build dependencies installed (this workspace uses `5.2.0+ox`), including
 [`cobalt.hosted`](docs/features/workspaces/WB-087-cobalt-editor.md#build-and-verify)
-for the terminal Editor. Run the installer again after updating the checkout
+for the terminal Editor and
+[`cobalt.terminal`](docs/features/integrations/WB-089-shared-toggleterm.md#cobalt-handoff)
+for shared project shells. Run the installer again after updating the checkout
 to replace your installed commands.
 
 **Which dependencies belong where?** Silver builds against Hardcaml and its UI

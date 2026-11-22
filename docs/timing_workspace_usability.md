@@ -66,7 +66,17 @@ The owner's saved built-ins were reordered to match. Existing extra investigatio
 remain after them; use the close command to dismiss those when no longer needed.
 Tiles, geometry records, contexts, pins and evidence were verified unchanged.
 
-## Background loading
+## Visible loading and background preparation
+
+Entering or restoring a visible Timing workspace asks for its selected run's
+Timing index when the evidence is available. The same rule applies if the run
+changes or becomes ready while the workspace is visible. Tabs, aliases, the
+workspace list and saved navigation all use the same rule. This is a read of
+existing evidence: it does not run EDA, execute a refresh, or fetch path detail.
+If the summary is not hot, Silver can load the selected summary first, then
+request its exact captured analysis. For legacy evidence with no captured analysis
+identity, visible loading requires an observed completed Timing/Signoff stage for
+the registered execution. A synthesis-only run is not a Timing candidate.
 
 Default **Background index** mode observes exact completed analyses resolved by
 built-in Timing workspaces, even when hidden. It handles:
@@ -85,6 +95,10 @@ corner and reported status. Enter/explicit inspection activates exact selected-d
 demand and the existing bounded neighbor policy; a cold full-detail read can still
 take several seconds with the current provider.
 
+In **Timing · selected path**, each report line occupies one screen row.
+Long descriptions and cell names are clipped at the right edge; widen the tile
+to see more of the original line.
+
 ### Loading policy controls
 
 | Control | Effect |
@@ -95,23 +109,30 @@ take several seconds with the current provider.
 | Client `--timing-preload explicit-only` | Initial explicit-only override |
 
 CLI policy wins initially; subsequent palette changes take effect and persist.
-Explicit-only can still display already-published evidence and permits ordinary
-explicit inspection. It does not purge cached data.
+**Explicit only** means no speculative index reads while Timing is hidden. Opening
+Timing is explicit demand for the visible index in either mode; no separate
+Inspect command is required. It does not purge cached data or change how
+explicit inspection opens path detail.
 
 ### Bounds and correctness
 
-- One speculative index request at a time, reserved until daemon publication/failure,
-  not merely HTTP acknowledgement. Matching explicit Inspect joins it without a
-  second refresh. Interactive inspection has priority before the next speculative read.
+- Visible and speculative index loads share one bounded automatic lane, reserved
+  until daemon publication/failure, not merely HTTP acknowledgement. Visible
+  demand comes first when choosing the next request. Matching explicit Inspect
+  joins an in-flight read without a second refresh. Inconsistent pane bindings
+  do not trigger a read; pins and independent contexts are not changed.
 - Exact run/stage/analysis/source and connection/project identities fence attachment.
   Advancing the mutable execution record does not invalidate an unchanged frozen
   Timing source. Selection/source changes cannot attach obsolete data to the new view.
+  Saved rows wait for the published index, then restore only if run, stage,
+  analysis (including any reinspection lineage), index digest and row all match.
 - Each daemon/project scope remembers at most **128 attempted exact sources**.
   Failures are not repeatedly retried by polling or evicted into retry loops. At the
   cap, further inspection remains explicitly available; a new client or daemon/project
   scope resets that budget.
-- Loading, ready, empty, filtered, failure and cached-unverified states remain distinct.
-  Explicit Inspect/refresh can retry a failed background load.
+- No run, no loaded index, loading, ready, empty, filtered, failure and
+  cached-unverified states remain distinct. Explicit Inspect/refresh can retry a
+  failed automatic load.
 - Existing caches remain bounded: persistent indexes (eight per project, each at most
   4,096 rows / 2 MiB), memory-only reusable details (default 64 entries / 4 MiB), and
   client-memory projections. Warm-up does not add a persistent cache of rendered frames.
@@ -134,9 +155,19 @@ rendering benchmark. Earlier cold provider measurements were approximately 7.5 s
 for an index and 7.6 seconds for a detail, which is why detail preloading remains bounded
 and lazy. No physical EDA run was performed.
 
+The saved Explicit-only workspace was also checked against retained run
+`193b02d362b1495a854eeae42f79b6a8` in a read-only project sandbox. Starting on
+Overview left the Timing index cold; switching to Timing issued one summary
+load and one non-refresh read for the exact analysis digest, and no detail
+reads. Starting with Timing already restored produced the same read counts.
+
 ## Verification and receipts
 
-- Full Workbench `dune build -j 1 @all @lint` and `dune runtest -j 1`: passed.
+- Visible-demand verification: 24 Timing-focused inline tests, navigation
+  hydration restart, the 22-check synthetic Timing PTY suite, and the
+  read-only retained-run PTY above.
+- For the earlier presentation/preload release, full Workbench
+  `dune build -j 1 @all @lint` and `dune runtest -j 1` passed.
 - Changed OCaml files pass the configured formatter; `git diff --check` passes.
   Unrelated global waveform/hydration formatting baseline remains separate.
 - Presentation tests cover precision 0–9, negative near-zero, exact sort values,

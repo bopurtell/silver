@@ -337,7 +337,8 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
       (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Asic_snapshot_fixture.run_b));
   assert (
     Option.is_none
-      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Asic_snapshot_fixture.run_a))
+      (H.matching_timing ~workspace:workspace.id pinned_registry ~run:Asic_snapshot_fixture.run_a));
+  assert (Option.is_none (H.visible_timing (H.switch pinned workspace.id)))
 ;;
 
 let%test_unit "generic Timing captures complete authoritative identity including legacy" =
@@ -359,6 +360,40 @@ let%test_unit "generic Timing captures complete authoritative identity including
     O.timing_inspection_target ~asic:(Some { asic with summaries }) ~run:Asic_snapshot_fixture.run_b
   in
   assert (Option.is_none other)
+;;
+
+let%test_unit "visible legacy index requires a completed stage for the exact execution" =
+  let _, data, _, summary = fixture () in
+  let snapshot = Option.value_exn data.asic in
+  let run = List.find_exn snapshot.runs ~f:(fun run -> Run_ref.equal run.run summary.run) in
+  let stage : Asic.Stage.t =
+    { id = "signoff"
+    ; name = "Signoff"
+    ; status = Completed
+    ; requested = true
+    ; reason = None
+    ; action = None
+    ; execution_timing = None
+    }
+  in
+  let summary = { summary with timing_analysis = None } in
+  let run = { run with execution_file = Some summary.execution_file; stages = [ stage ] } in
+  let snapshot = { snapshot with summaries = [ summary ]; runs = [ run ] } in
+  let view = Timing_workspace.create ~generation:0 ~run:summary.run ~stage:stage.id in
+  let available snapshot visible = O.timing_index_available snapshot view ~visible in
+  assert (available snapshot true);
+  assert (not (available snapshot false));
+  assert (not (available { snapshot with runs = [] } true));
+  assert (
+    not
+      (available
+         { snapshot with runs = [ { run with execution_file = Some "/other" } ] }
+         true));
+  assert (
+    not
+      (available
+         { snapshot with runs = [ { run with stages = [ { stage with status = Not_requested } ] } ] }
+         true))
 ;;
 
 let executable_fixture status =
@@ -880,4 +915,79 @@ let%test_unit "WB069 persisted navigation and reuse retain exact analysis rather
   assert (
     Option.is_none
       (Timing_workspace.attach_retained view (Option.value_exn data.asic)).index)
+;;
+
+let%test_unit "saved Timing row waits for the published reinspection lineage" =
+  let _, data, _, summary = fixture () in
+  let host, _, find =
+    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Timing.definition
+  in
+  let tile = find "timing-paths" in
+  let recomputed = { target with source_digest = String.make 64 'e' } in
+  let lineage : Asic_inspection.Reinspection.t =
+    { original = target
+    ; recomputed
+    ; observation_path = "/fixture"
+    ; observation_sha256 = String.make 64 'f'
+    ; lineage_digest = String.make 64 'a'
+    ; label = "recomputed"
+    }
+  in
+  let row : Asic_inspection.Row.t =
+    { id = "saved-path"
+    ; category = "timing_path"
+    ; producer = "STA"
+    ; corner = None
+    ; group = None
+    ; name = "path"
+    ; value = Some 0.125
+    ; unit_ = Some "ns"
+    ; status = "met"
+    ; source = "{}"
+    ; fields = []
+    }
+  in
+  let index : Asic_inspection.Index.t =
+    { run = summary.run
+    ; execution_file = summary.execution_file
+    ; execution_sha256 = target.execution_sha256
+    ; domain = "timing"
+    ; stage = target.stage
+    ; source_digest = String.make 64 'b'
+    ; analysis = Some recomputed
+    ; cached_unverified = true
+    ; times = Evidence_time.Index.empty
+    ; rows = [ row ]
+    ; diagnostics = [ Asic_inspection.Reinspection.encode lineage ]
+    ; truncated = false
+    }
+  in
+  let snapshot = Option.value_exn data.asic in
+  let restore host snapshot =
+    let snapshot = Some snapshot in
+    H.reconcile_navigation_timing (H.reconcile_visible_and_builtin_timing host snapshot) snapshot
+  in
+  let saved =
+    Timing_workspace.create ~generation:0 ~run:summary.run ~stage:target.stage
+    |> fun view ->
+    Timing_workspace.with_analysis view (Some recomputed)
+    |> fun view -> H.set_timing host tile { view with index = Some index; selected = Some row.id }
+    |> H.navigation_preferences ~project_key:"lineage"
+    |> Option.value_exn
+  in
+  let fresh =
+    H.restore_navigation_selections saved { host with timing = [] } ~scope:"lineage"
+  in
+  let pending = restore fresh { snapshot with summaries = [] } in
+  assert (not (List.is_empty pending.timing_restore));
+  assert (List.is_empty pending.timing_rejected);
+  let pending = restore pending snapshot in
+  assert (Option.is_none (H.timing pending tile |> Option.value_exn).selected);
+  let ready = restore pending { snapshot with inspections = [ index ] } in
+  let view = H.timing ready tile |> Option.value_exn in
+  assert (Option.equal String.equal view.selected (Some row.id));
+  assert (Option.equal Asic_inspection.Analysis_target.equal view.analysis (Some recomputed));
+  assert (Option.is_none view.requested);
+  let ready = restore ready { snapshot with inspections = [ index ] } in
+  assert (Option.equal String.equal (H.timing ready tile |> Option.value_exn).selected (Some row.id))
 ;;

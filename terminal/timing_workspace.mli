@@ -18,6 +18,7 @@ type path_item =
   }
 
 val path_items : ?presentation:Tile_presentation.t -> t -> path_item list
+val is_path : Asic_inspection.Row.t -> bool
 val empty_paths_message : t -> string
 
 type selection =

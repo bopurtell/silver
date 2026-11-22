@@ -1,5 +1,8 @@
 # Feature ticket catalog
 
+**2026-11-22:** [WB-093 — Silver quick launch from standalone Cobalt](integrations/WB-093-cobalt-quick-launch.md)
+records the agreed C6 design and two proposed delivery slices.
+
 **Cobalt integration intake (2026-11-21):** [Editor workspace, shared ToggleTerm,
 and timing navigation — recommended order](../cobalt_editor_roadmap.md).
 [WB-092](infrastructure/WB-092-module-jump-hook.md) (jump resolution),

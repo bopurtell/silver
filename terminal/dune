@@ -173,7 +173,7 @@
 
 (executable
  (name main)
- (modules main startup_entry editor_workspace)
+ (modules main startup_entry editor_workspace shared_terminal shared_terminal_view)
  (public_name silver)
  (package hardcaml_workbench)
  (libraries
@@ -183,6 +183,7 @@
   bonsai_term
   bonsai_term_components.spinner
   cobalt.hosted
+  cobalt.terminal
   core
   core_unix
   core_unix.command_unix
@@ -234,6 +235,18 @@
 (alias
  (name runtest)
  (deps (alias test-editor-config-pty)))
+
+(rule
+ (alias test-shared-terminal-pty)
+ (enabled_if (= %{system} linux))
+ (deps (sandbox always) test_shared_terminal_pty.py ../test/support/__init__.py
+        ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_shared_terminal_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (enabled_if (= %{system} linux))
+ (deps (alias test-shared-terminal-pty)))
 
 (rule
  (alias test-theme-picker-pty)

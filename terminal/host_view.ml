@@ -259,6 +259,61 @@ let run_selector_row
   ^ status
 ;;
 
+let run_selector_endpoint data run =
+  (* The selected workspace run, preview and stage observations are not the request
+     that created this row. Reference-only registrations need not have a selection. *)
+  Option.bind (Overview_tiles.execution ~asic:data.asic ~run) ~f:(fun execution ->
+    execution.selection)
+  |> Option.map ~f:(fun selection -> String.strip selection.endpoint)
+  |> Option.filter ~f:(fun endpoint -> not (String.is_empty endpoint))
+  |> Option.map ~f:Artifact_view.safe
+;;
+
+let run_selector_endpoints data candidates =
+  let known_width =
+    List.fold candidates ~init:0 ~f:(fun width (run, _) ->
+      Int.max
+        width
+        (Option.value_map (run_selector_endpoint data run) ~default:0 ~f:cell_width))
+  in
+  Int.clamp_exn known_width ~min:1 ~max:20, known_width > 0
+;;
+
+let run_selector_status_width ~width candidates =
+  Int.min
+    (Int.min (width / 3) (Int.max 0 (width - 9)))
+    (List.fold candidates ~init:0 ~f:(fun n (_, status) -> Int.max n (cell_width status)))
+;;
+
+let run_selector_columns
+  ~width ~status_width ~icon_width ~endpoint_width ~prefer_endpoint ~time_width
+  =
+  (* Leave room for the markers, a useful ID token and its separator. Prefer known
+     requests over time if only one fits, but never trade time for an all-unknown
+     column, or clip ordinary endpoint names to squeeze them into a narrow pane. *)
+  let room = width - status_width - icon_width - 7 in
+  let separator = 3 in
+  let time_cells = if time_width > 0 then separator + time_width else 0 in
+  let min_endpoint = Int.min endpoint_width 9 in
+  let both_fit = separator + min_endpoint + time_cells <= room in
+  if endpoint_width > 0 && separator + min_endpoint <= room
+     && (both_fit || prefer_endpoint || time_cells > room)
+  then (
+    let time_width, room =
+      if both_fit then time_width, room - time_cells else 0, room
+    in
+    Int.min endpoint_width (room - separator), time_width)
+  else 0, (if time_cells <= room then time_width else 0)
+;;
+
+let run_selector_endpoint_suffix ~width endpoint =
+  if width <= 0
+  then ""
+  else (
+    let endpoint = fit_label ~width endpoint in
+    " [" ^ endpoint ^ "]" ^ String.make (Int.max 0 (width - cell_width endpoint)) ' ')
+;;
+
 (** Lifecycle vocabulary only: an acceptance verdict or words inside an ID/report do not
     describe the execution lifecycle. Unknown provider values stay neutral. *)
 let run_status_role = function
@@ -395,6 +450,9 @@ let run_selector_view
   ?(string_compression = true)
   ?(population = [])
   ?indicator_frames
+  ?(endpoint = "")
+  ?endpoint_width
+  ?(prefer_endpoint = true)
   ?time
   ?time_width
   appearance
@@ -411,12 +469,19 @@ let run_selector_view
   in
   let time = Option.value time ~default:"" in
   let time_width = Option.value time_width ~default:(cell_width time) in
+  let icon_width = View.width icon in
+  let endpoint_width = Option.value endpoint_width ~default:(cell_width endpoint) in
+  let endpoint_width, time_width =
+    run_selector_columns
+      ~width ~status_width ~icon_width ~endpoint_width ~prefer_endpoint ~time_width
+  in
+  let endpoint = run_selector_endpoint_suffix ~width:endpoint_width endpoint in
   let time =
-    if time_width > 0 && time_width + status_width + View.width icon + 10 <= width
+    if time_width > 0
     then " | " ^ String.make (Int.max 0 (time_width - cell_width time)) ' ' ^ time
     else ""
   in
-  let text_width = Int.max 0 (width - View.width icon - cell_width time) in
+  let text_width = Int.max 0 (width - icon_width - cell_width endpoint - cell_width time) in
   let row =
     run_selector_row
       ~string_compression
@@ -434,7 +499,7 @@ let run_selector_view
   let status =
     status
     ^
-    if String.is_empty time
+    if String.is_empty endpoint && String.is_empty time
     then ""
     else String.make (status_width - cell_width status) ' '
   in
@@ -448,6 +513,7 @@ let run_selector_view
       |> View.with_colors'
            ?bg:(if cursor then Some (Role.backdrop appearance Selection) else None)
     ; View.text ~attrs:(attrs status_role) status
+    ; View.text ~attrs:(attrs Muted) endpoint
     ; View.text ~attrs:(attrs Muted) time
     ]
   |> box ~width ~height:1
@@ -2046,23 +2112,37 @@ let rows host data tile ~width ~height =
   let run_rows () =
     let candidates = run_candidates data ~filter:local.filter in
     let selected, _, page = run_page host tile ~height candidates in
-    let status_width =
-      Int.min
-        (Int.max 0 (width / 3))
-        (List.fold candidates ~init:0 ~f:(fun n (_, status) ->
-           Int.max n (cell_width status)))
+    let status_width = run_selector_status_width ~width candidates in
+    let endpoint_width, prefer_endpoint = run_selector_endpoints data candidates in
+    let endpoint_width, _ =
+      run_selector_columns
+        ~width
+        ~status_width
+        ~icon_width:0
+        ~endpoint_width
+        ~prefer_endpoint
+        ~time_width:0
     in
     page
     |> List.map ~f:(fun (run, label) ->
+      let endpoint =
+        run_selector_endpoint_suffix
+          ~width:endpoint_width
+          (Option.value (run_selector_endpoint data run) ~default:"?")
+      in
       run_selector_row
         ~string_compression:(H.policy host tile).string_compression
         ~population:(List.map data.runs ~f:(fun (r, _) -> r.id))
-        ~width
+        ~width:(width - cell_width endpoint)
         ~status_width
         ~cursor:(Option.equal String.equal selected (Some (run_label run)))
         ~active:(Option.equal Run_ref.equal scope (Some run))
         run
-        label)
+        label
+      ^ (if String.is_empty endpoint
+         then ""
+         else String.make (Int.max 0 (status_width - cell_width label)) ' ')
+      ^ endpoint)
   in
   let jobs =
     if String.equal tile.kind "project-tests"
@@ -2145,10 +2225,12 @@ let rows host data tile ~width ~height =
               ~width
               ~height
               view
-          | _ ->
-            [ "No matching Timing investigation"
-            ; "Use Inspect timing paths for this exact run"
-            ])
+           | _ when Option.is_none (H.tile_run host tile) ->
+             [ "No run selected for Timing" ]
+           | _ ->
+             [ "No matching Timing investigation"
+             ; "Waiting for retained evidence, or Timing pane bindings differ"
+             ])
        | kind when H.simulation_kind kind ->
          simulation_annotations ~width host data tile
          |> List.filter ~f:(fun row ->
@@ -2620,8 +2702,8 @@ let timing_status_role (row : Asic_inspection.Row.t) =
   | _ -> Foreground
 ;;
 
-(* C owns prefix content and width budgeting. Apply the same final sanitation/wrapping as
-   [Timing_workspace.rows], carrying only its explicit roles across wrapped lines. *)
+(* Detail's semantic prefix is already clipped by [Timing_workspace]. Carry Context's
+   explicit roles across its wrapped lines. *)
 let timing_line_role : Timing_workspace.line_role -> Role.t = function
   | Selected -> Selection
   | Metric -> Metric
@@ -2635,8 +2717,12 @@ let timing_line_role : Timing_workspace.line_role -> Role.t = function
 let timing_semantic_prefix ?(presentation = T.defaults) ~pane ~width view =
   Timing_workspace.semantic_prefix ~presentation ~pane ~width view
   |> List.concat_map ~f:(fun (role, line) ->
-    Artifact_view.wrap ~width (Artifact_view.safe line)
-    |> List.map ~f:(fun line -> timing_line_role role, line))
+    let role = timing_line_role role in
+    if Timing_workspace.equal_pane pane Detail
+    then [ role, line ]
+    else
+      Artifact_view.wrap ~width (Artifact_view.safe line)
+      |> List.map ~f:(fun line -> role, line))
 ;;
 
 (* Use typed fields and selection, never keywords found in producer report text. Paths
@@ -2666,16 +2752,11 @@ let timing_body
       | Numeric_descending -> "value ↓"
       | Name -> "name"
     in
-    let count =
-      sprintf
-        "%d paths · %s%s"
-        (List.length visible)
-        sort
-        (if view.near then " · ≤1ns" else "")
-    in
     let observation, observation_role =
       match view.index with
-      | None -> "Explicit Inspect / refresh required", Role.Warning
+      | None ->
+        ( (if view.index_loading then "Loading timing index…" else "No loaded index")
+        , Role.Warning )
       | Some i ->
         ( ((if i.cached_unverified then "Cached unverified" else "Verified observation")
            ^ if i.truncated then " · TRUNCATED" else "")
@@ -2697,15 +2778,22 @@ let timing_body
                   (all view.corner)
                   (all view.group)
                   (all view.producer)))
-      ; View.hcat
-          [ text Metric (count ^ " · ")
-          ; indicator_view
-              ?indicator_frames
-              appearance
-              observation_role
-              (inspection_indicator ~reading view)
-          ; text observation_role observation
-          ]
+       ; View.hcat
+           ((match view.index with
+             | None -> []
+             | Some _ ->
+               let paths = List.count visible ~f:Timing_workspace.is_path in
+               let count =
+                 sprintf "%d paths · %s%s" paths sort (if view.near then " · ≤1ns" else "")
+               in
+               [ text Metric (count ^ " · ") ])
+            @ [ indicator_view
+                  ?indicator_frames
+                  appearance
+                  observation_role
+                  (inspection_indicator ~reading view)
+              ; text observation_role observation
+              ])
       ; text Muted "Path / endpoint                         Value · reported status"
       ]
     in
@@ -2752,7 +2840,7 @@ let timing_body
     in
     View.vcat (header @ body) |> box ~width ~height |> colored appearance Foreground
   | Detail | Context ->
-    (* Scroll offsets are those of C's actual wrapped output. Only the canonical semantic
+    (* Scroll offsets follow the same display rows as input. Only the canonical semantic
        prefix receives role styling; provider payload is always neutral. *)
     let full =
       Timing_workspace.rows
@@ -3017,13 +3105,9 @@ let tile_view
             when String.equal tile.kind "run-selector"
                  && Option.is_none local.inspection
                  && Option.is_none local.artifacts ->
-            let candidates = run_candidates data ~filter:local.filter in
-            let status_width =
-              Int.min
-                (Int.min (body_width / 3) (Int.max 0 (body_width - 9)))
-                (List.fold candidates ~init:0 ~f:(fun n (_, status) ->
-                   Int.max n (cell_width status)))
-            in
+             let candidates = run_candidates data ~filter:local.filter in
+             let status_width = run_selector_status_width ~width:body_width candidates in
+             let endpoint_width, prefer_endpoint = run_selector_endpoints data candidates in
             let time run =
               Execution_time_view.list_value
                 ~now
@@ -3038,9 +3122,12 @@ let tile_view
             page
             |> List.map ~f:(fun (run, status) ->
               run_selector_view
-                ~string_compression:policy.string_compression
-                ~population:(List.map data.runs ~f:(fun (r, _) -> r.id))
-                ~time:(time run)
+                 ~string_compression:policy.string_compression
+                 ~population:(List.map data.runs ~f:(fun (r, _) -> r.id))
+                 ~endpoint:(Option.value (run_selector_endpoint data run) ~default:"?")
+                 ~endpoint_width
+                 ~prefer_endpoint
+                 ~time:(time run)
                 ~time_width
                 ?indicator_frames:
                   (if run_has_producer data run then indicator_frames else None)
@@ -5020,6 +5107,123 @@ let%test_unit "Runs pointer selection follows filtered capped page and never bin
     Option.equal String.equal (H.local clicked tile.id).cursor (Some (run_label after)));
   assert (Option.equal Run_ref.equal (tile_run clicked tile) (Some active));
   assert (phys_equal clicked.registry host.registry)
+;;
+
+let%test_unit "Runs show their own saved endpoint in stock and custom workspaces" =
+  let custom () =
+    let config =
+      P.Presets.custom_example () |> Or_error.ok_exn |> P.Presets.resolve |> Or_error.ok_exn
+    in
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config config) |> Result.ok |> Option.value_exn)
+  in
+  List.iter
+    [ (fun () -> refinement_fixture P.Overview.definition)
+    ; (fun () -> refinement_fixture P.Timing.definition)
+    ; (fun () -> refinement_fixture (P.Presets.find "resources" |> Option.value_exn))
+    ; custom
+    ]
+    ~f:(fun make ->
+      let host, data, find = make () in
+      let tile = find "run-selector" in
+      let snapshot = Option.value_exn data.asic in
+      let selection endpoint : Asic.Selection.t =
+        { flow = "flow"; profile = "profile"; endpoint; assignments = []; chip_target = None }
+      in
+      let first, second =
+        match snapshot.runs with
+        | [ first; second ] -> first, second
+        | _ -> assert false
+      in
+      let first =
+        { first with
+          selection = Some (selection "synthesis")
+        ; execution_timing = Execution_timing.make ~measured_seconds:127. ~running:false ()
+        }
+      in
+      let second =
+        { second with selection = Some (selection "timing"); status = "failed" }
+      in
+      let legacy =
+        { first with run = { first.run with id = "legacy-run" }; selection = None }
+      in
+      let unlisted = { first.run with id = "unlisted-run" } in
+      let data =
+        { data with
+          asic =
+            Some
+              { snapshot with
+                runs = [ first; second; legacy ]
+              ; preview =
+                  Some
+                    { selection = selection "not-the-endpoint"
+                    ; plan_identity = "other-plan"
+                    ; plan_json = "{}"
+                    }
+              }
+        ; runs =
+            [ first.run, first.status
+            ; second.run, second.status
+            ; legacy.run, legacy.status
+            ; unlisted, "queued"
+            ]
+        }
+      in
+      let check lines =
+        List.iter
+          [ first.run, "[synthesis]"
+          ; second.run, "[timing]"
+          ; legacy.run, "[?]"
+          ; unlisted, "[?]"
+          ]
+          ~f:(fun (run, endpoint) ->
+            if not
+                 (List.exists lines ~f:(fun line ->
+                    String.is_substring line ~substring:(run_label run)
+                    && String.is_substring line ~substring:endpoint
+                    && not (String.is_substring line ~substring:"not-the-endpoint")))
+            then
+              raise_s
+                [%message
+                  "Missing expected Runs row"
+                    ~run:(run_label run : string)
+                    (endpoint : string)
+                    (lines : string list)])
+      in
+      check (rows host data tile ~width:65 ~height:5);
+      let painted = tile_view host data tile ~width:65 ~height:10 |> plain_text in
+      check (String.split_lines painted);
+      assert (String.is_substring painted ~substring:"[synthesis] |  2m 07s");
+      assert (String.is_substring painted ~substring:(">* " ^ run_label first.run));
+      let dimensions = { Dimensions.width = 160; height = 40 } in
+      let screen = render_workspace host data dimensions |> plain_text |> String.split_lines in
+      assert (List.exists screen ~f:(fun line -> String.is_substring line ~substring:"[synthesis]"));
+      let y, line =
+        List.findi_exn screen ~f:(fun _ line -> String.is_substring line ~substring:"[timing]")
+      in
+      let x =
+        cell_width (String.prefix line (String.substr_index_exn line ~pattern:"[timing]"))
+      in
+      (match run_context_at host data dimensions ~x ~y with
+       | Some (clicked, run) ->
+         assert (W.Tile_id.equal tile.id clicked.id && Run_ref.equal run second.run)
+       | None -> assert false);
+      let clicked = select_body_row host data tile ~width:65 ~height:5 ~row:1 in
+      let scrolled =
+        tile_view clicked data tile ~width:65 ~height:8 |> plain_text |> String.split_lines
+      in
+      let focused =
+        List.find_exn scrolled ~f:(fun line -> String.is_substring line ~substring:"[timing]")
+      in
+      assert (String.is_substring focused ~substring:(">  " ^ run_label second.run));
+      assert (Option.equal Run_ref.equal (tile_run clicked tile) (Some first.run));
+      let narrow = tile_view clicked data tile ~width:23 ~height:8 in
+      let text = plain_text narrow in
+      assert (View.width narrow = 23 && View.height narrow = 8);
+      assert (not (String.is_substring text ~substring:"[timing]"));
+      assert (
+        String.is_substring text ~substring:second.run.id
+        || String.is_substring text ~substring:"#2"))
 ;;
 
 let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
@@ -8259,6 +8463,27 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
     timing_body host.appearance ~pane:Detail ~scroll:4 ~width:40 ~height:2 loaded
   in
   assert (String.equal (ansi scrolled) (ansi expected));
+  let numbered =
+    "421: U/top/" ^ String.make 60 'r' ^ " END-OF-LINE\n422: next cell\n\n424: last cell"
+  in
+  let host_with_report =
+    H.set_timing
+      host
+      paths
+      { loaded with detail = Some { provider_detail with text = numbered } }
+  in
+  List.iter [ 36, false; 120, true ] ~f:(fun (width, show_tail) ->
+    let image = tile_view host_with_report data detail ~width ~height:14 in
+    assert (View.width image = width);
+    let rows = String.split_lines (plain_text image) in
+    let y, first =
+      List.findi_exn rows ~f:(fun _ line ->
+        String.is_substring line ~substring:"421: U/top/")
+    in
+    assert (Bool.equal show_tail (String.is_substring first ~substring:"END-OF-LINE"));
+    assert (String.is_substring (List.nth_exn rows (y + 1)) ~substring:"422: next cell");
+    assert (String.is_substring (List.nth_exn rows (y + 3)) ~substring:"424: last cell");
+    assert (String.is_substring (List.nth_exn rows (y - 4)) ~substring:"Path: nnnn"));
   let full_context =
     timing_semantic_prefix
       ~presentation:{ T.defaults with string_compression = false }
@@ -11035,6 +11260,22 @@ let wb054_without_run host =
 ;;
 
 let wb054_commands host = H.contextual host (H.catalog host ~project:None ~jobs:[])
+
+let%test_unit "Timing distinguishes no run, a cold index, loading, and zero paths" =
+  let host, data, find, state = wb054_timing () in
+  let tile = find "timing-paths" in
+  let render host = tile_view host data tile ~width:96 ~height:12 |> plain_text in
+  let show view = render (H.set_timing host tile view) in
+  let includes text substring = String.is_substring text ~substring in
+  let cold = { state with index = None } in
+  assert (includes (render (wb054_without_run host)) "No run selected for Timing");
+  assert (includes (show cold) "No loaded index");
+  assert (not (includes (show cold) "0 paths"));
+  assert (includes (show { cold with index_loading = true }) "Loading timing index");
+  let empty = { state with index = Some (wb054_index 0); cache = None } in
+  assert (includes (show empty) "0 paths");
+  assert (includes (show empty) "No timing paths reported")
+;;
 
 let wb054_reason host id =
   (List.find_exn (wb054_commands host) ~f:(fun c -> String.equal c.H.id id)).unavailable

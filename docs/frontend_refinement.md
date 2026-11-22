@@ -36,8 +36,11 @@ the same geometry rather than subtracting independent guesses about headers/padd
 The wide selector uses actual available display-cell width for run identifiers,
 rather than the fixed six-character head/tail utility abbreviation. Long names are
 shortened only when necessary, preserving distinguishable beginnings/endings. Exact
-identities remain unchanged for selection, pinning and RPCs. Status has a compact
-aligned column; the selected run/cursor remains visible when browsing.
+identities remain unchanged for selection, pinning and RPCs. Rows show status,
+the run's own requested endpoint (for example, `[synthesis]` or `[timing]`),
+and duration when space permits. `[?]` means no requested endpoint was recorded
+for that run. Narrow selectors can omit endpoint and duration to keep the run
+identity, status and cursor usable.
 
 The border title reports **RUNS visible/total (CAP n)**. Thus two registered runs
 with cap four are different from a clipped list. **Run selector: More visible rows

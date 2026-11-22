@@ -3,7 +3,7 @@ id: WB-091
 title: Trace a retained timing path to its provable origins
 category: evidence
 feature_sets: [FS1, FS4]
-status: needs-design
+status: proposed
 kind: research
 priority: P2
 severity: n/a
@@ -19,6 +19,13 @@ related: [WB-021, WB-022]
 ---
 
 # WB-091 — Trace before designing the source map
+
+**Research plan agreed (2026-11-22); trace pending.** Use an existing run,
+not a regenerated substitute. Deliver one short table with separate launch and
+capture chains: hop, artifact identity, evidence connecting the objects, and
+last proven location. Distinguish an absent artifact, an artifact with no
+mapping, and a mapping with multiple origins. A documented break is sufficient;
+use the findings to refine WB-021 rather than fixing a format in advance.
 
 Choose one real retained path. Start with `Timing_workspace.selection` (run,
 domain, stage, source digest, row ID), not the rendered label. Follow launch

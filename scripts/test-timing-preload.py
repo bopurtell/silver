@@ -208,21 +208,24 @@ def acceptance(t, check, http, runs, presets):
     # Materialize a genuine fixture observation with Timing completed and Signoff
     # still running. Only private synthetic bytes are constructed here.
     p = load('preload_live_fixture', base / 'project/synthetic-provider/provider.py')
-    attempt = p.allocate(base / 'results', p.selection('success'), 'preload-live-signoff')
-    while next(x for x in p.load(attempt / 'observation.json')['stage_plan']['stages']
-               if x['status'] == 'running')['id'] != 'signoff':
-        p.advance(attempt)
-    live = p.load(attempt / 'observation.json')
-    p.finish(attempt, p.load(attempt / 'observation.json'), 'completed')
-    execution = p.load(attempt / 'execution.json')
-    execution.update(status='running', exit_code=None)
-    p.save(attempt / 'execution.json', execution)
-    live['execution_file'] = str(attempt / 'execution.json')
-    p.save(attempt / 'observation.json', live)
-    native('(Register ((attempt %s)(stream_id preload-live-signoff)))' % sexp(str(attempt)))
-    live_run = next(field(r, 'run') for r in field(native(), 'runs')
-                    if field(field(r, 'reference'), 'attempt') == str(attempt))
-    native('(Observe %s)' % sexp(live_run))
+    def register_live(stream):
+        attempt = p.allocate(base / 'results', p.selection('success'), stream)
+        while next(x for x in p.load(attempt / 'observation.json')['stage_plan']['stages']
+                   if x['status'] == 'running')['id'] != 'signoff':
+            p.advance(attempt)
+        live = p.load(attempt / 'observation.json')
+        p.finish(attempt, p.load(attempt / 'observation.json'), 'completed')
+        execution = p.load(attempt / 'execution.json')
+        execution.update(status='running', exit_code=None)
+        p.save(attempt / 'execution.json', execution)
+        live['execution_file'] = str(attempt / 'execution.json')
+        p.save(attempt / 'observation.json', live)
+        native('(Register ((attempt %s)(stream_id %s)))' % (sexp(str(attempt)), sexp(stream)))
+        ref = next(field(r, 'run') for r in field(native(), 'runs')
+                   if field(field(r, 'reference'), 'attempt') == str(attempt))
+        native('(Observe %s)' % sexp(ref))
+        return ref
+    live_run = register_live('preload-live-signoff')
     select(live_run)
     refresh(live_run)
     wait(lambda: index(live_run, 'd'), 'STA ready while Signoff remains running')
@@ -231,6 +234,25 @@ def acceptance(t, check, http, runs, presets):
           any(field(x, 'id') == 'signoff' and field(x, 'status') == 'Running' for x in field(observed, 'stages')),
           'Hidden index prepares before enclosing run completes, while Signoff is Running')
     t.capture('signoff-running-hidden-overview', ['Overview'])
+    # A second live run publishes only an execution reference/stages initially.
+    # Explicit-only governs hidden speculation, not entry into the visible table.
+    t.command('Timing preload: Explicit only')
+    visible_run = register_live('visible-live-signoff')
+    select(visible_run)
+    before_visible = len(indexes()), len(details())
+    settle()
+    check(index(visible_run, 'd') is None and len(indexes()) == before_visible[0],
+          'Explicit-only leaves a selected run idle while Timing is hidden')
+    t.command('Switch to Timing')
+    wait(lambda: index(visible_run, 'd'), 'visible Timing hydrates its summary and index')
+    t.capture('visible-explicit-only-live-ready', ['preload-ready-path', 'Stage: timing'])
+    t.command('Switch to Overview')
+    t.command('Switch to Timing')
+    settle()
+    check((len(indexes()), len(details())) == (before_visible[0] + 1, before_visible[1]),
+          'Visible entry loads one exact index without Refresh or detail; reentry reuses it')
+    t.command('Switch to Overview')
+    t.command('Timing preload: Background index')
     select(run)
     settle()
     (base / 'preload-restart.json').write_text(json.dumps(dict(run=run, indexes=len(indexes()), details=len(details()))))

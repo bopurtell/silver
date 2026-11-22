@@ -188,6 +188,8 @@ type action =
   | Toggle_main_hints
   | Toggle_browser_hints
   | Toggle_palette_hints
+  | Toggle_terminal of int option
+  | Restart_terminal
   | Set_timing_preload of bool
   | Set_appearance of Appearance.t
   | Choose_theme
@@ -2288,12 +2290,6 @@ let reconcile_navigation_timing t snapshot =
                       saved.run
                       (Some (Sexp.to_string_mach (Run_ref.sexp_of_t view.run)))))
                 || Option.is_none saved.source_digest
-                || (not (String.equal saved.stage view.stage))
-                || not
-                     (Option.equal
-                        Asic_inspection.Analysis_target.equal
-                        saved.analysis
-                        view.analysis)
         then
           reject
             t
@@ -2303,14 +2299,23 @@ let reconcile_navigation_timing t snapshot =
         else (
           let index =
             Option.bind snapshot ~f:(fun snapshot ->
-              List.find
-                snapshot.Asic.Snapshot.inspections
-                ~f:(Inspection_view.matches_index view))
+              List.find snapshot.Asic.Snapshot.inspections ~f:(Inspection_view.matches_index view)
+              |> Option.map ~f:(fun index -> snapshot, index))
           in
+          (* A missing summary can temporarily yield a generic placeholder; a
+             cache hit can also carry validated reinspection lineage. Decide
+             the saved analysis identity only once the index is here. *)
           match index with
           | None -> t
-          | Some index ->
-            if (not
+          | Some (snapshot, index) ->
+            let published = Timing_workspace.attach_retained view snapshot in
+            if (not (String.equal saved.stage published.stage))
+               || (not
+                     (Option.equal
+                        Asic_inspection.Analysis_target.equal
+                        saved.analysis
+                        published.analysis))
+               || (not
                   (Option.equal
                      String.equal
                      saved.source_digest
@@ -2325,13 +2330,16 @@ let reconcile_navigation_timing t snapshot =
                 "Saved Timing path not restored: source digest or path changed; select a \
                  path explicitly"
             else (
-              let view = { view with selected = saved.row_id; error = None } in
               let view =
-                Option.value_map
-                  snapshot
-                  ~default:view
-                  ~f:(Timing_workspace.attach_retained view)
+                { published with
+                  filter = saved.filter
+                ; selected = saved.row_id
+                ; requested = None
+                ; detail = None
+                ; error = None
+                }
               in
+              let view = Timing_workspace.attach_retained view snapshot in
               set_timing (cancel_navigation_timing t id) tile view)))
   in
   let t =
@@ -3526,74 +3534,93 @@ let builtin_timing_in_window registry ~window =
     W.Window_id.equal workspace.window window)
 ;;
 
-(** Pure, provider-free hidden hydration. Only coherent pane bindings may share state. No
-    activation, focus, registry selection or pin mutation. Exact target changes reset all
-    source-local state; unchanged targets retain filters/selection and cached rows. *)
-let reconcile_builtin_timing t snapshot =
+let timing_panes (registry : W.Snapshot.t) workspace =
+  List.filter registry.tiles ~f:(fun tile ->
+    W.Workspace_id.equal tile.workspace workspace
+    && Option.is_some (Timing_workspace.pane tile.kind))
+;;
+
+let coherent_timing_run registry panes =
+  let resolve (tile : W.Tile.t) =
+    W.resolve_tile registry tile.id |> Result.ok |> Option.bind ~f:(fun r -> r.run)
+  in
+  Option.bind (List.hd panes) ~f:(fun tile ->
+    Option.filter (resolve tile) ~f:(fun run ->
+      List.for_all panes ~f:(fun pane ->
+        Option.equal Run_ref.equal (resolve pane) (Some run))))
+;;
+
+let visible_timing t =
+  List.find (tiles t) ~f:(fun tile -> Option.is_some (timing_pane t tile))
+  |> Option.bind ~f:(fun tile ->
+    Option.bind t.registry ~f:(fun registry ->
+      Option.map
+        (coherent_timing_run registry (timing_panes registry tile.workspace))
+        ~f:(fun run -> tile, run)))
+;;
+
+let captured_timing (workspace : W.Arrangement.t) =
+  String.is_prefix workspace.name ~prefix:"Timing · captured "
+;;
+
+(** Provider-free hydration. Hidden stock workspaces support speculative indexes;
+    other layouts hydrate only while visible. Only coherent pane bindings share state. *)
+let reconcile_timing ~include_visible t snapshot =
   match t.registry with
   | None -> t
   | Some _ when Option.is_none snapshot -> t
   | Some registry ->
-    List.fold (builtin_timing_workspaces registry) ~init:t ~f:(fun t workspace ->
-      let panes =
-        List.filter registry.tiles ~f:(fun tile ->
-          W.Workspace_id.equal tile.workspace workspace.id
-          && Option.is_some (Timing_workspace.pane tile.kind))
-      in
-      match List.find panes ~f:(fun tile -> String.equal tile.kind "timing-paths") with
-      | None -> t
-      | Some tile ->
-        let run =
-          W.resolve_tile registry tile.id
-          |> Result.ok
-          |> Option.bind ~f:(fun reference -> reference.run)
+    let stock = builtin_timing_workspaces registry in
+    let workspaces =
+      match include_visible, visible_timing t, active t with
+      | true, Some _, Some workspace
+        when not (List.exists stock ~f:(fun w -> W.Workspace_id.equal w.id workspace.id)) ->
+        workspace :: stock
+      | _ -> stock
+    in
+    List.fold workspaces ~init:t ~f:(fun t workspace ->
+      let panes = timing_panes registry workspace.id in
+      match List.hd panes, coherent_timing_run registry panes with
+      | Some tile, Some run ->
+        let stage, analysis = Overview_tiles.timing_inspection_target ~asic:snapshot ~run in
+        let key = W.Workspace_id.to_string workspace.id in
+        let previous = List.Assoc.find t.timing key ~equal:String.equal in
+        let explicit_capture =
+          captured_timing workspace
+          && not (List.Assoc.mem t.timing_restore key ~equal:String.equal)
         in
-        (match run with
-         | None -> t
-         | Some run ->
-           if not
-                (List.for_all panes ~f:(fun pane ->
-                   match W.resolve_tile registry pane.id with
-                   | Ok reference -> Option.equal Run_ref.equal reference.run (Some run)
-                   | Error _ -> false))
-           then t
-           else (
-             let stage, analysis =
-               Overview_tiles.timing_inspection_target ~asic:snapshot ~run
-             in
-             let previous =
-               List.Assoc.find
-                 t.timing
-                 (W.Workspace_id.to_string workspace.id)
-                 ~equal:String.equal
-             in
-             let view =
-               timing t tile
-               |> Option.filter ~f:(fun view ->
-                 String.equal view.stage stage
-                 && Option.equal
-                      Asic_inspection.Analysis_target.equal
-                      view.analysis
-                      analysis)
-               |> Option.value
-                    ~default:
-                      (Timing_workspace.with_analysis
-                         (Timing_workspace.create
-                            ~generation:
-                              (Option.value_map previous ~default:0 ~f:(fun v ->
-                                 v.generation + 1))
-                            ~run
-                            ~stage)
-                         analysis)
-             in
-             let view =
-               Option.value_map snapshot ~default:view ~f:(fun snapshot ->
-                 if Option.is_none view.index
-                 then Timing_workspace.attach_retained view snapshot
-                 else Inspection_view.reconcile view snapshot)
-             in
-             set_timing t tile view)))
+        let view =
+          timing t tile
+          |> Option.filter ~f:(fun view ->
+            (explicit_capture && Option.is_some view.analysis)
+            ||
+            (String.equal view.stage stage
+             && (Option.equal Asic_inspection.Analysis_target.equal view.analysis analysis
+                 || Option.exists view.index ~f:(fun index ->
+                   Option.is_some analysis
+                   && Inspection_view.matches_index { view with analysis } index))))
+          |> Option.value
+               ~default:
+                 (Timing_workspace.with_analysis
+                    (Timing_workspace.create
+                       ~generation:
+                         (Option.value_map previous ~default:0 ~f:(fun v -> v.generation + 1))
+                       ~run
+                       ~stage)
+                    analysis)
+        in
+        let view =
+          Option.value_map snapshot ~default:view ~f:(fun snapshot ->
+            if Option.is_none view.index
+            then Timing_workspace.attach_retained view snapshot
+            else Inspection_view.reconcile view snapshot)
+        in
+        set_timing t tile view
+      | _ -> t)
 ;;
+
+let reconcile_builtin_timing = reconcile_timing ~include_visible:false
+let reconcile_visible_and_builtin_timing = reconcile_timing ~include_visible:true
 
 let%test_unit "Timing exact-run reuse preserves pins and independent investigations" =
   let apply s mutation =
@@ -4319,7 +4346,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
     ; command
         "timing.preload.explicit-only"
         ("Timing preload: Explicit only" ^ if t.timing_preload then "" else " (selected)")
-        "project persistent no speculative provider reads"
+        "project persistent no hidden Timing preload; visible index still loads"
         (Set_timing_preload false)
     ; command
         "layout.fit"

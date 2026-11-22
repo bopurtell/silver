@@ -290,6 +290,31 @@ let timing_inspection_target ~asic ~run =
     stage, None
 ;;
 
+let completed_timing_stage (run : Asic.Run.t) ~stage =
+  Option.is_some run.execution_file
+  && List.exists run.stages ~f:(fun s ->
+    String.equal s.id stage && Asic.Stage.Status.equal s.status Completed)
+;;
+
+(** Legacy checkpoint-backed Timing is only an automatic candidate when the
+    execution actually reached the relevant stage. A guessed Signoff fallback
+    for a synthesis-only run is not evidence. *)
+let timing_index_available (snapshot : Asic.Snapshot.t) (view : Inspection_view.t) ~visible =
+  let asic = Some snapshot in
+  match timing_summary ~asic ~run:view.run with
+  | Some summary when not (Asic.Summary.Freshness.equal summary.freshness Missing_source) ->
+    (match summary.timing_analysis, view.analysis with
+     | Some analysis, Some target ->
+       Asic.Timing_analysis.Status.equal analysis.status Completed
+       && Asic_inspection.Analysis_target.equal analysis.target target
+     | None, None when visible ->
+       Option.exists (execution ~asic ~run:view.run) ~f:(fun run ->
+         Option.equal String.equal run.execution_file (Some summary.execution_file)
+         && completed_timing_stage run ~stage:view.stage)
+     | _ -> false)
+  | _ -> false
+;;
+
 let checklist_items ~asic ~run =
   let stages = observed_stages ~asic ~run in
   let captured_selection =
