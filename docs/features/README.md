@@ -9,8 +9,8 @@ checklist status of stages skipped after cancellation.
 
 **Cobalt companion:** [WB-093 — Test quick launch](integrations/WB-093-cobalt-quick-launch.md)
 is closed. [WB-094 — Share the current project with editors](integrations/WB-094-editor-project-sharing.md)
-owns no-flags connection discovery; [WB-095 — Companion flow launch](integrations/WB-095-companion-flow-launch.md)
-owns the stage checklist, palette aliases, and flow kickoff. Both follow-ups are delivered.
+is closed for no-flags connection discovery; [WB-095 — Companion flow launch](integrations/WB-095-companion-flow-launch.md)
+is delivered for the stage checklist, palette aliases, and flow kickoff.
 
 **Cobalt integration intake (2026-11-21):** [Editor workspace, shared ToggleTerm,
 and timing navigation — recommended order](../cobalt_editor_roadmap.md).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-094: real Silver publisher + unflagged Cobalt, with private PTYs/state."""
+"""WB-094: real Silver publisher + unflagged Cobalt restart, with private PTYs/state."""
 import argparse
 from contextlib import contextmanager, ExitStack
 import errno
@@ -225,6 +225,63 @@ def live_offers(runtime):
     return offers
 
 
+def open_connection_picker(cobalt):
+    cobalt.palette("silver connect", "Silver: Discover/Connect")
+
+
+def check_cobalt_restart(argv, env, cwd, silver, runtime, offer, backend, retained):
+    oid = offer["offer_id"]
+    record = runtime / "editor-shares/v1" / f"{oid}.sexp"
+    original = record.stat()
+    remembered = Path(env["XDG_CONFIG_HOME"]) / "silver/editor-share-remembered-v1"
+    projects = field(backend.snapshot(), "projects")
+    jobs = backend.jobs()
+    history = backend.attempts()
+    assert set(history) == {retained} and history[retained]["outcome"] == "Passed"
+    # Both launches use the same private home and runtime. No Silver input is
+    # sent between runs, not even a visit to the share wizard.
+    for launch in ("initial Cobalt", "restarted Cobalt"):
+        assert silver.process.poll() is None
+        assert live_offers(runtime) == {oid: offer}
+        assert os.path.samestat(original, record.stat())
+        assert not list(remembered.glob("*.sexp"))
+        with terminal(argv, env, cwd) as cobalt:
+            cobalt.see("UNRELATED_COBALT_BUFFER")
+            open_connection_picker(cobalt)
+            try:
+                cobalt.see(f"[{offer['mode']} · {oid[:12]}]")
+            except AssertionError as error:
+                raise AssertionError(f"{launch} did not list live offer {oid}: {error}") from error
+            cobalt.keys(b"\r")
+            cobalt.see("Connected to Silver")
+            cobalt.keys(b" vz", b" vU", b" st")
+            status = cobalt.see(f"Endpoint: {offer['endpoint']}",
+                                f"Instance: {backend.instance}", f"Project ID: {backend.project}",
+                                f"Project: {offer['project_root']}", retained, "Outcome: Passed")
+            assert re.search(r"Outcome: Passed(?:[^\n]*\n){1,4}[^\n]*Attempt: " + re.escape(retained),
+                             status)
+            cobalt.keys(b" bp")
+            cobalt.see("UNRELATED_COBALT_BUFFER")
+            cobalt.keys(b" q")
+
+            def exited():
+                cobalt.screen()
+                return cobalt.process.poll() is not None
+            try:
+                wait(exited, f"{launch} did not quit normally", seconds=10)
+            except AssertionError as error:
+                raise AssertionError(f"{error}\n{cobalt.screen()}") from error
+            assert cobalt.process.returncode == 0
+        assert silver.process.poll() is None
+        assert live_offers(runtime) == {oid: offer}
+        assert os.path.samestat(original, record.stat())
+        assert not list(remembered.glob("*.sexp"))
+        assert field(backend.raw("/api/hello"), "instance_id") == backend.instance
+        assert field(backend.snapshot(), "projects") == projects
+        assert backend.jobs() == jobs
+        assert backend.attempts() == history
+
+
 def exercise(args, base, mode):
     base.mkdir(mode=0o700)
     root = base / "shared"
@@ -235,7 +292,8 @@ def exercise(args, base, mode):
     code.write_text("UNRELATED_COBALT_BUFFER\n")
     dirs = {key: base / name for key, name in [
         ("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
-        ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "run"), ("TMPDIR", "tmp")]}
+        ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"),
+        ("XDG_RUNTIME_DIR", "run"), ("TMPDIR", "tmp")]}
     for path in dirs.values():
         path.mkdir(mode=0o700)
     env = dict(os.environ, **{k: str(v) for k, v in dirs.items()}, TERM="xterm-256color",
@@ -244,6 +302,7 @@ def exercise(args, base, mode):
         env.pop(key, None)
     runtime = dirs["XDG_RUNTIME_DIR"] / "hardcaml-workbench"
     state = base / "deliberately-nondefault-state"
+    cobalt_argv = [args.cobalt, "--no-lsp", code]
     silver_exe = base / "silver"
     silver_exe.symlink_to(args.silver)
     with ExitStack() as stack:
@@ -295,14 +354,14 @@ def exercise(args, base, mode):
             first, offer = share(initial)
             seeded = Backend(offer)
             retained = seeded.seed()
+            check_cobalt_restart(cobalt_argv, env, base, initial, runtime, offer, seeded, retained)
             initial.keys(b"\x03")
             assert initial.process.wait(timeout=10) == 0
         wait(lambda: first not in offers(), "normal exit left live offer")
         assert not (runtime / "editor-shares/v1" / (first + ".sexp")).exists()
         assert any(p.name == retained for p in (state / "simulation-v1").glob("*/*"))
 
-        with silver() as s, silver(duplicate=True) as duplicate, terminal(
-                [args.cobalt, "--no-lsp", code], env, base) as c:
+        with silver() as s, silver(duplicate=True) as duplicate, terminal(cobalt_argv, env, base) as c:
             oid, offer = share(s)
             twin_id, twin = share(duplicate)
             assert len({first, oid, twin_id}) == 3 and offer["project_root"] == twin["project_root"]
@@ -326,7 +385,7 @@ def exercise(args, base, mode):
             jobs_before = backend.jobs()
 
             def picker():
-                c.palette("silver connect", "Silver: Discover/Connect")
+                open_connection_picker(c)
                 c.see(oid[:12], twin_id[:12])
 
             def choose(wanted):
@@ -351,7 +410,7 @@ def exercise(args, base, mode):
             assert set(offers()) == {oid}
             choose(twin_id)
             c.see("Silver share was withdrawn or changed")
-            c.palette("silver connect", "Silver: Discover/Connect")
+            open_connection_picker(c)
             c.see(oid[:12], absent=(twin_id[:12],))
             c.keys(b"\x1b")
             assert set(backend.attempts()) == {retained, silver_run}
@@ -390,13 +449,13 @@ def exercise(args, base, mode):
             assert not (runtime / "editor-shares/v1" / (oid + ".sexp")).exists()
             assert backend.jobs()[silver_job] == "Running"
             assert backend.attempts()[cobalt_run]["lifecycle"] == "Queued"
-            c.palette("silver connect", "Silver: Discover/Connect")
+            open_connection_picker(c)
             c.see(survivor_id[:12], absent=(oid[:12], twin_id[:12]))
             c.keys(b"\x1b")
             survivor.keys(b"\x03")
             assert survivor.process.wait(timeout=10) == 0
             wait(lambda: not offers(), "independent offer was not withdrawn on exit")
-            c.palette("silver connect", "Silver: Discover/Connect")
+            open_connection_picker(c)
             c.see("No Silver project shares")
             c.keys(b"\x1b")
             hold.unlink()
@@ -414,7 +473,8 @@ def exercise(args, base, mode):
             status = c.see(cobalt_run, "Outcome: Failed", f"Instance: {backend.instance}")
             assert re.search(r"Outcome: Failed(?:[^\n]*\n){1,4}[^\n]*Attempt: " + re.escape(cobalt_run), status)
             assert state.is_dir()
-    print(f"WB-094 {mode}: retained {retained}, Silver job {silver_job}, "
+    print(f"WB-094 {mode}: unremembered offer {first} survived Cobalt restart; "
+          f"retained {retained}, Silver job {silver_job}, "
           f"Cobalt acknowledged {cobalt_run}/{cobalt_job}; stale/withdraw left jobs intact")
 
 

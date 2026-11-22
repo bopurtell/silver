@@ -3,7 +3,7 @@ id: WB-094
 title: Share the open Silver project with Cobalt
 category: integrations
 feature_sets: [FS2, FS4]
-status: delivered
+status: closed
 design_status: designed
 kind: feature
 priority: P2
@@ -72,7 +72,9 @@ discoverable, not start another service with an empty or different history.
 
 ## Approved v1 design
 
-**Designed and owner-approved (2026-11-22); ready for implementation.**
+**Closed and owner-accepted (2026-11-22).** Session-only means the publishing
+Silver session: quitting Cobalt must not consume or withdraw the offer. A new
+Cobalt process may select it again while Silver is still sharing that project.
 The wizard explains that “Stop sharing” stops advertising the project for new
 connections; it does not revoke existing connections or interrupt jobs.
 
