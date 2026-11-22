@@ -1,10 +1,9 @@
 # Compose your own windows and workspaces
 
-Stock and user layouts use the same versioned S-expression specification. The actual
-shipped definitions are in [`stock.sexp`](../terminal/workspaces/stock.sexp); the
-default window composition is at the end of that file. Overview, Timing, Testing
-and Waveforms are definitions in this catalog, not separate layout implementations.
-The stock file is embedded at build time and validated through the shared codec.
+Stock and user layouts use the same versioned S-expression specification.
+[`stock.sexp`](../terminal/workspaces/stock.sexp) supplies the base catalog and
+default window composition. Silver embeds it at build time, appends the same
+Editor definition used by the registry, and validates the complete catalog.
 
 Start with [`custom.sexp`](../terminal/workspaces/custom.sexp) for a smaller working
 example: a run selector and two synthesis tiles, with independent presentation and
@@ -44,6 +43,7 @@ The global palette has these two-letter shortcuts:
 | `ti` | Timing |
 | `re` | Resources |
 | `wo` | Workloads (if present) |
+| `ed` | Editor |
 
 These shortcuts follow the built-in workspace even if you rename it. If it
 is closed, Enter reopens its saved layout. For any workspace, including a
@@ -234,10 +234,14 @@ The terminal reads a bounded file on the **client**, resolves built-ins and send
 data to the daemon. No daemon access to the client pathname is required.
 
 - A fresh session receives the entire composition in one atomic operation.
-- Without a selected file, fresh startup uses the window composition in `stock.sexp`
-  (currently Overview, Timing and Testing). Waveforms remains available to create.
+- Without a selected file, fresh startup uses the stock window composition
+  (Overview, Testing, Waveforms, Timing, Resources and Editor). The built-in Editor
+  is also available alongside a custom composition.
 - Existing sessions win over startup configuration, including sessions edited before
   the first terminal attaches. Legacy unfinished bootstrap remains supported.
+- On first load of an older registry, Silver adds the Editor if missing without
+  replacing existing workspaces. A custom workspace named Editor keeps its own ID.
+  The built-in Editor keeps `workspace-editor` even when moved, renamed, or closed.
 - Live identities, context/run selections, pins, geometry and visibility are saved
   separately from portable files. New workspaces link to Main; new tiles Follow.
 - Resolved definitions and tile-key mappings are persisted with the session. Remove

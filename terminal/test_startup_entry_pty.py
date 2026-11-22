@@ -243,8 +243,9 @@ def exercise(client, base, real_renderer=None):
         point(term, "Open existing")
         term.capture("open", ["Existing project directory"])
         send(term, ".\r")
-        term.capture("open-error", ["must directly contain"])
-        dismiss(term, "must directly contain")
+        # A long sandbox root can wrap the prose mid-word.
+        term.capture("open-error", ["Project error", "dune-project file"])
+        dismiss(term, "Project error")
         send(term, "p")
         menu(term)
         send(term, "o")

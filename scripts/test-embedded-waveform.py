@@ -420,7 +420,7 @@ def pty_acceptance(args, evidence, fixture, check):
             terminal.drain(.1)
         # Native startup consumes the canonical stock window composition. The
         # explicit Testing action also supports older saved two-workspace sessions.
-        stock_presets = [['overview'], ['testing'], ['waveforms'], ['timing'], ['resources']]
+        stock_presets = [['overview'], ['testing'], ['waveforms'], ['timing'], ['resources'], ['editor']]
         check([field(w, 'preset') for w in field(initial_registry, 'workspaces')] == stock_presets,
               'ordinary fresh startup opens the ordered built-in workspaces')
         has_testing = any(field(w, 'preset') == ['testing'] for w in field(initial_registry, 'workspaces'))

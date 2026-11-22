@@ -39,13 +39,32 @@ def exercise(client, base):
         see("open-file-prompt", "path[:line[:column]]")
         send(target.encode() + b"\r")
 
+    def editor_palette(query, result):
+        for key in (b" ", b"c", b"c"):
+            send(key)
+            term.drain(.12)
+        send(query.encode())
+        see("editor-palette-" + query, "Cobalt focus", result)
+
+    def click(x, y):
+        send(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m".encode())
+
     def click_tab(name):
         label = re.compile(rf"\b\d+ {name}\b")
         screen = see("tab-available-" + name, label)
         y, row = next((y, row) for y, row in enumerate(screen.splitlines(), start=1)
                       if label.search(row) and "Project" in row)
         x = label.search(row).start() + 1
-        send(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m".encode())
+        click(x, y)
+
+    def frame(screen, heading):
+        return next((row.index(heading), y) for y, row in enumerate(screen.splitlines(), start=1)
+                    if heading in row)
+
+    def cursor():
+        updates = re.findall(rb"\x1b\[\?25([hl])(?:\x1b\[(\d+);(\d+)H)?", term.data)
+        state, y, x = updates[-1]
+        return (int(x), int(y)) if state == b"h" and x and y else None
 
     def resize(width, height):
         term.width, term.height = width, height
@@ -68,11 +87,15 @@ def exercise(client, base):
     beta = re.compile(r"é界 *target_beta")
     dirty = re.compile(r"é界 *DIRTY_target_alpha")
     try:
-        see("initial", overview_tab, "Project: alpha", re.compile(r"\b\d+ Editor\b"))
+        resize(80, 32)
+        see("initial", overview_tab, re.compile(r"\b\d+ Editor\b"))
         click_tab("Editor")
-        see("editor-without-file", editor_tab, "Cobalt focus", "NORMAL", "Alt+Left")
-        click_tab("Overview")
-        see("clicked-out-of-editor", overview_tab, "Project: alpha")
+        see("editor-without-file", editor_tab, "Cobalt focus", "DIRECTORY", "Alt+Left")
+        editor_palette("ov", "Switch to Overview")
+        send(b"\r")
+        see("overview-from-directory", overview_tab, absent=("Cobalt focus",))
+        resize(120, 40)
+        see("initial-wide", overview_tab, "Project: alpha")
         open_file("draft.txt")
         see("file-only", editor_tab, "Cobalt focus", "TITLE_alpha", "F7 Back")
         send(b"\x0f")  # Ctrl-O is Cobalt's own jump history, not Silver Back.
@@ -83,18 +106,48 @@ def exercise(client, base):
         open_file("missing.txt")
         see("missing", overview_tab, "Cannot open in Editor", "missing.txt", absent=(editor_tab,))
         open_file("draft.txt:2:4")
-        see("positioned", editor_tab, "Cobalt focus", alpha)
+        screen = see("positioned", editor_tab, "Cobalt focus", alpha, "╭ editor ", "╭ session ")
+        target = frame(screen, "target_alpha")
+        assert cursor() == (target[0] + 1, target[1])
         send(b"iDIRTY_\x1b")
         see("edited", dirty)
 
-        send(f6 + b"ix")
+        # Normal `o` still opens a line even when Silver exports `ov`.
+        send(b"oOPEN_LINE\x1b")
+        see("cobalt-normal-o", editor_tab, dirty, "OPEN_LINE", absent=("Switch to Overview",))
+        send(b"u")
+        see("undo-open-line", editor_tab, dirty, absent=("OPEN_LINE",))
+        editor_palette("Open project file", "Silver: Open project file")
+        send(b"\r")
+        see("silver-prompt-from-merged-palette", editor_tab, "path[:line[:column]]")
+        send(b"\x1b")
+        screen = see("cancel-silver-prompt", editor_tab, "Cobalt focus", dirty,
+                     absent=("path[:line[:column]]",))
+
+        x, y = frame(screen, "╭ session ")
+        click(x + 1, y)  # The origin's border focuses Silver, not the buffer.
+        see("context-border-focus", "Silver focus", dirty)
+        assert cursor() is None
+        send(b"ix")
         see("sibling-focus", "Silver focus", dirty, absent=("DIRTY_ixtarget",))
         resize(90, 24)
         see("resized", editor_tab, "Silver focus", dirty)
-        send(f6)
+        click_tab("Overview")
+        see("leave-from-companion", overview_tab, absent=("DIRTY_target_alpha",))
+        click_tab("Editor")
+        see("companion-focus-retained", editor_tab, "Silver focus", dirty)
+        screen = see("companion-frame", "╭ editor ", "╭ session ")
+        x, y = frame(screen, "╭ editor ")
+        click(x + 1, y)
         see("editor-focus", "Cobalt focus", dirty)
+        assert cursor() is not None
         resize(70, 24)
-        see("narrow-editor", editor_tab, "Cobalt focus", dirty)
+        see("narrow-editor", editor_tab, "Cobalt focus", dirty, absent=("╭ session ",))
+        send(f6)
+        see("narrow-tabs-focus", editor_tab, "Silver focus", dirty)
+        assert cursor() is None
+        send(f6)
+        see("narrow-editor-focus", "Cobalt focus", dirty)
         resize(120, 40)
         see("wide-editor", editor_tab, "F6 Focus pane", dirty)
 
@@ -113,6 +166,19 @@ def exercise(client, base):
         see("after-cobalt-vcs", "Cobalt focus", dirty)
 
         send(f7)
+        see("back-before-context-tests", overview_tab)
+        for workspace, kind in (("Resources", "resources"), ("Testing", "simulation-catalog")):
+            click_tab(workspace)
+            workspace_tab = re.compile(rf"\[\d+ {workspace}\]")
+            title = f"╭ {kind} "
+            screen = see("origin-" + kind, workspace_tab, title)
+            x, y = frame(screen, title)
+            click(x + 1, y)
+            open_file("draft.txt:2")
+            see("companion-" + kind, editor_tab, title, "╭ editor ", dirty)
+            send(alt_left)
+            see("back-to-" + kind, workspace_tab, title, absent=("Cobalt focus",))
+        click_tab("Overview")
         see("before-project-switch", "Project: alpha")
         switch_project(roots[1])
         open_file("draft.txt")
@@ -126,6 +192,11 @@ def exercise(client, base):
         switch_project(roots[0])
         term.palette("Switch to Editor")
         see("original-project-retained", "TITLE_alpha", dirty)
+        editor_palette("signoff", "Launch signoff and view")
+        send(b"\r")
+        see("silver-command-unavailable", editor_tab,
+            "No declared catalog default; choose explicit flow/profile inputs")
+        assert cursor() is not None
 
         send(b"\x03")
         deadline = time.monotonic() + 12

@@ -152,7 +152,7 @@ let editor_definition : Definition.t =
       }
   ; tiles =
       [ { key = "workspace-tabs"; presentation = Some unframed }
-      ; { key = editor_tile_kind; presentation = Some unframed }
+      ; { key = editor_tile_kind; presentation = None }
       ]
   ; layout = Some (Stack [ leaf "workspace-tabs" 24 1 0; leaf editor_tile_kind 24 6 1 ])
   }

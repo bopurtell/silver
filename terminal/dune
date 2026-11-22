@@ -164,6 +164,13 @@
    %{dep:test_presentation_preferences_restart.py}
    %{exe:presentation_preferences_probe.exe})))
 
+(library
+ (name silver_editor)
+ (modules editor_config editor_theme)
+ (libraries core core_unix cobalt.hosted terminal_presentation)
+ (preprocess (pps ppx_jane))
+ (inline_tests))
+
 (executable
  (name main)
  (modules main startup_entry editor_workspace)
@@ -182,9 +189,10 @@
   hardcaml_workbench_native_http
   hardcaml_workbench_backend
   hardcaml_workbench_protocol
-  hardcaml_workbench_setup
-  notty-community
-  terminal_presentation)
+   hardcaml_workbench_setup
+   notty-community
+   silver_editor
+   terminal_presentation)
  (preprocess
   (pps ppx_jane bonsai.ppx_bonsai))
  (lint
@@ -206,6 +214,26 @@
 (alias
  (name runtest)
  (deps (alias test-editor-pty)))
+
+(rule
+ (alias test-editor-palette-pty)
+ (deps (sandbox always) test_editor_palette_pty.py ../test/support/__init__.py
+    ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_editor_palette_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-editor-palette-pty)))
+
+(rule
+ (alias test-editor-config-pty)
+ (deps (sandbox always) test_editor_config_pty.py ../test/support/__init__.py
+   ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_editor_config_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-editor-config-pty)))
 
 (rule
  (alias test-theme-picker-pty)

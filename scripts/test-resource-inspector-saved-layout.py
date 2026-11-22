@@ -80,9 +80,10 @@ def main():
         terminal = c.Terminal(test, "custom-bootstrap", config_path)
         terminal.wait("ready", ["Config one", "project-tests", "execution"])
         initial = wait_registry(lambda state: field(state, "configuration_pending") == "false", "custom bootstrap")
-        test.check(len(field(initial, "workspaces")) == 2 and not any(
-            field(w, "preset") == ["resources"] for w in field(initial, "workspaces")),
-            "Authored custom-only session initially has no Resources builtin")
+        workspaces = field(initial, "workspaces")
+        test.check([field(w, "preset") for w in workspaces] == [[], [], ["editor"]] and
+                   field(workspaces[-1], "id") == "workspace-editor",
+                   "Authored custom session has two custom workspaces, Editor, and no Resources builtin")
         test.check(all(field(field(mapping, "definition"), "key") == "resources"
                        for mapping in field(initial, "config_workspaces")),
                    "Legacy explicit Custom resources key remains authored custom rather than new builtin")

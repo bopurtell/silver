@@ -173,8 +173,8 @@ def scrolled_palette(t):
     for key in (b" ", b"c", b"c", b"Switch to"):
         send(t, key)
     labels = tuple("Switch to " + name for name in ("Overview", "Testing", "Waveforms",
-                                                    "Timing", "Resources"))
-    first, second, _, timing, last = labels
+                                                    "Timing", "Resources", "Editor"))
+    first, second, *_, penultimate, last = labels
     screen = t.capture("filtered", ["> Switch to Overview", "Switch to Testing"], absent=[last])
     capacity = sum("Switch to " in row and "▏" not in row for row in screen.splitlines())
     assert 2 <= capacity < len(labels), screen
@@ -191,28 +191,29 @@ def scrolled_palette(t):
     # Wheel still moves the selection, not just the viewport.
     click(t, screen, "Switch to Overview", button=65)
     page("wheel", 0, second)
-    send(t, DOWN * 3)
+    send(t, DOWN * (len(labels) - 2))
     bottom = len(labels) - capacity
     page("last-result", bottom, last)
     send(t, UP)
-    page("reverse-stays-put", bottom, timing)
-    send(t, UP * (3 - bottom))
+    page("reverse-stays-put", bottom, penultimate)
+    send(t, UP * (len(labels) - 2 - bottom))
     page("reverse-to-top-edge", bottom, labels[bottom])
     send(t, UP)
     page("cross-top-edge", bottom - 1, labels[bottom - 1])
     send(t, DOWN * (len(labels) - bottom))
     screen = page("bottom-for-click", bottom, last)
-    click(t, screen, timing)  # Click a visible row other than the selection.
-    t.capture("clicked-scrolled-row", ["Timing: active"], absent=["COMMAND PALETTE"])
+    click(t, screen, penultimate)  # Click a visible row other than the selection.
+    t.capture("clicked-scrolled-row", [re.compile(r"Resources: active|\[5 Resources\]")],
+              absent=["COMMAND PALETTE"])
 
     # Enter dispatches the hidden selection, not the top displayed match.
     for key in (b" ", b"c", b"c", b"Switch to"):
         send(t, key)
     page("reopened", 0, first)
-    send(t, DOWN * 4 + CTRL_Y * 4)
+    send(t, DOWN * (len(labels) - 1) + CTRL_Y * (len(labels) - 1))
     page("hidden-last-selection", 0, None)
     send(t, b"\r")
-    t.capture("entered-hidden-result", [re.compile(r"Resources: active|\[5 Resources\]")],
+    t.capture("entered-hidden-result", [re.compile(r"Editor: active|\[6 Editor\]")],
               absent=["COMMAND PALETTE"])
 
 

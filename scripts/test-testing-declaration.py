@@ -35,6 +35,40 @@ SELECTED = re.compile(rf"(?m)(?:^|[│|]) *> +\[ \] {CASE}\b")
 FOCUS_PANE = b"\x1b[17~"  # F6
 ALT_LEFT = b"\x1b[1;3D"  # xterm Alt+Left
 F7 = b"\x1b[18~"  # compatibility alias
+CURSOR_VISIBILITY = re.compile(rb"\x1b\[\?25([hl])")
+CURSOR_ADDRESS = re.compile(rb"\x1b\[(\d+);(\d+)H")
+
+
+class Caret:
+    """A visible Notty caret on an exact ASCII source line and display column."""
+    def __init__(self, tty, source_line, column):
+        assert source_line.isascii() and source_line.isprintable()
+        assert 1 <= column <= len(source_line.rstrip())
+        self.tty, self.source_line, self.column = tty, source_line.rstrip(), column
+        self.actual, self.expected = None, []
+
+    def search(self, text):
+        # Notty hides the caret for repainting, then explicitly shows and
+        # positions it. Use only the last visibility command, never a stale
+        # cursor or the addresses used to draw the frame.
+        self.actual = None
+        last = None
+        for last in CURSOR_VISIBILITY.finditer(self.tty.data):
+            pass
+        if last is not None and last.group(1) == b"h":
+            address = CURSOR_ADDRESS.match(self.tty.data, last.end())
+            if address:
+                self.actual = tuple(map(int, address.groups()))
+        self.expected = [
+            (row, match.start() + self.column)
+            for row, painted in enumerate(text.split("\n"), 1)
+            for match in re.finditer(re.escape(self.source_line), painted)
+        ]
+        return self.expected == [self.actual]
+
+    def __repr__(self):
+        return (f"Caret(source column {self.column}, terminal candidates {self.expected}, "
+                f"visible terminal caret {self.actual})")
 
 
 class Tty(Terminal):
@@ -64,6 +98,9 @@ class Tty(Terminal):
         self.capture(label, expected, absent)
         print("PASS:", label, flush=True)
 
+    def caret(self, source_line, column):
+        return Caret(self, source_line, column)
+
     def quit_silver(self):
         os.write(self.master, b"q")
         deadline = time.monotonic() + 12
@@ -83,10 +120,6 @@ def workspace_tab(name, *, active=False):
     if active:
         tab = rf"\[{tab} *\]"
     return re.compile(rf"\A[^\n]*{tab}")
-
-
-def cursor_at(line, column):
-    return re.compile(rf"[│|] *{line}:{column} *[│|]")
 
 
 def project(args):
@@ -189,11 +222,15 @@ def run(args):
     assert f'"{CASE}"' in declaration and declaration[column - 1:].startswith("[%here]"), (
         line, column, declaration)
     dirty = declaration[:column - 1] + MARKER + declaration[column - 1:]
+    assert original.decode().splitlines().count(declaration) == 1, declaration
 
+    # With Status hidden, the LSP result shares one compact row with the
+    # absolute filename. Leave room for both and the Silver sibling pane.
+    width = max(220, len(os.fsencode(source)) + 100)
     tty = Tty(SimpleNamespace(evidence=args.evidence, env=env),
               argv=[str(args.client), "--standalone", "--project-root", str(root),
-                    "--diagnostics-file", str(args.evidence / "silver.log")],
-              cwd=root, width=180, height=44)
+                     "--diagnostics-file", str(args.evidence / "silver.log")],
+              cwd=root, width=width, height=44)
     try:
         tty.check_startup()
         focus_pane(tty, "simulation-catalog")
@@ -206,7 +243,7 @@ def run(args):
         tty.key(b"d")
         tty.accept("open-declaration", [workspace_tab("Editor", active=True),
                                        "Cobalt focus", source.name, declaration.strip(),
-                                       cursor_at(line, column)])
+                                       tty.caret(declaration, column)])
         tty.key(FOCUS_PANE)
         tty.capture("silver-sibling-focus", ["Silver focus"])
         tty.key(b"k")
@@ -216,14 +253,15 @@ def run(args):
         tty.key(b"iWB088_WRONG_PANE\x1b")
         tty.key(FOCUS_PANE)
         tty.accept("focus-returns-to-unmodified-cobalt",
-                   ["Cobalt focus", declaration.strip()], ["WB088_WRONG_PANE", "INSERT"])
+                   ["Cobalt focus", declaration.strip(), tty.caret(declaration, column)],
+                   ["WB088_WRONG_PANE", "INSERT"])
         await_declaration(tty, source, line, column)
         tty.key(b"i" + MARKER.encode() + b"\x1b")
         tty.accept("dirty-at-declaration", [dirty.strip()])
         assert source.read_bytes() == original, "typing into Cobalt must not write to disk"
 
         tty.key(b"0")  # distinguish tab resume from a declaration-position reset
-        moved = cursor_at(line, 1)
+        moved = tty.caret(dirty, 1)
         tty.capture("dirty-cursor-moved", [dirty.strip(), moved])
         expected = [SELECTED, "Selected: 2 cases"]
         back(tty, "alt-left-restores-same-selection", key=ALT_LEFT, expected=expected)
@@ -236,7 +274,7 @@ def run(args):
         tty.key(b"d")
         tty.accept("repeat-retains-dirty-buffer",
                    [workspace_tab("Editor", active=True), source.name, dirty.strip(),
-                    cursor_at(line, column)])
+                     tty.caret(dirty, column)])
         tty.key(b"u")
         tty.accept("undo-history-retained", [declaration.strip()], [MARKER])
         tty.key(b"\x12")  # Cobalt Ctrl-R
@@ -259,13 +297,12 @@ def run_live(args):
     settings = record(parse(config_bytes.decode()))
     assert any(Path(arg).name == "checkout_provider.py" for arg in settings["provider_args"]), (
         f"Not the standard composite simulation config: {config}")
-    targets = [(line, text) for line, text in enumerate(original.decode().splitlines(), 1)
+    targets = [text for text in original.decode().splitlines()
                if re.search(rf'\bcase \[%here\] "{CASE}"', text)]
     assert len(targets) == 1, targets
-    line, declaration = targets[0]
+    declaration = targets[0]
     assert declaration.isascii()
     column = declaration.index("[%here]") + 1
-    cursor = cursor_at(line, column)
     ready = "Ready for explicit launch"
     selected = re.compile(rf"(?m)(?:^|[│|]) *> +\[x\] {CASE}\b")
 
@@ -303,11 +340,11 @@ def run_live(args):
             tty.key(b"d")
             tty.accept(label,
                        [workspace_tab("Editor", active=True), "Cobalt focus",
-                        DECLARATION_FILE, declaration.strip(), cursor])
+                         DECLARATION_FILE, declaration.strip(), tty.caret(declaration, column)])
 
         jump("real-project-declaration")
         tty.key(b"l")  # cursor movement only, never edit the real checkout
-        moved = cursor_at(line, column + 1)
+        moved = tty.caret(declaration, column + 1)
         tty.capture("real-project-cursor-moved", [moved])
         back(tty, "real-project-alt-left", key=ALT_LEFT, expected=expected)
         tty.click_workspace("Editor", "real-project-return-by-tab")
@@ -316,6 +353,19 @@ def run_live(args):
         back(tty, "real-project-f7", key=F7, expected=expected)
         jump("real-project-repeat-declaration")
         back(tty, "real-project-repeat-alt-left", key=ALT_LEFT, expected=expected)
+        # Back above returns to Testing. This time, navigate to a *different*
+        # workspace via Silver's alias without first relinquishing Cobalt focus.
+        tty.click_workspace("Editor", "real-project-return-for-command")
+        tty.capture("real-project-before-command", ["Cobalt focus", tty.caret(declaration, column)])
+        for key in (b" ", b"c", b"c", b"ov", b"\r"):
+            tty.key(key)
+        tty.accept("real-project-editor-command-ov", [workspace_tab("Overview", active=True)])
+        for key in (b" ", b"c", b"c", b"ed", b"\r"):
+            tty.key(key)
+        tty.accept("real-project-overview-command-ed",
+                   [workspace_tab("Editor", active=True), "Cobalt focus", tty.caret(declaration, column)])
+        tty.key(ALT_LEFT)
+        tty.accept("real-project-ed-back", [workspace_tab("Overview", active=True)])
         tty.quit_silver()
     finally:
         tty.close()

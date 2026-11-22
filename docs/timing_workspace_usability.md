@@ -56,7 +56,7 @@ for the desired run. Inside such a workspace, **Close separate investigation** i
 available in the palette. Closing is revision-checked and protects configured/shared
 workspaces, Main/shared contexts and the last workspace in a window.
 
-Default tabs are now:
+At the time of this Timing migration, the default tabs were:
 
 ```text
 Overview → Testing → Waveforms → Timing

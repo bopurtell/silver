@@ -19,7 +19,10 @@ let registry () =
   in
   let registry = W.initial ~session_id:(W.Session_id.of_string "navigation-restart") in
   let testing = List.hd_exn registry.workspaces in
-  let timing = List.last_exn registry.workspaces in
+  let timing =
+    List.find_exn registry.workspaces ~f:(fun w ->
+      Option.equal String.equal w.preset (Some "timing"))
+  in
   let registry =
     apply registry (P.Definition.apply P.Testing.definition ~workspace:testing.id)
   in
@@ -209,7 +212,7 @@ let restoration_regressions () =
   assert (Option.equal W.Tile_id.equal restored.focus focused.focus);
   assert (Option.equal W.Workspace_id.equal restored.active focused.active);
   (* Sidebar Enter returns the same Switch effect consumed by main's command route. *)
-  let sidebar = find registry "workspace-tabs" in
+  let sidebar = List.find_exn (H.tiles fresh) ~f:(fun tile -> String.equal tile.kind "workspace-tabs") in
   let sidebar_host = { fresh with focus = Some sidebar.id } in
   let browsed = H.browse_workspaces sidebar_host sidebar.id ~delta:1 in
   let before_switch, effect = H.input browsed Enter ~commands:[] in

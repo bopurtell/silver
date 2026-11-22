@@ -71,8 +71,8 @@ scripts/with-switch.sh python3 scripts/test-testing-declaration.py \
 
 The PTY test selects a real FIFO case and jumps with `gd`. Inside the editor,
 it checks the cursor coordinate through Cobalt's LSP client and verifies that
-`gd` has editor semantics. F6 transfers pane focus; F7 returns to the same
-Testing selection. Reopening the declaration preserves the unsaved edit and
+`gd` has editor semantics. F6 transfers pane focus; Alt+Left returns to the same
+Testing selection (F7 remains an alias). Reopening the declaration preserves the unsaved edit and
 undo/redo history, without writing the source file or launching a simulation.
 
 To check the standard configured `hardcaml_asic_example` checkout with the

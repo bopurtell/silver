@@ -15,7 +15,10 @@ let geometry : W.Geometry.t = { x = 2; y = 3; width = 35; height = 9 }
 
 let%test_unit "detached context retains the exact initial pair independently of links" =
   let initial = W.initial ~session_id:(W.Session_id.of_string "target-context") in
-  let workspace = (List.last_exn initial.workspaces).id in
+  let workspace =
+    (List.find_exn initial.workspaces ~f:(fun w ->
+       Option.equal String.equal w.preset (Some "timing"))).id
+  in
   let target : Asic.Chip_target.t = { chip = "fifo"; variant = "deep" } in
   let detached = mutate initial (Detach_with_target (workspace, target)) in
   let restored = W.Snapshot.t_of_sexp (W.Snapshot.sexp_of_t detached) in

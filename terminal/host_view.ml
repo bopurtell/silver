@@ -2245,7 +2245,7 @@ let checklist_page host data tile ~height rows =
 ;;
 
 let workspace_page host tile ~width ~height rows =
-  let chips =
+  let chips ~compact =
     List.mapi rows ~f:(fun i row ->
       let i =
         Option.bind host.H.registry ~f:(fun registry ->
@@ -2263,14 +2263,26 @@ let workspace_page host tile ~width ~height rows =
       ( View.text
           ~attrs:(Role.attrs host.appearance role)
           (sprintf
-             " %s%d %s%s "
+             "%s%s%d %s%s%s"
+             (if compact && not row.active then "" else " ")
              (if row.active then "[" else " ")
              (i + 1)
              row.label
-             (if row.active then "]" else " "))
+             (if row.active then "]" else if compact then "" else " ")
+             (if compact then "" else " "))
       , row.workspace ))
   in
-  if List.sum (module Int) chips ~f:(fun (view, _) -> View.width view) <= width
+  let fits chips = List.sum (module Int) chips ~f:(fun (view, _) -> View.width view) <= width in
+  let chips =
+    let spacious = chips ~compact:false in
+    if fits spacious then spacious
+    else (
+      (* Default six-tab layouts fit an 80-column terminal without losing Editor
+         to the right edge. Long custom names still get the normal viewport. *)
+      let compact = chips ~compact:true in
+      if fits compact then compact else spacious)
+  in
+  if fits chips
   then `Strip chips
   else if height = 1
   then (
@@ -3314,6 +3326,9 @@ let show_global_header host =
   host.H.chrome
   && (not (List.exists tiles ~f:(fun tile -> P.Waveforms.is_pane tile.kind)))
   && (not (List.exists tiles ~f:(fun tile -> String.equal tile.W.Tile.kind "live-status")))
+  && not
+       (Option.exists (H.active host) ~f:H.editor_workspace
+        && List.exists tiles ~f:(fun tile -> String.equal tile.kind "workspace-tabs"))
   &&
   (* The runtime top strip takes the place of the banner. An authored navigation
      panel can be anywhere, so its presence alone does not suppress the banner. *)
@@ -3485,20 +3500,68 @@ let tile_layout host ({ Dimensions.width; height } : Dimensions.t) =
   available, compact, layout
 ;;
 
+type workspace_cell =
+  { host : H.t
+  ; tile : W.Tile.t
+  ; bounds : W.Geometry.t
+  }
+
+(* The origin tile is a live projection, not a new tile or a nested panel.
+   Give it its own outer cell so both sides go through the same panel geometry. *)
+let workspace_cells
+  ?editor_companion
+  ?(editor_companion_focused = false)
+  host
+  dimensions
+  =
+  let available, compact, layout = tile_layout host dimensions in
+  let companion =
+    Option.filter editor_companion ~f:(fun _ ->
+      Option.exists (H.active host) ~f:(fun workspace ->
+        H.editor_workspace workspace && Option.is_none workspace.zoomed_tile))
+  in
+  let rec cells companion = function
+    | [] -> []
+    | ((tile : W.Tile.t), (bounds : W.Geometry.t)) :: rest ->
+      (match companion with
+       | Some ((origin_host : H.t), (origin : W.Tile.t))
+         when H.editor_kind tile.kind && bounds.width >= 75 ->
+         let right = Int.min 34 (bounds.width / 3) in
+         let left = bounds.width - right - 1 in
+         let editor_host =
+           if editor_companion_focused then { host with focus = None } else host
+         in
+         let origin_host =
+           { origin_host with
+             appearance = host.appearance
+           ; focus = Option.some_if editor_companion_focused origin.id
+           }
+         in
+         { host = editor_host; tile; bounds = { bounds with width = left } }
+         :: { host = origin_host
+            ; tile = origin
+            ; bounds = { bounds with x = bounds.x + left + 1; width = right }
+            }
+         :: cells None rest
+       | _ -> { host; tile; bounds } :: cells companion rest)
+  in
+  available, compact, cells companion layout
+;;
+
 (** Hit-test the workspace layer at a zero-based terminal cell. A frame,
     padding or heading hit still identifies the tile, but only body cells
     have a body-relative (column,row). The caller owns overlay routing. *)
-let pointer_geometry host (dimensions : Dimensions.t) ~x ~y =
+let pointer_geometry ?editor_companion host (dimensions : Dimensions.t) ~x ~y =
   let top = Bool.to_int (show_global_header host) in
   if x < 0 || x >= dimensions.width || y < top || y >= dimensions.height
   then None
   else (
-    let available, _, layout = tile_layout host dimensions in
+    let available, _, layout = workspace_cells ?editor_companion host dimensions in
     let y = y - top in
     if y >= available
     then None
     else
-      List.find_map layout ~f:(fun (tile, (g : W.Geometry.t)) ->
+      List.find_map layout ~f:(fun { host; tile; bounds = g } ->
         let col = x - g.x
         and row = y - g.y in
         if col < 0 || row < 0 || col >= g.width || row >= g.height
@@ -3516,16 +3579,17 @@ let pointer_geometry host (dimensions : Dimensions.t) ~x ~y =
           Some (tile, body, body_cell))))
 ;;
 
-let pointer_hit host dimensions ~x ~y =
-  Option.map (pointer_geometry host dimensions ~x ~y) ~f:(fun (tile, _, cell) ->
+let pointer_hit ?editor_companion host dimensions ~x ~y =
+  Option.map (pointer_geometry ?editor_companion host dimensions ~x ~y) ~f:(fun (tile, _, cell) ->
     tile, cell)
 ;;
 
 (** Screen-space body bounds for hosted tiles, using the same fit/zoom,
     frame, padding and chrome calculation as rendering and hit testing. *)
-let hosted_body host dimensions ~f =
-  let _, _, cells = tile_layout host dimensions in
-  List.find_map cells ~f:(fun (tile, (cell : W.Geometry.t)) ->
+let hosted_body ?editor_companion host dimensions ~f =
+  let _, _, cells = workspace_cells ?editor_companion host dimensions in
+  let top = Bool.to_int (show_global_header host) in
+  List.find_map cells ~f:(fun { host; tile; bounds = cell } ->
     if not (f tile) then None
     else (
       let panel = panel_geometry host tile ~width:cell.width ~height:cell.height in
@@ -3537,7 +3601,7 @@ let hosted_body host dimensions ~f =
           ( tile
           , { body with
               x = cell.x + body.x
-            ; y = cell.y + body.y + Bool.to_int (show_global_header host)
+            ; y = cell.y + body.y + top
             } )))
 ;;
 
@@ -3853,7 +3917,7 @@ let inspector_breadcrumb host ~width rows =
 
 (** Main-window hints name only controls that work on the focused view. Timing panes own
     their keys (q does not exit there), and an open reader names its explicit close. *)
-let main_hint_text host =
+let main_hint_text ?(editor_companion_focused = false) host =
   let timing =
     Option.bind (H.focused host) ~f:(fun tile ->
       Option.bind (H.timing_pane host tile) ~f:(fun pane ->
@@ -3861,8 +3925,9 @@ let main_hint_text host =
   in
   match H.active host, timing with
   | Some workspace, _ when H.editor_workspace workspace ->
-    (if Option.exists (H.focused host) ~f:(fun tile -> H.editor_kind tile.kind)
-     then "Cobalt focus | Alt+Left / F7 Back | F6 Focus pane | Ctrl-C exit"
+    (if not editor_companion_focused
+        && Option.exists (H.focused host) ~f:(fun tile -> H.editor_kind tile.kind)
+     then "Cobalt focus | Space c c commands | Alt+Left / F7 Back | F6 Focus pane | ^C exit"
      else "Silver focus | Alt+Left / F7 Back | F6 Focus editor | Space c c commands")
   | _, Some ((Timing_workspace.Detail | Context), view) when Inspection_view.detail_mode view
     ->
@@ -3890,6 +3955,8 @@ let render_workspace
   ?(now = Time_ns.now ())
   ?indicator_frames
   ?render_pane
+  ?editor_companion
+  ?(editor_companion_focused = false)
   host
   data
   ({ Dimensions.width; height } as dimensions)
@@ -3923,7 +3990,9 @@ let render_workspace
           ]
       ]
   in
-  let available, compact, layout = tile_layout host dimensions in
+  let available, compact, layout =
+    workspace_cells ?editor_companion ~editor_companion_focused host dimensions
+  in
   let content =
     if Option.is_none host.registry
     then lines ~appearance ~width ~height:available [ "Loading workspace..." ]
@@ -3937,7 +4006,12 @@ let render_workspace
         ; "Space c c: Add a tile, or Apply default layout"
         ]
     else
-      List.map layout ~f:(fun (tile, (g : W.Geometry.t)) ->
+      let active = host.H.active in
+      List.map layout ~f:(fun { host; tile; bounds = g } ->
+        let render_pane =
+          Option.filter render_pane ~f:(fun _ ->
+            Option.equal W.Workspace_id.equal active (Some tile.workspace))
+        in
         tile_view
           ~now
           ?indicator_frames
@@ -4003,7 +4077,7 @@ let render_workspace
                    "Compact: focused tile only | Tab: next tile | enlarge terminal for \
                     grid"
                else with_breadcrumb host ~width "Compact: focused tile only"
-             else with_breadcrumb host ~width (main_hint_text host))
+              else with_breadcrumb host ~width (main_hint_text ~editor_companion_focused host))
           ]
       ]
   in
@@ -4570,7 +4644,16 @@ let render_menu host dimensions background =
 
 (* A focused explorer covers the workspace. Do not construct the obscured tile images:
    those have different widths and would wrap the same large source a second time. *)
-let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dimensions =
+let render
+  ?(now = Time_ns.now ())
+  ?indicator_frames
+  ?render_pane
+  ?editor_companion
+  ?editor_companion_focused
+  host
+  data
+  dimensions
+  =
   let host = H.dismiss_stale_theme_picker host in
   let appearance = H.effective_appearance host in
   let inspection_tile =
@@ -4603,7 +4686,15 @@ let render ?(now = Time_ns.now ()) ?indicator_frames ?render_pane host data dime
       in
       View.vcat rows |> colored appearance Surface |> box ~width ~height
     | None ->
-      render_workspace ~now ?indicator_frames ?render_pane { host with appearance } data dimensions
+      render_workspace
+        ~now
+        ?indicator_frames
+        ?render_pane
+        ?editor_companion
+        ?editor_companion_focused
+        { host with appearance }
+        data
+        dimensions
   in
   render_palette host dimensions (render_menu host dimensions background)
 ;;
@@ -5184,6 +5275,141 @@ let%test_unit "workspace pointer targets rendered chips and narrow rows only" =
     ~f:(fun target -> assert (Option.equal W.Workspace_id.equal target (Some other.id)));
   assert (Option.is_none (click ~width:120 ~row:0 ~column:119));
   assert (Option.is_none (click ~width:4 ~row:2 ~column:0))
+;;
+
+let%test_unit "default Editor is a clickable tab at 80 columns and owns a hosted body" =
+  let host, data, _ =
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config P.Presets.stock_config)
+      |> Result.ok
+      |> Option.value_exn)
+  in
+  let dimensions = { Dimensions.width = 80; height = 30 } in
+  let top = plain_text (render host data dimensions) |> String.split_lines |> List.hd_exn in
+  let editor_x = cell_width (String.prefix top (String.substr_index_exn top ~pattern:"6 Editor")) in
+  let tabs, _, hit = pointer_geometry host dimensions ~x:editor_x ~y:0 |> Option.value_exn in
+  let column, row = Option.value_exn hit in
+  assert (
+    Option.equal W.Workspace_id.equal
+      (workspace_tab_at host data tabs ~width:80 ~height:1 ~column ~row)
+      (Some W.Editor.workspace_id));
+  let editor = H.switch host W.Editor.workspace_id in
+  let tile, bounds =
+    hosted_body editor dimensions ~f:(fun tile -> H.editor_kind tile.kind)
+    |> Option.value_exn
+  in
+  assert (Option.equal W.Tile_id.equal editor.focus (Some tile.id));
+  assert (bounds.x = 2 && bounds.y = 2 && bounds.width = 76 && bounds.height > 0);
+  let top = plain_text (render editor data dimensions) |> String.split_lines |> List.hd_exn in
+  assert (String.is_substring top ~substring:"[6 Editor]")
+;;
+
+let%test_unit "Editor and origin use separate native frames and share their body hit geometry" =
+  let host, data, _ =
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config P.Presets.stock_config)
+      |> Result.ok
+      |> Option.value_exn)
+  in
+  let editor = H.switch host W.Editor.workspace_id in
+  let editor_tile = H.focused editor |> Option.value_exn in
+  let dimensions = { Dimensions.width = 120; height = 30 } in
+  let with_origin preset kind ~f =
+    let registry = Option.value_exn host.registry in
+    let workspace =
+      List.find_exn registry.workspaces ~f:(fun w -> Option.equal String.equal w.preset (Some preset))
+    in
+    let origin_host = H.switch host workspace.id in
+    let origin = List.find_exn (H.tiles origin_host) ~f:(fun tile -> String.equal tile.kind kind) in
+    f ({ origin_host with focus = Some origin.id }, origin)
+  in
+  let check_geometry ((_, origin) as editor_companion) =
+    let cells focused =
+      let _, _, cells = workspace_cells ~editor_companion ~editor_companion_focused:focused editor dimensions in
+      assert (List.length cells = 3);
+      let left = List.nth_exn cells 1 and right = List.nth_exn cells 2 in
+      assert (W.Tile_id.equal left.tile.id editor_tile.id);
+      assert (W.Tile_id.equal right.tile.id origin.id);
+      let focused_cell, unfocused_cell = if focused then right, left else left, right in
+      assert (Option.equal W.Tile_id.equal focused_cell.host.focus (Some focused_cell.tile.id));
+      assert (Option.is_none unfocused_cell.host.focus);
+      left, right
+    in
+    let left, right = cells false in
+    ignore (cells true : workspace_cell * workspace_cell);
+    let hit = pointer_hit ~editor_companion editor dimensions in
+    assert (Option.is_none (hit ~x:(right.bounds.x - 1) ~y:right.bounds.y));
+    List.iter [ left; right ] ~f:(fun { tile; bounds = outer; _ } ->
+      let check x y expected =
+        let actual, cell = hit ~x ~y |> Option.value_exn in
+        assert (W.Tile_id.equal actual.id tile.id);
+        assert ([%equal: (int * int) option] cell expected)
+      in
+      check outer.x outer.y None;
+      let _, body =
+        hosted_body ~editor_companion editor dimensions ~f:(fun other -> W.Tile_id.equal other.id tile.id)
+        |> Option.value_exn
+      in
+      assert (body.x > outer.x && body.y > outer.y);
+      check (body.x - 1) body.y None;
+      check body.x body.y (Some (0, 0));
+      check (body.x + body.width - 1) (body.y + body.height - 1)
+        (Some (body.width - 1, body.height - 1)));
+    let narrow = { dimensions with width = 70 } in
+    let _, body =
+      hosted_body ~editor_companion editor narrow ~f:(fun tile -> H.editor_kind tile.kind)
+      |> Option.value_exn
+    in
+    assert (body.width = 66);
+    assert (Option.is_none (
+      hosted_body ~editor_companion editor narrow ~f:(fun tile -> W.Tile_id.equal tile.id origin.id)));
+    let render_pane tile ~width:_ ~height:_ =
+      Option.some_if (H.editor_kind tile.W.Tile.kind) (View.text "EDITOR BODY")
+    in
+    let view focused =
+      render ~editor_companion ~editor_companion_focused:focused ~render_pane editor data dimensions
+    in
+    let corner view { bounds; _ } =
+      let buffer = Buffer.create 64 in
+      Notty.Render.to_buffer buffer Notty.Cap.ansi (bounds.x, bounds.y) (1, 1)
+        (View.Private.notty_image view);
+      Buffer.contents buffer
+    in
+    assert (not (String.equal (corner (view false) left) (corner (view true) left)));
+    assert (not (String.equal (corner (view false) right) (corner (view true) right)));
+    let screen = plain_text (view false) in
+    assert (String.is_substring screen ~substring:"EDITOR BODY");
+    let title_row = List.nth_exn (String.split_lines screen) left.bounds.y in
+    assert (List.length (String.substr_index_all title_row ~pattern:"╭" ~may_overlap:false) = 2);
+    assert (String.is_substring title_row ~substring:" editor ");
+    title_row
+  in
+  with_origin "overview" "live-status" ~f:(fun companion ->
+    let title_row = check_geometry companion in
+    assert (String.is_substring title_row ~substring:" session "));
+  with_origin "testing" "simulation-catalog" ~f:(fun companion ->
+    let title_row = check_geometry companion in
+    assert (String.is_substring title_row ~substring:" simulation-catalog "));
+  with_origin "resources" "resources" ~f:(fun companion ->
+    let title_row = check_geometry companion in
+    assert (String.is_substring title_row ~substring:" resources ");
+    let origin_host, tile = companion in
+    let local = H.local origin_host tile.id in
+    let origin_host =
+      H.set_local origin_host tile.id
+        { local with presentation = { local.presentation with frame = Some false; padding = Some 0 } }
+    in
+    let editor_companion = origin_host, tile in
+    let view = render ~editor_companion editor data dimensions |> plain_text in
+    let title_row = List.nth_exn (String.split_lines view) 1 in
+    assert (List.length (String.substr_index_all title_row ~pattern:"╭" ~may_overlap:false) = 1);
+    let _, body =
+      hosted_body ~editor_companion editor dimensions ~f:(fun t -> W.Tile_id.equal t.id tile.id)
+      |> Option.value_exn
+    in
+    let hit, cell = pointer_hit ~editor_companion editor dimensions ~x:body.x ~y:body.y |> Option.value_exn in
+    assert (W.Tile_id.equal tile.id hit.id);
+    assert ([%equal: (int * int) option] cell (Some (0, 0))))
 ;;
 
 let%test_unit "blank workspace paints and hit-tests the stock navigation strip on row zero"

@@ -341,31 +341,43 @@ def native(base, args):
         presets = demo.workspace_presets(args.preset_export)
         starter_mappings = field(layout, 'config_workspaces')
         starter_windows = field(layout, 'config_windows')
-        stock_order = ('overview', 'testing', 'waveforms', 'timing', 'resources')
+        stock_order = ('overview', 'testing', 'waveforms', 'timing', 'resources', 'editor')
+        editor_id = 'workspace-editor'
         expected_instances = [(field(window, 'key'), field(instance, 'key'),
                                field(instance, 'definition'))
                               for window in field(presets.config, 'windows')
                               for instance in field(window, 'workspaces')]
+        check(expected_instances == [('main', identity, ['Builtin', identity]) for identity in stock_order],
+              'stock export contains the canonical ordered built-in instances')
+        # The model reserves Editor independently of ordinary config mappings.
+        mapped_ids = {field(p, 'workspace') for p in starter_mappings}
         check(field(layout, 'defaults_initialized') == 'true' and
               field(layout, 'configuration_pending') == 'false' and
               [field(w, 'preset') for w in field(layout, 'workspaces')] ==
               [[identity] for identity in stock_order] and
               [(field(p, 'window_key'), field(p, 'workspace_key'), field(p, 'reference'))
-               for p in starter_mappings] == expected_instances and
-              {field(p, 'workspace') for p in starter_mappings} ==
-              {field(w, 'id') for w in field(layout, 'workspaces')},
+               for p in starter_mappings] == expected_instances[:-1] and
+              editor_id not in mapped_ids and
+              mapped_ids | {editor_id} == {field(w, 'id') for w in field(layout, 'workspaces')},
               'fresh seed initializes exactly the ordered stock workspace instances and their provenance')
         for identity in stock_order:
             workspaces = [w for w in field(layout, 'workspaces') if field(w, 'preset') == [identity]]
             check(len(workspaces) == 1, 'one stable ' + identity + ' workspace')
             definition = next(d for d in field(presets.config, 'definitions')
                               if field(d, 'key') == identity)
-            policy = next(p for p in starter_mappings
-                          if field(p, 'workspace') == field(workspaces[0], 'id'))
             tiles = [t for t in field(layout, 'tiles')
                      if field(t, 'workspace') == field(workspaces[0], 'id')]
             views = [[['kind', field(t, 'kind')], ['hidden', field(t, 'hidden')],
                       ['geometry', field(t, 'requested_geometry')]] for t in tiles]
+            if identity == 'editor':
+                check(field(workspaces[0], 'id') == editor_id and
+                      field(workspaces[0], 'context') == field(layout, 'main_context') and
+                      views == field(field(definition, 'template'), 'views') and
+                      [field(tile, 'kind') for tile in tiles] == ['workspace-tabs', 'editor'],
+                      'Editor is the reserved Main-linked workspace with the canonical editor surface')
+                continue
+            policy = next(p for p in starter_mappings
+                          if field(p, 'workspace') == field(workspaces[0], 'id'))
             check(views == field(field(definition, 'template'), 'views') and
                   field(policy, 'definition') == definition and
                   field(policy, 'policy_detached') == 'false' and
@@ -448,7 +460,7 @@ def native(base, args):
               'reseed preserves retained user context/selection revision')
         check(field(after, 'config_workspaces') == starter_mappings and
               field(after, 'config_windows') == starter_windows,
-              'reseed preserves all three canonical starter mappings and frozen policies despite user rename/extras')
+              'reseed preserves all canonical starter mappings and frozen policies despite user rename/extras')
         check({field(a, 'id') for a in attempts(client)} == before_ids,
               'repeated full seed creates no duplicate attempts')
         cleared = mutate('(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run ()))' % (

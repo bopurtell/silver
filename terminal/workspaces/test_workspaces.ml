@@ -320,7 +320,13 @@ let%test_unit "complete stock spec roundtrips and is accepted as startup input" 
     assert (Workspace_template.equal (Definition.template wrapper) stock.template);
     assert (List.length wrapper.tiles = List.length stock.tiles));
   assert (List.length resolved.windows = 1);
-  assert (List.length (List.hd_exn resolved.windows).workspaces = 5);
+  assert (List.length (List.hd_exn resolved.windows).workspaces = 6);
+  let editor = Presets.builtins Workspace.Editor.preset |> Or_error.ok_exn in
+  assert (Workspace_config.Definition.equal editor Workspace_config.editor_definition);
+  assert (
+    Workspace_template.equal
+      (Definition.template (Presets.find Workspace.Editor.preset |> Option.value_exn))
+      Workspace_config.editor_definition.template);
   assert (Result.is_error (Presets.builtins "not-a-builtin"));
   (* An exported stock definition cannot be silently edited under a reserved ID. *)
   let changed =
@@ -334,12 +340,12 @@ let%test_unit "complete stock spec roundtrips and is accepted as startup input" 
   assert (Result.is_error (Presets.decode changed))
 ;;
 
-let%test_unit "stock startup opens five ordered built-in workspaces" =
+let%test_unit "stock startup opens six ordered built-in workspaces including Editor" =
   assert (
     List.equal
       String.equal
       (List.map Presets.starters ~f:(fun d -> d.Definition.id))
-      [ "overview"; "testing"; "waveforms"; "timing"; "resources" ]);
+       [ "overview"; "testing"; "waveforms"; "timing"; "resources"; "editor" ]);
   let initial = Workspace.initial ~session_id:(Workspace.Session_id.of_string "merged") in
   let initialized =
     Workspace.apply initial (Presets.startup_operation initial |> Option.value_exn)
@@ -350,14 +356,18 @@ let%test_unit "stock startup opens five ordered built-in workspaces" =
     List.equal
       String.equal
       (List.map initialized.workspaces ~f:(fun w -> w.name))
-      [ "Overview"; "Testing"; "Waveforms"; "Timing"; "Resources" ]);
+       [ "Overview"; "Testing"; "Waveforms"; "Timing"; "Resources"; "Editor" ]);
+  let editor = Workspace.workspace initialized Workspace.Editor.workspace_id in
+  assert (Workspace.is_workspace_open initialized editor.id);
+  assert (Option.equal String.equal editor.preset (Some Workspace.Editor.preset));
   (* Legacy bootstrap still targets only the two original placeholders. A catalog upgrade
      must not silently add Testing to a saved/edited legacy session. *)
   let legacy = { initial with configuration_pending = false } in
   let restored =
     Workspace.apply legacy Presets.bootstrap |> Result.ok |> Option.value_exn
   in
-  assert (List.length restored.workspaces = 2);
+  assert (List.length restored.workspaces = 3);
+  assert (Workspace.is_workspace_open restored Workspace.Editor.workspace_id);
   assert (Option.is_none (Presets.startup_operation restored));
   assert (
     Workspace.Snapshot.equal

@@ -172,7 +172,16 @@ def authoring(test):
         again = test.config_cli('export', [kind], 'export-repeat-' + kind)
         test.check(parse(again) == decoded, kind + ' export is deterministic and independently valid')
         if kind == 'stock':
-            for definition in field(decoded, 'definitions'):
+            definitions = field(decoded, 'definitions')
+            editor, = (d for d in definitions if field(d, 'key') == 'editor')
+            instances = [instance for window in field(decoded, 'windows')
+                         for instance in field(window, 'workspaces')]
+            test.check(field(instances[-1], 'definition') == ['Builtin', 'editor'] and
+                       sum(field(i, 'definition') == ['Builtin', 'editor'] for i in instances) == 1 and
+                       [field(v, 'kind') for v in field(field(editor, 'template'), 'views')] ==
+                       ['workspace-tabs', 'editor'],
+                       'Stock export appends exactly one Editor instance with its canonical template')
+            for definition in definitions:
                 key = field(definition, 'key')
                 portable = parse(test.command(test.args.workspace_cli,
                     ['starter', key], 'canonical-starter-' + key))
@@ -270,11 +279,13 @@ def terminal_startup(test, config, path):
         terminal.wait('custom-ready', ['Config one', 'project-tests', 'execution'])
         terminal.composed('fresh-custom-tree')
         current = test.workspace()
+        workspaces = field(current, 'workspaces')
         test.check(len(field(current, 'windows')) == 2 and
-                   len(field(current, 'workspaces')) == 2 and
+                   [field(w, 'preset') for w in workspaces] == [[], [], ['editor']] and
+                   field(workspaces[-1], 'id') == 'workspace-editor' and
                    field(current, 'configuration_pending') == 'false' and
                    int(field(current, 'revision')) == int(field(placeholders, 'revision')) + 1,
-                   'Native --workspace-config replaces placeholders atomically with custom-only session')
+                   'Native --workspace-config atomically replaces placeholders with the two custom desks and Editor')
         check_mapping(test, current, config)
         terminal.close()
         terminal = None

@@ -9,9 +9,10 @@ remains independently usable. Preset Apply preserves old extras; explicit Restor
 hides them. [Controls/evidence](../../docs/testing_workspace.md).
 
 Start with **`stock.sexp`** to change stock membership, sparse presentation, Fit trees,
-or the shipped default window composition. This is the actual stock source, embedded
-deterministically by dune and decoded/validated as `Workspace_config.Definition.t`.
-The OCaml preset modules are compatibility projections, not a second layout table.
+or the shipped default window composition. Dune embeds that file; `Stock.config`
+appends the protocol-owned Editor definition and instance, then validates the complete
+catalog. The daemon uses the same Editor definition to upgrade saved workspaces.
+The other OCaml preset modules project the catalog rather than duplicating layouts.
 `custom.sexp` is a usable custom-only example with two synthesis tiles addressed by
 different keys and deliberately placed in the opposite order to their membership.
 Both files use the shared `protocol/workspace_config.ml` slicing-tree vocabulary.
@@ -116,7 +117,7 @@ requested geometry; applying a definition to an older session needs no migration
 FS3 portable templates carry the stable preset ID alongside exact membership and
 requested geometry. `Definition.template` supplies the same definitions to CLI
 `starter overview|timing|testing`; imports do not fill/reset sparse arrangements.
-Fresh startup uses `Initialize_config` with the Overview/Testing/Waveforms/Timing window in
+Fresh startup uses `Initialize_config` with the default window composition in
 `stock.sexp`. `Presets.bootstrap` completes only unfinished legacy Overview/Timing
 placeholders through a single idempotent daemon operation, even after a CLI import
 has advanced registry revision. It does not add Testing to existing sessions. Legacy
@@ -129,9 +130,8 @@ honor generic Fit as well as requested-size mode. See [FS3 adoption](../../docs/
 tiles: `waveform-session`, `waveform-signals`, `waveform-waves`, `waveform-picker`, `waveform-logs`, plus
 the existing workspace tabs. Signals and Waves share the upper band; VCD picker and
 Logs share the lower band. All use normal host layout, focus, hiding, zoom and
-appearance. `Presets.all` is the complete catalog; `Presets.starters` remains the
-Overview/Testing/Waveforms/Timing startup definitions from `stock.sexp`. Existing
-saved sessions retain their membership; Waveforms can also be instantiated explicitly.
+appearance. `Presets.all` is the complete catalog; `Presets.starters` follows the
+startup composition in `stock.sexp`. Waveforms can also be instantiated explicitly.
 
 `Waveforms.create ~window` returns one `Instantiate_template` registry mutation.
 Submit through the normal daemon transport, await acknowledgement, then identify

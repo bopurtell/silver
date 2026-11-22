@@ -1166,7 +1166,10 @@ let editor_workspace (w : W.Arrangement.t) =
 ;;
 
 let editor_kind kind = String.equal kind W.Editor.tile_kind
-let editor_context_kind kind = String.equal kind "editor-context"
+
+let has_preset (w : W.Arrangement.t) preset =
+  Option.equal String.equal w.preset (Some preset)
+;;
 
 let workspace_at_index t index =
   Option.bind t.registry ~f:(fun s -> List.nth (W.open_workspaces s) index)
@@ -1583,7 +1586,7 @@ let%test_unit "cooperative simulation state is workspace-local and legacy isolat
   in
   let s = W.initial ~session_id:(W.Session_id.of_string "testing-shared") in
   let first = List.hd_exn s.workspaces
-  and second = List.last_exn s.workspaces in
+  and second = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
   let s = apply s (P.Definition.apply P.Testing.definition ~workspace:first.id) in
   let s = apply s (P.Definition.apply P.Testing.definition ~workspace:second.id) in
   let s =
@@ -2350,7 +2353,7 @@ let%test_unit "Timing reconnect keeps investigation until pane or session identi
     |> Option.value_exn
   in
   let registry = W.initial ~session_id:(W.Session_id.of_string "timing-reconnect") in
-  let workspace = List.last_exn registry.workspaces in
+  let workspace = List.find_exn registry.workspaces ~f:(fun w -> has_preset w "timing") in
   let context = W.context registry workspace.context in
   let registry =
     apply
@@ -3026,7 +3029,7 @@ let asic_cancel_commands (snapshot : Asic.Snapshot.t) =
 let project_scoped_kind kind =
   Testing_workspace.is_pane kind
   || P.Waveforms.is_pane kind
-  || editor_kind kind || editor_context_kind kind
+  || editor_kind kind
   || List.mem
        [ "simulation"
        ; "workloads"
@@ -3066,7 +3069,21 @@ let evidence_runs t =
     |> List.dedup_and_sort ~compare:Run_ref.compare
 ;;
 
-let definition = P.Presets.for_arrangement
+let definition workspace =
+  if editor_workspace workspace
+  then (
+    let definition = P.Definition.of_spec Workspace_config.editor_definition in
+    (* Keep the sticky normal tab strip even when the fit engine falls back at
+       narrow widths or extra tiles have been appended to the arrangement. *)
+    let layout =
+      match definition.layout with
+      | P.Common.Stack [ Leaf { kind = "workspace-tabs"; _ }; body ] ->
+        P.Common.Workspace_tabs_bar { key = "workspace-tabs"; body }
+      | layout -> layout
+    in
+    Some { definition with layout })
+  else P.Presets.for_arrangement workspace
+;;
 
 let provenance t workspace =
   Option.bind t.registry ~f:(fun registry ->
@@ -3175,9 +3192,10 @@ let layout_keys t (tiles : W.Tile.t list) =
            occurrences by kind; the stock author is still free to choose any keys. *)
         Option.bind t.registry ~f:(fun registry ->
           let workspace = W.workspace registry tile.workspace in
-          Option.bind workspace.preset ~f:(fun preset ->
-            P.Presets.builtins preset
-            |> Result.ok
+          (if editor_workspace workspace
+           then Some Workspace_config.editor_definition
+           else Option.bind workspace.preset ~f:(fun preset ->
+             Result.ok (P.Presets.builtins preset)))
             |> Option.bind ~f:(fun d ->
               List.find_map
                 (List.zip_exn d.tiles d.template.views)
@@ -3188,7 +3206,7 @@ let layout_keys t (tiles : W.Tile.t list) =
                   then (
                     Hash_set.add claimed claim;
                     Some keyed.Workspace_config.Tile.key)
-                  else None))))
+                  else None)))
     in
     Option.value key ~default:("extra:" ^ W.Tile_id.to_string tile.id))
 ;;
@@ -3552,7 +3570,7 @@ let%test_unit "Timing exact-run reuse preserves pins and independent investigati
   in
   let s = W.initial ~session_id:(W.Session_id.of_string "timing-investigations") in
   let main = List.hd_exn s.workspaces in
-  let timing_workspace = List.last_exn s.workspaces in
+  let timing_workspace = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
   let s =
     apply s (P.Definition.apply P.Timing.definition ~workspace:timing_workspace.id)
   in
@@ -5143,16 +5161,22 @@ let stock_workspace_palette_aliases t commands =
        prefer an open tab, then use registry order within each group. *)
     let closed = List.filter registry.workspaces ~f:(fun w -> w.closed) in
     let destinations = W.open_workspaces registry @ closed in
-    [ "te", "testing"
-    ; "ti", "timing"
-    ; "ov", "overview"
-    ; "wa", "waveforms"
-    ; "re", "resources"
-    ; "wo", "workloads"
-    ]
-    |> List.filter_map ~f:(fun (query, preset) ->
+    let targets =
+      (* Only the canonical Editor hosts Cobalt, even if another tab shares its preset. *)
+      ("ed", editor_workspace)
+      :: List.map
+           [ "te", "testing"
+           ; "ti", "timing"
+           ; "ov", "overview"
+           ; "wa", "waveforms"
+           ; "re", "resources"
+           ; "wo", "workloads"
+           ]
+           ~f:(fun (query, preset) -> query, fun w -> has_preset w preset)
+    in
+    List.filter_map targets ~f:(fun (query, is_target) ->
       List.find_map destinations ~f:(fun w ->
-        if Option.equal String.equal w.preset (Some preset)
+        if is_target w
         then
           List.find_map commands ~f:(fun c ->
             match c.action with
@@ -5211,6 +5235,17 @@ let global_palette_commands t commands =
       | _ -> exact_queries
     in
     { c with exact_queries })
+;;
+
+let capture_global_palette t ~commands =
+  Option.map (capture t) ~f:(fun capture ->
+    { capture
+    ; commands = global_palette_commands t commands
+    ; query = ""
+    ; index = 0
+    ; viewport = `Follow 0
+    ; argument = None
+    })
 ;;
 
 let workspace_destination_prefix (c : command) =
@@ -5914,7 +5949,7 @@ let%test_unit "Timing workspace filter paste is literal and shared only within i
     |> Option.value_exn
   in
   let s = W.initial ~session_id:(W.Session_id.of_string "timing-paste") in
-  let workspace = List.last_exn s.workspaces in
+  let workspace = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
   let context = W.context s workspace.context in
   let s =
     apply
@@ -6081,13 +6116,36 @@ let open_menu t kind commands ~height =
     { t with menu = Some (menu_reveal ~height menu); prefix = 0; notice = "" }, No_effect
 ;;
 
-let dispatch_command t capture command ~close ~stale_notice =
+let resolve_command t capture command =
   if not (current t capture)
-  then { (close t) with notice = stale_notice }, No_effect
-  else (
+  then Error `Stale
+  else
     match command.unavailable with
-    | Some reason -> { t with notice = reason }, No_effect
-    | None -> close t, Execute (capture, command.action))
+    | Some reason -> Error (`Unavailable reason)
+    | None -> Ok command.action
+;;
+
+let dispatch_command t capture command ~close ~stale_notice =
+  match resolve_command t capture command with
+  | Error `Stale -> { (close t) with notice = stale_notice }, No_effect
+  | Error (`Unavailable reason) -> { t with notice = reason }, No_effect
+  | Ok action -> close t, Execute (capture, action)
+;;
+
+let%test_unit "global palette capture retains unavailable rows and rejects a stale target" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "palette-capture") in
+  let t = receive empty registry in
+  let p = capture_global_palette t ~commands:[] |> Option.value_exn in
+  let command =
+    List.find_exn p.commands ~f:(fun c -> List.mem c.exact_queries "signoff" ~equal:String.equal)
+  in
+  assert command.exact_only;
+  assert (
+    Poly.equal
+      (resolve_command t p.capture command)
+      (Error (`Unavailable "Fresh signoff launch is unavailable here")));
+  let newer = receive t { registry with revision = registry.revision + 1 } in
+  assert (Poly.equal (resolve_command newer p.capture command) (Error `Stale))
 ;;
 
 let menu_input t menu event ~height =
@@ -6612,19 +6670,9 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                  | _ -> Hierarchy_view.move view 1)
              in
              set_local t tile.id { l with hierarchy }, No_effect)
-        | Character 'c', 1 -> { t with prefix = 2 }, No_effect
-        | Character 'c', 2 ->
-          let palette =
-            Option.map (capture t) ~f:(fun capture ->
-              { capture
-               ; commands = global_palette_commands t commands
-               ; query = ""
-               ; index = 0
-               ; viewport = `Follow 0
-               ; argument = None
-              })
-          in
-          { t with prefix = 0; palette }, No_effect
+         | Character 'c', 1 -> { t with prefix = 2 }, No_effect
+         | Character 'c', 2 ->
+           { t with prefix = 0; palette = capture_global_palette t ~commands }, No_effect
         (* Hint chords stay available while every hint area is hidden; they route through
            the same captured command path as the palette entries. *)
         | Character (('h' | 'p') as key), 2 ->
@@ -7978,7 +8026,7 @@ let%test_unit "closed Waveforms and Testing stock instances are not handoff dest
 let%test_unit "workspace tabs browse registry IDs and switch without mutating contexts" =
   let s = W.initial ~session_id:(W.Session_id.of_string "workspace-tabs") in
   let overview = List.hd_exn s.workspaces
-  and timing = List.last_exn s.workspaces in
+  and timing = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
   let tile = { (List.hd_exn s.tiles) with kind = "workspace-tabs" } in
   (* Duplicate labels must not merge destinations; registry ordering is authoritative. *)
   let s =
@@ -8709,7 +8757,7 @@ let%test_unit "workspace lifecycle palette closes presets and reopens exact clos
   in
   let registry = W.initial ~session_id:(W.Session_id.of_string "workspace-lifecycle") in
   let overview, timing =
-    match registry.workspaces with
+    match List.filter registry.workspaces ~f:(Fn.non editor_workspace) with
     | [ overview; timing ] -> overview, timing
     | _ -> assert false
   in
@@ -8734,7 +8782,10 @@ let%test_unit "workspace lifecycle palette closes presets and reopens exact clos
    | Reopen_workspace id -> assert (W.Workspace_id.equal id overview.id)
    | _ -> assert false);
   assert (not (List.exists (commands fallback) ~f:(fun c -> String.equal c.id (reopen_id timing.id))));
-  let last = switch fallback timing.id in
+  assert (Option.is_none (find fallback "workspace.close-current").unavailable);
+  let last =
+    receive fallback (apply closed (W.Mutation.Close_workspace W.Editor.workspace_id))
+  in
   let close_last = find last "workspace.close-current" in
   assert (Option.exists close_last.unavailable ~f:(fun reason ->
     String.is_substring reason ~substring:"last open workspace"));
@@ -8750,7 +8801,7 @@ let%test_unit "workspace lifecycle palette closes presets and reopens exact clos
 let%test_unit "goto ranks only workspace destinations and requires explicit selection" =
   let registry = W.initial ~session_id:(W.Session_id.of_string "goto-workspace") in
   let overview = List.hd_exn registry.workspaces in
-  let timing = List.last_exn registry.workspaces in
+  let timing = List.find_exn registry.workspaces ~f:(fun w -> has_preset w "timing") in
   let host = switch (receive empty registry) timing.id in
   let search host text =
     let commands = catalog host ~project:None ~jobs:[] in
@@ -8802,7 +8853,7 @@ let%test_unit "goto ranks only workspace destinations and requires explicit sele
   assert (List.is_empty (matches (Option.value_exn searched.palette)))
 ;;
 
-let%test_unit "bare global workspace aliases switch or reopen renamed stock presets" =
+let%test_unit "bare global workspace aliases switch or reopen renamed stock workspaces" =
   let ok = function Ok registry -> registry | Error _ -> assert false in
   let apply (registry : W.Snapshot.t) mutation =
     W.apply registry (Mutate { expected_revision = registry.revision; mutation }) |> ok
@@ -8813,6 +8864,18 @@ let%test_unit "bare global workspace aliases switch or reopen renamed stock pres
   let template = (P.Presets.builtins "workloads" |> Or_error.ok_exn).template in
   let with_workloads =
     apply registry (Instantiate_template { window = overview.window; template })
+  in
+  let with_editor_copy =
+    apply
+      with_workloads
+      (Instantiate_template
+         { window = overview.window; template = Workspace_config.editor_definition.template })
+  in
+  let editor_copy = List.last_exn with_editor_copy.workspaces in
+  let with_editor_copy =
+    apply
+      with_editor_copy
+      (Reorder_workspace { workspace = editor_copy.id; before = Some W.Editor.workspace_id })
   in
   let step host event ~commands =
     match input host event ~commands with
@@ -8839,14 +8902,16 @@ let%test_unit "bare global workspace aliases switch or reopen renamed stock pres
     ; "wa", "waveforms"
     ; "re", "resources"
     ; "wo", "workloads"
+    ; "ed", W.Editor.preset
     ]
     ~f:(fun (query, preset) ->
       let target =
-        List.find_exn with_workloads.workspaces ~f:(fun w ->
-          Option.equal String.equal w.preset (Some preset))
+        if String.equal query "ed"
+        then W.workspace with_editor_copy W.Editor.workspace_id
+        else List.find_exn with_editor_copy.workspaces ~f:(fun w -> has_preset w preset)
       in
       let name = "Renamed " ^ Int.to_string (String.length preset) in
-      let renamed = apply with_workloads (Rename_workspace { workspace = target.id; name }) in
+      let renamed = apply with_editor_copy (Rename_workspace { workspace = target.id; name }) in
       List.iter [ false; true ] ~f:(fun closed ->
         let registry = if closed then apply renamed (Close_workspace target.id) else renamed in
         let host = receive empty registry in
@@ -8882,7 +8947,7 @@ let%test_unit "bare global workspace aliases switch or reopen renamed stock pres
     List.map (ranked_matches p) ~f:(fun { Palette_search.item; score; positions } ->
       item.id, score, positions)
   in
-  List.iter [ "tes"; "overview"; "reopen"; "wa help"; "goto ov"; "" ] ~f:(fun query ->
+  List.iter [ "tes"; "overview"; "reopen"; "wa help"; "editor"; "ed help"; "goto ov"; "" ] ~f:(fun query ->
     let p = palette (search host commands query) in
     let without_stock_aliases = { p with commands = global_palette_commands empty commands } in
     assert (Poly.equal (rows p) (rows without_stock_aliases)));
@@ -8900,7 +8965,7 @@ let%test_unit "workspace rename edits a captured ID and revision without no-op m
   in
   let registry = W.initial ~session_id:(W.Session_id.of_string "rename-workspace") in
   let overview = List.hd_exn registry.workspaces in
-  let timing = List.last_exn registry.workspaces in
+  let timing = List.find_exn registry.workspaces ~f:(fun w -> has_preset w "timing") in
   let registry =
     apply registry ~expected_revision:registry.revision
       (Rename_workspace { workspace = timing.id; name = overview.name })
@@ -9326,7 +9391,7 @@ let%test_unit "pin, unlink and relink fence delayed reads without sharing local 
   =
   let s = W.initial ~session_id:(W.Session_id.of_string "fences") in
   let overview = List.hd_exn s.workspaces
-  and timing = List.last_exn s.workspaces in
+  and timing = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
   let a : Run_ref.t =
     { backend = Backend_id.of_string "asic"; id = "A"; build = None; label = None }
   in
@@ -9349,7 +9414,10 @@ let%test_unit "pin, unlink and relink fence delayed reads without sharing local 
          })
   in
   let s = choose s overview.id a in
-  let selector = List.last_exn s.tiles in
+  let selector =
+    List.find_exn s.tiles ~f:(fun tile ->
+      W.Workspace_id.equal tile.workspace timing.id && String.equal tile.kind "run-selector")
+  in
   let old = W.resolve_tile s selector.id |> Result.ok |> Option.value_exn in
   let s = apply s (Make_independent timing.id) in
   assert (not (W.view_is_current s old));

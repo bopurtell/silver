@@ -65,7 +65,12 @@ session can own that project's state at a time.
 Use the **Editor** workspace tab to reach the project's Cobalt buffers. With
 a FIFO case selected in **Testing → Catalog**, `gd` opens its declaration in
 Editor. **Alt+Left** takes you back to that case without closing the buffer;
-`Ctrl+O` navigates Cobalt's own jump history.
+`Ctrl+O` navigates Cobalt's own jump history. With Cobalt focused, `Space c c`
+opens the combined editor and Silver command palette; type `ov` and press
+**Enter** to switch to Overview without closing the buffer. Silver creates
+`~/.config/silver/editor.sexp` on first use (or uses `XDG_CONFIG_HOME`).
+See [embedded editor layout and theme](docs/features/workspaces/WB-087-cobalt-editor.md#embedded-editor-layout-and-theme)
+for examples; restart Silver after editing the file.
 
 Outside a Dune project, interactive local `silver` opens with a floating project
 setup dialog. Create an ASIC starter in the empty directory, choose a new
