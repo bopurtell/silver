@@ -470,9 +470,10 @@ receive newer results. Adapter/schema changes invalidate incompatible derived da
 Keep small active/pinned/recent summaries hot within byte/entry budgets; a last-3–5
 run working set is a workload example, not an unlimited retention guarantee. Large
 path tables, waveforms and raw artifacts remain separately paginated/provider-backed.
-L2 hits appear as cached/unverified; ordinary switching does not validate provider
-edits. Explicit Refresh is required for current validation; the adopted summary
-contract has no cheap provider revision query.
+L2 hits appear as cached/unverified. On startup Silver can verify one selected
+run's retained summary against the provider without adopting changed reports.
+**Verify evidence** explicitly refreshes the current run; the provider contract
+has no cheap revision query.
 Source disappearance or refresh failure remains visible. Corrupt/incompatible cache
 entries rebuild safely; cache writes publish complete entries atomically.
 

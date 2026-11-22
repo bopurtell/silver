@@ -16,12 +16,20 @@ import tempfile
 import traceback
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'test'))
-from support.terminal import Terminal
+from support.terminal import Terminal as PtyTerminal
 
 spec = importlib.util.spec_from_file_location('fs0', Path(__file__).with_name('test-native-execution.py'))
 fs0 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fs0)
 field, record, require = fs0.field, fs0.record, fs0.require
+
+
+class Terminal(PtyTerminal):
+    def __init__(self, session, *, cache_only=False):
+        super().__init__(session, argv=[
+            str(session.args.client), '--connect', session.url, '--project-root', str(session.root),
+            *(['--no-background-evidence-verification'] if cache_only else []),
+        ])
 
 
 def inventory(paths):
@@ -80,7 +88,7 @@ def exercise(args):
                     len([t for t in field(initial, 'tiles') if field(t, 'workspace') == field(w, 'id')]) == 2)
         check(not any(field(t, 'workspace') == field(overview, 'id') for t in field(initial, 'tiles')),
               'Source reproduces empty Overview')
-        terminal = Terminal(session)
+        terminal = Terminal(session, cache_only=True)
         terminal.capture('01-empty-overview', ['Overview', 'No visible tiles', 'Apply default layout'])
         check(b'Loading workspace...' in terminal.data, 'Startup renders loading workspace host')
         check(b'PROJECT / GENERIC DUNE WORKSPACE' not in terminal.data,

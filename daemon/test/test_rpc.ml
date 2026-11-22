@@ -305,7 +305,8 @@ let run ~build_jobs () =
            ; "read-hierarchy"
            ; "workspace"
            ; "asic"
-           ; Asic.automatic_discovery_capability
+            ; Asic.automatic_discovery_capability
+            ; Asic.cached_summary_validation_capability
            ; "simulation"
            ; Simulation.automatic_discovery_capability
            ; Preparation.capability

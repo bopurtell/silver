@@ -399,7 +399,8 @@ def reopen_real(args):
         ws = select_run(runs[0])
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
-        process = subprocess.Popen([str(args.client), '--connect', session.url, '--project-root', str(args.example_root)],
+        process = subprocess.Popen([str(args.client), '--connect', session.url, '--project-root', str(args.example_root),
+                                    '--no-background-evidence-verification'],
                                    stdin=slave, stdout=slave, stderr=slave,
                                    env=dict(session.env, TERM='xterm-256color'), start_new_session=True)
         os.close(slave)

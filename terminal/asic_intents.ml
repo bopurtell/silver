@@ -81,6 +81,32 @@ let terminal (run : Asic.Run.t) =
            ~equal:String.equal)
 ;;
 
+let validate_cached_summary (snapshot : Asic.Snapshot.t) ~selected =
+  Option.bind selected ~f:(fun reference ->
+    let busy =
+      List.exists snapshot.operations ~f:(fun pending ->
+        Plain_rpc.active pending
+        && List.exists [ "observe:"; "summary:"; "refresh:"; "validate-summary:" ] ~f:(fun prefix ->
+          String.equal pending.key (prefix ^ reference.Run_ref.id)))
+    in
+    if busy
+    then None
+    else
+      Option.bind (List.find snapshot.runs ~f:(fun run -> Run_ref.equal run.run reference))
+        ~f:(fun run ->
+          if not (terminal run && Option.is_some run.execution_file)
+          then None
+          else (
+            let validate source_digest =
+              Some (Asic.Operation.Validate_cached_summary { run = reference; source_digest })
+            in
+            match List.find snapshot.summaries ~f:(fun s -> Run_ref.equal s.run reference) with
+            | None -> validate None (* Exact L2 lookup; a miss never contacts the provider. *)
+            | Some { freshness = Cached_unverified; source_digest; _ } ->
+              validate (Some source_digest)
+            | Some { freshness = (Validated | Missing_source | Refresh_failed _); _ } -> None)))
+;;
+
 let plan t ~now (snapshot : Asic.Snapshot.t) ~visible =
   let visible = List.dedup_and_sort visible ~compare:Run_ref.compare in
   let t =
@@ -94,8 +120,9 @@ let plan t ~now (snapshot : Asic.Snapshot.t) ~visible =
     | None -> t, intents (* A saved missing run is never substituted or registered. *)
     | Some run ->
       let observe_key = "observe:" ^ reference.id in
-      let summary_key = "summary:" ^ reference.id in
-      let refresh_key = "refresh:" ^ reference.id in
+       let summary_key = "summary:" ^ reference.id in
+       let refresh_key = "refresh:" ^ reference.id in
+       let validation_key = "validate-summary:" ^ reference.id in
       let active_key key =
         List.exists snapshot.operations ~f:(fun op ->
           String.equal op.key key && Plain_rpc.active op)
@@ -140,7 +167,8 @@ let plan t ~now (snapshot : Asic.Snapshot.t) ~visible =
         && (not owned_reader)
         && Option.is_none run.error
         && (not
-              (active_key summary_key || active_key refresh_key || active_key observe_key))
+              (active_key summary_key || active_key refresh_key || active_key observe_key
+               || active_key validation_key))
         && (not (failed_key summary_key || failed_key refresh_key))
         && not (mem t.summary_requested reference)
       in
@@ -233,8 +261,8 @@ let fixture_summary : Asic.Summary.t =
   }
 ;;
 
-let%test_unit "old cached evidence without metrics never schedules observation, summary \
-               loads or Refresh"
+let%test_unit "visible history never schedules observation, summary loads or Refresh for \
+               cached evidence"
   =
   let snapshot =
     fixture_snapshot
@@ -257,6 +285,28 @@ let%test_unit "old cached evidence without metrics never schedules observation, 
       ~visible:[ fixture_reference ]
   in
   assert (List.is_empty intents)
+;;
+
+let%test_unit "startup validation addresses only the exact selected registered run" =
+  let registered = fixture_run ~execution_file:fixture_summary.execution_file "completed" in
+  let other = { fixture_reference with id = "other" } in
+  let snapshot = fixture_snapshot ~summaries:[ fixture_summary ] [ registered ] in
+  let request snapshot selected = validate_cached_summary snapshot ~selected in
+  assert (Option.is_none (request snapshot None));
+  assert (Option.is_none (request snapshot (Some other)));
+  assert (
+    Option.equal Asic.Operation.equal
+      (request snapshot (Some fixture_reference))
+      (Some (Validate_cached_summary
+         { run = fixture_reference; source_digest = Some fixture_summary.source_digest })));
+  assert (
+    Option.equal Asic.Operation.equal
+      (request (fixture_snapshot [ registered ]) (Some fixture_reference))
+      (Some (Validate_cached_summary { run = fixture_reference; source_digest = None })));
+  let refresh = fixture_operation "refresh:intent-fixture" "refresh" "executing" in
+  assert (Option.is_none (request { snapshot with operations = [ refresh ] } (Some fixture_reference)));
+  let validated = { fixture_summary with freshness = Validated } in
+  assert (Option.is_none (request { snapshot with summaries = [ validated ] } (Some fixture_reference)))
 ;;
 
 let%test_unit "active owner suppresses duplicate reads, including after run allocation" =

@@ -2868,13 +2868,37 @@ let main () =
       require
         (List.equal Asic.Metric.equal (summary restored r1.id).metrics first_metrics)
         "New metric projection lost on cache reopening";
-      let%bind restart_reports = reports root in
-      require (restart_reports = initial_reports) "L2 rematerialized report";
-      let%bind () =
-        In_thread.run (fun () ->
-          Out_channel.write_all (Filename.concat root "revision") ~data:"")
-      in
-      let%bind revised = settled restarted root (Refresh r1) in
+       let%bind restart_reports = reports root in
+       require (restart_reports = initial_reports) "L2 rematerialized report";
+       let%bind checked =
+         settled restarted root (Validate_cached_summary { run = r2; source_digest = None })
+       in
+       require
+         (Asic.Summary.Freshness.equal (summary checked r2.id).freshness Validated
+          && Asic.Summary.equal (summary checked r1.id) (summary restored r1.id))
+         "Exact cold check did not validate the retained summary or changed another run";
+       let%bind verification_reports = reports root in
+       require (verification_reports = restart_reports + 1) "Exact cold check did not use one report";
+       let%bind (_ : Asic.Snapshot.t) =
+         settled restarted root (Validate_cached_summary { run = r2; source_digest = None })
+       in
+       let%bind repeated_reports = reports root in
+       require (repeated_reports = verification_reports) "Validated cache queried again";
+       let%bind () =
+         In_thread.run (fun () ->
+           Out_channel.write_all (Filename.concat root "revision") ~data:"")
+       in
+       let original = summary restored r1.id in
+       let%bind stale =
+         settled restarted root
+           (Validate_cached_summary { run = r1; source_digest = Some original.source_digest })
+       in
+       let stale = summary stale r1.id in
+       require
+         ((match stale.freshness with Refresh_failed _ -> true | _ -> false)
+          && Asic.Summary.equal { stale with freshness = original.freshness } original)
+         "Changed evidence was adopted or the old values were lost during validation";
+       let%bind revised = settled restarted root (Refresh r1) in
       require
         (Option.equal Int.equal (summary revised r1.id).cell_count (Some 51))
         "Revision did not refresh";

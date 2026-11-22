@@ -108,7 +108,7 @@ def exercise(args):
         for tile in tiles:
             mutate('(Set_tile_binding (tile %s) (binding Follow))' % field(tile, 'id'))
         select(demo, ra)
-        terminal = Terminal(session)
+        terminal = Terminal(session, cache_only=True)
         discovery = next(p for p in args.evidence.glob('discovery-*') if p.is_dir())
         (args.evidence / 'commands.json').write_text(json.dumps(dict(
             acceptance=['python3', str(Path(__file__).resolve())],

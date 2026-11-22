@@ -5135,6 +5135,7 @@ let testing_dispatch t key ~commands =
 
 let named_stage_command_prefix = "stage.launch-view."
 let named_stage_command_id endpoint = named_stage_command_prefix ^ endpoint
+let verify_evidence_command_id = "asic.verify-evidence"
 
 let known_stage_endpoints =
   [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
@@ -5151,6 +5152,8 @@ let global_palette_aliases =
   ; "test", "testing.test"
   ; "test suites", "testing.suites"
   ; "verification", "testing.suites"
+  ; "veri", verify_evidence_command_id
+  ; "verify evidence", verify_evidence_command_id
   ; "theme", choose_theme_id
   ]
 ;;

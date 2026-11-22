@@ -551,7 +551,7 @@ def exercise(args):
         check({k: v for k, v in restored if k != 'freshness'} == {k: v for k, v in summary if k != 'freshness'}, 'L2 preserves all terminal/synthesis fields except freshness')
         check(calls() == warm, 'Restart and L2 load make no provider queries')
         # Reopen an actual PTY after restart to verify displayed freshness too.
-        terminal = metrics.Terminal(session)
+        terminal = metrics.Terminal(session, cache_only=True)
         terminal.palette('Switch to FS1 Terminal Results Private')
         mutate('(Set_zoom (workspace %s) (tile (%s)))' % (field(demo, 'id'), tiles[0]))
         terminal.capture('11-restarted-cache', ['Cached_unverified', 'Terminal timing (aggregate)' if inputs else 'Cell count:'])

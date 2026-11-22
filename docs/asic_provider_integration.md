@@ -64,6 +64,9 @@ Operations:
   reader-only reconnect/import. It neither launches nor discovers directories.
 - `Observe run`: bounded public read-updates + inspect, persisting cursor/status.
 - `Load_summary run`: L1, asynchronous L2, or coalesced public observation/report.
+- `Validate_cached_summary`: read-only verification of retained evidence for the
+  exact run. A cache miss does not query the provider; a changed source does not
+  replace the retained summary.
 - `Refresh run`: explicit observation and report validation/materialization.
 - `Cancel key`: use the key returned in `Snapshot.operations` (`run:KEY` for a
   launch). Cancelling an execution also stops its automatic reader. A reader's

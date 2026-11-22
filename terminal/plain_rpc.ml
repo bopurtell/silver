@@ -43,6 +43,7 @@ let rec keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
     then []
     else [ key ]
   | Load_summary run -> [ "summary:" ^ run.id ]
+  | Validate_cached_summary { run; _ } -> [ "validate-summary:" ^ run.id ]
   | Refresh run -> [ "refresh:" ^ run.id ]
   | Inspect_finalization { run; attempt } ->
     [ "finalization:" ^ run.id ^ ":" ^ digest attempt ]

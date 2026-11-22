@@ -293,9 +293,11 @@ vocabulary. Its corresponding policy tests must change if that protocol changes.
 The 500-ms host refresh still obtains daemon snapshots, but it no longer schedules
 Observe and Load_summary unconditionally on every refresh:
 
-- Cached terminal runs schedule neither automatic observation nor repeated summary
-  loads. An uncached terminal run gets one summary-load intent per visible-interest
-  lifetime; revisiting an evicted run can acquire it again.
+- Overview can show a cached run summary immediately while Silver queues a
+  background verification of the selected run. It does not verify every
+  historical run or launch any flow. An uncached terminal run gets one
+  summary-load intent per visible-interest lifetime; revisiting an evicted run
+  can acquire it again.
 - An active daemon observer, refresh operation, or allocated owned run suppresses
   duplicate reads. In particular, the backend's automatic launch reader owns live
   delivery through completion.
@@ -303,8 +305,12 @@ Observe and Load_summary unconditionally on every refresh:
   duplicate request while its read is active. An unknown execution gets one probe
   per visible-interest lifetime. Missing saved references are never substituted.
 - Failed observations and failed summary requests are not automatically retried.
-  **Refresh evidence** remains an explicit palette action. Cached/unverified data
-  is not silently promoted to validated evidence by this gating policy.
+  Open the palette with **Space c c**, type `veri`, and choose **Verify evidence**
+  to recheck the current run. **Refresh evidence** remains available for an
+  explicitly named run. The cached label changes only after the source is checked;
+  missing sources and failures remain visible. Launch with
+  `--no-background-evidence-verification` to keep cached summary reopening offline;
+  the palette commands still work.
 
 Cancellation commands are derived from **active owned operations**, both before
 and after allocation. An allocated `Pending.run` is not a reason to hide Cancel.

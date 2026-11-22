@@ -1049,9 +1049,108 @@ let observe t p cancel (run : Run_ref.t) =
       raise exn)
 ;;
 
-let materialize_unlocked ?attempt t p cancel (run : Run_ref.t) =
+let read_summary t p cancel (r : Asic.Run.t) ~execution_file ~terminal_attempt =
   Public.require (not (Deferred.is_determined cancel)) "ASIC report read cancelled";
   let%bind () = check_provider t p cancel in
+  let run = r.run in
+  let%bind report =
+    query
+      t
+      p
+      cancel
+      (invoke p (fun c ~root ~environment ->
+         Adapter.report c ~root ~environment execution_file))
+  in
+  Option.iter (expected_bundle p run) ~f:(fun bundle ->
+    Public.require
+      (Poly.equal
+         (Public.field "bundle_identity" (Public.field "methodology" report))
+         (`String bundle))
+      "Report bundle identity mismatch");
+  let summary =
+    Public.summary r ~expected_plan:(expected_plan p run) ~execution_file report
+  in
+  let%bind summary =
+    if Poly.equal (Public.field "timing_analysis" report) `Null
+    then return summary
+    else
+      In_thread.run (fun () ->
+        let execution_sha256 = Inspection.execution_hash ~registered:r ~execution_file in
+        let execution_bytes = read_public_bounded execution_file (8 * 1024 * 1024) in
+        Public.require
+          (String.equal (Public.digest execution_bytes) execution_sha256)
+          "Execution changed during timing report read";
+        let actual_execution = Public.decode execution_bytes in
+        Public.require
+          (Poly.equal
+             (Public.canonical_json actual_execution)
+             (Public.canonical_json (Public.field "execution" report)))
+          "Timing report execution content mismatch";
+        let timing_analysis =
+          Asic_timing_analysis.parse ~registered:r ~execution_file ~execution_sha256 report
+        in
+        { summary with timing_analysis })
+  in
+  let%bind terminal_summary =
+    Monitor.try_with (fun () ->
+      match terminal_attempt () with
+      | None -> return summary
+      | Some attempt ->
+        let%bind receipt =
+          query
+            t
+            p
+            cancel
+            (invoke p (fun c ~root ~environment ->
+               Adapter.inspect_finalization c ~root ~environment attempt))
+        in
+        let results_file = Public.terminal_results_file receipt in
+        let%map terminal =
+          In_thread.run (fun () ->
+            let execution_file = Filename_unix.realpath execution_file in
+            let execution_bytes = read_public_bounded execution_file (8 * 1024 * 1024) in
+            let results_bytes = read_public_bounded results_file (128 * 1024) in
+            let terminal =
+              Public.terminal_result
+                ~attempt
+                ~execution_file
+                ~execution_bytes
+                ~report
+                ~receipt
+                ~results_bytes
+            in
+            let snapshot_bytes =
+              Option.map
+                (Public.declared_clock_snapshot report)
+                ~f:(fun (path, _) -> read_public_bounded path (256 * 1024))
+            in
+            let clock = Public.declared_clock_metric ~report ~receipt ~snapshot_bytes in
+            { terminal with metrics = terminal.metrics @ [ clock ] })
+        in
+        { summary with
+          terminal = Some terminal
+        ; source_digest =
+            Public.digest
+              (summary.source_digest
+               ^ terminal.evidence
+               ^ Sexp.to_string_mach ([%sexp_of: Asic.Metric.t list] terminal.metrics))
+        })
+  in
+  match terminal_summary with
+  | Ok summary -> return summary
+  | Error exn when Option.is_some summary.timing_analysis ->
+    (* Supplementary completion does not depend on finalization hydration. Never
+       borrow old terminal metrics if its adopted source cannot be validated. *)
+    return { summary with freshness = Refresh_failed (Exn.to_string exn) }
+  | Error exn -> raise exn
+;;
+
+let same_execution (r : Asic.Run.t) (current : Asic.Run.t) =
+  current.cursor = r.cursor
+  && Option.equal String.equal current.execution_file r.execution_file
+;;
+
+let materialize_unlocked ?attempt t p cancel (run : Run_ref.t) =
   let r = find_run p run in
   match r.execution_file with
   | None when Asic_rejection.is_rejection r -> Deferred.unit
@@ -1060,116 +1159,14 @@ let materialize_unlocked ?attempt t p cancel (run : Run_ref.t) =
       hot p { s with freshness = Missing_source });
     failwith "No public execution_file reference available"
   | Some execution_file ->
+    let terminal_attempt () =
+      match attempt with
+      | Some _ -> attempt
+      | None -> List.Assoc.find p.terminal_attempts run.id ~equal:String.equal
+    in
     let%bind result =
       Monitor.try_with (fun () ->
-        let%bind report =
-          query
-            t
-            p
-            cancel
-            (invoke p (fun c ~root ~environment ->
-               Adapter.report c ~root ~environment execution_file))
-        in
-        Option.iter (expected_bundle p run) ~f:(fun bundle ->
-          Public.require
-            (Poly.equal
-               (Public.field "bundle_identity" (Public.field "methodology" report))
-               (`String bundle))
-            "Report bundle identity mismatch");
-        let summary =
-          Public.summary r ~expected_plan:(expected_plan p run) ~execution_file report
-        in
-        let%bind summary =
-          if Poly.equal (Public.field "timing_analysis" report) `Null
-          then return summary
-          else
-            In_thread.run (fun () ->
-              let execution_sha256 =
-                Inspection.execution_hash ~registered:r ~execution_file
-              in
-              let execution_bytes =
-                read_public_bounded execution_file (8 * 1024 * 1024)
-              in
-              Public.require
-                (String.equal (Public.digest execution_bytes) execution_sha256)
-                "Execution changed during timing report read";
-              let actual_execution = Public.decode execution_bytes in
-              Public.require
-                (Poly.equal
-                   (Public.canonical_json actual_execution)
-                   (Public.canonical_json (Public.field "execution" report)))
-                "Timing report execution content mismatch";
-              let timing_analysis =
-                Asic_timing_analysis.parse
-                  ~registered:r
-                  ~execution_file
-                  ~execution_sha256
-                  report
-              in
-              { summary with timing_analysis })
-        in
-        let attempt =
-          match attempt with
-          | Some _ -> attempt
-          | None -> List.Assoc.find p.terminal_attempts run.id ~equal:String.equal
-        in
-        let%bind terminal_summary =
-          Monitor.try_with (fun () ->
-            match attempt with
-            | None -> return summary
-            | Some attempt ->
-              let%bind receipt =
-                query
-                  t
-                  p
-                  cancel
-                  (invoke p (fun c ~root ~environment ->
-                     Adapter.inspect_finalization c ~root ~environment attempt))
-              in
-              let results_file = Public.terminal_results_file receipt in
-              let%map terminal =
-                In_thread.run (fun () ->
-                  let execution_file = Filename_unix.realpath execution_file in
-                  let execution_bytes =
-                    read_public_bounded execution_file (8 * 1024 * 1024)
-                  in
-                  let results_bytes = read_public_bounded results_file (128 * 1024) in
-                  let terminal =
-                    Public.terminal_result
-                      ~attempt
-                      ~execution_file
-                      ~execution_bytes
-                      ~report
-                      ~receipt
-                      ~results_bytes
-                  in
-                  let snapshot_bytes =
-                    Option.map
-                      (Public.declared_clock_snapshot report)
-                      ~f:(fun (path, _) -> read_public_bounded path (256 * 1024))
-                  in
-                  let clock =
-                    Public.declared_clock_metric ~report ~receipt ~snapshot_bytes
-                  in
-                  { terminal with metrics = terminal.metrics @ [ clock ] })
-              in
-              { summary with
-                terminal = Some terminal
-              ; source_digest =
-                  Public.digest
-                    (summary.source_digest
-                     ^ terminal.evidence
-                     ^ Sexp.to_string_mach
-                         ([%sexp_of: Asic.Metric.t list] terminal.metrics))
-              })
-        in
-        match terminal_summary with
-        | Ok summary -> return summary
-        | Error exn when Option.is_some summary.timing_analysis ->
-          (* Supplementary completion does not depend on finalization hydration. Never
-             borrow old terminal metrics if its adopted source cannot be validated. *)
-          return { summary with freshness = Refresh_failed (Exn.to_string exn) }
-        | Error exn -> raise exn)
+        read_summary t p cancel r ~execution_file ~terminal_attempt)
     in
     (match result with
      | Error exn ->
@@ -1181,10 +1178,7 @@ let materialize_unlocked ?attempt t p cancel (run : Run_ref.t) =
          (not (Deferred.is_determined cancel))
          "ASIC report read cancelled before publication";
        let current = find_run p run in
-       Public.require
-         (current.cursor = r.cursor
-          && Option.equal String.equal current.execution_file r.execution_file)
-         "Observation advanced during report read; refresh again";
+        Public.require (same_execution r current) "Observation advanced during report read; refresh again";
        let data = Sexp.to_string (Asic.Summary.sexp_of_t summary) in
        Public.require
          (String.length data <= summary_limit)
@@ -1233,28 +1227,29 @@ let materialize ?attempt t p cancel (run : Run_ref.t) =
     materialize_unlocked ?attempt t p cancel run)
 ;;
 
+let load_cached_summary t p (run : Run_ref.t) =
+  match List.Assoc.find p.index run.id ~equal:String.equal with
+  | None -> return None
+  | Some digest ->
+    In_thread.run (fun () ->
+      let s =
+        decode_summary_blob
+          (Sexp.of_string
+             (read_bounded (summary_path t p digest) (summary_limit + 1024)))
+      in
+      Public.require
+        (Run_ref.equal s.run run && String.equal s.source_digest digest)
+        "Wrong L2 summary identity";
+      Some { s with freshness = Cached_unverified })
+;;
+
 let load_summary t p cancel (run : Run_ref.t) =
   match Hashtbl.find p.hot run.Run_ref.id with
   | Some summary ->
     hot p summary;
     Deferred.unit
   | None ->
-    let%bind loaded =
-      Monitor.try_with (fun () ->
-        match List.Assoc.find p.index run.id ~equal:String.equal with
-        | None -> return None
-        | Some digest ->
-          In_thread.run (fun () ->
-            let s =
-              decode_summary_blob
-                (Sexp.of_string
-                   (read_bounded (summary_path t p digest) (summary_limit + 1024)))
-            in
-            Public.require
-              (Run_ref.equal s.run run && String.equal s.source_digest digest)
-              "Wrong L2 summary identity";
-            Some { s with freshness = Cached_unverified }))
-    in
+    let%bind loaded = Monitor.try_with (fun () -> load_cached_summary t p run) in
     (match loaded with
      | Ok (Some summary) ->
        if not (Hashtbl.mem p.hot run.id) then hot p summary;
@@ -1262,6 +1257,63 @@ let load_summary t p cancel (run : Run_ref.t) =
      | Ok None | Error _ ->
        let%bind (_ : bool) = observe t p cancel run in
        materialize t p cancel run)
+;;
+
+let validate_cached_summary t p cancel (run : Run_ref.t) ~source_digest ~on_read =
+  serialized p ("summaryop:" ^ run.id) (fun () ->
+    let%bind cached =
+      match Hashtbl.find p.hot run.id, source_digest with
+      | Some summary, _ -> return (Some summary)
+      | None, Some _ -> return None (* No substitution after the captured cache was lost. *)
+      | None, None ->
+        let%map summary = load_cached_summary t p run in
+        (match Hashtbl.find p.hot run.id with
+         | Some newer -> Some newer
+         | None ->
+           Option.iter summary ~f:(hot p);
+           summary)
+    in
+    match cached with
+    | Some cached
+      when Run_ref.equal cached.run run
+           && Asic.Summary.Freshness.equal cached.freshness Cached_unverified
+           && Option.value_map source_digest ~default:true ~f:(String.equal cached.source_digest) ->
+      let registered = find_run p run in
+      let publish_if_current summary =
+        if same_execution registered (find_run p run)
+           && Option.exists (Hashtbl.find p.hot run.id) ~f:(phys_equal cached)
+           && not (Deferred.is_determined cancel)
+        then hot p summary
+      in
+      let%map result =
+        Monitor.try_with (fun () ->
+          Public.require
+            (Option.equal String.equal registered.execution_file (Some cached.execution_file))
+            "Cached summary no longer matches the registered execution; use Refresh evidence";
+          let terminal_attempt () =
+            Option.map cached.terminal ~f:(fun terminal -> terminal.attempt)
+          in
+          on_read ();
+          let%map checked =
+            read_summary t p cancel registered ~execution_file:cached.execution_file ~terminal_attempt
+          in
+          (match checked.freshness with
+           | Validated -> ()
+           | Refresh_failed reason -> failwith reason
+           | Cached_unverified | Missing_source -> failwith "Cached summary was not verified");
+          (* A check can attest to the old projection, not adopt newer reports, fill old
+             metrics, or advance the source observation time. *)
+          Public.require
+            (Asic.Summary.equal { checked with
+               observed_at = cached.observed_at; freshness = cached.freshness } cached)
+            "Source evidence changed; use Refresh evidence")
+      in
+      (match result with
+       | Ok () -> publish_if_current { cached with freshness = Validated }
+       | Error exn ->
+         publish_if_current { cached with freshness = Refresh_failed (failure_message exn) };
+         raise exn)
+    | _ -> Deferred.unit)
 ;;
 
 let snapshot c p : Asic.Snapshot.t =
@@ -3288,6 +3340,22 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
     ignore (find_run p run : Asic.Run.t);
     enqueue ~key:(observation_key run) ~kind:"observe" (fun cancel ->
       observe t p cancel run >>| fun _ -> ());
+    Deferred.unit
+  | Validate_cached_summary { run; source_digest } ->
+    ignore (find_run p run : Asic.Run.t);
+    schedule
+      t
+      p
+      ~key:("validate-summary:" ^ run.id)
+      ~kind:"validate-summary"
+      ~run
+      ~execution:false
+      (fun task ->
+        let activity activity = task.pending <- { task.pending with activity } in
+        activity Evidence_cache_lookup;
+        validate_cached_summary
+          t p (Ivar.read task.cancel) run ~source_digest
+          ~on_read:(fun () -> activity Evidence_read));
     Deferred.unit
   | Load_summary run | Refresh run ->
     ignore (find_run p run : Asic.Run.t);

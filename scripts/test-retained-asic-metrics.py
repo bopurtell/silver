@@ -135,8 +135,8 @@ def guard_generic_builds(session):
 class Terminal(dashboard.Terminal):
     height = 40
 
-    def __init__(self, session):
-        super().__init__(session)
+    def __init__(self, session, *, cache_only=False):
+        super().__init__(session, cache_only=cache_only)
         try:
             self.wait_ready('startup')
             no_generic_jobs(session, 'PTY startup')
@@ -373,7 +373,7 @@ def exercise(args):
             tiles.append(field(field(ws, 'tiles')[-1], 'id'))
         select(ra)
         mutate('(Set_zoom (workspace %s) (tile (%s)))' % (field(demo, 'id'), tiles[0]))
-        terminal = Terminal(session)
+        terminal = Terminal(session, cache_only=True)
         terminal.palette('Switch to FS1 Metrics Private')
         terminal.capture('01-legacy-summary', ['Cell count: 673'])
         terminal.key(b'm')

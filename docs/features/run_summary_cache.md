@@ -104,11 +104,13 @@ Provider access goes through F01, not tile-specific parsing of `_flow_results/`.
 Separate any lightweight freshness validation from expensive report materialization.
 No selection/cache miss implicitly launches EDA or new expensive analysis.
 
-Implemented L2 data reopens with **cached/unverified** status; ordinary switching
-or inspection browsing does not start automatic source validation. Explicit Refresh
-is required for current validation. Distinguish validated current evidence,
-validation pending, source
-unavailable, and refresh failure. A failed refresh must not silently bless old data.
+L2 data reopens with **cached/unverified** status. The terminal verifies the
+selected run's cached summary in the background without waiting to show it or
+scanning the rest of the run history. The check validates matching evidence; it
+does not adopt changed reports. **Verify evidence** is the palette shortcut for
+an explicit refresh of the current run, including when the source has changed.
+This does not refresh independent resource or Timing inspection caches. A failed
+check or refresh must not silently bless old data.
 Missing canonical evidence remains explicit even if a cached summary is retained.
 Long-term retention/export of orphaned evidence remains D3 policy; a cache hit does
 not make an immutable snapshot or guarantee archival preservation.

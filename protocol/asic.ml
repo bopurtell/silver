@@ -1,6 +1,7 @@
 open! Core
 
 let automatic_discovery_capability = "asic-ensure-discovered-v1"
+let cached_summary_validation_capability = "asic-validate-cached-summary-v1"
 
 module Chip_target = struct
   type t = { chip : string; variant : string }
@@ -440,7 +441,9 @@ module Operation = struct
       arguments is an error. Disconnecting a client never cancels daemon-owned work.
       Summary selection does not launch tools. [Refresh] explicitly validates source
       evidence, including the last explicitly adopted finalization attempt. An ordinary
-      [Load_summary] may return cached/unverified evidence. [Inspect_finalization] adopts
+       [Load_summary] may return cached/unverified evidence. [Validate_cached_summary]
+       checks only the exact retained evidence without adopting a changed source.
+       [Inspect_finalization] adopts
       an existing public operation reference; it never starts finalization. [Finalize]
       reserves exact inputs persistently before scheduling the sole owned producer.
       [Observe_finalization] is read-only and never reacquires process ownership.
@@ -540,6 +543,11 @@ module Operation = struct
         { context : string
         ; initial_target : Chip_target.t option
         ; operation : t
+        }
+    | Validate_cached_summary of
+        { run : Run_ref.t
+        ; source_digest : string option
+          (** A hot summary's digest, or [None] for an exact run's cold cache lookup. *)
         }
   [@@deriving bin_io, compare, equal, sexp]
 end

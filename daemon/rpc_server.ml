@@ -47,6 +47,7 @@ let create ~application_version ~instance_id ~service =
             ; "workspace"
             ; "asic"
             ; Asic.automatic_discovery_capability
+            ; Asic.cached_summary_validation_capability
             ; "simulation"
             ; Simulation.automatic_discovery_capability
             ; Preparation.capability

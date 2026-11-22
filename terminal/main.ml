@@ -18,6 +18,7 @@ module Launch_preferences = Terminal_presentation.Launch_preferences
 module Presentation_preferences = Terminal_presentation.Presentation_preferences
 
 let timing_preload_override = ref None
+let background_evidence_verification = ref true
 
 module Asic_intents = Terminal_presentation.Asic_intents
 module Artifact_view = Terminal_presentation.Artifact_view
@@ -158,6 +159,7 @@ type session =
   ; mutable selecting_chip : bool
   ; staged_contexts : Planned_run.staged String.Table.t
   ; mutable catalog_open_checked : bool
+  ; mutable background_summary_attempted : bool
   ; mutable resource_navigation_intent : unit ref
   ; mutable preparation_request_id : int
   ; mutable asic_applied_id : int
@@ -382,6 +384,7 @@ let create_session
       ; selecting_chip = false
       ; staged_contexts = String.Table.create ()
       ; catalog_open_checked = false
+      ; background_summary_attempted = false
       ; resource_navigation_intent = ref ()
       ; preparation_request_id = 0
       ; asic_applied_id = 0
@@ -1853,6 +1856,7 @@ and perform_asic_request
         if Option.is_none artifact_request
            && Option.is_none inspection_request
            && Option.is_none timing_receipt
+           && (match operation with Validate_cached_summary _ -> false | _ -> true)
            && plan_current
         then session.host <- { session.host with notice = "ASIC: " ^ message }
       | Ok snapshot ->
@@ -2986,6 +2990,24 @@ let refresh_waveforms session =
   save_waveform_preferences session
 ;;
 
+let verify_selected_summary_on_open session =
+  if not !background_evidence_verification
+     || session.background_summary_attempted
+     || session.selecting_chip
+     || not (List.mem session.hello.capabilities Asic.cached_summary_validation_capability
+               ~equal:String.equal)
+  then return ()
+  else (
+    let selected = Terminal_presentation.Stage_launch_commands.workspace_run session.host in
+    match Option.bind session.asic ~f:(Asic_intents.validate_cached_summary ~selected) with
+    | None -> return ()
+    | Some operation ->
+      (* Spend the single startup slot before issuing the request: a lost reply or
+         automatic reconnect must not cause a retry, nor can another run use it. *)
+      session.background_summary_attempted <- true;
+      asic_request session operation)
+;;
+
 let refresh_host session =
   let%bind () = hydrate_retained session in
   let%bind () = initialize_host_layout session in
@@ -3012,6 +3034,7 @@ let refresh_host session =
        | Awaiting -> return ())
     | _ -> return ()
   in
+  let%bind () = verify_selected_summary_on_open session in
   (* Visible evidence and active runs share the same bounded read-intent scheduler. *)
   let runs =
     Host.evidence_runs session.host
@@ -4936,6 +4959,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; selecting_chip = false
     ; staged_contexts = String.Table.create ()
     ; catalog_open_checked = false
+    ; background_summary_attempted = false
     ; resource_navigation_intent = ref ()
     ; preparation_request_id = 0
     ; asic_applied_id = 0
@@ -5095,6 +5119,25 @@ let inspected_run session =
   | _ -> Terminal_presentation.Stage_launch_commands.inspected_run session.host
 ;;
 
+let verify_evidence_command session =
+  let target =
+    match inspected_run session with
+    | Some _ as run -> run
+    | None -> Terminal_presentation.Stage_launch_commands.workspace_run session.host
+  in
+  Option.bind target ~f:(fun run ->
+    Option.bind session.asic ~f:(fun snapshot ->
+      if List.exists snapshot.runs ~f:(fun registered -> Run_ref.equal run registered.run)
+      then
+        Some
+          (Host.command
+             Host.verify_evidence_command_id
+             "Verify evidence"
+             "refresh validate source for the current ASIC run"
+             (Asic (Refresh run)))
+      else None))
+;;
+
 let testing_catalog_tile (tile : Workspace.Tile.t) =
   String.equal tile.kind (Testing_workspace.pane_kind Catalog)
 ;;
@@ -5168,6 +5211,7 @@ let host_catalog_base session =
     ~project:(current_project session)
     ~jobs:(project_jobs session)
   @ Option.to_list (declaration_command session)
+  @ Option.to_list (verify_evidence_command session)
   @ Option.value_map (editor_project session) ~default:[] ~f:(fun project ->
     [ Host.command "editor.open" "Open project file…" "editor path line column cobalt"
         (Editor_prompt project.id) ])
@@ -11331,6 +11375,11 @@ let command =
      and plain = flag "--plain" no_arg ~doc:" print status without terminal control"
      and no_mouse =
        flag "--no-mouse" no_arg ~doc:" disable terminal mouse reporting (keyboard and native text selection)"
+     and no_background_evidence_verification =
+       flag
+         "--no-background-evidence-verification"
+         no_arg
+         ~doc:" skip the startup check of the selected ASIC run's cached summary"
      and timing_neighbors =
        flag
          "--timing-prefetch-neighbors"
@@ -11479,6 +11528,7 @@ let command =
        return (Ok ())
      | None, None, None ->
         fun () ->
+        background_evidence_verification := not no_background_evidence_verification;
         let local = standalone && Option.is_none endpoint in
         let interactive =
           local && not plain && not api && not wait && not refresh_integration

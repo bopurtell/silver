@@ -117,7 +117,7 @@ python3 -B scripts/real-asic-example-demo.py client
 ```
 
 Your current runs and selection remain saved. Do not reseed just to use this fix.
-If an old cached checklist is empty, select the run and use **Refresh evidence**
+If an old cached checklist is empty, select the run and use **Verify evidence**
 once; no EDA rerun is needed. Then use j/k/r directly: manual Discover is no longer
 a prerequisite when the real supported mapping has not yet been loaded.
 

@@ -203,6 +203,9 @@ Restored cache is **Cached_unverified**. Failed refresh, missing source, unsuppo
 capability and invalid evidence remain distinguishable from a valid failed resource
 check. Failed required-macro evidence is readable rather than discarded as a transport
 error. A late response cannot populate a different target or acknowledge a new retry.
+The general **Verify evidence** palette command refreshes the run summary, not
+this separate resource index. In the Resources workspace, use **Resources: Refresh
+exact evidence** (or `r`) to recheck the selected resource source.
 
 Index truncation is visible. Catalog/detail pages are bounded; a single item too
 large to represent produces an explicit error. Current limits are 32 source
