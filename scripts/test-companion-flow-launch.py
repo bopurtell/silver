@@ -28,7 +28,7 @@ parse, Terminal, Screen = api.c.parse, api.c.Terminal, api.c.Screen
 checklist = api.module('native_checklist', HERE / 'test-checklist-launch-workflow.py')
 EVIDENCE_ROOT = Path('/var/tmp/cobalt-stage-progress')
 STAGES = ('synthesis', 'floorplan', 'placement', 'cts', 'routing', 'timing', 'signoff')
-STAGE_LABELS = {stage: 'CTS' if stage == 'cts' else stage.title() for stage in STAGES}
+STAGE_LABELS = {stage: 'cts' if stage == 'cts' else stage.title() for stage in STAGES}
 
 
 def companion_operation(f, operation):
@@ -272,7 +272,7 @@ def capture_stage_rows(ui, label, selection, statuses=None, *, selected=None,
             bool(re.search(r'✓\s+Elaboration:\s+completed\b', screen)) if elaboration and not tail
             else not re.search(r'\bElaboration:\s+completed\b', screen))
 
-    return ui.capture(label, 'Silver: Stage checklist', context,
+    return ui.capture(label, 'Silver: Stage Checklist', context,
                       matches_screen=matches)
 
 
@@ -409,7 +409,7 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     watched = checklist.selected(f)
     assert watched
     screen = ui.capture('c8-empty-editor', 'WB095_OUTSIDE_DOCUMENT')
-    assert 'Silver flow kickoff' not in screen
+    assert 'Silver: Flow Runner' not in screen
     ui.command('silver stage checklist')
     selection = selected_inputs('standard', 'routing')
     assert not field(f.snapshot(), 'workflows')
@@ -450,7 +450,7 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     ui.palette('routing')
     ui.capture('c8-alias-reopened', 'Run routing ·')
     ui.send(b' checklist')
-    screen = ui.capture('c8-related', 'routing checklist', '> Silver: Stage checklist')
+    screen = ui.capture('c8-related', 'routing checklist', '> Silver: Stage Checklist')
     assert 'Run routing ·' not in screen, screen
     ui.send(b'\x1b')
     capture_stage_rows(ui, 'c8-palette-restores-checklist', selection,
@@ -501,10 +501,11 @@ class TraceWindow:
         return iter(self.trace[self.start:])
 
 
-def assert_first(screen, alias):
+def assert_first(screen, alias, *, title=None):
     lines = screen.splitlines()
     query = next(i for i, line in enumerate(lines) if f'> {alias} ' in line)
-    assert f'> Run {alias} ·' in lines[query + 1], screen
+    title = title or f'Run {alias} ·'
+    assert f'> {title}' in lines[query + 1], screen
 
 
 def selected_inputs(flow, endpoint, *, profile='balanced', assignments=()):
@@ -520,8 +521,12 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     capture_stage_rows(ui, 'c9-stage-initial', selected_inputs('standard', 'routing'))
     ui.send(b'g', b'g', b'j', b'j', b'j', b'j')
     capture_stage_rows(ui, 'c9-stage-routing', selected_inputs('standard', 'routing'), selected='routing')
-    ui.command('Focus Silver flow kickoff')
-    ui.capture('c9-flow-choice', 'WB095_OUTSIDE_DOCUMENT', 'Standard fixture · active', 'Explore fixture')
+    ui.palette('flow')
+    assert_first(ui.capture('c9-flow-palette', 'Silver: Flow Runner'), 'flow',
+                 title='Silver: Flow Runner')
+    ui.send(b'\t', b'\r')
+    ui.capture('c9-flow-choice', 'WB095_OUTSIDE_DOCUMENT', 'Silver: Flow Runner',
+               '› Standard fixture · active', 'Explore fixture')
     ui.send(b'j')
     ui.capture('c9-flow-explore', '› Explore fixture · active')
     ui.send(b'k')
@@ -530,7 +535,7 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     ui.capture('c9-flow-explore-again', '› Explore fixture · active')
     assert not exchanges(cobalt_trace, 'Plan', 'Stage_fresh')
     without_submit(cobalt_trace, f, 0, before)
-    ui.command('Toggle Silver flow kickoff')
+    ui.command('Toggle Silver: Flow Runner')
     screen = ui.capture('c9-selector-hidden', 'WB095_OUTSIDE_DOCUMENT')
     assert 'Explore fixture' not in screen
     ui.palette('st')
@@ -548,14 +553,14 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     save(f.base / 'c9-selected-flow.json', stage)
 
     start_after_stage = len(cobalt_trace)
-    ui.command('Focus Silver flow kickoff')
+    ui.command('flow')
     ui.send(b'k')
     ui.capture('c9-stale-standard-choice', '› Standard fixture · active')
     ui.palette('st')
     ui.send(b'\t', b'\r')
     capture_stage_rows(ui, 'c9-no-borrowed-explore-evidence', selected_inputs('standard', 'routing'),
                        selected='routing')
-    ui.command('Focus Silver flow kickoff')
+    ui.command('flow')
     ui.send(b'j')
     ui.capture('c9-explore-restored', '› Explore fixture · active')
     ui.palette('st')
@@ -568,8 +573,8 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     before = len(field(f.snapshot(), 'workflows'))
     expected = native_plan(f, native_url, selection)
     assert dict(field(expected, 'selection')) == selection
-    ui.command('Review Silver flow kickoff')
-    ui.capture('c9-review-choices', '› Flow choice: Explore fixture')
+    ui.command('Silver: Flow Review')
+    ui.capture('c9-review-choices', 'Silver: Flow Review', '› Flow choice: Explore fixture')
     begin = len(cobalt_trace)
     ui.send(b'K')  # No reviewed preview: never submit anything else.
     without_submit(cobalt_trace, f, begin, before)
@@ -663,7 +668,9 @@ def main():
             with editor(str(args.cobalt), file, env, ['--silver-endpoint', url, '--silver-project',
                                                      str(f.root), '--silver-run', watched], width=width) as term:
                 ui = Cobalt(term, f.base, width, height)
-                ui.capture(args.slice + '-watched-before', 'Attempt: ' + watched)
+                attempt_row = re.compile(r'\bAttempt: +' + re.escape(watched) + r'(?= *[│\n]|$)')
+                ui.capture(args.slice + '-watched-before', 'Silver: Overview',
+                           matches_screen=lambda screen: attempt_row.search(screen) is not None)
                 if args.slice == 'c8':
                     c8(f, ui, native, native_trace, trace)
                 else:

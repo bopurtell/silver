@@ -46,6 +46,11 @@ def stop(process):
             process.wait(timeout=5)
 
 
+def overview_field(key, value):
+    # Key/value column alignment depends on the visible fields and tile width.
+    return re.compile(r"\b" + re.escape(key) + r": +" + re.escape(value) + r"(?= *[│\n]|$)")
+
+
 class Terminal:
     width, height = 240, 55
 
@@ -74,9 +79,13 @@ class Terminal:
         return terminal_screen(bytes(self.data), width=self.width, height=self.height)
 
     def see(self, *text, absent=()):
+        def contains(screen, item):
+            return item in screen if isinstance(item, str) else item.search(screen) is not None
+
         def check():
             screen = self.screen()
-            return screen if all(s in screen for s in text) and not any(s in screen for s in absent) else None
+            return screen if all(contains(screen, s) for s in text) and not any(
+                contains(screen, s) for s in absent) else None
         try:
             return wait(check, f"wanted {text}, absent {absent}")
         except AssertionError as error:
@@ -255,11 +264,11 @@ def check_cobalt_restart(argv, env, cwd, silver, runtime, offer, backend, retain
             cobalt.keys(b"\r")
             cobalt.see("Connected to Silver")
             cobalt.keys(b" vz", b" vU", b" st")
-            status = cobalt.see(f"Endpoint: {offer['endpoint']}",
-                                f"Instance: {backend.instance}", f"Project ID: {backend.project}",
-                                f"Project: {offer['project_root']}", retained, "Outcome: Passed")
-            assert re.search(r"Outcome: Passed(?:[^\n]*\n){1,4}[^\n]*Attempt: " + re.escape(retained),
-                             status)
+            cobalt.see("Silver: Overview", overview_field("Endpoint", offer["endpoint"]),
+                       overview_field("Instance", backend.instance),
+                       overview_field("Project ID", backend.project),
+                       overview_field("Project", offer["project_root"]),
+                       overview_field("Attempt", retained), overview_field("Outcome", "Passed"))
             cobalt.keys(b" bp")
             cobalt.see("UNRELATED_COBALT_BUFFER")
             cobalt.keys(b" q")
@@ -398,9 +407,9 @@ def exercise(args, base, mode):
             choose(oid)
             c.see("Connected to Silver")
             c.keys(b" vz", b" vU", b" st")
-            status = c.see(f"Instance: {backend.instance}", f"Project ID: {backend.project}",
-                           retained, "Outcome: Passed")
-            assert re.search(r"Outcome: Passed(?:[^\n]*\n){1,4}[^\n]*Attempt: " + re.escape(retained), status)
+            c.see("Silver: Overview", overview_field("Instance", backend.instance),
+                  overview_field("Project ID", backend.project),
+                  overview_field("Attempt", retained), overview_field("Outcome", "Passed"))
             c.keys(b"\x1b")
 
             picker()
@@ -466,12 +475,12 @@ def exercise(args, base, mode):
             assert backend.attempts()[retained]["outcome"] == "Passed"
             assert field(backend.raw("/api/hello"), "instance_id") == backend.instance
             # Withdrawal does not revoke a verified attachment already in use.
-            if "[2:Silver overview]" not in c.screen().splitlines()[0]:
+            if "[2:Silver: Overview]" not in c.screen().splitlines()[0]:
                 c.keys(b" bn")
-            c.see("[2:Silver overview]", "Silver overview")
+            c.see("[2:Silver: Overview]", "Silver: Overview")
             c.keys(b"r")
-            status = c.see(cobalt_run, "Outcome: Failed", f"Instance: {backend.instance}")
-            assert re.search(r"Outcome: Failed(?:[^\n]*\n){1,4}[^\n]*Attempt: " + re.escape(cobalt_run), status)
+            c.see(overview_field("Outcome", "Failed"), overview_field("Attempt", cobalt_run),
+                  overview_field("Instance", backend.instance))
             assert state.is_dir()
     print(f"WB-094 {mode}: unremembered offer {first} survived Cobalt restart; "
           f"retained {retained}, Silver job {silver_job}, "
