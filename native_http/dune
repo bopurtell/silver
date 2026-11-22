@@ -1,6 +1,9 @@
 (library
  (name hardcaml_workbench_native_http)
- (libraries async cohttp-async core hardcaml_workbench_protocol)
+ (libraries async cohttp-async core cryptokit hardcaml_workbench_protocol unix)
+ (foreign_stubs
+  (language c)
+  (names editor_share_fs))
  (preprocess
   (pps ppx_jane))
  (lint

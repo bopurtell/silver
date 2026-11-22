@@ -55,7 +55,35 @@ def gate(root, stage):
     return mode
 
 
-def main():
+def prepared_input(root, args, *, effective_parameters=(), config_fields=None):
+    def option(flag):
+        return args[args.index(flag) + 1]
+
+    config = compact(dict(DESIGN_NAME='fresh-source-only', generation=(root / 'generation').read_text(),
+                          **(config_fields or {}))) + '\n'
+    payload = dict(schema_version=1, project='fresh-source-only',
+                   files=[dict(path='src/config.json', sha256=sha(config.encode()))])
+    bundle_id = sha(compact(payload).encode())
+    manifest = dict(identity=bundle_id, **payload)
+    stages = PREFIX[:PREFIX.index(option('--endpoint')) + 1]
+    assignments = [dict(key=args[i + 1].split('=', 1)[0], value=args[i + 1].split('=', 1)[1])
+                   for i, value in enumerate(args) if value == '--set']
+    snapshot = dict(contract='hardcaml-asic.flow-snapshot', schema_version=1,
+                    declaration={}, definition={}, profile={},
+                    selected=dict(flow=option('--flow'), profile=option('--profile')),
+                    endpoint=option('--endpoint'), stages=stages, request=assignments, parameters=[])
+    methodology = dict(snapshot=snapshot, project_assignments=[], effective_parameters=list(effective_parameters),
+                       translation={}, recipe=dict(schema_version=4, stages=stages, initial_boundary=None))
+    plan = dict(contract='hardcaml-asic.methodology-plan', schema_version=1,
+                methodology=methodology,
+                methodology_hash=identity('hardcaml-asic.methodology-hash', methodology),
+                project_name='fresh-source-only', bundle_identity=bundle_id,
+                bundle_manifest=compact(manifest), configuration_bytes=config)
+    plan['plan_identity'] = identity('hardcaml-asic.plan-identity', plan)
+    return plan
+
+
+def main(*, prepare=prepared_input):
     role, root = sys.argv[1], Path(sys.argv[2])
     args = sys.argv[3:]
     def option(flag):
@@ -74,31 +102,13 @@ def main():
         if mode == 'malformed':
             print('{broken receipt')
             return
-        config = compact(dict(DESIGN_NAME='fresh-source-only', generation=(root / 'generation').read_text())) + '\n'
-        payload = dict(schema_version=1, project='fresh-source-only',
-                       files=[dict(path='src/config.json', sha256=sha(config.encode()))])
-        bundle_id = sha(compact(payload).encode())
-        manifest = dict(identity=bundle_id, **payload)
+        plan = prepare(root, args)
+        bundle_id = plan['bundle_identity']
         output = Path(option('--results-root')) / 'bundles' / bundle_id
         reused = output.exists()
         (output / 'src').mkdir(parents=True, exist_ok=True)
-        (output / 'src/config.json').write_text(config)
-        (output / 'manifest.json').write_text(compact(manifest))
-        stages = PREFIX[:PREFIX.index(option('--endpoint')) + 1]
-        assignments = [dict(key=args[i + 1].split('=', 1)[0], value=args[i + 1].split('=', 1)[1])
-                       for i, value in enumerate(args) if value == '--set']
-        snapshot = dict(contract='hardcaml-asic.flow-snapshot', schema_version=1,
-                        declaration={}, definition={}, profile={},
-                        selected=dict(flow=option('--flow'), profile=option('--profile')),
-                        endpoint=option('--endpoint'), stages=stages, request=assignments, parameters=[])
-        methodology = dict(snapshot=snapshot, project_assignments=[], effective_parameters=[],
-                           translation={}, recipe=dict(schema_version=4, stages=stages, initial_boundary=None))
-        plan = dict(contract='hardcaml-asic.methodology-plan', schema_version=1,
-                    methodology=methodology,
-                    methodology_hash=identity('hardcaml-asic.methodology-hash', methodology),
-                    project_name='fresh-source-only', bundle_identity=bundle_id,
-                    bundle_manifest=compact(manifest), configuration_bytes=config)
-        plan['plan_identity'] = identity('hardcaml-asic.plan-identity', plan)
+        (output / 'src/config.json').write_text(plan['configuration_bytes'])
+        (output / 'manifest.json').write_text(plan['bundle_manifest'])
         receipt = dict(schema_version=1, kind='bundle_emission', bundle_identity=bundle_id,
                        plan_identity=plan['plan_identity'], output_dir=str(output), reused=reused, plan=plan)
         receipt_path = root / ('receipt-' + str(time.time_ns()) + '.json')

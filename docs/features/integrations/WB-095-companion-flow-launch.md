@@ -3,7 +3,7 @@ id: WB-095
 title: Launch Silver flows and stages from standalone Cobalt
 category: integrations
 feature_sets: [FS2, FS4]
-status: proposed
+status: delivered
 kind: feature
 priority: P2
 severity: n/a
@@ -97,3 +97,79 @@ C8 or sharing enabled.
   does not cancel Silver's execution. Fixture tests establish adapter readiness,
   not cross-repo acceptance: record the real two-window result separately for
   each slice.
+
+## Recorded acceptance (2026-11-22; ticket remains open)
+
+`scripts/test-companion-flow-launch.py --slice c8|c9` runs the built Silver
+daemon, native Silver terminal, and actual standalone Cobalt in a newly made
+test project. Both UIs use the exact same project ID and `Inherit_daemon` on
+private loopback. Cobalt is explicitly bound via `--silver-endpoint` and
+`--silver-project`, while its document is outside that project. No editor
+sharing or implicit connection is used. The fixture substitutes deterministic
+source/EDA producers, not the daemon, transport, terminal clients, reservation
+or preparation machinery. It does not invoke physical EDA tools or use a
+running Silver project's configuration or state.
+
+- **C8 live, default configuration:** In
+  `~/.cache/wb095/wb095-gfv08m08/c8/`, `c8-comparisons.json` records seven
+  distinct completed ASIC attempts: native Silver `R` on Routing, Synthesis,
+  and Timing; Cobalt `R` on Routing; and exact `synth`, `timing`, `routing`
+  with Routing selected. The selection and complete planned stage prefix
+  match the equivalent native submission (`demo-chip/small`,
+  `standard/balanced`, with the respective endpoint and no overrides).
+  `c8-*` PTY captures show row-one selected aliases, regular search via
+  `routing checklist`, checklist focus retained after `R` and restored after
+  palette escape, and withdrawn Routing staying first but disabled. Enter
+  on the disabled exact query sends nothing; an already-open Routing action
+  also rejected after withdrawal without staging or submission. Native
+  Overview's selected ASIC run and Cobalt's explicitly watched Testing
+  attempt stayed unchanged.
+- **C9 live, non-default configuration:** In
+  `~/.cache/wb095/wb095-xr540yfm/c9/`, the Silver terminal's public `--api Plan`
+  and Cobalt tile resolved identical `demo-chip/small`, `explore/review`,
+  `routing`, `STRATEGY=delay` and plan identity
+  `9165ac44f42a9e23476c0df07c5cf86ad7d0f1523ee4421c5482d6280fd66dea`.
+  The actual `Run` sent the exact preview, including `plan_json`. Browsing,
+  editing and previewing added zero workflows; two quick `K` presses added
+  exactly one. The reply and PTY acknowledge workflow `workflow-958c76f3…`
+  without a physical run ID; Silver later links completed run
+  `fresh-c08d1a10…` (`c9-comparison.json` has full IDs). Changing the draft
+  after review and superseding the ready preview in its server context
+  each caused zero new `Run` requests and zero new workflows. The checklist
+  was never opened in this C9 session; neither watched selection changed.
+
+Each evidence root records binary paths and SHA-256 hashes in `binaries.json`.
+The raw `native-http.jsonl` and `cobalt-http.jsonl` capture discovery, input
+intent/plan staging, submissions and replies. `scripts/export-companion-flow-fixture.py`
+projects the exchanges for Cobalt `silver_overview/test/wb095-{c8,c9}.sexp`,
+replayed by `test_recorded_flow.ml`. The live captures exposed incorrect
+inline-record encoding in Cobalt (`In_context`, `Stage_fresh`, `Launch_fresh`,
+`Run`); fields must follow the constructor directly. C9 also rechecks the
+server preview and local review generation before sending `Run`. Neither
+slice needed a new Silver RPC.
+
+To reproduce, use prebuilt binaries and put a compatible `dune` on `PATH` for
+the fixture's publisher-copy rule. Replace the paths with local builds:
+
+```sh
+python3 scripts/test-companion-flow-launch.py --slice c8 \
+  --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe \
+  --preset-export _build/default/terminal/workspaces/export_presets.exe \
+  --cobalt /path/to/cobalt.exe --cobalt-source /path/to/cobalt
+# Repeat with --slice c9. Use --evidence-parent /path/to/private/writable/dir
+# if /tmp/opencode is quota-limited, and set TMPDIR for tool subprocesses.
+```
+
+Limits: this verifies fixture execution through the real service, not real
+tool completion or a release build with the C8 implementation compiled out.
+C8’s explicit non-default settings are covered at the adapter level, not by
+this live C8 default-parity run. The public API does not atomically combine
+preview polling with `Run`; for chip-aware projects Silver still validates the
+exact scoped preview and plan identity if scope changes during delivery.
+
+Verification scope: focused Cobalt flow adapter, recorded replay, checklist
+and kickoff tile tests, and fixture PTYs passed. The broader Cobalt
+`@screen/runtest @bin/runtest @silver_overview/runtest` attempt was not green:
+it reported `/tmp` quota failures and separate configuration, main-editor,
+share-connection and WB-093 quick-launch test failures. No conclusion about
+those surfaces is drawn from this work.

@@ -160,6 +160,8 @@ type session =
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
   ; mutable painted_palette : Host.t option
   ; mutable browser : Browser.t option
+  ; sharing : Project_sharing.t
+  ; mutable share_wizard : (unit ref * int * Share_wizard.t) option
   ; mutable browser_epoch : int
   ; mutable owner_read : unit ref
   ; mutable painted_browser : (Browser.t * bool) option
@@ -327,11 +329,13 @@ let load_state ~endpoint ~project_root ~environment_selection ~diagnostics =
 
 let create_session
   ~local_project_files
+  ?embedded_endpoint
   ~endpoint
   ~project_root
   ~environment_selection
   ~environment_label
   ~diagnostics_file
+  ()
   =
   let%map loaded =
     load_state
@@ -388,6 +392,12 @@ let create_session
       ; last_dimensions = None
       ; painted_palette = None
       ; browser = None
+      ; sharing =
+          Project_sharing.create
+            (match embedded_endpoint with
+             | Some started_endpoint -> Embedded { started_endpoint }
+             | None -> Attached)
+      ; share_wizard = None
       ; browser_epoch = 0
       ; owner_read = ref ()
       ; painted_browser = None
@@ -464,6 +474,102 @@ let adoption_complete =
 
 let current_project session =
   State.current_project ~opened:session.opened session.snapshot
+;;
+
+let sharing_binding session : Project_sharing.binding option =
+  (* [current_project] can fall back to a cached open response for rendering.
+     Publication requires the actual open identity in the current snapshot. *)
+  let%bind.Option opened = session.opened in
+  let root = Project_root.to_absolute_path opened.project.root in
+  let%map.Option project =
+    List.find session.snapshot.projects ~f:(fun p ->
+      Project_id.equal p.id opened.project.id
+      && String.equal (Project_root.to_absolute_path p.root) root)
+  in
+  { Project_sharing.client = session.client
+  ; instance = session.hello.instance_id
+  ; project = project.id
+  ; root
+  }
+;;
+
+let sync_sharing session = Project_sharing.sync session.sharing (sharing_binding session)
+let activate_sharing session = Project_sharing.activate session.sharing (sharing_binding session)
+
+let share_wizard session =
+  match session.share_wizard with
+  | Some (_, generation, _) when generation <> session.sharing.generation ->
+    session.share_wizard <- None;
+    None
+  | wizard -> wizard
+;;
+
+let begin_share_wizard session =
+  let token = ref () in
+  let generation = session.sharing.generation in
+  let wizard =
+    Share_wizard.create
+      (Option.map (current_project session) ~f:(fun p ->
+         p.name, Project_root.to_absolute_path p.root))
+  in
+  session.share_wizard <- Some (token, generation, wizard);
+  let current () =
+    Option.exists (share_wizard session) ~f:(fun (id, _, _) -> phys_equal id token)
+  in
+  Bonsai_term.Effect.of_deferred_thunk (fun () ->
+    let%map eligibility = Project_sharing.check session.sharing ~current in
+    if current ()
+    then
+      Option.iter session.share_wizard ~f:(fun (_, _, wizard) ->
+        let wizard =
+          match eligibility with
+          | Ok (remembered, eligible) ->
+            let eligibility =
+              match eligible with
+              | Ok () -> Share_wizard.Available
+              | Error error -> Unavailable (Error.to_string_hum error)
+            in
+            { wizard with eligibility; remembered; notice = session.sharing.notice }
+          | Error error ->
+            { wizard with eligibility = Unavailable (Error.to_string_hum error) }
+        in
+        session.share_wizard <- Some (token, generation, wizard)))
+;;
+
+let share_wizard_key session event =
+  let open Bonsai_term in
+  match share_wizard session, Host.decode_event event with
+  | Some (token, generation, wizard), Some key ->
+    let sharing = Project_sharing.is_sharing session.sharing in
+    let set wizard = session.share_wizard <- Some (token, generation, wizard) in
+    (match Share_wizard.input wizard ~sharing key with
+     | Stay wizard -> set wizard; Effect.Ignore
+     | Dismiss -> session.share_wizard <- None; Effect.Ignore
+     | (Share _ | Stop) as action ->
+       set { wizard with busy = true; notice = None };
+       let current () =
+         Option.exists (share_wizard session) ~f:(fun (id, _, _) -> phys_equal id token)
+       in
+       Effect.of_deferred_thunk (fun () ->
+         let%map result =
+           match action with
+           | Share remember -> Project_sharing.share session.sharing ~current ~remember
+           | Stop -> Project_sharing.stop session.sharing ~current
+           | _ -> assert false
+         in
+         if current ()
+         then
+           match result with
+           | Ok () ->
+             let remembered =
+               match action with
+               | Share remember -> wizard.remembered || remember
+               | _ -> false
+             in
+             set { wizard with busy = false; confirmed = true; remembered }
+           | Error error ->
+             set { wizard with busy = false; notice = Some (Error.to_string_hum error) }))
+  | _ -> Effect.Ignore
 ;;
 
 let editor_project session : Editor_workspace.project option =
@@ -3114,6 +3220,7 @@ let apply_updates session ~instance_id updates =
     State.apply_updates session.snapshot updates
     |> Result.map ~f:(fun snapshot ->
       session.snapshot <- snapshot;
+      sync_sharing session;
       reconcile_selection session;
       preserve_selected_job session selected_job_id;
       `Applied))
@@ -3128,6 +3235,7 @@ let resync session ~instance_id =
   | Error _ as error -> error
   | Ok snapshot ->
     session.snapshot <- snapshot;
+    sync_sharing session;
     reconcile_selection session;
     preserve_selected_job session selected_job_id;
     Ok ()
@@ -3179,6 +3287,7 @@ let rec refresh session =
         let%bind updates = poll_updates session ~timeout_ms:200 in
         match updates with
         | Error message ->
+          Project_sharing.sync session.sharing None;
           session.status <- "disconnected: " ^ message ^ "; reconnecting...";
           session.timing_demand <- None;
           let%bind () =
@@ -3213,6 +3322,7 @@ let rec refresh session =
                  String.equal (Job_id.to_string job.id) id)))))
 
 and reconnect session =
+  Project_sharing.sync session.sharing None;
   session.timing_demand <- None;
   let selected_job_id = Option.map (selected_job session) ~f:(fun job -> job.id) in
   session.status <- "reconnecting...";
@@ -3249,6 +3359,7 @@ and reconnect session =
     session.hello <- hello;
     session.opened <- opened;
     session.snapshot <- snapshot;
+    sync_sharing session;
     session.host
     <- Host.reconnect session.host ~replacement:(instance_changed || project_changed);
     sync_terminal_workspace session;
@@ -4348,7 +4459,9 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
           @ List.map (Presentation.job_outcome_lines job) ~f:(fun line -> "  " ^ line)
       in
       let controls =
-        if session.show_connection_details
+        if Option.is_none session.opened
+        then "F2 Share with Cobalt… | d details | r reconnect | q exit"
+        else if session.show_connection_details
         then
           "d project | [/] details | b/t jobs | n/m select | g RTL | a/v artifact | h \
            hierarchy | i refresh | j/k job | c cancel | r reconnect | q exit"
@@ -4945,17 +5058,23 @@ let render
             || session.show_connection_details -> render_legacy ()
      | Some _ -> render_host ())
   in
-  match session.browser with
+  let appearance = Host.effective_appearance session.host in
+  let background =
+    match session.browser with
+    | None -> background
+    | Some browser ->
+      let hints = Host.project_browser_hints session.host in
+      session.painted_browser <- Some (browser, hints);
+      let window = Browser.render ~hints browser appearance dimensions background in
+      let host = displayed_host session in
+      session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
+      Host_view.render_palette host dimensions window
+  in
+  match share_wizard session with
   | None -> background
-  | Some browser ->
-    let hints = Host.project_browser_hints session.host in
-    session.painted_browser <- Some (browser, hints);
-    let window =
-      Browser.render ~hints browser (Host.effective_appearance session.host) dimensions background
-    in
-    let host = displayed_host session in
-    session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
-    Host_view.render_palette host dimensions window
+  | Some (_, _, wizard) ->
+    Share_wizard.render wizard ~sharing:(Project_sharing.is_sharing session.sharing)
+      appearance dimensions background
 ;;
 
 (* Baseline capture.
@@ -5013,6 +5132,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; last_dimensions = None
     ; painted_palette = None
     ; browser = None
+    ; sharing = Project_sharing.create Attached
+    ; share_wizard = None
     ; browser_epoch = 0
     ; owner_read = ref ()
     ; painted_browser = None
@@ -5240,6 +5361,11 @@ let declaration_command session =
               "gd selected test source" action)))
 ;;
 
+let share_command =
+  Host.command "project.share-cobalt" Share_wizard.title "share project local editor"
+    Share_with_cobalt
+;;
+
 let host_catalog_base session =
   (if session.local_project_files && Option.is_some session.opened
    then Host.project_entry_commands
@@ -5255,12 +5381,17 @@ let host_catalog_base session =
      ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
      ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
      ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
-     ; Host.command "project.manage" "Manage This Project…" "project browser" Manage_project
      ]
      @ library_commands session ~f:(fun label dir ->
        Host.command ("project.library." ^ label ^ ":" ^ dir)
          (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
          "select library actions" (Library_actions dir)))
+  @ (match session.opened with
+     | None -> [ share_command ]
+     | Some _ ->
+       [ Host.command "project.manage" "Manage This Project…" "project browser" Manage_project
+       ; share_command
+       ])
   @
   (if session.local_project_files
       && Option.is_some session.opened
@@ -6656,6 +6787,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            && Option.is_none session.host.palette
            && Option.is_none session.host.menu
            && Option.is_none session.browser
+           && Option.is_none session.share_wizard
         then (
           match Jump.Response.resolution response with
           | Direct location ->
@@ -7213,24 +7345,35 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           | Ok payload ->
             session.snapshot <- State.add_job_if_absent session.snapshot payload.job))
     | Refresh_integration -> async (fun () -> refresh_integration session)
-    | Manage_project ->
-      Option.iter
-        (List.find (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip"))
-        ~f:(fun ip ->
-          let libraries = library_commands session ~f:(fun label dir -> label, dir) in
-          (* Entering management commits to the inspection currently on screen.
-             A preference read begun during startup must not replace that origin. *)
-          let origin = Workspace.Workspace_id.to_string captured.workspace in
-          let pin touched =
-            if List.mem touched origin ~equal:String.equal then touched else origin :: touched
-          in
-          session.navigation_revision <- session.navigation_revision + 1;
-          session.navigation_focus_touched <- pin session.navigation_focus_touched;
-          session.navigation_touched <- pin session.navigation_touched;
-          session.host <- Host.cancel_navigation_timing session.host origin;
-          session.browser_epoch <- session.context_epoch;
-          session.browser <- Some (Browser.create captured (Browser.catalog ~ip ~libraries session.asic)));
-      Effect.Ignore
+    | (Manage_project | Share_with_cobalt) as project_action ->
+      (* A preference read begun during startup must not replace the inspection
+         the user opened this surface from. *)
+      let origin = Workspace.Workspace_id.to_string captured.workspace in
+      let pin touched =
+        if List.mem touched origin ~equal:String.equal then touched else origin :: touched
+      in
+      session.navigation_revision <- session.navigation_revision + 1;
+      session.navigation_focus_touched <- pin session.navigation_focus_touched;
+      session.navigation_touched <- pin session.navigation_touched;
+      session.host <- Host.cancel_navigation_timing session.host origin;
+      (match project_action with
+       | Share_with_cobalt -> begin_share_wizard session
+       | _ ->
+         let ip =
+           List.find (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip")
+         in
+         let libraries, asic =
+           match ip with
+           | None -> [], None
+           | Some _ -> library_commands session ~f:(fun label dir -> label, dir), session.asic
+         in
+         session.browser_epoch <- session.context_epoch;
+         session.browser <-
+           Some
+             (Browser.create
+                captured
+                (Browser.catalog ?ip ~share:share_command ~libraries asic));
+         Effect.Ignore)
     | Browse_chip_profiles chip ->
       (match session.browser, session.opened with
        | Some browser, Some opened ->
@@ -9713,6 +9856,7 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
     |> Option.value ~default:Effect.Ignore
   in
   match session.last_dimensions with
+  | _ when Option.is_some (share_wizard session) -> Effect.Ignore
   | None -> Effect.Ignore
   | Some _ when retire_stale_browser session -> Effect.Ignore
   | Some dimensions
@@ -9881,6 +10025,7 @@ let tui
   let host_modal session =
     let host = session.host in
     Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
+    || Option.is_some (share_wizard session)
     || host.editing_filter || host.paste || Option.is_some host.inspection_paste
   in
   let modal session = terminal_visible session || host_modal session in
@@ -10180,6 +10325,12 @@ let tui
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if Option.is_some (share_wizard session)
+    then share_wizard_key session event
+    else if Option.is_none session.host.registry
+            && Option.is_none session.opened
+            && Poly.equal (Host.decode_event event) (Some (Host.Open_menu Project_menu))
+    then begin_share_wizard session
     else if Host.has_theme_picker session.host
     then
       if retire_stale_browser session
@@ -10737,6 +10888,15 @@ let with_shared_terminal f =
       active := None)
 ;;
 
+let with_share_cleanup ~cleanup f =
+  let pending = ref true in
+  let close () = if !pending then cleanup () else Deferred.unit in
+  Async.Shutdown.at_shutdown close;
+  Monitor.protect f ~finally:(fun () ->
+    let%map () = close () in
+    pending := false)
+;;
+
 let print_opened session =
   reconcile_selection session;
   printf "Silver\n";
@@ -11177,11 +11337,13 @@ let run_legacy
       let%bind created =
         create_session
           ~local_project_files
+          ?embedded_endpoint:(if local_project_files then endpoint else None)
           ~endpoint
           ~project_root
           ~environment_selection
           ~environment_label
           ~diagnostics_file
+          ()
       in
       match created with
       | Error message -> return (Or_error.error_string message)
@@ -11210,17 +11372,23 @@ let run_legacy
           Monitor.try_with_or_error (fun () ->
             let%bind result =
               with_shared_terminal (fun terminal ->
-                session.terminal <- Some terminal;
-                Bonsai_term.start_with_exit
-                  ~dispose:true
-                  ~bpaste:true
-                  ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-                  (fun ~exit ~dimensions graph ->
-                    Editor_workspace.with_editors ~exit
-                      (fun mounts editors ~exit graph ->
-                        tui (Bonsai.return session) ~terminal ~no_mouse ~exit
-                          ~dimensions mounts editors graph)
-                      graph))
+                with_share_cleanup
+                  ~cleanup:(fun () -> Project_sharing.close session.sharing)
+                  (fun () ->
+                    if not local_project_files then
+                      Server_host.handle_signals [ Signal.hup; Signal.int; Signal.term ];
+                    activate_sharing session;
+                    session.terminal <- Some terminal;
+                    Bonsai_term.start_with_exit
+                      ~dispose:true
+                      ~bpaste:true
+                      ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+                      (fun ~exit ~dimensions graph ->
+                        Editor_workspace.with_editors ~exit
+                          (fun mounts editors ~exit graph ->
+                            tui (Bonsai.return session) ~terminal ~no_mouse ~exit
+                              ~dimensions mounts editors graph)
+                          graph)))
             in
             let%map () = session.preference_saves in
             result)
@@ -11447,6 +11615,7 @@ let run
             ~environment_selection
             ~environment_label
             ~diagnostics_file
+            ()
         in
         (match created with
          | Error message ->
@@ -11522,11 +11691,13 @@ let local_workspace
       let%bind created =
         create_session
           ~local_project_files:true
+          ?embedded_endpoint:endpoint
           ~endpoint
           ~project_root
           ~environment_selection
           ~environment_label
           ~diagnostics_file
+          ()
       in
       (match created with
        | Error msg -> return (Or_error.error_string msg)
@@ -11553,6 +11724,12 @@ let local_workspace
     match initial with
     | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
     | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
+  in
+  let shutting_down = ref false in
+  let cleanup () =
+    shutting_down := true;
+    Deferred.all_unit
+      (List.map (Hashtbl.data sessions) ~f:(fun s -> Project_sharing.close s.sharing))
   in
   let project_app ~terminal ~dimensions mounts editors ~exit (local_ graph) =
     let open Bonsai.Let_syntax in
@@ -11582,11 +11759,21 @@ let local_workspace
                       ~f:(fun s -> set_page (`Bound s))
         in
         let on_open =
-          let%arr set_page in
+          let%arr previous and set_page in
           fun root ->
             let open Bonsai_term in
             Effect.bind
-              (Effect.of_deferred_thunk (fun () -> bind root))
+              (Effect.of_deferred_thunk (fun () ->
+                 let%bind.Deferred.Or_error session = bind root in
+                 let%map.Deferred () =
+                   match previous with
+                   | Some old when not (phys_equal old session) ->
+                     old.share_wizard <- None;
+                     Project_sharing.deactivate old.sharing
+                   | _ -> Deferred.unit
+                 in
+                 if not !shutting_down then activate_sharing session;
+                 Ok session))
               ~f:(function
                 | Error e -> Effect.return (Error e)
                 | Ok s ->
@@ -11605,16 +11792,19 @@ let local_workspace
   let%bind result =
     Monitor.try_with_or_error (fun () ->
       with_shared_terminal (fun terminal ->
-        (match initial with
-         | `Bound session -> session.terminal <- Some terminal
-         | `Entry _ -> ());
-        Editor_workspace.with_terminal_mode (fun () ->
-          Bonsai_term.start_with_exit
-            ~dispose:true
-            ~bpaste:true
-            ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
-            (fun ~exit ~dimensions graph ->
-              Editor_workspace.with_editors ~exit (project_app ~terminal ~dimensions) graph))))
+        with_share_cleanup ~cleanup (fun () ->
+          (match initial with
+           | `Bound session ->
+             session.terminal <- Some terminal;
+             activate_sharing session
+           | `Entry _ -> ());
+          Editor_workspace.with_terminal_mode (fun () ->
+            Bonsai_term.start_with_exit
+              ~dispose:true
+              ~bpaste:true
+              ~mouse:(if no_mouse then No_mouse_events else All_mouse_events_except_hover)
+              (fun ~exit ~dimensions graph ->
+                Editor_workspace.with_editors ~exit (project_app ~terminal ~dimensions) graph)))))
   in
   let%map () =
     Deferred.all_unit (List.map (Hashtbl.data sessions) ~f:(fun s -> s.preference_saves))

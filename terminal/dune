@@ -173,7 +173,8 @@
 
 (executable
  (name main)
- (modules main startup_entry editor_workspace shared_terminal shared_terminal_view)
+ (modules main startup_entry editor_workspace shared_terminal shared_terminal_view
+  project_sharing share_wizard)
  (public_name silver)
  (package hardcaml_workbench)
  (libraries
@@ -328,6 +329,17 @@
 (alias
  (name runtest)
  (deps (alias test-project-menus-pty)))
+
+(rule
+ (alias test-project-sharing-pty)
+ (deps (sandbox always) test_project_sharing_pty.py ../scripts/fixtures/simulation_fixture_wire.py
+  ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_project_sharing_pty.py}
+          %{exe:main.exe} %{exe:../daemon/main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-project-sharing-pty)))
 
 (rule
  (alias test-custom-workspace-pty)

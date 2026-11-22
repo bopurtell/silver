@@ -98,6 +98,7 @@ type action =
   | Refresh_integration
   | Project_entry of [ `New | `Open ]
   | Manage_project
+  | Share_with_cobalt
   | Editor_prompt of Project_id.t
   | Editor_open of Editor_location.Location.t
   | Module_jump of Hardcaml_workbench_backend.Module_jump.Offer.t

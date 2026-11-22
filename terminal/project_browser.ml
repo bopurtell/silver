@@ -30,8 +30,8 @@ let profile_items chip flows =
         ]))
 ;;
 
-let catalog ~ip ~libraries (asic : Hardcaml_workbench_protocol.Asic.Snapshot.t option) =
-  item "Project" "Project" [ ip ]
+let catalog ?share ?ip ~libraries (asic : Hardcaml_workbench_protocol.Asic.Snapshot.t option) =
+  item "Project" "Project" (Option.to_list ip @ Option.to_list share)
   :: (List.map libraries ~f:(fun (name, dir) ->
         item ("IP library: " ^ name) dir (H.library_authoring_commands dir))
       @ Option.value_map asic ~default:[] ~f:(fun s ->

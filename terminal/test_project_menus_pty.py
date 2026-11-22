@@ -253,9 +253,14 @@ def scrolled_project(t):
                "Chip: " + MEM[0])
 
     def browser(name, top, selected, destination):
-        screen = list_page(t, "scroll-browser-" + name, objects[top:top + 4], selected,
+        # The Project row now has two actions; the stacked layout gives it
+        # one more Actions line and one fewer Objects line at this height.
+        capacity = 3 if destination == "Project" else 4
+        screen = list_page(t, "scroll-browser-" + name, objects[top:top + capacity], selected,
                            heading="Objects", end="Actions")
         assert "For: " + destination in screen, screen
+        if destination == "Project":
+            assert "Share with Cobalt…" in screen, screen
         return screen
 
     browser("initial", 0, "Project", "Project")

@@ -29,6 +29,7 @@ let resolve ~interactive ~explicit ~discover =
 type screen =
   | Closed
   | Menu
+  | Share_unbound of screen * Share_wizard.t
   | Name of string
   | Destination of string * string
   | Existing of string
@@ -40,17 +41,18 @@ type screen =
 let reopen = "[p] Create or open project", Host.Character 'p'
 let quit = "[q] Quit", Host.Character 'q'
 let dismiss = "Esc dismiss", Host.Escape
+let share = "[s] " ^ Share_wizard.title, Host.Character 's'
 let controls_text controls = String.concat ~sep:"   " (List.map controls ~f:fst)
 let plain rows = List.map rows ~f:(fun s -> s, None)
 
 let contents ~bound = function
-  | Closed -> assert false
+  | Closed | Share_unbound _ -> assert false
   | Menu ->
     ( "Local project"
     , [ "[c] New Project… (Create project here)", Some (Host.Character 'c')
       ; "[o] Open existing project", Some (Host.Character 'o')
       ]
-    , [ dismiss ] )
+    , (if bound then [ dismiss ] else [ share; dismiss ]) )
   | Name s -> "Project name", plain [ s ^ "▏" ], [ "Enter continue", Host.Enter; dismiss ]
   | Destination (name, s) ->
     ( "Destination"
@@ -116,7 +118,7 @@ let layout { Dimensions.width; height } rows footer =
   width, height, geometry, body_height, rows, last, footer
 ;;
 
-let render ~start ~original screen scroll ({ Dimensions.width; height } as dimensions) =
+let rec render ~start ~original screen scroll ({ Dimensions.width; height } as dimensions) =
   let hits = ref [] in
   let add ~x ~y ~clip label action =
     let right = Int.min clip (x + View.width (View.text label)) in
@@ -141,7 +143,7 @@ let render ~start ~original screen scroll ({ Dimensions.width; height } as dimen
             [ text Heading "Silver  /  Unbound workspace"
             ; text Muted ("Directory: " ^ start)
             ; text Foreground "No Dune project is open."
-            ; text Focus (controls_text [ reopen; quit ])
+            ; text Focus (controls_text [ reopen; share; quit ])
             ]
           | Some root ->
             [ text Heading "Silver  /  Project switch"
@@ -152,8 +154,11 @@ let render ~start ~original screen scroll ({ Dimensions.width; height } as dimen
   in
   match screen with
   | Closed ->
-    controls ~x:0 ~y:3 ~clip:width [ reopen; quit ];
+    controls ~x:0 ~y:3 ~clip:width [ reopen; share; quit ];
     base, !hits, None
+  | Share_unbound (previous, wizard) ->
+    let background, _, _ = render ~start ~original previous 0 dimensions in
+    Share_wizard.render wizard ~sharing:false appearance dimensions background, [], None
   | _ ->
     let title, rows, footer = contents ~bound:(Option.is_some original) screen in
     let width, height, geometry, body_height, rows, last, footer =
@@ -326,6 +331,13 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
           | Some (Text s), _ -> append s
           | _, _ when !pasted -> Effect.Ignore
           | _, Busy _ -> Effect.Ignore
+          | Some key, Share_unbound (previous, wizard) ->
+            (match Share_wizard.input wizard ~sharing:false key with
+             | Stay wizard -> show (Share_unbound (previous, wizard))
+             | Dismiss -> show previous
+             | Share _ | Stop -> Effect.Ignore)
+          | Some (Character 's'), (Menu | Closed) when not bound ->
+            show (Share_unbound (!screen, Share_wizard.create None))
           | Some Escape, Review p ->
             (match call (Cancel { preview_id = p.preview_id }) with
              | Cancelled -> cancel ()

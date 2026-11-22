@@ -3,7 +3,8 @@ id: WB-094
 title: Share the open Silver project with Cobalt
 category: integrations
 feature_sets: [FS2, FS4]
-status: proposed
+status: delivered
+design_status: designed
 kind: feature
 priority: P2
 severity: n/a
@@ -69,7 +70,11 @@ discoverable, not start another service with an empty or different history.
   discoverability, not the backend's lifetime: do not stop a service, cancel
   jobs, alter launch or run selection, or delete history to change sharing.
 
-## Proposed v1 design (for review)
+## Approved v1 design
+
+**Designed and owner-approved (2026-11-22); ready for implementation.**
+The wizard explains that “Stop sharing” stops advertising the project for new
+connections; it does not revoke existing connections or interrupt jobs.
 
 The **Silver frontend publishes**; the existing **service executes**; the Cobalt
 Silver module discovers and verifies. An offer identifies one publication, not a
@@ -116,13 +121,13 @@ use an explicit connection throughout; this registry adds no flow-launch API.
 
 ## Acceptance criteria
 
-- [ ] Automate the wizard in a terminal: fresh project starts off; open and
+- [x] Automate the wizard in a terminal: fresh project starts off; open and
   cancel without publishing; reopen and press Enter to share without persisting;
   dismiss back to the same workspace, tile, and row. Reopen Silver to check the
   default reset; explicitly remember, reopen to check opt-in, then stop sharing
   and reopen to confirm it stays off. Verify unbound and SSH-forwarded or
   otherwise unverifiable connections cannot publish.
-- [ ] In the automated Silver+Cobalt E2E, seed a real retained attempt and start
+- [x] In the automated Silver+Cobalt E2E, seed a real retained attempt and start
   a job through Silver. Share and discover the project in standalone Cobalt,
   verify the connection against the advertised service, and assert the same
   backend/project identity and retained attempt identity and result that Silver
@@ -132,7 +137,7 @@ use an explicit connection throughout; this registry adds no flow-launch API.
   state directory for the embedded case. Turning sharing off or switching
   projects while a job is active must leave that job running to completion with
   the same identity and history; no replacement service or job may be started.
-- [ ] Run two Silver instances with overlapping sharing lifetimes. Verify
+- [x] Run two Silver instances with overlapping sharing lifetimes. Verify
   discovery distinguishes live destinations, including two instances offering
   the same project; the selected destination must resolve to the expected
   backend/project. Stop sharing, switch projects, and exit in one instance;
@@ -140,16 +145,63 @@ use an explicit connection throughout; this registry adds no flow-launch API.
   exit or stale offer and verify Cobalt reports it unavailable rather than
   silently selecting another destination. Verify exit or withdrawal from an
   attached Silver client does not stop the attached service or its jobs.
-- [ ] Provide a reproducible fake contract for C7 covering no offers, verified
+- [x] Provide a reproducible fake contract for C7 covering no offers, verified
   offers, multiple offers, withdrawal/staleness, and failed or mismatched
   verification. Use it in automated consumer tests. Record the fixture,
   commands, and real E2E results here; fake-peer success alone is not acceptance.
 
 ## Asynchronous handoff
 
-Silver documents the observable discovery and verification contract with
-fixtures once producer and consumer agree on it. C7 can build and test the
-consumer against the fake contract without waiting for the Silver wizard;
-Silver can test wizard and lifecycle behavior without waiting for Cobalt.
-Agree on local trust, identity and lifetime before freezing any transport,
-storage layout or message format. Keep the real two-app check under WB-094.
+**Publisher verification:** `native_http/editor_share.mli` exposes validation,
+publish/withdraw and local preference operations. `dune build
+@native_http/test/runtest` passed for the producer, including concurrent offers,
+crash staleness and rejection of unverifiable attached endpoints. A forced
+unlink-permission failure also verified the leftover inode loses its publisher
+lock while the frontend is still running, so it cannot remain a live offer. Those checks
+cover publication; the live editor/history gates above are separate.
+
+Use the approved publication, lifetime and verification rules above for both
+the Silver publisher and the C7 reader. Record matching fixtures when wiring
+the producer and consumer. Silver can test wizard and lifecycle behavior
+independently; the real two-app history check remains WB-094's acceptance gate.
+
+## Reproduction
+
+From Silver, `dune build @terminal/test-project-sharing-pty` verifies the
+wizard through the project-management and palette routes, including focus
+restoration, session-only sharing, remembering and stopping, refusals, and
+withdrawal on switch, exit and crash. The PTYs use isolated runtime and
+preferences directories.
+
+The Cobalt fixture and production-format test publisher are documented in
+`cobalt/silver_overview/README.md`.
+Cobalt's `silver_overview/test/test_connection.ml` tests the bounded registry
+and injects a fake peer. From Cobalt, the standalone PTY test can also be run
+as `python3 bin/test_silver_share_cli.py _build/default/bin/cobalt.exe`.
+
+From Silver, after building both apps, run the real publisher/consumer check:
+
+```sh
+python3 scripts/test-editor-project-sharing.py \
+  --silver _build/default/terminal/main.exe \
+  --daemon _build/default/daemon/main.exe \
+  --cobalt ../../cobalt/_build/default/bin/cobalt.exe
+```
+
+The check creates its own runtime/config/state directories, starts no external
+EDA tools, and touches no existing session. Omit `--mode` to run both embedded
+and attached checks.
+
+**Results (2026-11-22):** The Cobalt reader tests and both fake-peer PTY
+sources (fixture and locked production format) passed. The command above
+passed against the real Silver terminal and daemon, with `TMPDIR=/dev/shm`
+to avoid the machine's `/tmp` quota. Embedded recovered the exact retained
+attempt and `Passed` outcome after a restart with a nondefault state path.
+Attached verified the existing daemon and project. In both modes the Cobalt
+acknowledgement's exact attempt/job appeared in Silver beside the retained
+attempt. A crashed duplicate's stale row failed without falling through to the
+live offer. Project switching (embedded) and stop/exit (attached) preserved
+the independent offer, the running Silver job, and the queued Cobalt job;
+both original jobs completed with their expected outcomes and no extra jobs.
+Cobalt refreshed the completed result through the existing verified project
+connection after all offers were gone.

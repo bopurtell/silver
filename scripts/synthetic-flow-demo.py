@@ -115,19 +115,20 @@ class WorkspaceCatalog(dict):
         self.config = config
 
 
-def workspace_presets(executable=None):
+def workspace_presets(executable=None, *, use_switch=True):
     """Read both public catalog exports; never synthesize fallback layouts."""
     executable = Path(executable or os.environ.get('WORKBENCH_PRESET_EXPORT',
         REPO / '_build/default/terminal/workspaces/export_presets.exe')).expanduser().resolve()
     if not executable.is_file():
         raise RuntimeError('Build terminal/workspaces/export_presets.exe and pass --preset-export; missing ' + str(executable))
-    output = subprocess.run(switch_command([executable]), check=True, capture_output=True,
+    command = switch_command if use_switch else list
+    output = subprocess.run(command([executable]), check=True, capture_output=True,
                             text=True, timeout=15).stdout
     presets = parse(output)
     ids = [field(p, 'id') for p in presets]
     if len(set(ids)) != len(ids):
         raise ValueError('Duplicate OCaml preset IDs')
-    config = parse(subprocess.run(switch_command([executable, '--workspace-config']),
+    config = parse(subprocess.run(command([executable, '--workspace-config']),
         check=True, capture_output=True, text=True, timeout=15).stdout)
     return WorkspaceCatalog(presets, config)
 

@@ -1,0 +1,10 @@
+(executable
+ (name editor_share_probe)
+ (libraries async core hardcaml_workbench_native_http hardcaml_workbench_protocol)
+ (preprocess
+  (pps ppx_jane)))
+
+(rule
+ (alias runtest)
+ (deps test_editor_share.py)
+ (action (run python3 -B %{dep:test_editor_share.py} %{exe:editor_share_probe.exe})))

@@ -74,6 +74,18 @@ opens the combined editor and Silver command palette; type `ov` and press
 See [embedded editor layout and theme](docs/features/workspaces/WB-087-cobalt-editor.md#embedded-editor-layout-and-theme)
 for examples; restart Silver after editing the file.
 
+To make the open project discoverable in standalone Cobalt, choose
+**Project ▾ → Manage This Project… → Share with Cobalt…**, or search for
+**Share with Cobalt** in the command palette. Press **Enter** to share for this
+Silver session, or press **r** before confirming to remember the choice for
+this project. Discovery is local to your user account. An attached connection
+must match a verified local daemon; SSH forwards and other unverified endpoints
+cannot be shared.
+
+Only the active project is advertised. Reopen the wizard to **Stop sharing**
+and clear the remembered choice. This removes the offer for new connections;
+it does not disconnect existing clients or interrupt jobs.
+
 Outside a Dune project, interactive local `silver` opens with a floating project
 setup dialog. Create an ASIC starter in the empty directory, choose a new
 directory beneath it, or open an existing Dune project. Type the project name

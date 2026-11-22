@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+import shlex
+import shutil
 from socketserver import ThreadingMixIn
 import sys
 import threading
@@ -19,25 +21,29 @@ c = api.c
 field, sexp, wait = api.field, api.sexp, api.wait
 
 
-def setup(args, label, check, preparation=True, configure=None, cold=False, before_attach=None):
+def setup(args, label, check, preparation=True, configure=None, cold=False, before_attach=None,
+          attach=True, use_switch=True):
     f = api.Fixture(args, label, check)
     if not preparation:
         (f.root / 'hardcaml-workbench-preparation.sexp').unlink()
     # Generic source operations still request -j20; normalize only this private
     # daemon's wrapper, so every actual nested build has the authorized -j6 bound.
     wrapper = f.base / 'bin/dune'
+    command = [str(HERE / 'with-switch.sh'), 'dune'] if use_switch else [shutil.which('dune')]
+    if not command[0]:
+        raise RuntimeError('The private publisher rule requires dune on PATH')
     wrapper.write_text('#!/bin/bash\nset -euo pipefail\na=()\n'
                        'for x in "$@"; do [[ "$x" == -j* ]] || a+=("$x"); done\n'
                        'if [[ "${a[0]}" == build ]]; then a=(build -j6 "${a[@]:1}"); fi\n'
-                       'exec flock /tmp/opencode/workbench-fresh-prefix-build.lock "' +
-                       str(HERE / 'with-switch.sh') + '" dune "${a[@]}"\n')
+                       'exec flock /tmp/opencode/workbench-fresh-prefix-build.lock ' +
+                       shlex.join(command) + ' "${a[@]}"\n')
     if configure:
         configure(f)
     try:
         f.start()
         f.http.rpc('Discover', wait=False)
         wait(lambda: field(f.snapshot(), 'flows'), 'synthetic catalog')
-        presets = c.demo.workspace_presets(args.preset_export)
+        presets = c.demo.workspace_presets(args.preset_export, use_switch=use_switch)
         ws = c.demo.ensure_workspaces(f.http, f.http.rpc(domain='workspace'), presets)
         ws = c.demo.apply_workspace_presets(f.http, ws, presets)
         overview = next(w for w in field(ws, 'workspaces') if field(w, 'preset') == ['overview'])
@@ -58,6 +64,8 @@ def setup(args, label, check, preparation=True, configure=None, cold=False, befo
             f.start()
         if before_attach:
             before_attach(f)
+        if not attach:
+            return f, presets
         client = f.base / 'inherited-client'
         client.write_text('#!' + sys.executable + '\nimport os,sys\na=sys.argv[1:]\n'
                           'a[a.index("--environment")+1]="inherited"\nos.execv(' + repr(str(args.client)) +
