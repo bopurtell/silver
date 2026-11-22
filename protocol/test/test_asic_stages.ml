@@ -30,6 +30,8 @@ let%test_unit "stages preserve every status and new-run action through wire code
     ; Not_requested
     ; Unsupported
     ; Unknown "provider_future_status"
+    ; Cancelling
+    ; Interrupted
     ]
   in
   let stages =

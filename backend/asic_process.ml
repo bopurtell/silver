@@ -2,7 +2,7 @@ open! Core
 open! Async
 module Invocation = Hardcaml_workbench_adapters.Dune_adapter.Invocation
 
-let stop ?(grace_seconds = 5.) process =
+let stop ?(grace_seconds = 5.) ?(before_signal = ignore) process =
   (* Force Async's owned wait before signalling. Completed children need no signal;
      send_signal itself also guards the wait/PID-reuse race (process.ml). Never replace it
      with a raw PID signal or reap through a second waitpid API. *)
@@ -10,6 +10,7 @@ let stop ?(grace_seconds = 5.) process =
   if Deferred.is_determined waited
   then Deferred.unit
   else (
+    before_signal ();
     Process.send_signal process Signal.term;
     match%bind Clock.with_timeout (Time_float.Span.of_sec grace_seconds) waited with
     | `Result _ -> Deferred.unit
@@ -25,7 +26,8 @@ module Output = struct
 end
 
 let run_with_status ?(optional_command = false) ?(accept_evidence_failure = false) ?(max_stdout_bytes = 16 * 1024 * 1024)
-  ?(max_record_bytes = 8 * 1024 * 1024) ?(stop_grace_seconds = 5.) ~seconds ~cancel ~on_process ~on_line invocation =
+  ?(max_record_bytes = 8 * 1024 * 1024) ?(stop_grace_seconds = 5.)
+  ?(on_cancel_signal = ignore) ~seconds ~cancel ~on_process ~on_line invocation =
   if max_stdout_bytes < 1 || max_stdout_bytes > 16 * 1024 * 1024
      || max_record_bytes < 1 || max_record_bytes > 8 * 1024 * 1024
   then invalid_arg "ASIC process output limits";
@@ -92,9 +94,14 @@ let run_with_status ?(optional_command = false) ?(accept_evidence_failure = fals
     in
     loop ()
   in
+  let cancelled = ref false in
   Monitor.protect
     ~finally:(fun () ->
-      let%bind () = stop ~grace_seconds:stop_grace_seconds process in
+      let%bind () =
+        stop ~grace_seconds:stop_grace_seconds
+          ~before_signal:(fun () -> if !cancelled then on_cancel_signal ())
+          process
+      in
       let%bind () = Writer.close (Process.stdin process) in
       let%bind () = Reader.close (Process.stdout process) in
       Reader.close (Process.stderr process))
@@ -128,17 +135,19 @@ let run_with_status ?(optional_command = false) ?(accept_evidence_failure = fals
       | `Result (Ok value) -> return value
       | `Result (Error exn) -> raise exn
       | `Timeout -> failwith "ASIC command timeout"
-      | `Cancelled -> failwith "ASIC operation cancelled")
+      | `Cancelled ->
+        cancelled := true;
+        failwith "ASIC operation cancelled")
 ;;
 
 (** Ordinary callers retain their existing string result and process-failure policy.
     Resource evidence readers use [run_with_status] and validate the accepted code
     against the public verdict before publishing either indexes or pages. *)
 let run ?accept_evidence_failure ?max_stdout_bytes ?max_record_bytes ?stop_grace_seconds
-  ~seconds ~cancel ~on_process ~on_line invocation =
+  ?on_cancel_signal ~seconds ~cancel ~on_process ~on_line invocation =
   let%map output =
     run_with_status ?accept_evidence_failure ?max_stdout_bytes ?max_record_bytes
-      ?stop_grace_seconds ~seconds ~cancel ~on_process ~on_line invocation
+      ?stop_grace_seconds ?on_cancel_signal ~seconds ~cancel ~on_process ~on_line invocation
   in
   output.Output.stdout
 ;;

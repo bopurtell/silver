@@ -319,18 +319,19 @@ let run_selector_endpoint_suffix ~width endpoint =
 let run_status_role = function
   | "completed" -> Role.Success
   | "failed" -> Failure
-  | "running" | "starting" | "observing" -> Running
+  | "running" | "starting" | "observing" | "cancelling" -> Running
   | "pending" | "queued" | "cancelled" | "interrupted" | "skipped" -> Warning
   | _ -> Foreground
 ;;
 
 (** Only lifecycle fields enter this mapping, never arbitrary report text. *)
 let run_indicator : string -> Indicator.t = function
-  | "running" | "starting" | "observing" -> Running
+  | "running" | "starting" | "observing" | "cancelling" -> Running
   | "pending" | "queued" -> Pending
   | "completed" -> Completed
   | "failed" -> Failed
-  | "cancelled" | "interrupted" -> Cancelled
+  | "cancelled" -> Cancelled
+  | "interrupted" -> Unknown
   | "skipped" -> Skipped
   | _ -> Unknown
 ;;
@@ -418,8 +419,8 @@ let stopped_observation data run =
           List.is_empty execution.stages
           || List.exists execution.stages ~f:(fun stage ->
             match stage.Asic.Stage.status with
-            | Pending | Running | Unknown _ -> true
-            | Completed | Failed | Skipped | Cancelled | Not_requested | Unsupported ->
+            | Pending | Running | Cancelling | Unknown _ -> true
+            | Completed | Failed | Skipped | Cancelled | Interrupted | Not_requested | Unsupported ->
               false)
         in
         if replacement || not unresolved
@@ -1506,7 +1507,7 @@ let planned_source_rows host tile =
       [ row Fact ("exact allocated run: " ^ id) ])
     @ Option.value_map workflow ~default:[] ~f:(fun w ->
       [ row Fact ("Workflow ID: " ^ w.id); row Fact ("submission key: " ^ w.key) ]
-      @ (if Planned_run.workflow_active w
+       @ (if Planned_run.workflow_active w && not w.cancel_requested
          then
            [ row
                Muted
@@ -1540,11 +1541,11 @@ let plan_indicator : Planned_run.status -> Indicator.t = function
 ;;
 
 let producer_indicator : Planned_run.launch_status -> Indicator.t = function
-  | Submitting | Allocated | Running -> Running
+  | Submitting | Allocated | Running | Cancelling -> Running
   | Completed -> Completed
   | Launch_failed -> Failed
   | Cancelled -> Cancelled
-  | Detached -> Unknown
+  | Detached | Interrupted -> Unknown
   | Unavailable -> Unavailable
 ;;
 
@@ -6461,9 +6462,11 @@ let%test_unit "lifecycle icons do not turn readiness, ownership or completion in
     [ Planned_run.Submitting, Indicator.Running
     ; Allocated, Running
     ; Running, Running
+    ; Cancelling, Running
     ; Completed, Completed
     ; Launch_failed, Failed
     ; Cancelled, Cancelled
+    ; Interrupted, Unknown
     ; Detached, Unknown
     ; Unavailable, Unavailable
     ]
@@ -6497,8 +6500,10 @@ let%test_unit "lifecycle icons do not turn readiness, ownership or completion in
   check (Simulation_view.attempt_indicator Finished Incomplete) Unknown;
   check (Simulation_view.attempt_indicator Finished Failed) Failed;
   check (Simulation_view.attempt_indicator Finished Passed) Completed;
+  check (run_indicator "cancelling") Running;
+  check (run_indicator "cancelled") Cancelled;
   List.iter
-    [ "pass"; "detached"; "unknown"; "unavailable"; "running in report" ]
+    [ "pass"; "detached"; "interrupted"; "unknown"; "unavailable"; "running in report" ]
     ~f:(fun status -> check (run_indicator status) Unknown)
 ;;
 

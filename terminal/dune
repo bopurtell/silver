@@ -304,6 +304,20 @@
  (deps (alias test-palette-launch-aliases-pty)))
 
 (rule
+ (alias test-palette-cancellation-pty)
+ (deps test_palette_cancellation_pty.py test_chip_contexts_pty.py test_checklist_defaults_pty.py
+       ../scripts/test-native-execution.py ../test/support/__init__.py ../test/support/screen.py
+       ../test/support/terminal.py ../backend/test/asic/production_flow_list.json
+       ../backend/test/fresh_provider.py ../scripts/fixtures/unified_fresh_prefix.py
+       ../scripts/fixtures/routing_cancellation_provider.py)
+ (action (run python3 -B %{dep:test_palette_cancellation_pty.py}
+          --client %{exe:main.exe} --daemon %{exe:../daemon/main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-palette-cancellation-pty)))
+
+(rule
  (alias test-verify-evidence-pty)
  (deps (sandbox always) test_verify_evidence_pty.py ../scripts/test-native-execution.py
         ../test/support/__init__.py ../test/support/screen.py ../test/support/terminal.py

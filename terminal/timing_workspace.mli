@@ -10,6 +10,10 @@ type pane =
 type t = Inspection_view.t
 
 val attach_retained : t -> Asic.Snapshot.t -> t
+val attach_selected : t -> Asic.Snapshot.t -> t
+val want_selected_detail : t -> t
+val published_detail : t -> Asic.Snapshot.t -> row_id:string -> Asic_inspection.Detail.t option
+val top_path_ids : t -> count:int -> string list
 
 type path_item =
   { row : Asic_inspection.Row.t

@@ -20,10 +20,10 @@ generic open action; C3 hands off ToggleTerm. C4 addresses a separately running
 main editor; C5 covers standalone monitoring. [WB-093](features/integrations/WB-093-cobalt-quick-launch.md)
 and C6 are closed for test quick launch, including the live tile/`test` alias demo.
 
-| Companion follow-up | Cobalt can start independently | Silver handoff for live acceptance |
+| Companion follow-up | Cobalt surface | Live verification (delivered; awaiting owner acceptance) |
 | --- | --- | --- |
-| [WB-094 — Project sharing](features/integrations/WB-094-editor-project-sharing.md) | C7: connection picker using fixture advertisements | Publish and withdraw real shares for the current project service and verify both clients see the same history. |
-| [WB-095 — Stage and flow launch](features/integrations/WB-095-companion-flow-launch.md) | C8: checklist and exact aliases; C9: flow kickoff tile. Exercise both against a fake launch service. | Supply examples of native flow resolution and submission; compare live launches. Use an explicit connection independently of WB-094. |
+| [WB-094 — Project sharing](features/integrations/WB-094-editor-project-sharing.md) | C7: discover and connect to an advertised project | Embedded and attached clients observed the same retained history; withdrawal preserved running jobs. |
+| [WB-095 — Stage and flow launch](features/integrations/WB-095-companion-flow-launch.md) | C8: checklist and exact aliases; C9: flow kickoff tile | Explicitly bound Cobalt matched native Silver stage launches and submitted the exact reviewed nondefault plan. |
 
 | Order | Ticket | What to try before moving on |
 | --- | --- | --- |

@@ -11,12 +11,13 @@ type request =
   ; selected : bool
   }
 
-val create : neighbors:int -> Inspection_view.t -> t
+val create : ?automatic:bool -> neighbors:int -> Inspection_view.t -> t
+val is_automatic : t -> bool
 
 (** Explicit reopen/retry resets the finite budget, retaining held/active reads. An
     acknowledged read whose task and publication are both absent from a post-receipt
     snapshot is released for explicit retry only; polls never retry it. *)
-val restart : t -> view:Inspection_view.t -> t
+val restart : ?automatic:bool -> ?neighbors:int -> t -> view:Inspection_view.t -> t
 
 (** Ignore obsolete tickets. [floor] requires a snapshot from a request issued after the
     receipt, rather than an already-held equal poll. *)
@@ -26,6 +27,9 @@ val receipt : ?floor:int -> t -> ticket:int -> (unit, 'error) Result.t -> t
     completion is observed through receipts and exact snapshots. *)
 val step
   :  ?revision:int
+  -> ?blocked:bool
+  -> ?allow_neighbors:bool
+  -> ?joining:string
   -> t
   -> view:Inspection_view.t
   -> Asic.Snapshot.t

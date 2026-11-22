@@ -18,6 +18,7 @@ module Launch_preferences = Terminal_presentation.Launch_preferences
 module Presentation_preferences = Terminal_presentation.Presentation_preferences
 
 let timing_preload_override = ref None
+let timing_preload_details_override = ref None
 let background_evidence_verification = ref true
 
 module Asic_intents = Terminal_presentation.Asic_intents
@@ -184,6 +185,9 @@ type session =
       (Workspace.Tile.t * Http.Client.t * Terminal_presentation.Timing_demand.t ref)
         option
   ; mutable timing_preload : Terminal_presentation.Timing_preload.t
+  ; mutable timing_detail_preload : Terminal_presentation.Timing_preload.t
+  ; mutable timing_detail_lane :
+      (Http.Client.t * string * string * int option ref * Inspection_view.t) option
   ; mutable timing_index_inflight : (string * unit Deferred.t) list
   ; mutable timing_preload_receipt : (string * string * int) option
   ; mutable view_on_allocation : (string * Host.launch_target) option
@@ -418,6 +422,8 @@ let create_session
       ; asic_applied_id = 0
       ; timing_demand = None
       ; timing_preload = Terminal_presentation.Timing_preload.empty
+      ; timing_detail_preload = Terminal_presentation.Timing_preload.empty
+      ; timing_detail_lane = None
       ; timing_index_inflight = []
       ; timing_preload_receipt = None
       ; view_on_allocation = None
@@ -951,7 +957,8 @@ let load_presentation_preferences session =
              ; main_hints = true
              ; browser_hints = false
              ; palette_hints = true
-             ; timing_preload = true
+              ; timing_preload = true
+              ; timing_preload_details = 0
              ; quick_launch_view = true
              ; planned_preparation = true
              ; locals = []
@@ -976,8 +983,10 @@ let load_presentation_preferences session =
              "Could not load presentation preferences; using defaults (file left \
               untouched)"
              error);
-        Option.iter !timing_preload_override ~f:(fun timing_preload ->
-          session.host <- { session.host with timing_preload })))
+         Option.iter !timing_preload_override ~f:(fun timing_preload ->
+           session.host <- { session.host with timing_preload });
+         Option.iter !timing_preload_details_override ~f:(fun timing_preload_details ->
+           session.host <- { session.host with timing_preload_details })))
 ;;
 
 let save_presentation_preferences session =
@@ -1428,7 +1437,11 @@ let reconcile_synthesis session =
               , Option.value_map session.asic ~default:view ~f:(fun snapshot ->
                   if Option.is_none view.index
                   then Timing_workspace.attach_retained view snapshot
-                  else Inspection_view.reconcile view snapshot) )))
+                   else (
+                     let view = Inspection_view.reconcile view snapshot in
+                     if session.host.timing_preload && session.host.timing_preload_details > 0
+                     then Timing_workspace.attach_selected view snapshot
+                     else view)) )))
     in
     session.host <- { session.host with timing };
     List.iter registry.tiles ~f:(fun tile ->
@@ -1776,6 +1789,21 @@ let timing_preload_scope session =
        (session.hello.instance_id, Option.map (current_project session) ~f:(fun p -> p.id)))
 ;;
 
+let timing_detail_busy session =
+  let active key snapshot =
+    List.exists snapshot.Asic.Snapshot.operations ~f:(fun op ->
+      String.equal key op.key
+      && List.mem [ "pending"; "executing" ] op.state ~equal:String.equal)
+  in
+  Option.iter session.timing_detail_lane ~f:(fun (client, scope, key, floor, _) ->
+    if not (phys_equal client session.client && String.equal scope (timing_preload_scope session))
+       || Option.exists !floor ~f:(fun floor ->
+         session.asic_applied_id >= floor
+         && not (Option.exists session.asic ~f:(active key)))
+    then session.timing_detail_lane <- None);
+  Option.is_some session.timing_detail_lane
+;;
+
 let rec asic_request
   ?artifact_request
   ?inspection_request
@@ -2045,9 +2073,13 @@ and drive_timing_demand session =
   match session.timing_demand with
   | None -> ()
   | Some (tile, client, demand) ->
+    let speculative = session.host.timing_preload in
     let view = Host.inspection session.host tile.id in
     let active =
       phys_equal client session.client
+      && Option.is_some (current_project session)
+      && (not (Terminal_presentation.Timing_demand.is_automatic !demand)
+          || (speculative && session.host.timing_preload_details > 0))
       && Option.exists session.host.registry ~f:(fun registry ->
         List.exists registry.tiles ~f:(fun current ->
           Workspace.Tile_id.equal current.id tile.id && not current.hidden))
@@ -2056,9 +2088,27 @@ and drive_timing_demand session =
     in
     (match active, view, session.asic with
      | true, Some view, Some snapshot ->
-       let next, view, request =
-         Terminal_presentation.Timing_demand.step
-           ~revision:session.asic_applied_id
+        let blocked = timing_detail_busy session in
+        let joining =
+          Option.bind session.timing_detail_lane ~f:(fun (_, _, key, _, origin) ->
+            Option.some_if
+              (Option.equal Inspection_view.same_index_source origin.index view.index
+               && Option.equal
+                    Inspection_view.equal_observation
+                    origin.observation
+                    view.observation)
+              key)
+        in
+        let next, view, request =
+          Terminal_presentation.Timing_demand.step
+            ~revision:session.asic_applied_id
+           ?joining
+           ~allow_neighbors:speculative
+            ~blocked:
+              (blocked
+               || List.exists snapshot.operations ~f:(fun op ->
+                 String.equal op.kind "inspection-detail"
+                 && Terminal_presentation.Plain_rpc.active op))
            !demand
            ~view
            snapshot
@@ -2085,12 +2135,78 @@ and drive_timing_demand session =
                      ~ticket:request.ticket
                      response
             in
-            don't_wait_for
-              (asic_request ?inspection_request ~timing_receipt session request.operation)))
-     | _ -> session.timing_demand <- None)
+             send_timing_detail ?inspection_request ~timing_receipt session view request.operation))
+      | _ -> session.timing_demand <- None)
+
+and send_timing_detail ?inspection_request ?timing_receipt session (view : Inspection_view.t) operation =
+  let scope = timing_preload_scope session in
+  let client = session.client in
+  let source_digest, row_id =
+    match operation with
+    | Asic.Operation.Inspect_detail { source_digest; row_id; _ }
+    | Inspect_analysis_detail { source_digest; row_id; _ } -> source_digest, row_id
+    | _ -> invalid_arg "Expected an exact timing detail operation"
+  in
+  let key = Inspection_view.detail_key view ~source_digest ~row_id in
+  if Option.is_some timing_receipt && session.host.timing_preload
+     && session.host.timing_preload_details > 0
+     && List.mem
+          (Timing_workspace.top_path_ids view ~count:session.host.timing_preload_details)
+          row_id ~equal:String.equal
+  then
+    Option.iter view.index ~f:(fun index ->
+      let module P = Terminal_presentation.Timing_preload in
+      let source = P.detail_source view index in
+      session.timing_detail_preload
+      <- P.remember
+           session.timing_detail_preload
+           ~scope
+           ~key:(P.detail_attempt_key ~source ~row_id));
+  let floor = ref None in
+  session.timing_detail_lane <- Some (client, scope, key, floor, view);
+  let receipt response =
+    if phys_equal client session.client
+       && String.equal scope (timing_preload_scope session)
+       && Option.exists session.timing_detail_lane ~f:(fun (_, _, _, current, _) ->
+         phys_equal current floor)
+    then (
+      (* Even an uncertain/failed HTTP receipt may have reached the daemon. *)
+      floor := Some (session.asic_request_id + 1);
+      Option.iter timing_receipt ~f:(fun receipt -> receipt response))
+  in
+  don't_wait_for (asic_request ?inspection_request ~timing_receipt:receipt session operation)
 
 and drive_timing_preload session =
+  (* Always give the current highlighted/explicit demand the next available slot. *)
+  drive_timing_demand session;
   let scope = timing_preload_scope session in
+  let speculative =
+    session.host.timing_preload
+    && Option.is_some session.presentation_preferences_loaded
+    && not (Terminal_presentation.Retained_hydration.Coordinator.busy session.hydration)
+  in
+  let stock_paths =
+    if not speculative
+    then []
+    else
+      Option.value_map session.host.registry ~default:[] ~f:(fun registry ->
+        Host.builtin_timing_workspaces registry
+        |> List.filter_map ~f:(fun workspace ->
+          let panes = Host.timing_panes registry workspace.id in
+          if Option.is_none (Host.coherent_timing_run registry panes)
+          then None
+          else
+            List.find panes ~f:(fun tile ->
+              String.equal tile.kind "timing-paths" && not tile.hidden)))
+  in
+  let inspection_active =
+    timing_detail_busy session
+    || not (List.is_empty session.timing_index_inflight)
+    || Option.exists session.asic ~f:(fun snapshot ->
+      List.exists snapshot.operations ~f:(fun op ->
+        List.mem [ "inspection"; "inspection-detail" ] op.kind ~equal:String.equal
+        && List.mem [ "pending"; "executing" ] op.state ~equal:String.equal))
+  in
   (* The HTTP receipt only acknowledges queued work. The shared automatic index lane
      stays occupied until a later snapshot publishes the index or a terminal failure. *)
   Option.iter session.timing_preload_receipt ~f:(fun (flight_scope, key, floor) ->
@@ -2146,25 +2262,7 @@ and drive_timing_preload session =
         then Some (Inspection_view.index_key view, (tile, view))
         else None)
     in
-    let hidden =
-      (* The preference identity is set when its read starts. Do not speculate
-         until hydration has applied the saved policy and navigation. *)
-      if not session.host.timing_preload
-         || Option.is_none session.presentation_preferences_loaded
-         || Terminal_presentation.Retained_hydration.Coordinator.busy session.hydration
-      then []
-      else
-        Option.value_map session.host.registry ~default:[] ~f:(fun registry ->
-          Host.builtin_timing_workspaces registry
-          |> List.filter_map ~f:(fun workspace ->
-            let panes = Host.timing_panes registry workspace.id in
-            if Option.is_none (Host.coherent_timing_run registry panes)
-            then None
-            else
-              List.find panes ~f:(fun tile ->
-                String.equal tile.kind "timing-paths" && not tile.hidden)
-              |> Option.bind ~f:(candidate ~visible:false)))
-    in
+     let hidden = List.filter_map stock_paths ~f:(candidate ~visible:false) in
     Option.to_list (Option.bind visible ~f:(candidate ~visible:true)) @ hidden
   in
   let planner, next =
@@ -2172,13 +2270,7 @@ and drive_timing_preload session =
       session.timing_preload
       ~scope
        ~enabled:(not session.selecting_chip)
-      ~interactive:
-        ((not (List.is_empty session.timing_index_inflight))
-         || Option.is_some session.timing_demand
-         || Option.exists session.asic ~f:(fun snapshot ->
-           List.exists snapshot.operations ~f:(fun op ->
-             List.mem [ "inspection"; "inspection-detail" ] op.kind ~equal:String.equal
-             && List.mem [ "pending"; "executing" ] op.state ~equal:String.equal)))
+       ~interactive:inspection_active
       ~candidates:(List.map candidates ~f:fst)
   in
   session.timing_preload <- planner;
@@ -2222,7 +2314,31 @@ and drive_timing_preload session =
       (asic_request
          ~timing_receipt
          session
-         (Inspection_view.operation ~refresh:false view)))
+          (Inspection_view.operation ~refresh:false view)));
+  if Option.is_none next && not inspection_active && Option.is_none planner.running
+     && Option.is_some (current_project session)
+     && not session.selecting_chip && session.host.timing_preload_details > 0
+  then
+    Option.iter session.asic ~f:(fun snapshot ->
+      let candidates =
+        List.concat_map stock_paths ~f:(fun tile ->
+          Option.value_map (Host.timing session.host tile) ~default:[] ~f:(fun view ->
+            Terminal_presentation.Timing_preload.detail_candidates
+              view snapshot ~count:session.host.timing_preload_details))
+      in
+      let details, next =
+        Terminal_presentation.Timing_preload.step
+          session.timing_detail_preload
+          ~scope ~enabled:true ~interactive:false ~candidates:(List.map candidates ~f:fst)
+      in
+      session.timing_detail_preload <- details;
+      Option.iter next ~f:(fun key ->
+        let view, operation = List.Assoc.find_exn candidates key ~equal:String.equal in
+        (* The shared lane owns serialization through daemon completion. The planner
+           only keeps the finite attempt ledger. *)
+        session.timing_detail_preload
+        <- Terminal_presentation.Timing_preload.finish details ~scope ~key;
+        send_timing_detail session view operation))
 ;;
 
 let artifact_export_notice session tile_id message =
@@ -5153,7 +5269,9 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; preparation_request_id = 0
     ; asic_applied_id = 0
     ; timing_demand = None
-    ; timing_preload = Terminal_presentation.Timing_preload.empty
+     ; timing_preload = Terminal_presentation.Timing_preload.empty
+     ; timing_detail_preload = Terminal_presentation.Timing_preload.empty
+     ; timing_detail_lane = None
     ; timing_index_inflight = []
     ; timing_preload_receipt = None
     ; view_on_allocation = None
@@ -5586,11 +5704,16 @@ let host_catalog_base session =
             "run synth last used"
             (Asic (Plan selection))
         ])
-  @ Terminal_presentation.Stage_launch_commands.commands
-      ~inspected:(inspected_run session)
-      session.host
-      ~asic:session.asic
-      ~remembered:session.remembered_selection
+   @ Terminal_presentation.Stage_launch_commands.commands
+       ~inspected:(inspected_run session)
+       session.host
+       ~asic:session.asic
+       ~remembered:session.remembered_selection
+   @ Terminal_presentation.Stage_launch_commands.cancellation_commands
+       session.host
+       ~project:(Option.map (current_project session) ~f:(fun project -> project.id))
+       ~asic:session.asic
+       ~inspected:(inspected_run session)
   @ Host.launch_commands
       session.host
       ~preview:(Option.bind session.asic ~f:(fun asic -> asic.preview))
@@ -5632,7 +5755,7 @@ let host_catalog_base session =
               ^ Launch_preferences.chip_label asic.chip_target))
           "selected flow endpoint overrides EDA-less no launch"
           (Edit_preparation (flow.id, profile))))
-    @ Host.asic_cancel_commands asic
+     @ Host.asic_cancel_commands ~include_producers:false asic
     @ List.map asic.finalizations ~f:(fun finalization ->
       Host.command
         ("asic.finalize-observe." ^ finalization.key)
@@ -5770,12 +5893,16 @@ let host_catalog session =
 
 let timing_prefetch_neighbors = ref 2
 
-let activate_timing_demand session tile view =
+let activate_timing_demand ?(automatic = false) session tile view =
+  let neighbors =
+    if automatic || not session.host.timing_preload then 0 else !timing_prefetch_neighbors
+  in
   match session.timing_demand with
   | Some (previous, client, demand)
-    when Workspace.Tile_id.equal previous.id tile.Workspace.Tile.id
+    when Workspace.Workspace_id.equal previous.workspace tile.Workspace.Tile.workspace
          && phys_equal client session.client ->
-    demand := Terminal_presentation.Timing_demand.restart !demand ~view
+     demand := Terminal_presentation.Timing_demand.restart !demand ~view ~automatic ~neighbors;
+     session.timing_demand <- Some (tile, client, demand)
   | _ ->
     session.timing_demand
     <- Some
@@ -5783,7 +5910,8 @@ let activate_timing_demand session tile view =
          , session.client
          , ref
              (Terminal_presentation.Timing_demand.create
-                ~neighbors:!timing_prefetch_neighbors
+                 ~automatic
+                 ~neighbors
                 view) )
 ;;
 
@@ -6312,9 +6440,10 @@ let inspection_step session tile view action =
     let inspection, operation =
       match Host.timing_pane session.host tile with
       | None -> Inspection_view.input ~width ~height view action
-      | Some pane ->
-        let local = Host.local session.host tile.id in
-        let view, scroll, operation =
+       | Some pane ->
+         let local = Host.local session.host tile.id in
+         let previous = view.selected in
+         let view, scroll, operation =
           Timing_workspace.input
             ~presentation:(Host.policy session.host tile)
             ~pane
@@ -6324,9 +6453,24 @@ let inspection_step session tile view action =
             view
             action
         in
-        let view =
-          Option.value_map session.asic ~default:view ~f:(Inspection_view.reconcile view)
-        in
+         let view =
+           Option.value_map session.asic ~default:view ~f:(Inspection_view.reconcile view)
+         in
+         let changed = not (Option.equal String.equal previous view.selected) in
+         let view =
+           if changed
+           then Option.value_map session.asic ~default:view ~f:(Timing_workspace.attach_selected view)
+           else view
+         in
+         let view =
+           if changed && Option.is_none operation
+              && session.host.timing_preload && session.host.timing_preload_details > 0
+           then (
+             let view = Timing_workspace.want_selected_detail view in
+             activate_timing_demand ~automatic:true session tile view;
+             view)
+           else view
+         in
         let operation =
           match action, operation with
           | Inspection_view.Back, _ ->
@@ -8198,10 +8342,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
          ; notice = "Enter ENDPOINT [name=value ...]; captures preparation inputs only"
          };
       Effect.Ignore
-    | Cancel_preparation ->
-      (match Planned_run.workflow session.host.planned_run with
-       | Some w when Planned_run.workflow_active w ->
-         async (fun () -> asic_request session (Cancel_workflow w.id))
+     | Cancel_preparation ->
+       (match Planned_run.workflow session.host.planned_run with
+        | Some w when Planned_run.workflow_active w ->
+          if w.cancel_requested then Effect.Ignore
+          else async (fun () -> asic_request session (Cancel_workflow w.id))
        | _ ->
          (match Option.bind session.host.preparation ~f:(fun s -> s.latest) with
           | Some a when Terminal_presentation.Preparation_view.active a ->
@@ -8437,7 +8582,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               preview"
          };
       Effect.Ignore
-    | Asic (Plan selection) ->
+     | Asic (Plan selection) ->
       async
         (stage_fresh
            ~remember:true
@@ -8446,9 +8591,53 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
              Host.current session.host captured && Result.is_ok (validate ()))
            ~selection
            ~elaboration_only:false
-           ~quick:false
-           ~view:false)
-    | Asic (Cancel key as operation) ->
+            ~quick:false
+            ~view:false)
+     | Cancel_asic_flows { project; bulk_chip; viewed; operations } ->
+       let instance = session.hello.instance_id in
+       let epoch = session.context_epoch in
+       async (fun () ->
+         let module C = Terminal_presentation.Stage_launch_commands in
+         let same_scope () =
+           not session.selecting_chip
+           && epoch = session.context_epoch
+           && phys_equal captured_client session.client
+           && V1.Daemon_instance_id.equal instance session.hello.instance_id
+           && Option.exists (current_project session) ~f:(fun p -> Project_id.equal p.id project)
+           && Option.for_all bulk_chip ~f:(fun chip ->
+             Option.exists session.asic ~f:(fun snapshot ->
+               Result.ok (C.selected_cancel_chip snapshot)
+               |> Option.equal Asic.Chip_target.equal (Some chip)))
+         in
+         if not (same_scope ())
+         then (
+           session.host <- { session.host with notice = "Cancellation target changed; reopen palette" };
+           return ())
+         else
+           (* Only captured IDs are dispatched. Never replace one that finished
+              or began cancelling while the palette was open with a newer one. *)
+           Deferred.List.iter operations ~how:`Sequential ~f:(fun operation ->
+             let still_active =
+               Option.exists session.asic ~f:(fun snapshot ->
+                 let flows = C.cancellable_flows snapshot in
+                 let matches (flow : C.cancellable_flow) =
+                   Asic.Operation.equal operation flow.operation
+                   && Option.for_all bulk_chip ~f:(fun chip ->
+                     Option.equal Asic.Chip_target.equal flow.target (Some chip))
+                 in
+                 if viewed
+                 then
+                   Result.ok (C.viewed_flow session.host ~inspected:(inspected_run session) flows)
+                   |> Option.exists ~f:matches
+                 else List.exists flows ~f:matches)
+             in
+             if same_scope () && still_active
+             then asic_request session operation
+             else (
+               if viewed
+               then session.host <- { session.host with notice = "Viewed flow changed; reopen palette" };
+               return ())))
+     | Asic (Cancel key as operation) ->
       async (fun () ->
         if Option.value_map session.asic ~default:false ~f:(fun snapshot ->
              List.exists snapshot.operations ~f:(fun operation ->
@@ -8728,8 +8917,17 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               then "Timing preload: Background index"
               else "Timing preload: Explicit only")
          };
-      drive_timing_preload session;
-      Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+       drive_timing_preload session;
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+    | Set_timing_preload_details timing_preload_details ->
+       session.host
+       <- { session.host with
+            timing_preload_details
+          ; notice = sprintf "Timing preload: Top %d path details" timing_preload_details
+          };
+       reconcile_synthesis session;
+       drive_timing_preload session;
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
     | Set_global_compression value ->
       session.host <- Host.set_global_compression session.host value;
       session.host <- { session.host with notice = Host.compression_hint session.host };
@@ -11910,6 +12108,16 @@ let command =
          ~doc:
             "background-index|explicit-only hidden Timing index policy (visible Timing \
              loads on entry in either mode; overrides saved preference initially)"
+     and timing_preload_details =
+       flag
+         "--timing-preload-details"
+         (optional
+            (Command.Arg_type.create (fun value ->
+               let n = Int.of_string value in
+               if not (Terminal_presentation.Timing_preload.valid_detail_count n)
+               then failwith "expected 0..5";
+               n)))
+         ~doc:"0..5 top timing path details to warm (overrides saved project preference)"
      and api =
        flag
          "--api"
@@ -12065,18 +12273,21 @@ let command =
             return (Or_error.error_string message)
          | Ok (`Unbound start) ->
            timing_prefetch_neighbors := timing_neighbors;
-           timing_preload_override := timing_preload;
+            timing_preload_override := timing_preload;
+            timing_preload_details_override := timing_preload_details;
            local_workspace ~initial:(`Unbound start) ~no_mouse ~environment ~state_dir:standalone_state_dir
              ~diagnostics_file ~workspace_config ~artifact_viewer ~artifact_binary_viewer
          | Ok (`Open (Some root, note)) when interactive ->
            timing_prefetch_neighbors := timing_neighbors;
-           timing_preload_override := timing_preload;
+            timing_preload_override := timing_preload;
+            timing_preload_details_override := timing_preload_details;
            Option.iter note ~f:(eprintf "%s: %s\n%!" program);
            local_workspace ~initial:(`Open root) ~no_mouse ~environment ~state_dir:standalone_state_dir
              ~diagnostics_file ~workspace_config ~artifact_viewer ~artifact_binary_viewer
          | Ok (`Open (project_root, note)) ->
           timing_prefetch_neighbors := timing_neighbors;
-          timing_preload_override := timing_preload;
+           timing_preload_override := timing_preload;
+           timing_preload_details_override := timing_preload_details;
           if not api then Option.iter note ~f:(eprintf "%s: %s\n%!" program);
             let wait =
               wait

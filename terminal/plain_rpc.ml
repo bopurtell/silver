@@ -31,6 +31,7 @@ let rec keys (operation : Asic.Operation.t) (snapshot : Asic.Snapshot.t) =
     List.filter_map snapshot.workflows ~f:(fun w ->
       if String.equal w.key key then Some ("workflow:" ^ w.id) else None)
   | Cancel_workflow id -> [ "workflow:" ^ id ]
+  | Cancel_finalization { key; _ } -> [ "finalize:" ^ key ]
   | Register _ -> []
   | Observe run ->
     let key = "observe:" ^ run.id in

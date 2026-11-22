@@ -70,12 +70,12 @@ elif args[:1] == ["stages"]:
 
     def save(status=None):
         execution = dict(attempt_id=stream, status=status or "running",
-                         exit_code=130 if status == "interrupted" else 0,
+                         exit_code=143 if status == "interrupted" else 0,
                          plan=recipe, artifacts=[], occurrences=[
                              dict(action_key="implementation." + stage,
                                   occurrence_id=stream + "/implementation." + stage,
                                   status=status or "running",
-                                  exit_code=(None if status is None else (130 if status == "interrupted" else 0)),
+                                  exit_code=(None if status is None else (143 if status == "interrupted" else 0)),
                                   best_effort=False, verdict=None)
                              for stage in stages])
         with open(execution_file, "w") as out:
@@ -93,7 +93,7 @@ elif args[:1] == ["stages"]:
         with open("physical-stopped", "w") as out:
             out.write(stream)
         emit(env("stage-observation", event="observation_terminal", execution_file=execution_file))
-        sys.exit(130)
+        sys.exit(143)
 
     signal.signal(signal.SIGTERM, stop)
     save()

@@ -48,6 +48,7 @@ module Stored = struct
     ; terminal_attempts : (string * string) list [@sexp.default []]
     ; finalizations : Finalization_stored.t list [@sexp.default []]
     ; stage_starts : (string * (string * Timestamp.t) list) list [@sexp.default []]
+    ; user_cancelled_runs : string list [@sexp.default []] [@sexp_drop_default.equal]
     ; workflows : Asic.Fresh.Workflow.t list [@sexp.default []]
     ; context_targets : (string * Asic.Chip_target.t) list [@sexp.default []] [@sexp_drop_default.equal]
     ; preferred_target : Asic.Chip_target.t option [@sexp.default None] [@sexp_drop_default.equal]
@@ -143,6 +144,7 @@ type query_scope = string * int option [@@deriving sexp_of]
 type task =
   { query_scope : query_scope option
   ; cancel : unit Ivar.t
+  ; mutable user_cancel_requested : bool
   ; mutable pending : Asic.Pending.t
   ; mutable completion : unit Deferred.t
   }
@@ -183,6 +185,7 @@ type project =
   ; mutable terminal_attempts : (string * string) list
   ; mutable finalizations : Finalization_stored.t list
   ; mutable stage_starts : (string * (string * Timestamp.t) list) list
+  ; mutable user_cancelled_runs : string list
   ; mutable artifacts : Asic_artifact.Reference.t list
   ; mutable artifact_pages : Asic_artifact.Page.t list
   ; mutable artifact_byte_pages : Asic_artifact.Byte_page.t list
@@ -316,6 +319,7 @@ let save_registry ?reservation t p =
         ; terminal_attempts = p.terminal_attempts
         ; finalizations = p.finalizations
         ; stage_starts = p.stage_starts
+        ; user_cancelled_runs = p.user_cancelled_runs
         ; workflows = p.workflows
         ; preferred_target = p.main.chip_target
         ; context_targets =
@@ -466,6 +470,7 @@ let load_project t ~root ~environment =
     ; terminal_attempts = []
     ; finalizations = []
     ; stage_starts = []
+    ; user_cancelled_runs = []
     ; artifacts = []
     ; artifact_pages = []
     ; artifact_byte_pages = []
@@ -506,6 +511,14 @@ let load_project t ~root ~environment =
             Stored.t_of_sexp (Sexp.of_string (read_bounded filename (4 * 1024 * 1024)))
           in
           List.iter stored.runs ~f:(fun run -> Public.validate_stages run.stages);
+          Public.require
+            (List.length stored.user_cancelled_runs <= 256
+             && not (List.contains_dup stored.user_cancelled_runs ~compare:String.compare)
+             && List.for_all stored.user_cancelled_runs ~f:(fun id ->
+                  List.exists stored.runs ~f:(fun r -> String.equal r.run.id id)
+                  && List.exists stored.submissions ~f:(fun (_, _, run) ->
+                       Option.equal String.equal run (Some id))))
+            "Invalid retained ASIC cancellation evidence";
           let workflow_keys = String.Hash_set.create () in
           List.iter stored.workflows ~f:(fun w ->
             Public.require
@@ -570,10 +583,18 @@ let load_project t ~root ~environment =
             ; stages =
                 List.map r.stages ~f:(fun stage ->
                   { stage with
-                    execution_timing = Execution_timing.stopped stage.execution_timing
+                    status =
+                      (* Old registries mislabelled bare provider interruption.
+                         The legacy reason identifies only that projection. *)
+                      (match stage.status, stage.reason with
+                       | Cancelled, Some reason
+                         when String.equal reason Public.interruption_reason -> Interrupted
+                       | status, _ -> status)
+                  ; execution_timing = Execution_timing.stopped stage.execution_timing
                   })
             });
        p.submissions <- s.submissions;
+       p.user_cancelled_runs <- s.user_cancelled_runs;
        List.iter s.context_targets ~f:(fun (key, target) ->
          Hashtbl.set p.contexts ~key ~data:(launch_context key (Some target)));
        p.main.chip_target <- s.preferred_target;
@@ -935,7 +956,8 @@ let observe_unlocked t p cancel (run : Run_ref.t) =
       (invoke p (fun c ~root ~environment ->
          Adapter.inspect c ~root ~environment r.reference))
   in
-  let next, final = Public.inspection r ~cursor inspection in
+  let user_cancelled = List.mem p.user_cancelled_runs run.id ~equal:String.equal in
+  let next, final = Public.inspection ~user_cancelled r ~cursor inspection in
   let next =
     Public.updates_timing
       next
@@ -1316,6 +1338,17 @@ let validate_cached_summary t p cancel (run : Run_ref.t) ~source_digest ~on_read
     | _ -> Deferred.unit)
 ;;
 
+let task_active task =
+  List.mem [ "pending"; "executing" ] task.pending.state ~equal:String.equal
+;;
+
+let request_task_cancellation task =
+  if task_active task && not (Ivar.is_full task.cancel)
+  then (
+    task.user_cancel_requested <- true;
+    Ivar.fill_if_empty task.cancel ())
+;;
+
 let snapshot c p : Asic.Snapshot.t =
   { configured = Option.is_some p.config
   ; flows = c.flows
@@ -1324,7 +1357,33 @@ let snapshot c p : Asic.Snapshot.t =
   ; catalog_default = c.catalog_default
   ; description_json = c.description
   ; preview = c.preview
-  ; runs = p.runs
+  ; runs =
+      (let cancelling =
+         Hashtbl.data p.tasks
+         |> List.filter_map ~f:(fun task ->
+           if task_active task
+              && task.user_cancel_requested
+              && String.equal task.pending.kind "run"
+           then task.pending.run
+           else None)
+      in
+      List.map p.runs ~f:(fun run ->
+        if List.mem [ "allocated"; "observing" ] run.status ~equal:String.equal
+           && List.mem cancelling run.run ~equal:Run_ref.equal
+        then
+          { run with
+            status = "cancelling"
+          ; stages =
+              List.map run.stages ~f:(fun stage ->
+                if Asic.Stage.Status.equal stage.status Running
+                then
+                  { stage with
+                    status = Cancelling
+                  ; reason = Some "Waiting for flow cleanup"
+                  }
+                else stage)
+          }
+        else run))
   ; launches =
       List.map p.submissions ~f:(fun (key, preview, run_id) ->
         { Asic.Launch.key; preview; run_id })
@@ -1423,6 +1482,7 @@ let schedule ?query_scope ?run t p ~key ~kind ~execution f =
     let task =
       { query_scope
       ; cancel = Ivar.create ()
+      ; user_cancel_requested = false
       ; completion = Deferred.unit
       ; pending =
           { Asic.Pending.key
@@ -2460,8 +2520,9 @@ let load_inspection_detail
        && List.exists index.rows ~f:(fun row -> String.equal row.id row_id))
       "Stale inspection digest or unknown row";
     check_inspection_current p cancel registered;
-    let%bind () = In_thread.run (fun () ->
-      Asic_timing_reinspection.validate_live ~registered index) in
+     let%bind () = In_thread.run (fun () ->
+       Asic_timing_reinspection.validate_live ~registered index) in
+     check_inspection_current p cancel registered;
     let identity = detail_identity registered index row_id in
     match Inspection_detail_cache.find p.detail_cache identity with
     | Some detail ->
@@ -2923,11 +2984,18 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
            Inspection_wire.analysis_detail_key ~run ~target ~source_digest ~row_id)
       ~kind:"inspection-detail"
       ~execution:false
-      (fun task ->
-        task.pending
-        <- { task.pending with run = Some run; activity = Evidence_cache_lookup };
-        let cancel = Ivar.read task.cancel in
-        let%bind result =
+       (fun task ->
+         task.pending
+         <- { task.pending with run = Some run; activity = Evidence_cache_lookup };
+         let cancel = Ivar.read task.cancel in
+         let published_source () =
+           let registered = find_run p run in
+           Option.map
+             (List.find p.inspections ~f:(inspection_matches ~run ~domain ~stage))
+             ~f:(fun index -> registered, index)
+         in
+         let before = if String.equal domain "timing" then published_source () else None in
+         let%bind result =
           Monitor.try_with (fun () ->
             load_inspection_detail
               t
@@ -2955,8 +3023,24 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
             ; error = Some (Exn.to_string exn)
             }
           in
-          publish_detail p detail;
-          raise exn);
+           (* The detail wire identity does not contain a run cursor or the full
+              index identity. A failed read from a superseded source must not
+              occupy the same row/digest slot on the new source. *)
+           if not (String.equal domain "timing")
+              || (not (Deferred.is_determined cancel)
+                  && Option.for_all analysis ~f:(fun target ->
+                    Option.exists before ~f:(fun (registered, index) ->
+                      String.equal target.attempt_id registered.Asic.Run.reference.stream_id
+                      && Asic_timing_reinspection.matches index target))
+                  && Option.equal
+                       (fun (old_run, old_index) (run, index) ->
+                         String.equal
+                           (detail_source_identity old_run old_index)
+                           (detail_source_identity run index))
+                       before
+                       (published_source ()))
+           then publish_detail p detail;
+           raise exn);
     Deferred.unit
   | Finalize { key; run; execution_file; acceptance } ->
     reserve_finalization t p ~key ~run ~execution_file ~acceptance
@@ -3169,8 +3253,16 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
          "Fresh input intent superseded; stage again";
        validate_target p c intent.selection;
        launch_fresh ~staged:true t p c ~key ~intent)
-  | Cancel_workflow id -> cancel_workflow t p id
-  | Cancel key when List.exists p.workflows ~f:(fun w -> workflow_cancel_key w key) ->
+   | Cancel_workflow id -> cancel_workflow t p id
+   | Cancel_finalization { key; run } ->
+     serialized p "finalization-reservations" (fun () ->
+       let operation_key = "finalize:" ^ key in
+       Option.iter (Hashtbl.find p.tasks operation_key) ~f:(fun task ->
+         if String.equal task.pending.kind "finalize"
+            && Option.equal Run_ref.equal task.pending.run (Some run)
+         then request_task_cancellation task);
+       Deferred.unit)
+   | Cancel key when List.exists p.workflows ~f:(fun w -> workflow_cancel_key w key) ->
     let w = List.find_exn p.workflows ~f:(fun w -> workflow_cancel_key w key) in
     cancel_workflow t p w.id
   | Cancel key ->
@@ -3183,8 +3275,8 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
          | Some task -> task
          | None -> Hashtbl.find_exn p.tasks ("run:" ^ key))
     in
-    Ivar.fill_if_empty task.cancel ();
-    if String.equal task.pending.kind "run"
+    request_task_cancellation task;
+    if task.user_cancel_requested && task_active task && String.equal task.pending.kind "run"
     then
       Option.iter task.pending.run ~f:(fun run ->
         Option.iter
@@ -3519,6 +3611,7 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
         in
         let allocated = ref None in
         let delivered_execution = ref None in
+        let user_cancel_signalled = ref false in
         let validate_delivery run =
           Option.iter !delivered_execution ~f:(fun delivered ->
             let r = find_run p run in
@@ -3654,6 +3747,9 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
               ~stop_grace_seconds:15.
               ~seconds
               ~cancel
+              ~on_cancel_signal:(fun () ->
+                user_cancel_signalled :=
+                  task.user_cancel_requested && not (Deferred.is_determined deadline))
               ~on_process:ignore
               ~on_line
               (let id, prepared = Option.value_exn prepared_input in
@@ -3672,6 +3768,18 @@ let rec handle_operation ?prepared_input ?(preparation_target_compatible = fun _
           match !allocated with
           | None -> Deferred.unit
           | Some run ->
+            (* Persist the exact producer association before interpreting its
+               terminal journal. A request alone (or a daemon shutdown/deadline)
+               cannot turn an unrelated interruption into a user cancellation. *)
+            let%bind () =
+              if !user_cancel_signalled
+              then (
+                p.user_cancelled_runs
+                <- run.id :: List.filter p.user_cancelled_runs ~f:(fun id ->
+                     not (String.equal id run.id));
+                persist t p)
+              else Deferred.unit
+            in
             let observer = Hashtbl.find p.tasks (observation_key run) in
             Option.iter observer ~f:(fun observer ->
               Ivar.fill_if_empty observer.cancel ());
@@ -3767,10 +3875,10 @@ and cancel_workflow t p id =
     update_workflow p id (fun w -> { w with cancel_requested = true });
     Option.iter
       (Hashtbl.find p.tasks ("workflow:" ^ id))
-      ~f:(fun task -> Ivar.fill_if_empty task.cancel ());
+      ~f:request_task_cancellation;
     Option.iter
       (Hashtbl.find p.tasks ("run:" ^ w.key))
-      ~f:(fun task -> Ivar.fill_if_empty task.cancel ());
+      ~f:request_task_cancellation;
     let%bind () = save_required t p in
     match w.preparation_id, t.preparation_runner with
     | Some attempt, Some runner ->
@@ -4051,7 +4159,7 @@ and execute_fresh t p c id task =
             (Run { key = w.key; preview })
         in
         let task = Hashtbl.find_exn p.tasks ("run:" ^ w.key) in
-        if (workflow p id).cancel_requested then Ivar.fill_if_empty task.cancel ();
+        if (workflow p id).cancel_requested then request_task_cancellation task;
         let%bind () = task.completion in
         Public.require
           (String.equal task.pending.state "completed")
@@ -4072,14 +4180,18 @@ and execute_fresh t p c id task =
   update_workflow p id (fun w ->
     { w with
       phase =
-        (if w.cancel_requested
-            || t.closing
-            || String.equal w.elaboration_status "cancelled"
-         then Cancelled
-         else (
-           match result with
-           | Ok () -> Completed
-           | Error _ -> Failed))
+        (match w.run with
+         | Some run ->
+           (match (find_run p run).status with
+            | "cancelled" -> Cancelled
+            | "interrupted" -> Interrupted
+            | "completed" when w.cancel_requested -> Completed
+            | "observation_unavailable" when w.cancel_requested || t.closing -> Interrupted
+            | _ -> (match result with Ok () -> Completed | Error _ -> Failed))
+         | None ->
+           if w.cancel_requested || t.closing || String.equal w.elaboration_status "cancelled"
+           then Cancelled
+           else (match result with Ok () -> Completed | Error _ -> Failed))
     ; error =
         (match result with
          | Ok () -> w.error

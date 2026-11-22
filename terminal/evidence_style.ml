@@ -41,7 +41,7 @@ let normalize field value : Status.t =
   | Summary_completion, "completed" -> Passed
   | Operation, "failed" | Physical_completion, "failed" | Verdict, ("fail" | "failed") ->
     Failed
-  | Operation, ("running" | "starting") -> Running
+  | Operation, ("running" | "starting" | "cancelling") -> Running
   | Operation, ("interrupted" | "cancelled" | "queued" | "pending")
   | Physical_completion, ("partial" | "incomplete")
   | Verdict, ("not_evaluated" | "not_requested" | "skipped" | "pending") -> Pending
@@ -64,8 +64,8 @@ let freshness_role : Asic.Summary.Freshness.t -> Role.t = function
 let stage_role : Asic.Stage.Status.t -> Role.t = function
   | Completed -> Passed
   | Failed -> Failed
-  | Running -> Running
-  | Pending | Skipped | Cancelled -> Pending
+  | Running | Cancelling -> Running
+  | Pending | Skipped | Cancelled | Interrupted -> Pending
   | Not_requested | Unsupported | Unknown _ -> Muted
 ;;
 

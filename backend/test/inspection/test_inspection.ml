@@ -58,7 +58,11 @@ let replace j key value =
 ;;
 
 let fixture () =
-  let root = Core_unix.mkdtemp "/tmp/workbench-inspection-" |> Filename_unix.realpath in
+  let root =
+    Core_unix.mkdtemp
+      (Filename.concat (Stdlib.Filename.get_temp_dir_name ()) "workbench-inspection-")
+    |> Filename_unix.realpath
+  in
   let execution_file = Filename.concat root "execution.json" in
   let bytes = Yojson.Safe.to_string (json [ "attempt_id", str run.id ]) ^ "\n" in
   Out_channel.write_all execution_file ~data:bytes;
@@ -1006,10 +1010,9 @@ let observation_generation_tests () =
       require
         (List.hd_exn snapshot.inspections).cached_unverified
         "Stale detail revalidated an old index";
-      require
-        (List.for_all snapshot.inspection_details ~f:(fun detail ->
-           Option.is_some detail.error && String.is_empty detail.text))
-        "In-flight detail crossed a same-path cursor fence";
+       require
+         (List.is_empty snapshot.inspection_details)
+         "In-flight detail or its failure crossed a same-path cursor fence";
       require
         (List.exists snapshot.operations ~f:(fun pending ->
            String.equal pending.kind "inspection-detail"

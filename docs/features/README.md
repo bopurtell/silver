@@ -1,15 +1,15 @@
 # Feature ticket catalog
 
 **Timing detail preload:** [WB-097 — Preload details for the top N timing paths](evidence/WB-097-timing-path-detail-preload.md)
-is proposed. A saved count controls how many paths are ready to inspect on selection.
+is delivered. A saved count controls how many paths are ready to inspect on selection.
 
 **ASIC flow cancellation:** [WB-096 — Cancel active ASIC flows from the palette](presentation/WB-096-flow-cancellation.md)
-is proposed. It covers `cancel`, chip-scoped `cancel all`, and the checklist status of stages skipped after cancellation.
+is delivered. It covers `cancel`, chip-scoped `cancel all`, and the checklist status of stages skipped after cancellation.
 
 **Cobalt companion:** [WB-093 — Test quick launch](integrations/WB-093-cobalt-quick-launch.md)
 is closed. [WB-094 — Share the current project with editors](integrations/WB-094-editor-project-sharing.md)
 owns no-flags connection discovery; [WB-095 — Companion flow launch](integrations/WB-095-companion-flow-launch.md)
-owns the stage checklist, palette aliases, and flow kickoff. Both follow-ups are proposed.
+owns the stage checklist, palette aliases, and flow kickoff. Both follow-ups are delivered.
 
 **Cobalt integration intake (2026-11-21):** [Editor workspace, shared ToggleTerm,
 and timing navigation — recommended order](../cobalt_editor_roadmap.md).

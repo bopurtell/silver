@@ -31,9 +31,11 @@ and launch_status =
   | Submitting
   | Allocated
   | Running
+  | Cancelling
   | Completed
   | Launch_failed
   | Cancelled
+  | Interrupted
   | Detached
   | Unavailable
 [@@deriving equal, sexp]
@@ -398,9 +400,10 @@ let launch_model t preview =
          | Some r when String.equal r.status "completed" ->
            Completed, "Producer completed"
          | Some r when String.equal r.status "failed" -> Launch_failed, "Producer failed"
-         | Some r
-           when List.mem [ "cancelled"; "interrupted" ] r.status ~equal:String.equal ->
-           Cancelled, "Producer cancelled/interrupted"
+          | Some r when String.equal r.status "cancelling" -> Cancelling, "Cancelling…"
+          | Some r when String.equal r.status "cancelled" -> Cancelled, "Producer cancelled"
+          | Some r when String.equal r.status "interrupted" ->
+            Interrupted, "Producer interrupted; cancellation not confirmed"
          | _ ->
            (match op with
             | Some op when String.equal op.state "failed" ->
@@ -565,7 +568,9 @@ let raw_model t =
           | Completed -> Completed
           | Failed -> Launch_failed
           | Cancelled -> Cancelled
-          | Interrupted -> Detached
+           | Interrupted -> Interrupted
+           | (Reserved | Building | Emitting | Prepared | Physical) when w.cancel_requested ->
+             Cancelling
           | Physical -> if Option.is_some w.run then Running else Submitting
           | Reserved | Building | Emitting | Prepared -> Submitting
         in
@@ -578,7 +583,9 @@ let raw_model t =
             ^ "; workflow "
             ^ w.id
             ^ "; "
-            ^ Sexp.to_string (Asic.Fresh.Phase.sexp_of_t w.phase)
+             ^ (if equal_launch_status state Cancelling
+                then "Cancelling…"
+                else Sexp.to_string (Asic.Fresh.Phase.sexp_of_t w.phase))
             ^ Option.value_map w.error ~default:"" ~f:(fun e ->
               ": " ^ Presentation.failure_summary e ^ " (details: d)")
         }
@@ -669,16 +676,16 @@ let launchable t (preview : Asic.Preview.t) =
            let l = launch_model t (Some i.preview) in
            not
              (List.mem
-                [ Launch_failed; Cancelled; Completed ]
+                 [ Launch_failed; Cancelled; Interrupted; Completed ]
                 l.state
                 ~equal:equal_launch_status))))
   && (not
         (List.mem
-           [ Submitting; Allocated; Running; Detached ]
+            [ Submitting; Allocated; Running; Cancelling; Detached ]
            m.launch.state
            ~equal:equal_launch_status))
   && not
-       (List.mem [ Launch_failed; Cancelled ] m.launch.state ~equal:equal_launch_status
+        (List.mem [ Launch_failed; Cancelled; Interrupted ] m.launch.state ~equal:equal_launch_status
         && Option.is_some m.launch.run_id
         && not
              (Option.exists t.snapshot ~f:(fun s ->
@@ -1103,7 +1110,8 @@ let%test_unit "launch lifecycle uses exact durable reservations, local receipt f
   in
   assert (not (launchable failed_owner_live preview));
   List.iter
-    [ "completed", Completed; "failed", Launch_failed; "interrupted", Cancelled ]
+     [ "completed", Completed; "failed", Launch_failed; "cancelled", Cancelled
+     ; "interrupted", Interrupted ]
     ~f:(fun (status, expected) ->
       let terminal =
         receive running ~revision:13 { (observe status) with operations = [ plan ] }

@@ -3,7 +3,7 @@ id: WB-096
 title: Cancel active ASIC flows from the palette
 category: presentation
 feature_sets: [FS0, FS1]
-status: proposed
+status: delivered
 kind: enhancement
 priority: P2
 severity: n/a
@@ -27,22 +27,28 @@ make it clear which requested stages never ran.
 
 ## Acceptance criteria
 
-- [ ] For exact `cancel`, pin **Cancel — \<flow in view\>** first and **Cancel
+- [x] For exact `cancel`, pin **Cancel — \<flow in view\>** first and **Cancel
   All — \<selected chip\> (\<active flow count\> flows)** second, ahead of
   competing fuzzy matches. Exact `cancel all` selects the bulk action first.
-- [ ] Enter on **Cancel** dispatches the existing cancellation action for the
+- [x] Enter on **Cancel** dispatches the existing cancellation action for the
   active run or workflow in view. If there is no unambiguous cancellable flow
   in view, keep that row first with a reason; Enter dispatches nothing.
-- [ ] **Cancel All** stops only active flows for the selected chip in the
+- [x] **Cancel All** stops only active flows for the selected chip in the
   current project. Count and cancel each flow once even when both its
   workflow and its active operation are visible.
-- [ ] Show **Cancelling…** while cleanup is underway. Once cancellation is
+- [x] Show **Cancelling…** while cleanup is underway. Once cancellation is
   confirmed, show the interrupted stage as **Cancelled** and later requested,
   unreached stages as **Skipped** with the reason (e.g. **Timing: Skipped —
   flow cancelled during routing**). Preserve completed results and **Not
   requested** stages. An interruption alone is not proof of user cancellation.
 
 ## Verification
+
+Delivered against an updated daemon. The [palette PTY regression](../../../terminal/test_palette_cancellation_pty.py)
+verified Enter dispatch and the rendered skip reason after refresh. The private
+Routing cancellation fixture passed 42 lifecycle assertions, including child
+cleanup, no Timing start, cold refresh after restart, and a provider-only
+interruption not being reported as user cancellation.
 
 Use short fixtures. Exercise **Enter dispatch**, not just row order: include
 a competing fuzzy match, two active Electrum flows, and an out-of-scope flow.

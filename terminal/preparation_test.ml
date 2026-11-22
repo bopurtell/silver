@@ -196,14 +196,19 @@ let%test_unit "fresh manual launch captures intent, preallocation progress cance
   (match snd (H.input host (Character 'x') ~commands:[]) with
    | Execute (_, Asic (Cancel_workflow id)) -> assert (String.equal id w.id)
    | _ -> assert false);
-  let commands =
-    Stage_launch_commands.commands host ~asic:(Some snapshot) ~remembered:None
+   let commands =
+     Stage_launch_commands.cancellation_commands host
+       ~project:(Some (Project_id.of_string "preparation-fixture")) ~asic:(Some snapshot)
+       ~inspected:None
   in
-  assert (
-    List.exists commands ~f:(fun c ->
-      match c.H.action with
-      | Asic (Cancel_workflow id) -> String.equal id w.id
-      | _ -> false));
+   assert (
+     let command =
+       List.find_exn commands ~f:(fun c -> String.equal c.H.id H.cancel_flow_command_id)
+     in
+     match command.action with
+     | Cancel_asic_flows { viewed = true; operations = [ Cancel_workflow id ]; _ } ->
+       String.equal id w.id
+     | _ -> false);
   let allocated = { w with phase = Physical; run = Some Asic_snapshot_fixture.run_b } in
   assert (
     match

@@ -47,6 +47,7 @@ type t =
   ; browser_hints : bool option [@sexp.option]
   ; palette_hints : bool option [@sexp.option]
   ; timing_preload : bool option [@sexp.option]
+  ; timing_preload_details : int option [@sexp.option]
   ; quick_launch_view : bool option [@sexp.option]
   ; global_compression : bool option [@sexp.option]
   ; workspace_compression : workspace_compression list option [@sexp.option]
@@ -74,6 +75,7 @@ let path ~state_directory ~project_key =
 (* Schema 6 adds sparse project/global and session/workspace compression choices. *)
 (* WB004 adds an optional quick-launch context-follow choice. Existing files inherit
    [true]; their stock layout/default migration is independent of this preference. *)
+(* WB-097 adds the optional Timing detail count. Older files inherit index-only (0). *)
 let schema_version = 6
 
 let appearance_of_overrides (o : T.overrides) ~tile ~workspace ~kind =
@@ -105,6 +107,7 @@ let capture ~project_key (host : Host.t) =
   ; browser_hints = Option.some_if host.browser_hints true (* absent in older files: off *)
   ; palette_hints = Some host.palette_hints
   ; timing_preload = Some host.timing_preload
+  ; timing_preload_details = Some host.timing_preload_details
   ; quick_launch_view = Some host.quick_launch_view
   ; global_compression = host.presentation.string_compression
   ; resource_orientations =
@@ -287,6 +290,9 @@ let apply t (host : Host.t) =
     ; browser_hints = Option.value t.browser_hints ~default:false
     ; palette_hints = Option.value t.palette_hints ~default:true
     ; timing_preload = Option.value t.timing_preload ~default:true
+    ; timing_preload_details =
+        Option.value (Option.filter t.timing_preload_details ~f:Timing_preload.valid_detail_count)
+          ~default:0
     ; quick_launch_view = Option.value t.quick_launch_view ~default:true
     ; presentation = { host.presentation with string_compression = t.global_compression }
     }
@@ -302,20 +308,26 @@ let receive pending host snapshot =
 
 let%test_unit "preload schema migration and durable explicit policy" =
   let project_key = "preload/project" in
-  let stored = capture ~project_key { Host.empty with timing_preload = false } in
+  let stored =
+    capture ~project_key { Host.empty with timing_preload = false; timing_preload_details = 5 }
+  in
   let restore stored = apply (decode ~project_key (encode stored)) Host.empty in
   assert (not (restore stored).timing_preload);
+  assert ((restore stored).timing_preload_details = 5);
+  assert ((restore { stored with timing_preload_details = Some 6 }).timing_preload_details = 0);
   List.iter [ 1; 2; 3; 4 ] ~f:(fun schema_version ->
     let legacy =
       { stored with
         schema_version
       ; timing_preload = None
+      ; timing_preload_details = None
       ; main_hints = (if schema_version = 1 then None else Some true)
       ; palette_hints = (if schema_version = 1 then None else Some true)
       ; tile_appearance = (if schema_version < 3 then None else Some [])
       }
     in
-    assert (restore legacy).timing_preload);
+    assert (restore legacy).timing_preload;
+    assert ((restore legacy).timing_preload_details = 0));
   assert (restore { stored with timing_preload = Some true }).timing_preload
 ;;
 

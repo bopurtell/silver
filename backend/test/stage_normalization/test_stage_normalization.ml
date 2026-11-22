@@ -92,7 +92,50 @@ let unknown (s : Asic.Stage.t) =
   | _ -> failwith "Unknown stage evidence acquired a known status"
 ;;
 
+let cancellation_fences () =
+  let observation =
+    observation
+      ~plan:(recipe ~version:4 [ "synthesis"; "floorplan"; "placement" ])
+      [ occurrence "completed" (`Int 0)
+      ; occurrence ~stage:"floorplan" "interrupted" (`Int 143)
+      ; occurrence ~stage:"placement" "unreached" `Null
+      ]
+  in
+  let project ~user_cancelled ~writer_active ~cursor ~status ~exit_code =
+    observation
+    |> (fun j -> set j "writer_active" (`Bool writer_active))
+    |> (fun j -> set j "observation_status" (`String "final"))
+    |> (fun j ->
+         let outcome = `Assoc [ "status", `String status; "exit_code", `Int exit_code ] in
+         set j "state" (set (Public.field "state" j) "outcome" outcome))
+    |> Public.inspection ~user_cancelled run ~cursor
+    |> fst
+  in
+  let prefix r = List.take (List.map r.Asic.Run.stages ~f:(fun s -> s.status)) 3 in
+  let equal = List.equal Asic.Stage.Status.equal in
+  List.iter
+    [ false, false, "interrupted", 143
+    ; true, true, "interrupted", 143
+    ; true, false, "interrupted", 130
+    ; true, false, "failed", 143
+    ]
+    ~f:(fun (user_cancelled, writer_active, status, exit_code) ->
+      require
+        (equal
+           [ Completed; Interrupted; Pending ]
+           (prefix (project ~user_cancelled ~writer_active ~cursor:4 ~status ~exit_code)))
+        "Incomplete, unrelated or non-user evidence invented cancellation");
+  let project cursor =
+    project ~user_cancelled:true ~writer_active:false ~cursor ~status:"interrupted" ~exit_code:143
+  in
+  require (List.is_empty (project 3).stages) "Ahead inspection escaped cancellation fence";
+  require
+    (equal [ Completed; Cancelled; Skipped ] (prefix (project 4)))
+    "Exact terminal user cancellation lost"
+;;
+
 let fixtures () =
+  cancellation_fences ();
   List.iter
     [ "unreached", `Null; "running", `Null ]
     ~f:(fun (status, exit) ->
@@ -205,7 +248,7 @@ let fixtures () =
     ; "running", `Null, Running
     ; "completed", `Int 0, Completed
     ; "failed", `Int 1, Failed
-    ; "interrupted", `Int 130, Cancelled
+    ; "interrupted", `Int 130, Interrupted
     ]
     ~f:(fun (status, exit, expected) ->
       let j = observation [ occurrence status exit ] in

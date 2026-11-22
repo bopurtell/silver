@@ -324,6 +324,154 @@ let inspected_run host =
   | None -> workspace_run host
 ;;
 
+type cancellable_flow =
+  { operation : Asic.Operation.t
+  ; run : Run_ref.t option
+  ; target : Asic.Chip_target.t option
+  ; label : string
+  ; explicit_title : string
+  }
+
+let cancellable_flows (snapshot : Asic.Snapshot.t) =
+  let workflows =
+    List.filter_map snapshot.workflows ~f:(fun w ->
+      if Planned_run.workflow_active w && not w.cancel_requested
+      then
+        Some
+          { operation = Cancel_workflow w.id
+          ; run = w.run
+          ; target = w.intent.selection.chip_target
+          ; label = w.intent.selection.flow ^ " · " ^ w.key
+          ; explicit_title =
+              "Cancel fresh workflow " ^ w.key ^ " (Elaboration: " ^ w.elaboration_status ^ ")"
+          }
+      else None)
+  in
+  (* A fresh workflow owns its build, emission, and physical "run:" producer.
+     Don't count the latter independently (nor count its observation reader).
+     Standalone finalizations have separate keys and independent ownership. *)
+  workflows
+  @ List.filter_map snapshot.finalizations ~f:(fun f ->
+    if f.owned
+       && List.exists snapshot.operations ~f:(fun op ->
+         String.equal op.kind "finalize"
+         && String.equal op.key ("finalize:" ^ f.key)
+         && Option.equal Run_ref.equal op.run (Some f.run)
+         && Asic_intents.cancellable op)
+    then
+      let target =
+        observed_selection (Some snapshot) f.run |> Option.bind ~f:(fun s -> s.chip_target)
+      in
+      Some
+        { operation = Cancel_finalization { key = f.key; run = f.run }
+        ; run = Some f.run
+        ; target
+        ; label = "Finalization · " ^ f.key
+        ; explicit_title = "Cancel finalization " ^ f.key
+        }
+    else None)
+;;
+
+let selected_cancel_chip (snapshot : Asic.Snapshot.t) =
+  match snapshot.chip_target with
+  | None -> Error "Select a chip target first"
+  | Some chip when Launch_preferences.has_target snapshot chip -> Ok chip
+  | Some _ -> Error "Chip/variant missing from catalog"
+;;
+
+let viewed_flow host ~inspected flows =
+  let focused_kind kind =
+    Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind kind)
+  in
+  let open Result.Let_syntax in
+  let%bind inspected =
+    if Option.is_some inspected
+       || List.exists [ "run-selector"; "planned-run"; "stage-checklist" ] ~f:focused_kind
+    then Ok inspected
+    else (
+      (* Focus can be on a utility tile. Use a run displayed elsewhere only if
+         visible tiles agree; don't guess between independent/pinned runs. *)
+      match List.filter_map (H.tiles host) ~f:(H.tile_run host)
+            |> List.dedup_and_sort ~compare:Run_ref.compare with
+      | [] -> Ok None
+      | [ run ] -> Ok (Some run)
+      | _ -> Error "Multiple runs in view; focus the intended run")
+  in
+  let planned_workflow = Planned_run.workflow host.H.planned_run in
+  let displayed_workflow =
+    if focused_kind "planned-run" || (focused_kind "stage-checklist" && Option.is_none inspected)
+    then Option.map planned_workflow ~f:(fun w -> Asic.Operation.Cancel_workflow w.id)
+    else None
+  in
+  let candidates =
+    List.filter flows ~f:(fun flow ->
+      match displayed_workflow, inspected with
+      | Some op, _ -> Asic.Operation.equal op flow.operation
+      | None, Some run when not (focused_kind "planned-run") ->
+        Option.equal Run_ref.equal flow.run (Some run)
+      | _ -> false)
+  in
+  match candidates with
+  | [ flow ] -> Ok flow
+  | [] -> Error "No cancellable ASIC flow in view"
+  | _ -> Error "Multiple active flows for this run; select an explicit cancellation command"
+;;
+
+let cancellation_commands host ~project ~asic ~inspected =
+  let flows = Option.value_map asic ~default:[] ~f:cancellable_flows in
+  let make ?bulk_chip ?(viewed = false) id title aliases operations =
+    let action =
+      match project, operations with
+      | None, _ -> Error "No open ASIC project"
+      | Some _, Error reason -> Error reason
+      | Some project, Ok operations ->
+        Ok (H.Cancel_asic_flows { project; bulk_chip; viewed; operations })
+    in
+    match action with
+    | Ok action -> H.command id (Artifact_view.safe title) aliases action
+    | Error reason ->
+      H.command ~unavailable:reason id (Artifact_view.safe title) aliases (H.Unavailable reason)
+  in
+  let viewed = viewed_flow host ~inspected flows in
+  let single =
+    make ~viewed:true H.cancel_flow_command_id
+      ("Cancel — " ^ Option.value_map (Result.ok viewed) ~default:"flow in view" ~f:(fun flow -> flow.label))
+      "stop viewed ASIC flow" (Result.map viewed ~f:(fun flow -> [ flow.operation ]))
+  in
+  let selected =
+    Option.value_map asic ~default:(Error "ASIC snapshot unavailable") ~f:selected_cancel_chip
+  in
+  let bulk_flows =
+    Option.value_map (Result.ok selected) ~default:[] ~f:(fun chip ->
+      List.filter flows ~f:(fun flow -> Option.equal Asic.Chip_target.equal (Some chip) flow.target))
+  in
+  let bulk =
+    let title =
+      match Launch_preferences.chip_target asic, selected with
+      | None, _ -> "Cancel All — no chip selected"
+      | Some chip, Error _ -> "Cancel All — " ^ Launch_preferences.chip_label (Some chip)
+      | Some chip, Ok _ ->
+        let n = List.length bulk_flows in
+        sprintf "Cancel All — %s (%d %s)" (Launch_preferences.chip_label (Some chip)) n
+          (if n = 1 then "flow" else "flows")
+    in
+    make ?bulk_chip:(Result.ok selected) H.cancel_all_flows_command_id title "stop all chip flows"
+      (Result.bind selected ~f:(fun _ ->
+         match bulk_flows with
+         | [] -> Error "No active flows for the selected chip"
+         | flows -> Ok (List.map flows ~f:(fun flow -> flow.operation))))
+  in
+  [ single; bulk ]
+  @ List.map flows ~f:(fun flow ->
+    let id =
+      match flow.operation with
+      | Cancel_workflow id -> "workflow.cancel." ^ id
+      | Cancel_finalization { key; _ } -> "finalization.cancel." ^ key
+      | _ -> assert false
+    in
+    make id flow.explicit_title "stop explicit ASIC workflow or finalization" (Ok [ flow.operation ]))
+;;
+
 let commands ?inspected host ~asic ~remembered =
   (let run = Option.value_or_thunk inspected ~default:(fun () -> inspected_run host) in
    match run, Option.bind run ~f:(observed_selection asic)
@@ -342,21 +490,6 @@ let commands ?inspected host ~asic ~remembered =
   @ selected_commands host ~asic
   @ [ elaboration_command host ~asic ~remembered ]
   @ named_commands host ~asic ~remembered
-  @ Option.value_map asic ~default:[] ~f:(fun snapshot ->
-    List.filter_map snapshot.Asic.Snapshot.workflows ~f:(fun w ->
-      if Planned_run.workflow_active w
-      then
-        Some
-          (H.command
-             ("workflow.cancel." ^ w.id)
-             ("Cancel fresh workflow "
-              ^ w.key
-              ^ " (Elaboration: "
-              ^ w.elaboration_status
-              ^ ")")
-             "stop build emit physical workflow"
-             (H.Asic (Cancel_workflow w.id)))
-      else None))
 ;;
 
 let chip_commands = H.chip_commands

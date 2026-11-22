@@ -683,7 +683,8 @@ let%expect_test "ASIC metrics round-trip and old summary sexps have no metrics" 
         ; expected_plan_identity = None
         }
     ; Launch_fresh { key = "fresh-key"; intent_id = "fresh-input-intent" }
-    ; Cancel_workflow "workflow-key"
+     ; Cancel_workflow "workflow-key"
+     ; Cancel_finalization { key = "finalization-key"; run = summary.run }
     ]
     ~f:(fun operation ->
       require_portable_round_trip

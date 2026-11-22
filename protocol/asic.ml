@@ -48,11 +48,14 @@ module Stage = struct
       | Not_requested
       | Unsupported
       | Unknown of string
+      | Cancelling
+      | Interrupted
     [@@deriving bin_io, compare, equal, sexp]
   end
 
-  (** Explicit provider observations only. An action prepares a new named-flow run through
-      its endpoint using ordinary [Plan]/[Run], never a restart in this run. *)
+  (** Provider observations, reconciled with exact-run Workbench cancellation evidence.
+      An action prepares a new named-flow run through its endpoint using ordinary
+      [Plan]/[Run], never a restart in this run. *)
   type t =
     { id : string
     ; name : string
@@ -548,6 +551,12 @@ module Operation = struct
         { run : Run_ref.t
         ; source_digest : string option
           (** A hot summary's digest, or [None] for an exact run's cold cache lookup. *)
+        }
+    (** Exact standalone producer cancellation; unlike [Cancel], this never
+        resolves aliases or matches an observation/query task. *)
+    | Cancel_finalization of
+        { key : string
+        ; run : Run_ref.t
         }
   [@@deriving bin_io, compare, equal, sexp]
 end

@@ -79,25 +79,58 @@ let with_analysis t analysis =
   { t with operation_key = Some (Inspection_view.index_key t) }
 ;;
 
+let published_detail (t : t) (snapshot : Asic.Snapshot.t) ~row_id =
+  Option.bind t.index ~f:(fun index ->
+    List.find snapshot.inspection_details ~f:(fun detail ->
+      Run_ref.equal detail.Asic_inspection.Detail.run t.run
+      && String.equal detail.domain t.domain
+      && String.equal detail.stage t.stage
+      && String.equal detail.source_digest index.source_digest
+      && String.equal detail.row_id row_id))
+;;
+
+let top_path_ids (t : t) ~count =
+  let seen = Hash_set.create (module String) in
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | row :: rest when is_path row && not (Hash_set.mem seen row.id) ->
+      Hash_set.add seen row.id;
+      loop (remaining - 1) (row.id :: acc) rest
+    | _ :: rest -> loop remaining acc rest
+  in
+  loop count [] (Inspection_view.visible t)
+;;
+
+let want_selected_detail (t : t) =
+  match t.index, t.selected with
+  | Some index, Some row_id when Option.is_none t.requested ->
+    { t with
+      requested = Some (index.source_digest, row_id)
+    ; operation_key = None
+    ; error = None
+    ; pending_error = None
+    }
+  | _ -> t
+;;
+
 (** Attach only published evidence. No Inspect operation or demand is created here. *)
+let attach_selected (t : t) snapshot =
+  if Option.is_none t.requested
+     && Option.exists t.selected ~f:(fun row_id ->
+       Option.is_some (published_detail t snapshot ~row_id))
+  then
+    Inspection_view.reconcile
+      { (want_selected_detail t) with operation_key = t.operation_key }
+      snapshot
+  else t
+;;
+
 let attach_retained (t : t) snapshot =
   let selected = t.selected in
   let t = Inspection_view.reconcile t snapshot in
   let t = if Option.is_none t.index then { t with selected } else t in
-  match t.index, t.selected with
-  | Some index, Some row_id when Option.is_none t.requested ->
-    if List.exists snapshot.Asic.Snapshot.inspection_details ~f:(fun detail ->
-         Run_ref.equal detail.run t.run
-         && String.equal detail.domain t.domain
-         && String.equal detail.stage t.stage
-         && String.equal detail.source_digest index.source_digest
-         && String.equal detail.row_id row_id)
-    then
-      Inspection_view.reconcile
-        { t with requested = Some (index.source_digest, row_id) }
-        snapshot
-    else t
-  | _ -> t
+  attach_selected t snapshot
 ;;
 
 let selection (t : t) =

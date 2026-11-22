@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Parent-run real Workbench signoff cancellation acceptance (<180s; no builds).
+"""Use --fixture --daemon PATH for the short, synthetic WB-096 lifecycle check.
+
+Without --fixture: parent-run real Workbench signoff cancellation acceptance (<180s; no builds).
 
 Launches ONE real flow using the supplied existing timeout-capable project binary,
 private copied source/config/state/results, and captured Discover/Describe/Plan
@@ -437,4 +439,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if '--fixture' in sys.argv[1:]:
+        sys.argv.remove('--fixture')
+        sys.path.insert(0, str(Path(__file__).resolve().parent / 'fixtures'))
+        from asic_signoff_cancellation_fixture import main as fixture_main
+        fixture_main()
+    else:
+        main()

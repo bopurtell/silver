@@ -347,6 +347,12 @@ let normalize (t : t) =
     }
 ;;
 
+let same_index_source (a : Asic_inspection.Index.t) (b : Asic_inspection.Index.t) =
+  phys_equal a b
+  || Asic_inspection.Index.equal { a with times = Evidence_time.Index.empty }
+       { b with times = Evidence_time.Index.empty }
+;;
+
 let reconcile t (snapshot : Asic.Snapshot.t) =
   let observation =
     List.find snapshot.runs ~f:(fun run -> Run_ref.equal run.Asic.Run.run t.run)
@@ -368,6 +374,7 @@ let reconcile t (snapshot : Asic.Snapshot.t) =
   in
   let changed =
     (not (Option.equal equal_observation t.observation observation))
+    || (String.equal t.domain "timing" && not (Option.equal same_index_source t.index index))
     || (not (Option.equal String.equal (digest t.index) (digest index)))
     || (not
           (Option.equal
@@ -1252,8 +1259,8 @@ let%test_unit "1000 detail downs then one up reverses the visible viewport and r
           }
         |> fun t -> clamp t ~width ~height
       in
-      assert (
-        not (phys_equal (Option.value_exn diagnostic_change.detail_cache).lines lines));
+       assert (Option.is_none diagnostic_change.detail);
+       assert (Option.is_none diagnostic_change.detail_cache);
       let step t action =
         let state, operation = input ~width ~height t action in
         assert (Option.is_none operation);

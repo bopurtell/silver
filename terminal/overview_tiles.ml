@@ -10,10 +10,12 @@ module Status = struct
     | Not_requested
     | Pending
     | Running
+    | Cancelling
     | Completed
     | Failed
     | Skipped
     | Cancelled
+    | Interrupted
     | Unsupported
     | Unrecognized of string
   [@@deriving compare, equal, sexp]
@@ -23,10 +25,12 @@ module Status = struct
     | Not_requested -> "not requested"
     | Pending -> "pending"
     | Running -> "running"
+    | Cancelling -> "cancelling…"
     | Completed -> "completed"
     | Failed -> "failed"
     | Skipped -> "skipped"
     | Cancelled -> "cancelled"
+    | Interrupted -> "interrupted"
     | Unsupported -> "unsupported"
     | Unrecognized ("observation_unavailable" | "unconfirmed") -> "unconfirmed"
     | Unrecognized "not_started" -> "not started"
@@ -100,8 +104,8 @@ let row
 
 let status_role : Status.t -> Role.t = function
   | Unknown | Not_requested | Unsupported | Unrecognized _ -> Muted
-  | Pending | Skipped | Cancelled -> Warning
-  | Running -> Running
+  | Pending | Skipped | Cancelled | Interrupted -> Warning
+  | Running | Cancelling -> Running
   | Completed -> Success
   | Failed -> Failure
 ;;
@@ -139,10 +143,12 @@ let run_identity (run : Run_ref.t) = Backend_id.to_string run.backend ^ "/" ^ ru
 let asic_stage_status : Asic.Stage.Status.t -> Status.t = function
   | Pending -> Pending
   | Running -> Running
+  | Cancelling -> Cancelling
   | Completed -> Completed
   | Failed -> Failed
   | Skipped -> Skipped
   | Cancelled -> Cancelled
+  | Interrupted -> Interrupted
   | Not_requested -> Not_requested
   | Unsupported -> Unsupported
   | Unknown value -> Unrecognized value
@@ -150,6 +156,12 @@ let asic_stage_status : Asic.Stage.Status.t -> Status.t = function
 
 let asic_stage_row ?(now = Time_ns.now ()) ~run ~selected (stage : Asic.Stage.t) =
   let status = asic_stage_status stage.status in
+  let value =
+    Status.label status
+    ^ (match status, stage.reason with
+       | Skipped, Some reason -> " — " ^ Artifact_view.safe reason
+       | _ -> "")
+  in
   row
     ~time:(Execution_time_view.list_value ~now stage.execution_timing)
     ~role:(status_role status)
@@ -175,7 +187,7 @@ let asic_stage_row ?(now = Time_ns.now ()) ~run ~selected (stage : Asic.Stage.t)
               "Advertised selection: "
               ^ Sexp.to_string_hum (Asic.Selection.sexp_of_t selection))))
     stage.name
-    (Status.label status)
+    value
 ;;
 
 (** Compact Overview keeps the six explicit stage observations ahead of aggregate facts.
@@ -548,11 +560,12 @@ let elaboration_row ~now ~selected workflow =
   | Some (w : Asic.Fresh.Workflow.t) ->
     let status : Status.t =
       match w.elaboration_status with
+      | ("building" | "emitting") when w.cancel_requested -> Cancelling
       | "building" | "emitting" -> Running
       | "completed" -> Completed
       | "build_failed" | "emission_failed" -> Failed
       | "cancelled" -> Cancelled
-      | "interrupted" -> Unknown
+      | "interrupted" -> Interrupted
       | _ -> Pending
     in
     let time =
@@ -601,7 +614,7 @@ let elaboration_row ~now ~selected workflow =
            ; "Plan digest: " ^ p.methodology_plan_digest
            ]))
       "Elaboration"
-      w.elaboration_status
+      (if Status.equal status Cancelling then Status.label status else w.elaboration_status)
 ;;
 
 (** Only shorten ASCII opaque identifiers. Human/provider labels remain intact and are
@@ -963,11 +976,12 @@ let status_rows
 ;;
 
 let status_indicator : Status.t -> Indicator.t = function
-  | Running -> Running
+  | Running | Cancelling -> Running
   | Pending -> Pending
   | Completed -> Completed
   | Failed -> Failed
   | Cancelled -> Cancelled
+  | Interrupted -> Unknown
   | Skipped -> Skipped
   | Not_requested -> Not_requested
   | Unknown | Unsupported | Unrecognized _ -> Unknown
@@ -1004,6 +1018,14 @@ let fit_cells ~width text =
 
 let aligned row = Option.is_some row.status && not (String.is_empty row.value)
 
+let status_value_width row =
+  (* An inline skip explanation can use the remaining row width, but must not
+     force the stage names to be abbreviated for every row in the checklist. *)
+  match row.status with
+  | Some Skipped -> cell_width (Status.label Skipped)
+  | _ -> cell_width row.value
+;;
+
 (** The display cell where status keywords start for the visible checklist group (rows
     with a [status]). Prefixes are measured per row, so Off mode has no phantom icon cells
     and the selection marker never pushes its keyword out of the column. When the width is
@@ -1027,7 +1049,7 @@ let status_column ~appearance ~width ~indent rows =
         (if timed then prefix_width else prefix row) + cell_width row.label + 2)
     in
     let floor = prefix_width + min_label_cells + 2 in
-    let value_width = max_of (fun r -> cell_width r.value) in
+    let value_width = max_of status_value_width in
     let time_width = max_of (fun r -> Option.value_map r.time ~default:0 ~f:cell_width) in
     let with_time = value_width + if time_width = 0 then 0 else 3 + time_width in
     let reserved = if floor + with_time <= width then with_time else value_width in
@@ -1113,7 +1135,7 @@ let render_row
            if row.active then [ Attr.bg bg ] else [])
        in
        if i = 0
-          && Option.equal Status.equal row.status (Some Running)
+           && Option.exists row.status ~f:(function Running | Cancelling -> true | _ -> false)
           && Option.is_some indicator_frames
           && not (Appearance.Icons.equal appearance.icons None_)
        then (
@@ -1175,7 +1197,7 @@ let render
   let status_column = status_column ~appearance ~width ~indent candidates in
   let group = List.filter candidates ~f:aligned in
   let status_width =
-    List.fold group ~init:0 ~f:(fun n r -> Int.max n (cell_width r.value))
+    List.fold group ~init:0 ~f:(fun n r -> Int.max n (status_value_width r))
   in
   let time_width =
     List.fold group ~init:0 ~f:(fun n r ->
@@ -1599,12 +1621,14 @@ let%test_unit "ASIC stage projection preserves every explicit status and full ac
     }
   in
   let cases : (Asic.Stage.Status.t * string * Role.t) list =
-    [ Pending, "pending", Warning
-    ; Running, "running", Running
+     [ Pending, "pending", Warning
+     ; Running, "running", Running
+     ; Cancelling, "cancelling…", Running
     ; Completed, "completed", Success
     ; Failed, "failed", Failure
-    ; Cancelled, "cancelled", Warning
-    ; Skipped, "skipped", Warning
+     ; Cancelled, "cancelled", Warning
+     ; Interrupted, "interrupted", Warning
+     ; Skipped, "skipped — exact provider reason", Warning
     ; Not_requested, "not requested", Muted
     ; Unsupported, "unsupported", Muted
     ; Unknown "provider-future", "unknown: provider-future", Muted
@@ -1859,6 +1883,46 @@ let plain_lines view =
   Buffer.contents buffer
   |> String.split_lines
   |> List.map ~f:(fun line -> String.rstrip line)
+;;
+
+let%test_unit "checklist displays cancellation progress and the retained skip reason" =
+  let display name status reason =
+    asic_stage_row
+      ~run:Asic_snapshot_fixture.run_a
+      ~selected:false
+      { id = String.lowercase name
+      ; name
+      ; status
+      ; requested = true
+      ; reason
+      ; action = None
+      ; execution_timing = None
+      }
+  in
+  let screen rows =
+    let appearance = { Appearance.default with icons = None_; density = Compact } in
+    render ~appearance ~attrs:(fun _ -> []) ~width:62 ~height:(List.length rows) rows
+    |> plain_lines
+  in
+  let contains rows fragment =
+    assert (List.exists (screen rows) ~f:(fun line ->
+      String.split line ~on:' '
+      |> List.filter ~f:(Fn.non String.is_empty)
+      |> String.concat ~sep:" "
+      |> String.is_substring ~substring:fragment))
+  in
+  contains [ display "Routing" Cancelling None ] "Routing: cancelling…";
+  contains [ display "Routing" Interrupted None ] "Routing: interrupted";
+  let retained =
+    [ display "Routing" Cancelled None
+    ; display "Timing" Skipped (Some "flow cancelled during routing")
+    ]
+  in
+  contains retained "Routing: cancelled";
+  contains retained "Timing: skipped — flow cancelled during routing";
+  assert (
+    List.mem (inspection_lines retained) "Reason: flow cancelled during routing"
+      ~equal:String.equal)
 ;;
 
 let%test_unit "summary freshness markers are typed, static and never stage verdicts" =

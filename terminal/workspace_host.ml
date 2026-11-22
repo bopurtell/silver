@@ -95,6 +95,12 @@ type action =
   | Build
   | Test
   | Cancel of Job_id.t
+  | Cancel_asic_flows of
+      { project : Project_id.t
+      ; bulk_chip : Asic.Chip_target.t option
+      ; viewed : bool
+      ; operations : Asic.Operation.t list
+      }
   | Refresh_integration
   | Project_entry of [ `New | `Open ]
   | Manage_project
@@ -194,6 +200,7 @@ type action =
   | Restart_terminal
   | Set_terminal_placement of [ `Center | `Bottom ]
   | Set_timing_preload of bool
+  | Set_timing_preload_details of int
   | Set_appearance of Appearance.t
   | Choose_theme
   | Set_scheme of Appearance.Scheme.t
@@ -327,6 +334,7 @@ type t =
   ; browser_hints : bool
   ; palette_hints : bool
   ; timing_preload : bool
+  ; timing_preload_details : int
   ; quick_launch_view : bool
   ; planned_preparation : bool
   ; notice : string
@@ -368,6 +376,7 @@ let empty =
   ; browser_hints = false
   ; palette_hints = true
   ; timing_preload = true
+  ; timing_preload_details = 0
   ; quick_launch_view = true
   ; planned_preparation = true
   ; notice = "Loading workspace registry"
@@ -3051,9 +3060,11 @@ let%test_unit "appearance commands change only client-local style" =
   | _ -> assert false
 ;;
 
-let asic_cancel_commands (snapshot : Asic.Snapshot.t) =
+let asic_cancel_commands ?(include_producers = true) (snapshot : Asic.Snapshot.t) =
   List.filter_map snapshot.operations ~f:(fun operation ->
     if Asic_intents.cancellable operation
+       && (include_producers
+           || not (List.mem [ "workflow"; "run"; "finalize" ] operation.kind ~equal:String.equal))
     then
       Some
         (command
@@ -4363,6 +4374,15 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         (Set_layout_mode Preferred)
     ; command "host.exit" "Exit client" "quit" Exit
     ]
+    @ List.init (Timing_preload.max_details + 1) ~f:(fun count ->
+      command
+        (sprintf "timing.preload.details.%d" count)
+        (sprintf
+           "Timing preload: Top %d path details%s"
+           count
+           (if count = t.timing_preload_details then " (selected)" else ""))
+        "project persistent timing background warm up path reports"
+        (Set_timing_preload_details count))
     @ testing_alias_commands t ?unavailable:needs_project ()
     @ appearance_commands t
     @ compression_commands t
@@ -5211,6 +5231,8 @@ let testing_dispatch t key ~commands =
 let named_stage_command_prefix = "stage.launch-view."
 let named_stage_command_id endpoint = named_stage_command_prefix ^ endpoint
 let verify_evidence_command_id = "asic.verify-evidence"
+let cancel_flow_command_id = "asic.cancel-viewed-flow"
+let cancel_all_flows_command_id = "asic.cancel-chip-flows"
 
 let known_stage_endpoints =
   [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
@@ -5231,6 +5253,9 @@ let global_palette_aliases =
   ; "verification", "testing.suites"
   ; "veri", verify_evidence_command_id
   ; "verify evidence", verify_evidence_command_id
+  ; "cancel", cancel_flow_command_id
+  ; "cancel", cancel_all_flows_command_id
+  ; "cancel all", cancel_all_flows_command_id
   ; "theme", choose_theme_id
   ; "close term", "terminal.close"
   ; "restart term", "terminal.restart"
@@ -5291,6 +5316,8 @@ let global_palette_commands t commands =
       , "Launch elaboration bundle"
       , "elaboration"
       , "Elaboration preparation is unavailable here" )
+    ; (cancel_flow_command_id, "Cancel — flow in view", "stop", "No cancellable ASIC flow in view")
+    ; (cancel_all_flows_command_id, "Cancel All — no chip selected", "stop all", "Select a chip target first")
     ]
     @ List.map known_stage_endpoints ~f:(fun endpoint ->
       ( named_stage_command_id endpoint
@@ -5303,7 +5330,12 @@ let global_palette_commands t commands =
     @ List.filter_map fallbacks ~f:(fun (id, title, aliases, unavailable) ->
       if List.exists commands ~f:(fun c -> String.equal c.id id)
       then None
-      else Some (command ~unavailable ~exact_only:true id title aliases Unavailable_launch))
+      else Some
+        (command ~unavailable ~exact_only:true id title aliases
+           (if String.equal id cancel_flow_command_id
+               || String.equal id cancel_all_flows_command_id
+            then Unavailable unavailable
+            else Unavailable_launch)))
   in
   List.map commands ~f:(fun c ->
     let exact_queries =
@@ -5392,21 +5424,27 @@ let ranked_command_matches (p : palette) =
   let folded = String.lowercase query in
   (* Prefer the exact spelling when a provider distinguishes endpoint IDs by case. *)
   let exact =
-    Option.first_some
-      (List.find p.commands ~f:(fun c -> List.mem c.exact_queries query ~equal:String.equal))
-      (List.find p.commands ~f:(fun c ->
-         List.exists c.exact_queries ~f:(fun alias -> String.equal (String.lowercase alias) folded)))
+    if String.equal folded "cancel"
+    then
+      List.filter_map [ cancel_flow_command_id; cancel_all_flows_command_id ] ~f:(fun id ->
+        List.find p.commands ~f:(fun c ->
+          String.equal c.id id && List.mem c.exact_queries "cancel" ~equal:String.equal))
+    else
+      Option.first_some
+        (List.find p.commands ~f:(fun c -> List.mem c.exact_queries query ~equal:String.equal))
+        (List.find p.commands ~f:(fun c ->
+           List.exists c.exact_queries ~f:(fun alias -> String.equal (String.lowercase alias) folded)))
+      |> Option.to_list
   in
   (* An exact-only fallback must not change the results of unrelated searches. *)
   let fuzzy = List.filter p.commands ~f:(fun c -> not c.exact_only) in
-  match exact with
-  | None -> rank fuzzy
-  | Some item ->
-    (* Exact bindings work even when the row doesn't qualify in fuzzy search. *)
-    (match rank [ item ] with
-     | [] -> [ { Palette_search.item; score = 0; positions = [] } ]
-     | ranked -> ranked)
-    @ rank (List.filter fuzzy ~f:(fun c -> not (String.equal c.id item.id)))
+  (* Exact bindings work even when a row doesn't qualify in fuzzy search. *)
+  List.concat_map exact ~f:(fun item ->
+    match rank [ item ] with
+    | [] -> [ { Palette_search.item; score = 0; positions = [] } ]
+    | ranked -> ranked)
+  @ rank (List.filter fuzzy ~f:(fun c ->
+    not (List.exists exact ~f:(fun item -> String.equal c.id item.id))))
 ;;
 
 let ranked_matches p =
@@ -6875,7 +6913,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
           when Option.exists (focused t) ~f:(fun tile ->
                  String.equal tile.kind "planned-run") ->
           (match Planned_run.workflow t.planned_run, capture t with
-           | Some w, Some captured when Planned_run.workflow_active w ->
+           | Some w, Some captured when Planned_run.workflow_active w && not w.cancel_requested ->
              t, Execute (captured, Asic (Cancel_workflow w.id))
            | _ -> { t with notice = "No active fresh workflow" }, No_effect)
         | Character (('r' | 'x' | 'a') as key), _

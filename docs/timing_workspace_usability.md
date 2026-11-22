@@ -71,8 +71,8 @@ Tiles, geometry records, contexts, pins and evidence were verified unchanged.
 Entering or restoring a visible Timing workspace asks for its selected run's
 Timing index when the evidence is available. The same rule applies if the run
 changes or becomes ready while the workspace is visible. Tabs, aliases, the
-workspace list and saved navigation all use the same rule. This is a read of
-existing evidence: it does not run EDA, execute a refresh, or fetch path detail.
+workspace list and saved navigation all use the same rule. Index loading reads
+existing evidence; it does not run EDA, execute a refresh, or require path detail.
 If the summary is not hot, Silver can load the selected summary first, then
 request its exact captured analysis. For legacy evidence with no captured analysis
 identity, visible loading requires an observed completed Timing/Signoff stage for
@@ -85,15 +85,17 @@ built-in Timing workspaces, even when hidden. It handles:
 - selecting an already-completed run;
 - reopening a cached index after client/daemon restart.
 
-It loads the **index**, then prepares reusable searchable/filter/sort state. It does
-not draw hidden terminal frames, fetch every full path report, change focus, select
-a newer run, or alter pins. Thus a run that finishes while Overview is displayed can
-have its paths table ready before the user switches to Timing.
+It loads the **index**, then prepares reusable searchable/filter/sort state. If
+the project opts into detail preload, it also reads the first N distinct paths in
+the Timing Paths order, excluding non-path rows. It does not draw hidden terminal
+frames, change focus, select a newer run, or alter pins.
 
-Full path detail remains lazy. The index already supplies row-level slack, endpoints,
-corner and reported status. Enter/explicit inspection activates exact selected-detail
-demand and the existing bounded neighbor policy; a cold full-detail read can still
-take several seconds with the current provider.
+With detail preload enabled, the highlight shows matching published detail
+immediately, without Enter. Moving to a cold path shows its loading state and
+requests that path before any unsent warm-up reads. At the default count of zero,
+the index supplies slack, endpoints, corner and status; use Enter or explicit
+inspection to load full detail. Explicit inspection can also warm its configured
+neighbors in Background index mode. A cold provider read can take several seconds.
 
 In **Timing · selected path**, each report line occupies one screen row.
 Long descriptions and cell names are clipped at the right edge; widen the tile
@@ -105,14 +107,19 @@ to see more of the original line.
 | --- | --- |
 | Palette `Timing preload: Background index` | Enable and persist project loading policy; default |
 | Palette `Timing preload: Explicit only` | Suppress speculative reads and persist that choice |
+| Palette `Timing preload: Top 5 path details` | Save a project count of five (choices 0–5) |
+| Palette `Timing preload: Top 0 path details` | Save the default count, zero (index only) |
 | Client `--timing-preload background-index` | Initial override of the saved policy |
 | Client `--timing-preload explicit-only` | Initial explicit-only override |
+| Client `--timing-preload-details 5` | Initial override of the saved count (integer 0–5) |
 
-CLI policy wins initially; subsequent palette changes take effect and persist.
-**Explicit only** means no speculative index reads while Timing is hidden. Opening
-Timing is explicit demand for the visible index in either mode; no separate
-Inspect command is required. It does not purge cached data or change how
-explicit inspection opens path detail.
+The client stores the count as `(timing_preload_details 5)` in the project's
+`presentation-<project-key-hash>.sexp` state file; a missing field means zero.
+CLI overrides win initially; subsequent palette changes take effect and persist.
+**Explicit only** means no speculative index or detail reads, regardless of the
+saved count. Opening Timing still loads the visible index and Enter still loads
+the selected path. Changing policy does not purge cached data or abort an
+already-running read.
 
 ### Bounds and correctness
 
@@ -122,20 +129,26 @@ explicit inspection opens path detail.
   joins an in-flight read without a second refresh. Inconsistent pane bindings
   do not trigger a read; pins and independent contexts are not changed.
 - Exact run/stage/analysis/source and connection/project identities fence attachment.
-  Advancing the mutable execution record does not invalidate an unchanged frozen
-  Timing source. Selection/source changes cannot attach obsolete data to the new view.
+  The index for an unchanged frozen Timing source is reusable as the mutable execution
+  advances. Detail attachment also checks the run observation; a selection or source
+  change cannot attach obsolete data to the new view.
   Saved rows wait for the published index, then restore only if run, stage,
   analysis (including any reinspection lineage), index digest and row all match.
-- Each daemon/project scope remembers at most **128 attempted exact sources**.
-  Failures are not repeatedly retried by polling or evicted into retry loops. At the
-  cap, further inspection remains explicitly available; a new client or daemon/project
-  scope resets that budget.
+- Each daemon/project scope remembers at most **128 attempted exact indexes** and
+  **128 attempted exact path details** for background preparation. A missing or
+  failed detail does not stop the batch or retry on each poll. At the cap, further
+  inspection remains explicitly available; a new client or daemon/project scope
+  resets the budget.
 - No run, no loaded index, loading, ready, empty, filtered, failure and
   cached-unverified states remain distinct. Explicit Inspect/refresh can retry a
   failed automatic load.
 - Existing caches remain bounded: persistent indexes (eight per project, each at most
   4,096 rows / 2 MiB), memory-only reusable details (default 64 entries / 4 MiB), and
-  client-memory projections. Warm-up does not add a persistent cache of rendered frames.
+  the eight-detail publication window. The maximum warm-up of five fits in that
+  window without resizing it. Other reads can displace publications; a later
+  foreground request can reuse the daemon's memory cache. One timing detail
+  occupies the shared client lane until its daemon operation ends. Warm-up does
+  not add a persistent cache of rendered frames.
 
 ## Real-run evidence
 

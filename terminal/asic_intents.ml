@@ -58,7 +58,7 @@ let mem runs run = List.mem runs run ~equal:Run_ref.equal
 
 let live_status status =
   List.mem
-    [ "allocated"; "observing"; "running"; "starting"; "queued" ]
+    [ "allocated"; "observing"; "running"; "starting"; "queued"; "cancelling" ]
     status
     ~equal:String.equal
 ;;

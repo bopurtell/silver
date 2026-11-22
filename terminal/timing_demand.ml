@@ -21,6 +21,7 @@ type t =
   ; selected : string option
   ; order : string list
   ; attempted : string list
+  ; automatic : bool
   ; flight : flight option
   ; serial : int
   }
@@ -31,7 +32,7 @@ type request =
   ; selected : bool
   }
 
-let create ~neighbors (view : Inspection_view.t) =
+let create ?(automatic = false) ~neighbors (view : Inspection_view.t) =
   if neighbors < 0 || neighbors > 2 then invalid_arg "Timing neighbors must be 0..2";
   { origin = view
   ; source = view.index
@@ -40,6 +41,7 @@ let create ~neighbors (view : Inspection_view.t) =
   ; selected = None
   ; order = []
   ; attempted = []
+  ; automatic
   ; flight = None
   ; serial = 0
   }
@@ -61,17 +63,12 @@ let receipt ?(floor = 0) t ~ticket response =
   | _ -> t
 ;;
 
-let same_source (a : Asic_inspection.Index.t) (b : Asic_inspection.Index.t) =
-  String.equal a.source_digest b.source_digest
-  && Option.equal Asic_inspection.Analysis_target.equal a.analysis b.analysis
-  && String.equal a.execution_file b.execution_file
-  && String.equal a.execution_sha256 b.execution_sha256
-  && Bool.equal a.cached_unverified b.cached_unverified
-  && List.equal Asic_inspection.Row.equal a.rows b.rows
-;;
+let same_source = Inspection_view.same_index_source
 
-let restart t ~(view : Inspection_view.t) =
-  let next = { (create ~neighbors:t.neighbors view) with serial = t.serial } in
+let restart ?automatic ?neighbors t ~(view : Inspection_view.t) =
+  let automatic = Option.value automatic ~default:t.automatic in
+  let neighbors = Option.value neighbors ~default:t.neighbors in
+  let next = { (create ~automatic ~neighbors view) with serial = t.serial } in
   if Run_ref.equal t.origin.run view.run
      && String.equal t.origin.stage view.stage
      && Option.equal Asic_inspection.Analysis_target.equal t.origin.analysis view.analysis
@@ -85,7 +82,10 @@ let restart t ~(view : Inspection_view.t) =
   else next
 ;;
 
-let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot.t) =
+let is_automatic t = t.automatic
+
+let step ?(revision = 0) ?(blocked = false) ?(allow_neighbors = true) ?joining t
+  ~(view : Inspection_view.t) (snapshot : Asic.Snapshot.t) =
   let valid =
     Run_ref.equal t.origin.run view.run
     && String.equal t.origin.stage view.stage
@@ -139,7 +139,7 @@ let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot
               [ "completed"; "failed"; "cancelled"; "detached" ]
               op.state
               ~equal:String.equal
-          | None -> Option.is_some published
+          | None -> Option.is_some published || t.automatic
         in
         let eligible = flight.acknowledged && revision >= flight.floor in
         if flight.failed || (eligible && completed)
@@ -152,8 +152,18 @@ let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot
             })
     in
     let t = { t with flight } in
+    let t =
+      match source, view.selected, flight with
+      | Some index, Some row_id, None ->
+         let key = Inspection_view.detail_key view ~source_digest:index.source_digest ~row_id in
+         if Option.equal String.equal joining (Some key)
+         then
+           { t with attempted = row_id :: List.filter t.attempted ~f:(Fn.non (String.equal row_id)) }
+        else t
+      | _ -> t
+    in
     match source, view.selected, flight with
-    | Some index, Some selected, None ->
+    | Some index, Some selected, None when not blocked ->
       let position =
         List.findi order ~f:(fun _ id -> String.equal id selected)
         |> Option.value_map ~default:0 ~f:fst
@@ -164,15 +174,34 @@ let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot
           List.filter_map
             [ position + distance; position - distance ]
             ~f:(fun n -> if n < 0 then None else List.nth order n))
-        |> Fn.flip List.take t.neighbors
+         |> Fn.flip List.take (if allow_neighbors then t.neighbors else 0)
       in
       let candidate =
         List.find (selected :: neighbors) ~f:(fun id ->
           (not (List.mem t.attempted id ~equal:String.equal))
-          && (String.equal id selected || Option.is_none (detail id)))
+           &&
+           match detail id with
+           | None ->
+             not
+               (String.equal id selected
+                && Option.exists view.detail ~f:(fun d -> Option.is_none d.error))
+           | Some d ->
+             (* A deliberate reopen/Enter can retry a failed selected detail, but must
+                not re-read successful evidence already published. *)
+             not t.automatic && String.equal id selected && Option.is_some d.error)
       in
       (match candidate with
-       | None -> Some t, view, None
+       | None ->
+         let view =
+           if List.mem t.attempted selected ~equal:String.equal
+              && Option.is_some view.requested
+              && Option.is_none view.detail
+              && Option.is_none view.pending_error
+              && Option.is_none view.error
+           then { view with error = Some "Timing detail unavailable · Enter retries" }
+           else view
+         in
+         Some t, view, None
        | Some row_id ->
          let operation =
            Inspection_view.detail_operation
@@ -190,7 +219,7 @@ let step ?(revision = 0) t ~(view : Inspection_view.t) (snapshot : Asic.Snapshot
            else
              { view with
                requested = Some (index.source_digest, row_id)
-             ; operation_key = Some key
+              ; operation_key = Option.some_if (not t.automatic) key
              ; error = None
              ; pending_error = None
              }
@@ -589,4 +618,31 @@ let%test_unit "vanished acknowledged completion is quiet on polls and recoverabl
   let state = receipt state ~ticket:retry.ticket (Ok ()) in
   let completed = { snapshot with inspection_details = [ detail "a" ] } in
   ignore (issued state view completed "b" : t * Inspection_view.t * request)
+;;
+
+let%test_unit "highlight attaches exact published detail and joins a matching held read" =
+  let open Fixture in
+  let snapshot = { snapshot with inspection_details = [ detail "a"; detail "b" ] } in
+  let choose id =
+    Timing_workspace.attach_selected { view with selected = Some id } snapshot
+    |> Timing_workspace.want_selected_detail
+  in
+  let b = choose "b" in
+  assert (String.equal (Option.value_exn b.detail).text "provider detail b");
+  let _, _, request = step (create ~automatic:true ~neighbors:0 b) ~view:b snapshot in
+  assert (Option.is_none request);
+  let c = choose "c" in
+  assert (Option.is_none c.detail && Option.is_some c.requested);
+  let demand = create ~automatic:true ~neighbors:0 c in
+  let held, _, request = step ~blocked:true demand ~view:c snapshot in
+  assert (Option.is_none request);
+  ignore (issued (Option.value_exn held) c snapshot "c" : t * Inspection_view.t * request);
+  let joined, _, request =
+    let key = Inspection_view.detail_key c ~source_digest:index.source_digest ~row_id:"c" in
+    step ~blocked:true ~joining:key demand ~view:c snapshot
+  in
+  assert (Option.is_none request);
+  let failed, view, request = step (Option.value_exn joined) ~view:c snapshot in
+  assert (Option.is_some view.error && Option.is_none request);
+  ignore (quiet (Option.value_exn failed) view snapshot : t)
 ;;

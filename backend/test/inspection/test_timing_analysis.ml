@@ -129,7 +129,9 @@ let settled service root operation =
 
 let main () =
   let root =
-    Core_unix.mkdtemp "/tmp/workbench-timing-analysis-" |> Filename_unix.realpath
+    Core_unix.mkdtemp
+      (Filename.concat (Stdlib.Filename.get_temp_dir_name ()) "workbench-timing-analysis-")
+    |> Filename_unix.realpath
   in
   let file name = Filename.concat root name in
   let write name j = Out_channel.write_all (file name) ~data:(Yojson.Safe.to_string j) in
@@ -471,8 +473,12 @@ let main () =
     "Incompatible exact cache accepted replacement instead of rejecting pinned fetch";
   let%bind snapshot = settled service root (detail wrong_target) in
   require
-    (Option.is_some (List.hd_exn snapshot.inspection_details).error)
-    "Cached detail silently replaced captured analysis";
+    (List.exists snapshot.operations ~f:(fun p ->
+       String.equal p.kind "inspection-detail"
+       && String.equal p.state "failed"
+       && Option.is_some p.error)
+     && Option.is_none (List.hd_exn snapshot.inspection_details).error)
+    "Wrong-target detail did not fail cleanly without replacing the current publication";
   let%bind () = Service.shutdown service in
   let before = calls () in
   write "response.json" (replace response "analysis_digest" (str hash));
@@ -954,7 +960,11 @@ let retained_refresh execution_file provider =
   let source_bytes = Backend.Asic_evidence_file.read_bounded source_file (8*1024*1024) in
   let observation_file = source_file ^ ".timing-analysis.json" in
   let observation_bytes = Backend.Asic_evidence_file.read_bounded observation_file (1024*1024) in
-  let root = Core_unix.mkdtemp "/tmp/workbench-retained-reinspection-" |> Filename_unix.realpath in
+  let root =
+    Core_unix.mkdtemp
+      (Filename.concat (Stdlib.Filename.get_temp_dir_name ()) "workbench-retained-reinspection-")
+    |> Filename_unix.realpath
+  in
   let state_dir = Filename.concat root "state" in
   Core_unix.mkdir_p state_dir ~perm:0o700;
   let registered : Asic.Run.t =

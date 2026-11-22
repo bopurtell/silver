@@ -36,9 +36,11 @@ and launch_status =
   | Submitting
   | Allocated
   | Running
+  | Cancelling
   | Completed
   | Launch_failed
   | Cancelled
+  | Interrupted
   | Detached
   | Unavailable
 [@@deriving equal, sexp]

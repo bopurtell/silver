@@ -492,6 +492,10 @@ let validate_stages (stages : Asic.Stage.t list) =
     "Normalized stage-plan exceeds byte budget"
 ;;
 
+let interruption_reason =
+  "Explicit interrupted stage occurrence; not evidence of user cancellation"
+;;
+
 (* CLI4 observation state is a provider-validated journal prefix, not a report or a
    checkpoint inventory. Interpret explicit recipes in their historical stage order. *)
 let observation_stages j =
@@ -567,12 +571,12 @@ let observation_stages j =
           | "running", `Null -> Running
           | "completed", `Int 0 -> Completed
           | "failed", `Int n when n <> 0 -> Failed
-          | "interrupted", `Int n when n <> 0 -> Cancelled
+          | "interrupted", `Int n when n <> 0 -> Interrupted
           | _ -> Unknown "invalid_or_unknown_occurrence_state"
         in
         let execution_timing =
           match status with
-          | Completed | Failed | Cancelled ->
+          | Completed | Failed | Interrupted ->
             Execution_timing.make
               ?measured_seconds:(duration_number (field "duration_seconds" occurrence))
               ~running:false
@@ -589,9 +593,7 @@ let observation_stages j =
         let occurrence = Option.map occurrence ~f:fst in
         let status, reason =
           match requested, occurrence with
-          | true, Some Cancelled ->
-            ( Asic.Stage.Status.Cancelled
-            , "Explicit interrupted stage occurrence; not evidence of user cancellation" )
+          | true, Some Interrupted -> Asic.Stage.Status.Interrupted, interruption_reason
           | true, Some status -> status, "Explicit stage occurrence"
           | true, None ->
             Unknown "missing_occurrence", "Requested stage occurrence missing"
@@ -608,7 +610,7 @@ let observation_stages j =
         in
         let execution_timing =
           match status with
-          | Completed | Failed | Cancelled -> execution_timing
+          | Completed | Failed | Interrupted -> execution_timing
           | _ -> None
         in
         { Asic.Stage.id
@@ -649,6 +651,7 @@ let stage_plan ?chip_target j =
             | "failed" -> Failed
             | "skipped" -> Skipped
             | "cancelled" -> Cancelled
+            | "interrupted" -> Interrupted
             | "not_requested" -> Not_requested
             | "unsupported" -> Unsupported
             | s -> Unknown s
@@ -684,7 +687,34 @@ let stage_plan ?chip_target j =
   | _ -> failwith "Expected stage-plan object"
 ;;
 
-let inspection (r : Asic.Run.t) ~cursor j =
+(* Require both an exact-run Workbench cancellation and the provider's terminal
+   interruption. Never replace measured results, infer execution from aggregate
+   status, or skip an earlier/unrequested stage. *)
+let cancelled_stages (stages : Asic.Stage.t list) =
+  let interrupted =
+    List.filter stages ~f:(fun s ->
+      s.requested && Asic.Stage.Status.equal s.status Interrupted)
+  in
+  match interrupted with
+  | [ boundary ] ->
+    let _, stages =
+      List.fold_map stages ~init:false ~f:(fun after (s : Asic.Stage.t) ->
+        if String.equal s.id boundary.id
+        then true, { s with status = Cancelled; reason = Some "Flow cancelled by user" }
+        else if after && s.requested && Asic.Stage.Status.equal s.status Pending
+        then
+          ( true
+          , { s with
+              status = Skipped
+            ; reason = Some ("flow cancelled during " ^ boundary.id)
+            } )
+        else after, s)
+    in
+    stages
+  | _ -> stages
+;;
+
+let inspection ?(user_cancelled = false) (r : Asic.Run.t) ~cursor j =
   let j = envelope j "hardcaml-asic.stage-observation" 2 in
   require
     (cursor >= r.cursor
@@ -704,6 +734,12 @@ let inspection (r : Asic.Run.t) ~cursor j =
     && integer (field "cursor" j) = cursor
   in
   let status = if final then text (field "status" outcome) else "observing" in
+  let cancelled =
+    user_cancelled
+    && String.equal status "interrupted"
+    && Poly.equal (field "exit_code" outcome) (`Int 143) (* Workbench sends SIGTERM. *)
+  in
+  let status = if cancelled then "cancelled" else status in
   let execution_file =
     Option.map (optional_text (field "execution_file" j)) ~f:absolute
   in
@@ -711,6 +747,7 @@ let inspection (r : Asic.Run.t) ~cursor j =
   (* Inspect can race ahead of read-updates. Never attach its stage state to an older
      cursor, or retain the previous cursor's checklist. The next poll catches up. *)
   let stages = if integer (field "cursor" j) = cursor then stages else [] in
+  let stages = if cancelled then cancelled_stages stages else stages in
   let stages =
     List.map stages ~f:(fun stage ->
       let started_at =
