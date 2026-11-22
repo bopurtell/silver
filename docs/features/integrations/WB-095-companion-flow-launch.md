@@ -148,6 +148,38 @@ inline-record encoding in Cobalt (`In_context`, `Stage_fresh`, `Launch_fresh`,
 server preview and local review generation before sending `Run`. Neither
 slice needed a new Silver RPC.
 
+### Live stage-progress regression
+
+The revised harness also gates one Cobalt checklist `R` launch per slice:
+`standard/balanced` in C8 and the selector's `explore/balanced` in C9, both
+through Routing on `demo-chip/small`. Before allocation, Elaboration is
+completed but physical status is not reported. After allocation, Synthesis
+is running, the rest of the requested prefix is pending, and Timing and
+Signoff are not requested. The producer then temporarily removes the
+structured physical stage evidence without ending the process; neither
+client may retain the previous running/pending statuses or imply completion.
+Native Silver labels the captured endpoint `unconfirmed`; Cobalt shows its
+catalog row once with `not reported`.
+Finally the same run reports its terminal completed prefix. The harness
+also checks that Cobalt does not duplicate the endpoint row, borrow the
+historical/native selection or use Explore evidence while Standard is active.
+Native Silver temporarily selects the exact linked ASIC run for inspection
+and restores its previous selection; Cobalt's Testing watch never changes.
+
+For each slice, `*-stage-progress-public-evidence.json` links the actual
+reservation, workflow, and run receipts; `*-stage-progress-*-{cobalt,native}.txt`
+and the matching `.ansi` files capture the two UIs. A `cobalt-tail` capture
+scrolls the fixed-height bottom band to include Signoff. The raw pass-through
+HTTP transcripts and `binaries.json` record the source of that evidence.
+Only the fixture producer is gated; the test does not rewrite Silver replies
+or inject progress into Cobalt.
+
+Prebuilt-binary verification passed both slices on 2026-11-22:
+`/var/tmp/cobalt-stage-progress/wb095-c8-um3gn46d/c8/` and
+`/var/tmp/cobalt-stage-progress/wb095-c9-x0vr2giz/c9/`. The compact launch
+fixture exporter ignores unscoped progress queries; the raw transcripts
+retain them.
+
 To reproduce, use prebuilt binaries and put a compatible `dune` on `PATH` for
 the fixture's publisher-copy rule. Replace the paths with local builds:
 
@@ -155,9 +187,9 @@ the fixture's publisher-copy rule. Replace the paths with local builds:
 python3 scripts/test-companion-flow-launch.py --slice c8 \
   --daemon _build/default/daemon/main.exe --client _build/default/terminal/main.exe \
   --preset-export _build/default/terminal/workspaces/export_presets.exe \
-  --cobalt /path/to/cobalt.exe --cobalt-source /path/to/cobalt
-# Repeat with --slice c9. Use --evidence-parent /path/to/private/writable/dir
-# if /tmp/opencode is quota-limited, and set TMPDIR for tool subprocesses.
+  --cobalt /path/to/cobalt.exe --cobalt-source /path/to/cobalt \
+  --evidence-parent /var/tmp/cobalt-stage-progress
+# Repeat with --slice c9. Each run creates its own evidence and TMPDIR.
 ```
 
 Limits: this verifies fixture execution through the real service, not real

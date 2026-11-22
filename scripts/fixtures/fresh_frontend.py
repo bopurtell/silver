@@ -35,7 +35,7 @@ def setup(args, label, check, preparation=True, configure=None, cold=False, befo
     wrapper.write_text('#!/bin/bash\nset -euo pipefail\na=()\n'
                        'for x in "$@"; do [[ "$x" == -j* ]] || a+=("$x"); done\n'
                        'if [[ "${a[0]}" == build ]]; then a=(build -j6 "${a[@]:1}"); fi\n'
-                       'exec flock /tmp/opencode/workbench-fresh-prefix-build.lock ' +
+                       'exec flock ' + shlex.quote(str(f.build_lock)) + ' ' +
                        shlex.join(command) + ' "${a[@]}"\n')
     if configure:
         configure(f)

@@ -1,10 +1,10 @@
 # Feature ticket catalog
 
 **Timing detail preload:** [WB-097 — Preload details for the top N timing paths](evidence/WB-097-timing-path-detail-preload.md)
-is delivered. A saved count controls how many paths are ready to inspect on selection.
+is closed (owner-accepted, 2026-11-22). A saved count controls how many paths are ready to inspect on selection.
 
 **ASIC flow cancellation:** [WB-096 — Cancel active ASIC flows from the palette](presentation/WB-096-flow-cancellation.md)
-is delivered. It covers `cancel` / `stop`, chip-scoped `cancel all` / `stop all`, and the
+is closed (owner-accepted, 2026-11-22). It covers `cancel` / `stop`, chip-scoped `cancel all` / `stop all`, and the
 checklist status of stages skipped after cancellation.
 
 **Cobalt companion:** [WB-093 — Test quick launch](integrations/WB-093-cobalt-quick-launch.md)

@@ -82,16 +82,16 @@ class Fixture:
         # The daemon uses Inherit_daemon, so its Dune resolves to this private wrapper.
         # with-switch runs inside the wrapper after flock acquisition, never outside it.
         wrapper = self.base / 'bin/dune'
+        self.build_lock = getattr(args, 'build_lock', '/tmp/opencode/workbench-fresh-prefix-build.lock')
         wrapper.write_text('#!/bin/bash\nset -euo pipefail\n'
                            'if [[ "$1" == "build" && " $* " != *" -j6 "* ]]; then exit 64; fi\n'
-                           'exec flock '
-                           '/tmp/opencode/workbench-fresh-prefix-build.lock ' +
+                           'exec flock "' + str(self.build_lock) + '" ' +
                            '"' + str(HERE / 'with-switch.sh') + '" dune "$@"\n')
         wrapper.chmod(0o700)
 
     def start(self):
         # Wait outside the HTTP open-project timeout for another owner's shared build.
-        subprocess.run(['flock', '-w', '120', '/tmp/opencode/workbench-fresh-prefix-build.lock', 'true'],
+        subprocess.run(['flock', '-w', '120', str(self.build_lock), 'true'],
                        check=True, timeout=125)
         metadata = self.base / 'discovery/daemon.sexp'
         metadata.unlink(missing_ok=True)

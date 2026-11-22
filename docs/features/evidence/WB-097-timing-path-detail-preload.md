@@ -3,7 +3,7 @@ id: WB-097
 title: Preload details for the top N timing paths
 category: evidence
 feature_sets: [FS1]
-status: delivered
+status: closed
 kind: enhancement
 priority: P2
 severity: n/a

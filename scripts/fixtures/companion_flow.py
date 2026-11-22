@@ -1,5 +1,6 @@
 """WB-095's synthetic EDA boundary; the daemon and both frontends stay real."""
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -54,6 +55,9 @@ if __name__ == '__main__':
     role, root = sys.argv[1], Path(sys.argv[2])
     args = sys.argv[3:]
     if role != 'pinned':
+        gate = root / 'companion-physical-gate'
+        if role == 'provider' and args[:1] == ['stages'] and gate.is_dir():
+            os.environ['WB095_PHYSICAL_GATE'] = str(gate)
         fresh.main(prepare=prepared)
     else:
         fresh.event(root, 'pinned-call', argv=args)

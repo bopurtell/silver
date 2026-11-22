@@ -70,22 +70,30 @@ elif args[:1] == ["stages"]:
                  plan_identity=plan["plan_identity"], bundle_identity=plan["bundle_identity"],
                  reference=dict(attempt_id=stream))
 
-    def save(status=None):
+    # Opt-in companion PTY gate: pause on either side of the real allocation
+    # event. Only synthesis has started in the held observation.
+    gate = os.environ.get("WB095_PHYSICAL_GATE")
+    gated = gate is not None
+
+    def save(status=None, *, omit_stages=False):
         execution = dict(attempt_id=stream, status=status or "running",
                          exit_code=143 if status == "interrupted" else 0,
                          plan=recipe, artifacts=[], occurrences=[
                              dict(action_key="implementation." + stage,
                                   occurrence_id=stream + "/implementation." + stage,
-                                  status=status or "running",
+                                   status=status or ("unreached" if gated and stage != stages[0] else "running"),
                                   exit_code=(None if status is None else (143 if status == "interrupted" else 0)),
                                   best_effort=False, verdict=None)
-                             for stage in stages])
+                              for stage in stages])
         with open(execution_file, "w") as out:
             json.dump(execution, out)
         inspection = env("stage-observation", 2, stream_id=stream, cursor=0,
                          writer_active=status is None, observation_status="final" if status else "active",
                          state=dict(execution, outcome=dict(status=status, exit_code=execution["exit_code"]) if status else None),
                          methodology=method, execution_file=execution_file if status else None)
+        if omit_stages:
+            inspection["state"].pop("plan")
+            inspection["state"].pop("occurrences")
         with open(os.path.join(attempt, "inspection.pending"), "w") as out:
             json.dump(inspection, out)
         os.replace(os.path.join(attempt, "inspection.pending"), os.path.join(attempt, "inspection.json"))
@@ -98,9 +106,23 @@ elif args[:1] == ["stages"]:
         sys.exit(143)
 
     signal.signal(signal.SIGTERM, stop)
+    def await_release(name):
+        deadline = time.monotonic() + 35
+        while not os.path.exists(os.path.join(gate, name)):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("companion fixture gate: " + name)
+            time.sleep(0.025)
+
+    if gated:
+        await_release("allocate")
     save()
     emit(env("stage-observation", event="observation_allocated", attempt=attempt, stream_id=stream))
-    time.sleep(30 if os.path.exists("hold-physical") else 0.2)
+    if gated:
+        await_release("omit-stages")
+        save(omit_stages=True)
+        await_release("complete")
+    else:
+        time.sleep(30 if os.path.exists("hold-physical") else 0.2)
     save("completed")
     emit(env("stage-observation", event="observation_terminal", execution_file=execution_file))
 elif args[:2] == ["observation", "inspect"]:

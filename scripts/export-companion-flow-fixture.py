@@ -28,6 +28,12 @@ def export(path, action):
         request = parse(row['request'])
         operation = field(request, 'operation')
         if path == '/api/v1/asic':
+            # Checklist observation uses independent, unscoped public reads;
+            # export only the companion-context launch exchange.
+            if not isinstance(operation, list) or operation[0] != 'In_context':
+                continue
+            if field(operation[1:], 'context') != 'cobalt-companion-v1':
+                continue
             operation = field(operation[1:], 'operation')
         name = operation if isinstance(operation, str) else operation[0]
         result, snapshot = parse(row['response'])

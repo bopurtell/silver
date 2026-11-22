@@ -3,7 +3,7 @@ id: WB-096
 title: Cancel active ASIC flows from the palette
 category: presentation
 feature_sets: [FS0, FS1]
-status: delivered
+status: closed
 kind: enhancement
 priority: P2
 severity: n/a
