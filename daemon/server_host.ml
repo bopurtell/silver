@@ -18,6 +18,33 @@ let instance_id () =
   |> V1.Daemon_instance_id.of_string
 ;;
 
+let session_temporary_paths () =
+  match Sys.getenv "TMPDIR" with
+  | Some _ ->
+    (* Preserve Filename's explicit-temp behavior and the unmodified child environment. *)
+    Filename_unix.temp_dir "hardcaml-workbench-" "-logs" ~perm:0o700, None
+  | None ->
+    let cache =
+      Sys.getenv "XDG_CACHE_HOME"
+      |> Option.filter ~f:Filename.is_absolute
+      |> Option.value_or_thunk ~default:(fun () ->
+        Filename.concat (Sys_unix.home_directory ()) ".cache")
+    in
+    Core_unix.mkdir_p cache;
+    let parent = Filename.concat cache "silver-runtime" in
+    (try Core_unix.mkdir parent ~perm:0o700 with
+     | Unix.Unix_error (EEXIST, _, _) -> ());
+    let stat = Core_unix.lstat parent in
+    if not (Poly.equal stat.st_kind S_DIR)
+       || stat.st_uid <> Core_unix.geteuid ()
+       || stat.st_perm land 0o777 <> 0o700
+    then failwithf "Silver runtime cache must be a private directory: %s" parent ();
+    let session = Filename_unix.temp_dir ~in_dir:parent ~perm:0o700 "session" "" in
+    let scratch = Filename.concat session "tmp" in
+    Core_unix.mkdir scratch ~perm:0o700;
+    Filename.concat session "logs", Some scratch
+;;
+
 let start
   ?(authoring_roots = [])
   ~port
@@ -56,12 +83,13 @@ let start
     Or_error.tag state_lock ~tag:("cannot open Silver state at " ^ state_dir)
     |> Or_error.ok_exn
   in
-  let log_dir = Filename_unix.temp_dir "hardcaml-workbench-" "-logs" ~perm:0o700 in
+  let%bind log_dir, subprocess_temp_dir = In_thread.run session_temporary_paths in
   let%bind service =
     Service.create
       ~authoring_roots
       ~instance_id
       ~log_dir
+      ?subprocess_temp_dir
       ~state_dir
       ~inspection_detail_cache_entries
       ~inspection_detail_cache_bytes
@@ -100,6 +128,14 @@ let start
   in
   Shutdown.at_shutdown ~here:[%here] (fun () ->
     let%bind () = Service.shutdown service in
+    let%bind () =
+      match subprocess_temp_dir with
+      | None -> Deferred.unit
+      | Some scratch ->
+        Monitor.try_with (fun () ->
+          In_thread.run (fun () -> Service.remove_tree_sync (Filename.dirname scratch)))
+        >>| ignore
+    in
     let%bind () = Cohttp_async.Server.close server in
     Unix.funlock state_lock;
     let%bind () = Unix.close state_lock in

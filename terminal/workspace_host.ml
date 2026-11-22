@@ -392,7 +392,7 @@ let empty =
   ; browser_hints = false
   ; palette_hints = true
   ; timing_preload = true
-  ; timing_preload_details = 0
+  ; timing_preload_details = Timing_preload.default_details
   ; quick_launch_view = true
   ; planned_preparation = true
   ; notice = "Loading workspace registry"
@@ -978,11 +978,29 @@ let timing t (tile : W.Tile.t) =
 ;;
 
 let set_timing t (tile : W.Tile.t) (view : Timing_workspace.t) =
+  let previous = timing t tile in
   let view =
     { view with
       Inspection_view.workspace_epoch =
         Option.map t.registry ~f:(fun registry -> timing_epoch registry tile.workspace)
     }
+  in
+  let t =
+    if Option.exists previous ~f:(fun previous ->
+         previous.generation = view.generation
+         && Option.equal String.equal previous.selected view.selected)
+    then t
+    else
+      (* Scroll in the selected report belongs to that path, not its replacement. *)
+      Option.value_map t.registry ~default:t ~f:(fun registry ->
+        List.fold registry.tiles ~init:t ~f:(fun t pane ->
+          if W.Workspace_id.equal tile.workspace pane.workspace
+             && Option.equal Timing_workspace.equal_pane
+                  (Timing_workspace.pane pane.kind) (Some Detail)
+          then (
+            let state = local t pane.id in
+            if state.scroll = 0 then t else set_local t pane.id { state with scroll = 0 })
+          else t))
   in
   { t with
     timing =
@@ -2044,7 +2062,7 @@ let navigation_preferences ~project_key t =
           |> Option.map ~f:(fun (_, _, state) ->
             let view = Testing_workspace.view state in
             let artifact =
-              Testing_workspace.artifact_identity state
+              Testing_workspace.navigation_artifact_identity state
               |> Option.map ~f:(fun artifact ->
                 { Navigation_preferences.id = artifact.Testing_workspace.id
                 ; sha256 = artifact.sha256
@@ -2094,8 +2112,9 @@ let navigation_preferences ~project_key t =
       Navigation_preferences.with_testing_artifacts
         saved
         (List.filter_map t.testing ~f:(fun (id, (_, _, state)) ->
-           if List.exists workspaces ~f:(fun w ->
-                String.equal w.Navigation_preferences.id id)
+            if Option.is_some (Testing_workspace.navigation_artifact_identity state)
+               && List.exists workspaces ~f:(fun w ->
+                    String.equal w.Navigation_preferences.id id)
            then Option.map (Testing_workspace.artifact_metadata state) ~f:(fun a -> id, a)
            else None))
     in
@@ -3581,6 +3600,16 @@ let coherent_timing_run registry panes =
     Option.filter (resolve tile) ~f:(fun run ->
       List.for_all panes ~f:(fun pane ->
         Option.equal Run_ref.equal (resolve pane) (Some run))))
+;;
+
+let builtin_timing_paths t =
+  Option.value_map t.registry ~default:[] ~f:(fun registry ->
+    builtin_timing_workspaces registry
+    |> List.filter_map ~f:(fun workspace ->
+      let panes = timing_panes registry workspace.id in
+      Option.bind (coherent_timing_run registry panes) ~f:(fun run ->
+        List.find panes ~f:(fun tile -> String.equal tile.kind "timing-paths" && not tile.hidden)
+        |> Option.map ~f:(fun tile -> tile, run))))
 ;;
 
 let visible_timing t =
@@ -5252,7 +5281,7 @@ let named_stage_command_id endpoint = named_stage_command_prefix ^ endpoint
 let verify_evidence_command_id = "asic.verify-evidence"
 let cancel_flow_command_id = "asic.cancel-viewed-flow"
 let cancel_all_flows_command_id = "asic.cancel-chip-flows"
-let viewed_flow_palette_queries = [ "cancel"; "stop" ]
+let viewed_flow_palette_queries = [ "cancel"; "stop"; "cancel current"; "stop current" ]
 
 let known_stage_endpoints =
   [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
@@ -6177,14 +6206,17 @@ let has_local_actions t =
   Option.exists (focused t) ~f:(fun tile -> String.equal tile.kind "run-selector")
 ;;
 
-(* The caller supplies only the inspected run's catalog entries. *)
+(* The caller supplies only the selected execution/workflow's catalog entries. *)
 let run_menu_rows commands =
   List.filter_map commands ~f:(fun command ->
-    Option.some_if
-      (String.equal command.id "asic.use-run-target"
-       || String.is_prefix command.id ~prefix:"asic.artifacts."
-       || String.is_prefix command.id ~prefix:"asic.refresh.")
-      { group = "Selected run"; label = command.title; command })
+    if String.equal command.id cancel_flow_command_id
+    then Some { group = "Selected workflow"; label = command.title; command }
+    else
+      Option.some_if
+        (String.equal command.id "asic.use-run-target"
+         || String.is_prefix command.id ~prefix:"asic.artifacts."
+         || String.is_prefix command.id ~prefix:"asic.refresh.")
+        { group = "Selected run"; label = command.title; command })
 ;;
 
 let menu_matches menu =
@@ -8815,17 +8847,39 @@ let launch_target t =
   | _ -> None
 ;;
 
-(* An unselected launch origin can address its own submitted workflow even before the
-   provider returns a run. Do not carry that authority into another workspace/binding,
-   across a run selection change, or to another chip. *)
-let unselected_launch_origin t ~chip_target =
+(* A local submission is newer intent than a run already being watched, but it does
+   not change that run's binding. Do not carry it across a selection revision,
+   workspace/binding change, or chip change. *)
+let current_launch_origin t ~chip_target =
   Option.bind t.fresh_launch_origin ~f:(fun origin ->
-    Option.bind t.registry ~f:(fun registry ->
-      if Option.exists (launch_target t) ~f:(equal_launch_target origin.target)
-         && Option.equal Asic.Chip_target.equal chip_target origin.chip_target
-         && Option.is_none (W.context registry origin.target.context_id).selected_run
-      then Some origin.key
-      else None))
+    if Option.exists (launch_target t) ~f:(equal_launch_target origin.target)
+       && Option.equal Asic.Chip_target.equal chip_target origin.chip_target
+    then Some origin.key
+    else None)
+;;
+
+(* Local Runs cursors are not durable run references. The namespace cannot collide
+   with [run_label], which starts with the provider followed by '/'. Parse only
+   against authoritative workflow rows before offering an action. *)
+let workflow_cursor id = "\000workflow:" ^ id
+let is_workflow_cursor = String.is_prefix ~prefix:(workflow_cursor "")
+
+let cursor_workflow (snapshot : Asic.Snapshot.t) cursor =
+  List.find snapshot.workflows ~f:(fun w ->
+    Planned_run.workflow_in_chip snapshot w && String.equal cursor (workflow_cursor w.id))
+;;
+
+let start_fresh_launch_view t origin =
+  (* A deliberate new submission supersedes earlier browsing in Follow
+     selectors. Pinned tiles and later explicit cursor picks remain exact. *)
+  let t =
+    List.fold (tiles t) ~init:t ~f:(fun t tile ->
+      match tile.binding with
+      | Follow when String.equal tile.kind "run-selector" ->
+        set_local t tile.id { (local t tile.id) with cursor = None; scroll = 0 }
+      | _ -> t)
+  in
+  { t with fresh_launch_origin = Some origin }
 ;;
 
 let selection_after_allocation (s : W.Snapshot.t) target run =

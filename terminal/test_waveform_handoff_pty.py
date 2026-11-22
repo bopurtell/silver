@@ -74,10 +74,14 @@ def provider():
             schema_version=1, result='/retained/' + case + '/result.json', source_digest='a' * 64)))
         writer.artifact(case + '-result-reference', case, 'json', 'application/json', path.name)
         # JSON-only run, then mixed artifacts with distinct case-specific signal names.
-        if selection['seed'] == '2':
+        if selection['seed'] in ('2', '3'):
             path = a.artifact_dir / (case + '.vcd')
             path.write_text(handoff_vcd(case))
             writer.artifact(case + '-waveform', case, 'trace', 'text/vcd', path.name)
+            if selection['seed'] == '3':
+                path = a.artifact_dir / (case + '-alternate.vcd')
+                path.write_text(handoff_vcd(case).replace(f'module {case} ', 'module alternate '))
+                writer.artifact(case + '-alternate-waveform', case, 'trace', 'text/vcd', path.name)
         writer.finish_case(case)
     writer.emit(['Finished', 'Passed'])
 
@@ -369,10 +373,11 @@ def run(args, evidence):
 
         reopen(attempts[0])
         testing_layout.focus_pane(terminal, 'simulation-artifacts')
+        before_json = len(proxy.records)
         terminal.key(b'w')
         terminal.capture('json-only-no-vcd', ['No available supported VCD'],
             absent=['Embedded viewer supports VCD only', 'Captured waveform identity'])
-        check(not proxy.records, 'JSON-only w does not fetch/pin a JSON waveform')
+        check(len(proxy.records) == before_json, 'JSON-only w does not fetch/pin a JSON waveform')
         check_inspect_action('legacy-json-inspect-action')
         check(True, 'legacy JSON-only case retains Inspect workload result action')
         reopen(attempts[1])
@@ -488,8 +493,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--daemon', type=Path, required=True)
     p.add_argument('--client', type=Path, required=True)
-    p.add_argument('--ephemeral', action='store_true',
+    output = p.add_mutually_exclusive_group()
+    output.add_argument('--ephemeral', action='store_true',
         help='remove owned state/evidence on exit (Dune); default retains historical evidence')
+    output.add_argument('--evidence', type=Path, help='create and retain this evidence directory')
     p.add_argument('--timeout-seconds', type=int, default=180)
     args = p.parse_args()
     if not 1 <= args.timeout_seconds <= 300:
@@ -507,6 +514,9 @@ def main():
         with ExitStack() as cleanup:
             if args.ephemeral:
                 evidence = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='workload-waveform-pty-')))
+            elif args.evidence:
+                evidence = args.evidence.resolve()
+                evidence.mkdir(mode=0o700)
             else:
                 evidence = Path(tempfile.mkdtemp(prefix='workload-waveform-pty-', dir='/tmp/opencode'))
             signal.alarm(args.timeout_seconds)

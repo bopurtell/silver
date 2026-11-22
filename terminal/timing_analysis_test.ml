@@ -377,12 +377,15 @@ let%test_unit "visible legacy index requires a completed stage for the exact exe
     }
   in
   let summary = { summary with timing_analysis = None } in
-  let run = { run with execution_file = Some summary.execution_file; stages = [ stage ] } in
+  let run =
+    { run with execution_file = Some summary.execution_file; stages = [ stage ]; status = "completed" }
+  in
   let snapshot = { snapshot with summaries = [ summary ]; runs = [ run ] } in
   let view = Timing_workspace.create ~generation:0 ~run:summary.run ~stage:stage.id in
   let available snapshot visible = O.timing_index_available snapshot view ~visible in
   assert (available snapshot true);
-  assert (not (available snapshot false));
+  assert (available snapshot false);
+  assert (not (available { snapshot with runs = [ { run with status = "running" } ] } false));
   assert (not (available { snapshot with runs = [] } true));
   assert (
     not

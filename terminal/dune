@@ -438,6 +438,25 @@
    --ephemeral --timeout-seconds 180)))
 
 (rule
+ (alias test-native-smoke)
+ (deps
+  (sandbox always)
+  test_waveform_preparation_pty.py
+  test_waveform_handoff_pty.py
+  ../scripts/test-native-simulation.py
+  ../scripts/test-native-execution.py
+  ../scripts/test-embedded-waveform.py
+  ../scripts/fixtures/simulation_fixture_wire.py
+  ../scripts/fixtures/testing_layout.py
+  ../test/support/__init__.py
+  ../test/support/screen.py
+  ../test/support/terminal.py)
+ (action
+  (run python3 -B %{dep:test_waveform_preparation_pty.py}
+   --daemon %{exe:../daemon/main.exe}
+   --client %{exe:main.exe})))
+
+(rule
  (alias test-mouse-pty)
  (deps
   (sandbox always)

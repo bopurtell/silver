@@ -107,7 +107,7 @@ let validate_cached_summary (snapshot : Asic.Snapshot.t) ~selected =
             | Some { freshness = (Validated | Missing_source | Refresh_failed _); _ } -> None)))
 ;;
 
-let plan t ?timing_summary_run ~now (snapshot : Asic.Snapshot.t) ~visible =
+let plan t ?(timing_summary_runs = []) ~now (snapshot : Asic.Snapshot.t) ~visible =
   let visible = List.dedup_and_sort visible ~compare:Run_ref.compare in
   let t =
     { observed = List.filter t.observed ~f:(fun (run, _) -> mem visible run)
@@ -163,7 +163,7 @@ let plan t ?timing_summary_run ~now (snapshot : Asic.Snapshot.t) ~visible =
       in
        let timing_ready =
          (not (terminal run))
-         && Option.equal Run_ref.equal timing_summary_run (Some reference)
+         && mem timing_summary_runs reference
          && List.exists [ "timing"; "signoff" ] ~f:(fun stage ->
            Overview_tiles.completed_timing_stage run ~stage)
        in
@@ -285,7 +285,8 @@ let%test_unit "visible completed Timing may read one summary while Signoff is li
   let owner = fixture_operation ~run:fixture_reference "run:launch" "run" "executing" in
   let snapshot = fixture_snapshot ~operations:[ owner ] [ run ] in
   let plan t ?timing_summary_run snapshot =
-    plan t ?timing_summary_run ~now:Time_ns.epoch snapshot ~visible:[ fixture_reference ]
+    plan t ~timing_summary_runs:(Option.to_list timing_summary_run)
+      ~now:Time_ns.epoch snapshot ~visible:[ fixture_reference ]
   in
   assert (List.is_empty (snd (plan empty snapshot)));
   let t, intents = plan empty ~timing_summary_run:fixture_reference snapshot in

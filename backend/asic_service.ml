@@ -620,10 +620,13 @@ let load_project t ~root ~environment =
                  else w.elaboration_status)
             ; error =
                 (if active
-                 then
-                   Some
-                     "Daemon restarted; producer ownership unavailable; no automatic \
-                      replay"
+                 then (
+                   let owner =
+                     if Asic.Fresh.Workflow.source_queued w
+                     then "queued source work was not resumed"
+                     else "producer ownership unavailable"
+                   in
+                   Some ("Daemon restarted; " ^ owner ^ "; no automatic replay"))
                  else w.error)
             });
        p.index <- s.index;

@@ -1525,6 +1525,9 @@ let planned_source_rows host tile =
       [ row Fact ("exact allocated run: " ^ id) ])
     @ Option.value_map workflow ~default:[] ~f:(fun w ->
       [ row Fact ("Workflow ID: " ^ w.id); row Fact ("submission key: " ^ w.key) ]
+      @ (if Option.is_none w.run
+         then [ row Muted "See this workflow in Runs" ]
+         else [])
        @ (if Planned_run.workflow_active w && not w.cancel_requested
          then
            [ row
@@ -1587,7 +1590,12 @@ let formatted_plan_history ?indicator_frames host tile ~width =
         if i = 0
         then Some (plan_indicator model.status)
         else if i = 1
-        then Some (producer_indicator model.launch.state)
+        then
+          Some
+            (if Option.exists (Planned_run.workflow host.planned_run) ~f:(fun w ->
+                   not w.cancel_requested && Asic.Fresh.Workflow.source_queued w)
+             then Pending
+             else producer_indicator model.launch.state)
         else None
       else if host.planned_preparation
       then
@@ -2063,18 +2071,61 @@ let run_candidates data ~filter =
     String.is_substring (String.lowercase (run_label run ^ " " ^ status)) ~substring)
 ;;
 
-let run_cursor host tile =
-  Option.first_some
-    (H.local host tile.W.Tile.id).cursor
-    (Option.map (tile_run host tile) ~f:run_label)
+type selector_entry =
+  | Execution of Run_ref.t * string
+  | Workflow of Asic.Fresh.Workflow.t
+
+let selector_cursor = function
+  | Execution (run, _) -> run_label run
+  | Workflow w -> H.workflow_cursor w.id
 ;;
 
-let run_page host tile ~height candidates =
+let selector_candidates data ~filter =
+  let workflows =
+    Option.value_map data.asic ~default:[] ~f:(fun snapshot ->
+      Planned_run.preallocation_workflows snapshot
+      |> List.filter ~f:(Planned_run.workflow_matches ~filter))
+  in
+  let live, terminal = List.partition_tf workflows ~f:Planned_run.workflow_active in
+  List.map live ~f:(fun w -> Workflow w)
+  @ List.map (run_candidates data ~filter) ~f:(fun (run, status) -> Execution (run, status))
+  @ List.map terminal ~f:(fun w -> Workflow w)
+;;
+
+let run_cursor ~data host tile =
+  let local = (H.local host tile.W.Tile.id).cursor in
+  let workflow_cursor =
+    Option.bind data.asic ~f:(fun snapshot ->
+      match local with
+      | Some cursor when H.is_workflow_cursor cursor ->
+        Option.bind (H.cursor_workflow snapshot cursor) ~f:(fun w ->
+          Option.map (Planned_run.registered_run snapshot w) ~f:run_label)
+      | Some _ -> None
+      | None ->
+        (match tile.binding with
+         | Pin_run _ -> None
+         | Follow ->
+           Option.bind (H.current_launch_origin host ~chip_target:snapshot.chip_target)
+             ~f:(fun key ->
+               List.find snapshot.workflows ~f:(fun w ->
+                 String.equal w.key key
+                 && Planned_run.workflow_in_chip snapshot w
+                 && Planned_run.workflow_active w)
+               |> Option.map ~f:(fun w ->
+                 Option.value_map (Planned_run.registered_run snapshot w)
+                   ~default:(H.workflow_cursor w.id) ~f:run_label))))
+  in
+  Option.first_some
+    workflow_cursor
+    (Option.first_some local (Option.map (tile_run host tile) ~f:run_label))
+;;
+
+let run_page host data tile ~height candidates =
   let local = H.local host tile.W.Tile.id in
-  let selected = run_cursor host tile in
+  let selected = run_cursor ~data host tile in
   let index =
-    List.findi candidates ~f:(fun _ (run, _) ->
-      Option.equal String.equal selected (Some (run_label run)))
+    List.findi candidates ~f:(fun _ entry ->
+      Option.equal String.equal selected (Some (selector_cursor entry)))
     |> Option.value_map ~default:0 ~f:fst
   in
   let available = Int.min height (H.policy host tile).run_selector_rows in
@@ -2087,14 +2138,47 @@ let run_page host tile ~height candidates =
   selected, start, List.take (List.drop candidates start) (Int.max 0 available)
 ;;
 
-let local_menu_run host data tile =
+let selected_run_entry host data tile =
   if not (String.equal tile.W.Tile.kind "run-selector")
   then None
   else
-    let candidates = run_candidates data ~filter:(H.local host tile.id).filter in
-    Option.bind (run_cursor host tile) ~f:(fun cursor ->
-      List.find_map candidates ~f:(fun (run, _) ->
-        Option.some_if (String.equal (run_label run) cursor) run))
+    let candidates = selector_candidates data ~filter:(H.local host tile.id).filter in
+    Option.bind (run_cursor ~data host tile) ~f:(fun cursor ->
+      List.find candidates ~f:(fun entry -> String.equal (selector_cursor entry) cursor))
+;;
+
+let local_menu_run host data tile =
+  match selected_run_entry host data tile with
+  | Some (Execution (run, _)) -> Some run
+  | _ -> None
+;;
+
+let workflow_row host data tile (w : Asic.Fresh.Workflow.t) ~width ~selected =
+  let snapshot = Option.value_exn data.asic in
+  let population = List.map snapshot.workflows ~f:(fun w -> w.id) in
+  let phase = Planned_run.workflow_phase w in
+  let id =
+    Presentation.identifiers ~compress:(H.policy host tile).string_compression population w.id
+  in
+  let no_run = Planned_run.workflow_without_run w in
+  E.text
+    (E.clip ~width
+       (E.plain
+          (Artifact_view.safe
+             ((if selected then "> " else "  ") ^ phase ^ " · " ^ id ^ " · " ^ no_run
+              ^ " · " ^ w.intent.selection.endpoint))))
+;;
+
+let workflow_style (w : Asic.Fresh.Workflow.t) =
+  match w.phase with
+  | Completed -> Role.Success, Indicator.Completed
+  | Failed -> Failure, Failed
+  | Cancelled -> Warning, Cancelled
+  | Interrupted -> Warning, Unknown
+  | (Building | Emitting) when not w.cancel_requested && Asic.Fresh.Workflow.source_queued w ->
+    Muted, Pending
+  | (Reserved | Prepared) when not w.cancel_requested -> Muted, Pending
+  | Reserved | Prepared | Building | Emitting | Physical -> Running, Running
 ;;
 
 let menu_button appearance label =
@@ -2130,7 +2214,9 @@ let rows host data tile ~width ~height =
   in
   let run_rows () =
     let candidates = run_candidates data ~filter:local.filter in
-    let selected, _, page = run_page host tile ~height candidates in
+    let selected, _, page =
+      run_page host data tile ~height (selector_candidates data ~filter:local.filter)
+    in
     let status_width = run_selector_status_width ~width candidates in
     let endpoint_width, prefer_endpoint = run_selector_endpoints data candidates in
     let endpoint_width, _ =
@@ -2143,7 +2229,11 @@ let rows host data tile ~width ~height =
         ~time_width:0
     in
     page
-    |> List.map ~f:(fun (run, label) ->
+    |> List.map ~f:(function
+    | Workflow w ->
+      workflow_row host data tile w ~width
+        ~selected:(Option.equal String.equal selected (Some (H.workflow_cursor w.id)))
+    | Execution (run, label) ->
       let endpoint =
         run_selector_endpoint_suffix
           ~width:endpoint_width
@@ -2620,9 +2710,7 @@ let select_body_row ?(column = 0) host data tile ~width ~height ~row =
       let _, header, page = timing_paths_page view ~height in
       (match List.nth page (row - header) with
        | Some path when not (Option.equal String.equal view.selected (Some path.id)) ->
-         H.set_timing
-           host
-           tile
+         let view =
            { view with
              selected = Some path.id
            ; requested = None
@@ -2633,19 +2721,24 @@ let select_body_row ?(column = 0) host data tile ~width ~height ~row =
            ; error = None
            ; pending_error = None
            }
+         in
+         H.set_timing
+           host
+           tile
+           (Option.value_map data.asic ~default:view ~f:(Timing_workspace.attach_selected view))
        | _ -> host))
   else if String.equal tile.kind "run-selector"
   then (
     let _, start, page =
-      run_page host tile ~height (run_candidates data ~filter:local.filter)
+      run_page host data tile ~height (selector_candidates data ~filter:local.filter)
     in
     match List.nth page row with
     | None -> host
-    | Some (run, _) ->
+    | Some entry ->
       H.set_local
         host
         tile.id
-        { local with cursor = Some (run_label run); scroll = start })
+        { local with cursor = Some (selector_cursor entry); scroll = start })
   else (
     let target =
       let at rows offset =
@@ -2731,6 +2824,7 @@ let timing_line_role : Timing_workspace.line_role -> Role.t = function
   | Failure -> Failure
   | Success -> Success
   | Source -> Focus
+  | Payload -> Foreground
 ;;
 
 let timing_semantic_prefix ?(presentation = T.defaults) ~pane ~width view =
@@ -2758,7 +2852,6 @@ let timing_body
   ~height
   (view : Timing_workspace.t)
   =
-  let source = Timing_workspace.rows ~presentation ~pane ~scroll ~width ~height view in
   let text role value =
     let role = match role with Role.Success when report_only -> Role.Muted | role -> role in
     View.text ~attrs:(Role.attrs appearance role) (Artifact_view.safe value)
@@ -2860,32 +2953,20 @@ let timing_body
       | _ -> header
     in
     View.vcat (header @ body) |> box ~width ~height |> colored appearance Foreground
-  | Detail | Context ->
-    (* Scroll offsets follow the same display rows as input. Only the canonical semantic
-       prefix receives role styling; provider payload is always neutral. *)
-    let full =
-      Timing_workspace.rows
-        ~presentation
-        ~pane
-        ~scroll:0
-        ~width
-        ~height:Int.max_value
-        view
-    in
-    let start = Int.min scroll (Int.max 0 (List.length full - height)) in
-    let prefix =
-      timing_semantic_prefix ~presentation ~pane ~width view |> Array.of_list
-    in
-    List.mapi source ~f:(fun i line ->
-      let offset = start + i in
-      if offset < Array.length prefix && String.equal (snd prefix.(offset)) line
-      then (
-        let role = fst prefix.(offset) in
-        match role, String.lsplit2 line ~on:':' with
-        | Focus, Some (label, value) ->
-          View.hcat [ text Muted (label ^ ":"); text Focus value ]
-        | _ -> text role line)
-      else text Foreground line)
+  | Detail ->
+    Timing_workspace.detail_page ~presentation ~scroll ~width ~height view
+    |> List.map ~f:(fun (role, line) -> text (timing_line_role role) line)
+    |> View.vcat
+    |> box ~width ~height
+    |> colored appearance Foreground
+  | Context ->
+    Timing_workspace.context_page ~presentation ~scroll ~width ~height view
+    |> List.map ~f:(fun (role, line) ->
+      let role = timing_line_role role in
+      match role, String.lsplit2 line ~on:':' with
+      | Focus, Some (label, value) ->
+        View.hcat [ text Muted (label ^ ":"); text Focus value ]
+      | _ -> text role line)
     |> View.vcat
     |> box ~width ~height
     |> colored appearance Foreground
@@ -3024,7 +3105,7 @@ let tile_view
           | kind when P.Waveforms.is_pane kind ->
             P.Waveforms.title (Option.value_exn (P.Waveforms.pane kind))
           | "run-selector" ->
-            let total = List.length (run_candidates data ~filter:local.filter) in
+            let total = List.length (selector_candidates data ~filter:local.filter) in
             sprintf
               "runs %d/%d (cap %d)"
               (Int.min total (Int.min body_height policy.run_selector_rows))
@@ -3150,9 +3231,25 @@ let tile_view
               List.fold candidates ~init:0 ~f:(fun n (run, _) ->
                 Int.max n (cell_width (time run)))
             in
-            let selected, _, page = run_page host tile ~height:body_height candidates in
+            let selected, _, page =
+              run_page host data tile ~height:body_height
+                (selector_candidates data ~filter:local.filter)
+            in
             page
-            |> List.map ~f:(fun (run, status) ->
+            |> List.map ~f:(function
+              | Workflow w ->
+                let role, kind = workflow_style w in
+                let icon = indicator_view ?indicator_frames appearance role kind in
+                let gap = if View.width icon > 0 then View.text " " else View.none in
+                let selected =
+                  Option.equal String.equal selected (Some (H.workflow_cursor w.id))
+                in
+                let text =
+                  workflow_row host data tile w
+                    ~width:(body_width - View.width icon - View.width gap) ~selected
+                in
+                View.hcat [ View.text ~attrs:(Role.attrs appearance role) text; gap; icon ]
+              | Execution (run, status) ->
               run_selector_view
                  ~string_compression:policy.string_compression
                  ~population:(List.map data.runs ~f:(fun (r, _) -> r.id))
@@ -3750,7 +3847,7 @@ let menu_trigger_at host _data dimensions ~x ~y =
   | _ -> None
 ;;
 
-let run_context_at host data dimensions ~x ~y =
+let selector_context_at host data dimensions ~x ~y =
   match pointer_geometry host dimensions ~x ~y with
   | Some (tile, body, Some (_, row)) when String.equal tile.kind "run-selector" ->
     let local = H.local host tile.id in
@@ -3758,9 +3855,15 @@ let run_context_at host data dimensions ~x ~y =
     then None
     else (
       let _, _, page =
-        run_page host tile ~height:body.height (run_candidates data ~filter:local.filter)
+        run_page host data tile ~height:body.height (selector_candidates data ~filter:local.filter)
       in
-      List.nth page row |> Option.map ~f:(fun (run, _) -> tile, run))
+      List.nth page row |> Option.map ~f:(fun entry -> tile, entry))
+  | _ -> None
+;;
+
+let run_context_at host data dimensions ~x ~y =
+  match selector_context_at host data dimensions ~x ~y with
+  | Some (tile, Execution (run, _)) -> Some (tile, run)
   | _ -> None
 ;;
 
@@ -4926,6 +5029,43 @@ let refinement_fixture definition =
     |> Option.value_exn)
 ;;
 
+let%test_unit "Runs scopes workflow rows, keeps terminal rows static and follows allocation" =
+  let host, data, find = refinement_fixture P.Overview.definition in
+  let tile = find "run-selector" in
+  let snapshot = Option.value_exn data.asic in
+  let chip : Asic.Chip_target.t = { chip = "sample"; variant = "main" } in
+  let intent = Asic_snapshot_fixture.fresh_intent "inputs" in
+  let scoped =
+    { intent with selection = { intent.selection with chip_target = Some chip } }
+  in
+  let workflow = Asic_snapshot_fixture.workflow "held" scoped in
+  let outside = Asic_snapshot_fixture.workflow "outside" intent in
+  let terminal =
+    { (Asic_snapshot_fixture.workflow ~phase:Cancelled "terminal" scoped) with
+      cancel_requested = true
+    }
+  in
+  let snapshot = { snapshot with chip_target = Some chip; workflows = [ outside; workflow; terminal ] } in
+  let data = { data with asic = Some snapshot } in
+  let workflow_ids data =
+    List.filter_map (selector_candidates data ~filter:"") ~f:(function
+      | Workflow w -> Some w.id
+      | Execution _ -> None)
+  in
+  assert (List.equal String.equal (workflow_ids data) [ workflow.id; terminal.id ]);
+  assert (String.equal (Planned_run.workflow_phase workflow) "Building (queued)");
+  assert (String.equal (Planned_run.workflow_phase terminal) "Cancelled");
+  assert (Poly.equal (workflow_style terminal) (Role.Warning, Indicator.Cancelled));
+  let host = H.set_local host tile.id
+    { (H.local host tile.id) with cursor = Some (H.workflow_cursor workflow.id) }
+  in
+  let run = Asic_snapshot_fixture.run_b in
+  let allocated = { workflow with run = Some run; phase = Physical } in
+  let data = { data with asic = Some { snapshot with workflows = [ outside; allocated; terminal ] } } in
+  assert (List.equal String.equal (workflow_ids data) [ terminal.id ]);
+  assert (Option.equal Run_ref.equal (local_menu_run host data tile) (Some run))
+;;
+
 let project_job_fixture ~compact =
   let open Workspace_config in
   let key = "project-job-fixture" in
@@ -5132,8 +5272,8 @@ let%test_unit "Runs pointer selection follows filtered capped page and never bin
   let values =
     run_candidates data ~filter:"match" |> List.map ~f:(fun (r, _) -> run_label r)
   in
-  assert (browse_index values ~cursor:(run_cursor host tile) ~delta:1 = 2);
-  assert (browse_index values ~cursor:(run_cursor host tile) ~delta:(-1) = 0);
+  assert (browse_index values ~cursor:(run_cursor ~data host tile) ~delta:1 = 2);
+  assert (browse_index values ~cursor:(run_cursor ~data host tile) ~delta:(-1) = 0);
   let click row = select_body_row host data tile ~width:45 ~height:4 ~row in
   List.iter [ -1; 2; 3; 4 ] ~f:(fun row -> assert (phys_equal host (click row)));
   let clicked = click 1 in

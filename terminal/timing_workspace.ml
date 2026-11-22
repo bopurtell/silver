@@ -23,9 +23,7 @@ type path_item =
   ; label : string
   }
 
-let is_path (row : Asic_inspection.Row.t) =
-  List.mem [ "timing_path"; "path" ] row.category ~equal:String.equal
-;;
+let is_path = Inspection_view.is_timing_path
 
 let path_items ?(presentation = Tile_presentation.defaults) (t : t) =
   Inspection_view.visible t
@@ -67,7 +65,7 @@ let pane = function
 ;;
 
 let create ~generation ~run ~stage =
-  Inspection_view.create ~scope:run ~generation ~run ~domain:"timing" ~stage ()
+  Inspection_view.create ~scope:run ~generation ~paths_first:true ~run ~domain:"timing" ~stage ()
 ;;
 
 let with_analysis t analysis =
@@ -102,6 +100,16 @@ let top_path_ids (t : t) ~count =
   loop count [] (Inspection_view.visible t)
 ;;
 
+let preload_path_ids (t : t) ~count =
+  match t.selected with
+  | Some id when count > 0
+                 && List.exists (Inspection_view.visible t) ~f:(fun row ->
+                   is_path row && String.equal row.id id) ->
+    id :: (List.filter (top_path_ids t ~count) ~f:(Fn.non (String.equal id))
+           |> Fn.flip List.take (count - 1))
+  | _ -> top_path_ids t ~count
+;;
+
 let want_selected_detail (t : t) =
   match t.index, t.selected with
   | Some index, Some row_id when Option.is_none t.requested ->
@@ -114,6 +122,23 @@ let want_selected_detail (t : t) =
   | _ -> t
 ;;
 
+let detail_lines text = String.split_lines text |> List.map ~f:Artifact_view.safe |> Array.of_list
+
+let prepare_detail (t : t) =
+  let timing_detail_lines =
+    Option.bind t.detail ~f:(fun detail ->
+      if Option.is_some detail.error || String.is_empty detail.text
+      then None
+      else
+        match t.timing_detail_lines with
+        | Some (previous, lines)
+          when phys_equal previous detail || Asic_inspection.Detail.equal previous detail ->
+          Some (detail, lines)
+        | _ -> Some (detail, detail_lines detail.text))
+  in
+  { t with timing_detail_lines }
+;;
+
 (** Attach only published evidence. No Inspect operation or demand is created here. *)
 let attach_selected (t : t) snapshot =
   if Option.is_none t.requested
@@ -123,7 +148,8 @@ let attach_selected (t : t) snapshot =
     Inspection_view.reconcile
       { (want_selected_detail t) with operation_key = t.operation_key }
       snapshot
-  else t
+    |> prepare_detail
+  else prepare_detail t
 ;;
 
 let attach_retained (t : t) snapshot =
@@ -152,6 +178,7 @@ type line_role =
   | Failure
   | Success
   | Source
+  | Payload
 
 let selected_row (t : t) =
   List.find (Inspection_view.visible t) ~f:(fun row ->
@@ -170,11 +197,11 @@ let row_status_role (row : Asic_inspection.Row.t) =
 ;;
 
 (* Clip a single display row without expanding the hidden suffix into continuations. *)
-let clip_line ?(ellipsis = false) ~width line =
+let clip_line ?(ellipsis = false) ?(sanitize = true) ~width line =
   if width <= 0
   then ""
   else (
-    let line = Artifact_view.safe line in
+    let line = if sanitize then Artifact_view.safe line else line in
     let rec end_offset limit offset cells =
       if offset = String.length line
       then offset
@@ -207,16 +234,6 @@ let semantic_prefix
   (t : t)
   =
   let compress = presentation.string_compression in
-  let population =
-    [ t.run.id ]
-    @ Option.value_map t.index ~default:[] ~f:(fun i ->
-      [ i.source_digest; i.execution_sha256 ] @ List.map i.rows ~f:(fun row -> row.id))
-    @ Option.value_map t.analysis ~default:[] ~f:(fun a ->
-      [ a.analysis_id; a.attempt_id; a.occurrence_id; a.source_digest ])
-  in
-  let identity = Presentation.identifiers ~compress population in
-  let path = Presentation.source_path ~compress in
-  let field label value = Source, label ^ ": " ^ value in
   match pane with
   | Paths -> []
   | Detail ->
@@ -247,6 +264,16 @@ let semantic_prefix
        ])
     |> List.map ~f:(fun (role, line) -> role, clip_line ~ellipsis:true ~width line)
   | Context ->
+    let population =
+      [ t.run.id ]
+      @ Option.value_map t.index ~default:[] ~f:(fun i ->
+        [ i.source_digest; i.execution_sha256 ] @ List.map i.rows ~f:(fun row -> row.id))
+      @ Option.value_map t.analysis ~default:[] ~f:(fun a ->
+        [ a.analysis_id; a.attempt_id; a.occurrence_id; a.source_digest ])
+    in
+    let identity = Presentation.identifiers ~compress population in
+    let path = Presentation.source_path ~compress in
+    let field label value = Source, label ^ ": " ^ value in
     let observation =
       match t.index with
       | None ->
@@ -310,22 +337,60 @@ let semantic_prefix
 
 let detail_body (t : t) =
   match selected_row t with
-  | None -> []
+  | None -> [||]
   | Some _ ->
     (match Option.first_some t.error t.pending_error with
-     | Some error -> [ "ERROR: " ^ error ]
+     | Some error -> [| "ERROR: " ^ Artifact_view.safe error |]
      | None ->
        (match t.requested, t.detail with
-        | None, _ -> [ "Enter to load selected path detail (read-only)" ]
+        | None, _ -> [| "Enter to load selected path detail (read-only)" |]
         | Some _, None ->
-          [ "Pending: waiting for exact selected path detail · Enter retries" ]
+          [| "Pending: waiting for exact selected path detail · Enter retries" |]
         | Some _, Some detail ->
           (match detail.error with
-           | Some error -> [ "ERROR: " ^ error ]
+           | Some error -> [| "ERROR: " ^ Artifact_view.safe error |]
            | None ->
              if String.is_empty detail.text
-             then [ "Provider returned no detail text" ]
-             else String.split_lines detail.text)))
+             then [| "Provider returned no detail text" |]
+             else
+               match t.timing_detail_lines with
+               | Some (prepared, lines) when phys_equal detail prepared -> lines
+               | _ -> detail_lines detail.text)))
+;;
+
+let detail_page ?(presentation = Tile_presentation.defaults) ~scroll ~width ~height t =
+  let prefix = semantic_prefix ~presentation ~pane:Detail ~width t |> Array.of_list in
+  let body = detail_body t in
+  let header = Array.length prefix in
+  let length = header + Array.length body in
+  let height = Int.max 0 height in
+  let start = Int.clamp_exn scroll ~min:0 ~max:(Int.max 0 (length - height)) in
+  let compress = presentation.string_compression in
+  List.init (Int.min height (length - start)) ~f:(fun i ->
+    let offset = start + i in
+    if offset < header
+    then prefix.(offset)
+    else (
+      let index = offset - header in
+      let line = body.(index) in
+      let line =
+        if index = 0 && String.is_prefix line ~prefix:"/"
+        then Presentation.source_path ~compress line
+        else Presentation.report_source_header ~compress line
+      in
+      Payload, clip_line ~sanitize:false ~width line))
+;;
+
+let context_page ?presentation ?now ~scroll ~width ~height t =
+  let lines =
+    semantic_prefix ?presentation ?now ~pane:Context ~width t
+    |> List.concat_map ~f:(fun (role, line) ->
+      List.map (Artifact_view.wrap ~width (Artifact_view.safe line)) ~f:(fun line ->
+        role, line))
+  in
+  let height = Int.max 0 height in
+  let start = Int.clamp_exn scroll ~min:0 ~max:(Int.max 0 (List.length lines - height)) in
+  List.take (List.drop lines start) height
 ;;
 
 let empty_paths_message (t : t) =
@@ -430,28 +495,10 @@ let rows
          |> Fn.flip List.take viewport
          |> List.map ~f:(fun item -> item.label))
       (Int.max 0 height)
-  | Detail | Context ->
-    let prefix = List.map (semantic_prefix ~presentation ?now ~pane ~width t) ~f:snd in
-    let lines =
-      if equal_pane pane Detail
-      then (
-        (* Width must not change the row indices used to page through a report. *)
-        let compress = presentation.string_compression in
-        prefix
-        @ List.mapi (detail_body t) ~f:(fun index line ->
-          let line =
-            if index = 0 && String.is_prefix line ~prefix:"/"
-            then Presentation.source_path ~compress line
-            else Presentation.report_source_header ~compress line
-          in
-          clip_line ~width line))
-      else
-        List.concat_map prefix ~f:(fun line ->
-          Artifact_view.wrap ~width (Artifact_view.safe line))
-    in
-    List.take
-      (List.drop lines (Int.min scroll (Int.max 0 (List.length lines - height))))
-      height
+  | Detail ->
+    detail_page ~presentation ~scroll ~width ~height t |> List.map ~f:snd
+  | Context ->
+    context_page ~presentation ?now ~scroll ~width ~height t |> List.map ~f:snd
 ;;
 
 let input
@@ -468,6 +515,7 @@ let input
     ( { t with
         requested = None
       ; detail = None
+      ; timing_detail_lines = None
       ; info = false
       ; generation = t.generation + 1
       ; operation_key = None
@@ -485,7 +533,10 @@ let input
       | _ -> Int.max 1 height
     in
     let length =
-      List.length (rows ~presentation ~pane ~scroll:0 ~width ~height:Int.max_value t)
+      if equal_pane pane Detail
+      then List.length (semantic_prefix ~presentation ~pane ~width t)
+           + Array.length (detail_body t)
+      else List.length (rows ~presentation ~pane ~scroll:0 ~width ~height:Int.max_value t)
     in
     let last = Int.max 0 (length - height) in
     t, Int.clamp_exn (Int.min scroll last + delta) ~min:0 ~max:last, None

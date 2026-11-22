@@ -65,6 +65,12 @@ val begin_fresh : t -> elaboration_only:bool -> Asic.Selection.t -> t * ticket
 val fresh_intent : t -> Asic.Fresh.Intent.t option
 val workflow : t -> Asic.Fresh.Workflow.t option
 val workflow_active : Asic.Fresh.Workflow.t -> bool
+val workflow_phase : Asic.Fresh.Workflow.t -> string
+val workflow_without_run : Asic.Fresh.Workflow.t -> string
+val workflow_in_chip : Asic.Snapshot.t -> Asic.Fresh.Workflow.t -> bool
+val registered_run : Asic.Snapshot.t -> Asic.Fresh.Workflow.t -> Run_ref.t option
+val preallocation_workflows : Asic.Snapshot.t -> Asic.Fresh.Workflow.t list
+val workflow_matches : Asic.Fresh.Workflow.t -> filter:string -> bool
 val fresh_launchable : t -> Asic.Fresh.Intent.t -> bool
 val current_ticket : t -> ticket -> bool
 val same_generation : t -> ticket -> bool

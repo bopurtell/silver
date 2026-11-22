@@ -329,9 +329,9 @@ let completed_timing_stage (run : Asic.Run.t) ~stage =
     String.equal s.id stage && Asic.Stage.Status.equal s.status Completed)
 ;;
 
-(** Legacy checkpoint-backed Timing is only an automatic candidate when the
-    execution actually reached the relevant stage. A guessed Signoff fallback
-    for a synthesis-only run is not evidence. *)
+(** A guessed Signoff fallback is not evidence. A legacy checkpoint-backed
+    index can warm off-screen only after a terminal outcome with the exact
+    stage completed. A completed captured analysis can warm earlier. *)
 let timing_index_available (snapshot : Asic.Snapshot.t) (view : Inspection_view.t) ~visible =
   let asic = Some snapshot in
   match timing_summary ~asic ~run:view.run with
@@ -340,9 +340,12 @@ let timing_index_available (snapshot : Asic.Snapshot.t) (view : Inspection_view.
      | Some analysis, Some target ->
        Asic.Timing_analysis.Status.equal analysis.status Completed
        && Asic_inspection.Analysis_target.equal analysis.target target
-     | None, None when visible ->
+     | None, None ->
        Option.exists (execution ~asic ~run:view.run) ~f:(fun run ->
-         Option.equal String.equal run.execution_file (Some summary.execution_file)
+         (visible
+          || List.mem [ "completed"; "complete"; "succeeded"; "success"; "failed" ]
+               run.status ~equal:String.equal)
+         && Option.equal String.equal run.execution_file (Some summary.execution_file)
          && completed_timing_stage run ~stage:view.stage)
      | _ -> false)
   | _ -> false
@@ -585,13 +588,15 @@ let elaboration_row ~now ~selected workflow =
       "unavailable"
   | Some (w : Asic.Fresh.Workflow.t) ->
     let status : Status.t =
-      match w.elaboration_status with
-      | ("building" | "emitting") when w.cancel_requested -> Cancelling
-      | "building" | "emitting" -> Running
-      | "completed" -> Completed
-      | "build_failed" | "emission_failed" -> Failed
-      | "cancelled" -> Cancelled
-      | "interrupted" -> Interrupted
+      match w.elaboration_status, w.phase with
+      | "completed", _ -> Completed
+      | "build_failed", _ | "emission_failed", _ | _, Failed -> Failed
+      | "cancelled", _ | _, Cancelled -> Cancelled
+      | "interrupted", _ | _, Interrupted -> Interrupted
+      | _, Completed -> Completed
+      | ("building" | "emitting"), _ when w.cancel_requested -> Cancelling
+      | ("building" | "emitting"), _ when Asic.Fresh.Workflow.source_queued w -> Pending
+      | ("building" | "emitting"), _ -> Running
       | _ -> Pending
     in
     let time =
@@ -599,11 +604,7 @@ let elaboration_row ~now ~selected workflow =
         let finish =
           match w.elaboration_finished_at with
           | Some finish -> Some (Timestamp.to_time_ns finish)
-          | None
-            when List.mem
-                   [ "building"; "emitting" ]
-                   w.elaboration_status
-                   ~equal:String.equal -> Some now
+          | None when Status.equal status Running || Status.equal status Cancelling -> Some now
           | None -> None
         in
         Option.value_map finish ~default:"unknown" ~f:(fun finish ->
@@ -640,7 +641,12 @@ let elaboration_row ~now ~selected workflow =
            ; "Plan digest: " ^ p.methodology_plan_digest
            ]))
       "Elaboration"
-      (if Status.equal status Cancelling then Status.label status else w.elaboration_status)
+      (if Status.equal status Pending && Asic.Fresh.Workflow.source_queued w
+       then w.elaboration_status ^ " (queued)"
+       else if List.mem [ "building"; "emitting" ] w.elaboration_status ~equal:String.equal
+          && not (Status.equal status Running)
+       then Status.label status
+       else w.elaboration_status)
 ;;
 
 (** Only shorten ASCII opaque identifiers. Human/provider labels remain intact and are

@@ -29,6 +29,7 @@ val selected_artifact : t -> string option
 val artifact : t -> Simulation.Artifact.t option
 val workload_artifact : t -> Simulation.Artifact.t option
 val waveform_artifact : t -> Simulation.Artifact.t option
+val intended_waveform : t -> (Simulation.Attempt.t * Simulation.Artifact.t, string) Result.t
 val waveform_unavailable : t -> string option
 val waveform_eligible : t -> Simulation.Artifact.t -> bool
 val artifact_metadata : t -> Simulation.Artifact.t option
@@ -57,6 +58,7 @@ val restore_selection
 (** Includes pending/unavailable saved identity so persistence never replaces it with an
     empty intermediate hydration state. *)
 val artifact_identity : t -> artifact_identity option
+val navigation_artifact_identity : t -> artifact_identity option
 
 val selection_unavailable : t -> string option
 val select_attempt : t -> string -> t

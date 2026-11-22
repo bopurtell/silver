@@ -11,9 +11,11 @@ type t = Inspection_view.t
 
 val attach_retained : t -> Asic.Snapshot.t -> t
 val attach_selected : t -> Asic.Snapshot.t -> t
+val prepare_detail : t -> t
 val want_selected_detail : t -> t
 val published_detail : t -> Asic.Snapshot.t -> row_id:string -> Asic_inspection.Detail.t option
 val top_path_ids : t -> count:int -> string list
+val preload_path_ids : t -> count:int -> string list
 
 type path_item =
   { row : Asic_inspection.Row.t
@@ -46,6 +48,24 @@ type line_role =
   | Failure
   | Success
   | Source
+  | Payload
+
+val detail_page
+  :  ?presentation:Tile_presentation.t
+  -> scroll:int
+  -> width:int
+  -> height:int
+  -> t
+  -> (line_role * string) list
+
+val context_page
+  :  ?presentation:Tile_presentation.t
+  -> ?now:Time_ns.t
+  -> scroll:int
+  -> width:int
+  -> height:int
+  -> t
+  -> (line_role * string) list
 
 (** Width-bounded four-line Detail summary, or complete Context provenance. Provider text
     follows the Detail prefix in [rows] and must remain neutrally styled. Context lists

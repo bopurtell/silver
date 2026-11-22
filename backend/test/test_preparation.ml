@@ -1597,6 +1597,194 @@ let run_fresh_fixture endpoint =
        return ())
 ;;
 
+let run_failed_log_fixture ~shutdown =
+  with_service
+    (fun
+        ~service
+        ~project
+        ~root
+        ~config:_
+        ~write_config
+        ~plan_identity:_
+        ~receipt:_
+        ~output_dir:_
+        ~build_script
+        ~emit_script:_
+        ~builds
+        ~emissions
+      ->
+       write_config ();
+       let asic operation =
+         Service.asic service { instance_id; project; operation } >>| ok
+       in
+       let find (snapshot : Asic.Snapshot.t) key =
+         List.find_exn snapshot.workflows ~f:(fun w ->
+           String.equal w.Asic.Fresh.Workflow.key key)
+       in
+       let bounded label work =
+         let%map result = Clock.with_timeout (Time_float.Span.of_sec 4.) work in
+         match result with
+         | `Result value -> value
+         | `Timeout -> failwith ("Timed out: " ^ label)
+       in
+       let wait key predicate =
+         let rec loop () =
+           let%bind snapshot = asic Get in
+           match
+             List.find snapshot.workflows ~f:(fun w ->
+               String.equal w.Asic.Fresh.Workflow.key key && predicate w)
+           with
+           | Some w -> return w
+           | None ->
+             let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+             loop ()
+         in
+         bounded key (loop ())
+       in
+       let launch key =
+         let%bind snapshot =
+           asic
+             (Stage_fresh
+                { selection; elaboration_only = true; expected_plan_identity = None })
+         in
+         let intent = Option.value_exn snapshot.fresh_intent in
+         asic (Launch_fresh { key; intent_id = intent.id }) >>| ignore
+       in
+       let install_full_log () =
+         (* A real failing write, not a mocked deferred or a symlink on live state. *)
+         let next_id = sprintf "%s-job-%d" instance_id (service.next_job_id + 1) in
+         let path = Filename.concat service.log_dir (next_id ^ ".log") in
+         Core_unix.symlink ~target:"/dev/full" ~link_name:path
+       in
+       let exists name =
+         Poly.equal (Sys_unix.file_exists (Filename.concat root name)) `Yes
+       in
+       install_full_log ();
+       build_script := "printf '%s' 'dune: build failed' >&2; exit 1";
+       let%bind () = launch "failed-write-and-exit" in
+       let%bind failed =
+         wait "failed-write-and-exit" (fun w -> Asic.Fresh.Phase.equal w.phase Failed)
+       in
+       let failed_job = Option.value_exn failed.build_job in
+       require
+         (Option.equal Job.Exit_status.equal failed_job.exit_status (Some (Exited 1))
+          && Option.exists failed.error ~f:(fun s ->
+            String.is_substring s ~substring:"Job log write failed")
+          && Option.is_none failed.emission_job
+          && not
+               (Hardcaml_workbench_backend.Preparation_service.source_leased
+                  service.preparation_service
+                  root))
+         "Log write failure hid the real exit or stranded the source lease";
+       install_full_log ();
+       build_script
+       := "printf '%s' 'dune: started' >&2; echo $$ > held-build-pid; setsid /bin/sh -c \
+           'echo $$ > detached-build-pid; i=0; while test \"$i\" -lt 160 && ! test -f \
+           release-detached-build; do i=$((i+1)); sleep 0.05; done' & exec sleep 30";
+       let%bind () = launch "held-build" in
+       let%bind held =
+         wait "held-build" (fun w ->
+           exists "held-build-pid"
+           && exists "detached-build-pid"
+           && Option.exists w.build_job ~f:(fun job -> Job.State.equal job.state Running))
+       in
+       let held_job = Option.value_exn held.build_job in
+       let pid =
+         String.strip (In_channel.read_all (Filename.concat root "held-build-pid"))
+       in
+       let detached_pid =
+         String.strip (In_channel.read_all (Filename.concat root "detached-build-pid"))
+       in
+       let%bind log =
+         bounded
+           "reading a failed log"
+           (Service.read_log service
+              { instance_id
+              ; job = held_job.id
+              ; offset = 0
+              ; max_records = 10
+              ; max_bytes = 1024
+              })
+       in
+       require (Result.is_error log) "Failed log was reported readable";
+       build_script := "exit 0";
+       let%bind () = launch "queued-behind-build" in
+       let%bind queued = wait "queued-behind-build" Asic.Fresh.Workflow.source_queued in
+       require (not (Asic.Fresh.Workflow.source_queued held)) "Running build was queued";
+       let state_dir = Filename.concat (Filename.dirname root) "logs-state" in
+       let reopen () =
+         let reopened = Hardcaml_workbench_backend.Asic_service.create ~state_dir in
+         let%bind snapshot =
+           Hardcaml_workbench_backend.Asic_service.handle
+             reopened ~root ~environment:Inherit_daemon Get >>| ok
+         in
+         let%map () = Hardcaml_workbench_backend.Asic_service.shutdown reopened in
+         snapshot
+       in
+       let%bind restored = reopen () in
+       let interrupted key explanation =
+         let w = find restored key in
+         Asic.Fresh.Phase.equal w.phase Interrupted
+         && Option.is_none w.build_job
+         && Option.exists w.error ~f:(fun s ->
+           String.is_substring s ~substring:explanation)
+       in
+       require
+         (interrupted held.key "producer ownership unavailable"
+          && interrupted queued.key "queued source work was not resumed"
+          && Poly.equal (Sys_unix.file_exists ("/proc/" ^ pid)) `Yes)
+         "Restart view confused queued/running work or affected the actual owner";
+       let%bind () =
+         if shutdown
+         then bounded "quit with failed log" (Service.shutdown service)
+         else (
+           let%bind _ =
+             bounded "cancel with failed log" (asic (Cancel_workflow held.id))
+           in
+           let%bind _ =
+             wait held.key (fun w -> Asic.Fresh.Phase.equal w.phase Cancelled)
+           in
+           let%map _ =
+             wait queued.key (fun w -> Asic.Fresh.Phase.equal w.phase Completed)
+           in
+           require (!builds = 3 && !emissions = 1) "Source lease did not resume queued work")
+       in
+       require
+         (Poly.equal (Sys_unix.file_exists ("/proc/" ^ pid)) `No)
+         "Cancellation or quit returned without reaping the owned build";
+       let detached_stat = In_channel.read_all ("/proc/" ^ detached_pid ^ "/stat") in
+       Out_channel.write_all (Filename.concat root "release-detached-build") ~data:"";
+       require
+         (not (String.is_substring detached_stat ~substring:") Z "))
+         "Cancellation or quit signalled the detached process holding the output pipes";
+       let%map restored =
+         if not shutdown
+         then reopen ()
+         else (
+           let instance_id = "restarted-log-fixture" in
+           let log_dir = Filename.concat (Filename.dirname root) "restarted-logs" in
+           let%bind restarted = Service.create ~instance_id ~state_dir ~log_dir () in
+           let restarted = Or_error.ok_exn restarted in
+           Monitor.protect
+             ~finally:(fun () -> Service.shutdown restarted)
+             (fun () ->
+                let%bind opened =
+                  Service.open_project
+                    restarted
+                    { instance_id; root; environment = Inherit_daemon }
+                in
+                let project = (ok opened).project.id in
+                Service.asic restarted { instance_id; project; operation = Get } >>| ok))
+       in
+       require
+         (Asic.Fresh.Phase.equal (find restored held.key).phase Cancelled
+          && Asic.Fresh.Phase.equal
+               (find restored queued.key).phase
+               (if shutdown then Cancelled else Completed)
+          && ((not shutdown) || (!builds = 2 && !emissions = 0)))
+         "Reopening lost the confirmed cancellation or replayed work")
+;;
+
 let run_fresh_probe_fixture ~shutdown =
   with_service
     (fun
@@ -1917,7 +2105,9 @@ let () =
           let%bind () = config_location_fixture () in
           let%bind () = run_staging_fixture () in
           let%bind () = run_fixture () in
-          let%bind () = run_fresh_persistence_fixture () in
+           let%bind () = run_fresh_persistence_fixture () in
+           let%bind () = run_failed_log_fixture ~shutdown:false in
+           let%bind () = run_failed_log_fixture ~shutdown:true in
           let%bind () = run_fresh_probe_fixture ~shutdown:false in
           let%bind () = run_fresh_probe_fixture ~shutdown:true in
           let%bind () = run_fresh_fixture "synthesis" in

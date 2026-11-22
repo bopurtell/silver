@@ -81,11 +81,33 @@ type hierarchy_view =
   ; mutable pane_scroll : int
   }
 
+type waveform_pane_spec =
+  { pane : Waveforms.pane
+  ; width : int
+  ; height : int
+  ; hints : bool
+  ; string_compression : bool
+  }
+[@@deriving equal]
+
+type waveform_viewport =
+  { appearance : Appearance.t
+  ; value_layout : Waveform_view.value_layout
+  ; panes : waveform_pane_spec list
+  }
+[@@deriving equal]
+
 type waveform_runtime =
   { pin : Waveforms.pin
   ; token : unit ref
+  ; automatic : bool
+  ; owner : Http.Client.t
+  ; registry : Workspace.Session_id.t option
   ; mutable epoch : unit ref
   ; mutable view : Waveform_view.t
+  ; mutable prepared :
+      (Waveform_view.t * waveform_viewport * (waveform_pane_spec * Bonsai_term.View.t) list)
+        option
   ; mutable loading : bool
   ; mutable restore_navigation : bool
   ; mutable artifacts : Simulation.Artifact.t list
@@ -189,7 +211,7 @@ type session =
   ; mutable timing_detail_lane :
       (Http.Client.t * string * string * int option ref * Inspection_view.t) option
   ; mutable timing_index_inflight : (string * unit Deferred.t) list
-  ; mutable timing_preload_receipt : (string * string * int) option
+  ; mutable timing_preload_receipt : (string * string * string * int) option
   ; mutable view_on_allocation : (string * Host.launch_target) option
   ; mutable remembered_selection : Asic.Selection.t option
   ; mutable preferences_loaded : bool
@@ -209,7 +231,11 @@ type session =
   ; mutable waveform_generation : int
   ; mutable waveform_history : Waveform_view.t list
   ; mutable waveform_workspaces : (string * waveform_runtime) list
+  ; mutable waveform_testing_observed : (Http.Client.t * unit ref * int) option
+  ; mutable waveform_read_busy : bool
+  ; mutable waveform_prepare_busy : bool
   ; mutable waveform_preferences_loaded : string option
+  ; mutable waveform_preferences_ready : bool
   ; mutable waveform_preferences_pending : Host.waveform_preferences option
   ; mutable waveform_preferences_saved : string option
   ; mutable waveform_preferences_failed : bool
@@ -444,7 +470,11 @@ let create_session
       ; waveform_generation = 0
       ; waveform_history = []
       ; waveform_workspaces = []
+      ; waveform_testing_observed = None
+      ; waveform_read_busy = false
+      ; waveform_prepare_busy = false
       ; waveform_preferences_loaded = None
+      ; waveform_preferences_ready = false
       ; waveform_preferences_pending = None
       ; waveform_preferences_saved = None
       ; waveform_preferences_failed = false
@@ -958,7 +988,7 @@ let load_presentation_preferences session =
              ; browser_hints = false
              ; palette_hints = true
               ; timing_preload = true
-              ; timing_preload_details = 0
+              ; timing_preload_details = Terminal_presentation.Timing_preload.default_details
              ; quick_launch_view = true
              ; planned_preparation = true
              ; locals = []
@@ -1105,6 +1135,7 @@ let load_waveform_preferences session =
     then return ()
     else (
       session.waveform_preferences_loaded <- Some project_key;
+      session.waveform_preferences_ready <- false;
       session.waveform_preferences_pending <- None;
       session.waveform_preferences_saved <- None;
       session.waveform_preferences_failed <- false;
@@ -1115,6 +1146,7 @@ let load_waveform_preferences session =
       in
       if Option.equal String.equal session.waveform_preferences_loaded (Some project_key)
       then (
+        session.waveform_preferences_ready <- true;
         match result with
         | Ok saved ->
           session.waveform_preferences_pending <- saved;
@@ -1129,7 +1161,8 @@ let save_waveform_preferences session =
   match Or_error.try_with (fun () -> preference_context session) with
   | Error _ -> return ()
   | Ok (project_key, state_directory) ->
-    if session.waveform_preferences_failed
+    if not session.waveform_preferences_ready
+       || session.waveform_preferences_failed
        || Option.is_none session.host.registry
        || not
             (Option.equal
@@ -1437,11 +1470,11 @@ let reconcile_synthesis session =
               , Option.value_map session.asic ~default:view ~f:(fun snapshot ->
                   if Option.is_none view.index
                   then Timing_workspace.attach_retained view snapshot
-                   else (
-                     let view = Inspection_view.reconcile view snapshot in
-                     if session.host.timing_preload && session.host.timing_preload_details > 0
-                     then Timing_workspace.attach_selected view snapshot
-                     else view)) )))
+                  else (
+                    let view = Inspection_view.reconcile view snapshot in
+                    if session.host.timing_preload && session.host.timing_preload_details > 0
+                    then Timing_workspace.attach_selected view snapshot
+                    else Timing_workspace.prepare_detail view)) )))
     in
     session.host <- { session.host with timing };
     List.iter registry.tiles ~f:(fun tile ->
@@ -1605,7 +1638,8 @@ let workspace_request ?(poll = false) ?(on_snapshot = fun _ -> ()) session opera
           session.navigation_restore_revision <- session.navigation_revision;
           session.navigation_touched <- [];
           session.navigation_focus_touched <- [];
-          session.waveform_preferences_loaded <- None;
+           session.waveform_preferences_loaded <- None;
+           session.waveform_preferences_ready <- false;
           session.waveform_preferences_pending <- None;
           session.retained_reads <- Terminal_presentation.Retained_hydration.create ();
           Terminal_presentation.Retained_hydration.Coordinator.invalidate
@@ -1787,6 +1821,12 @@ let timing_preload_scope session =
   Sexp.to_string
     ([%sexp_of: V1.Daemon_instance_id.t * Project_id.t option]
        (session.hello.instance_id, Option.map (current_project session) ~f:(fun p -> p.id)))
+;;
+
+let timing_background_enabled session =
+  session.host.timing_preload
+  && Option.is_some session.presentation_preferences_loaded
+  && not (Terminal_presentation.Retained_hydration.Coordinator.busy session.hydration)
 ;;
 
 let timing_detail_busy session =
@@ -2159,7 +2199,7 @@ and send_timing_detail ?inspection_request ?timing_receipt session (view : Inspe
   if Option.is_some timing_receipt && session.host.timing_preload
      && session.host.timing_preload_details > 0
      && List.mem
-          (Timing_workspace.top_path_ids view ~count:session.host.timing_preload_details)
+          (Timing_workspace.preload_path_ids view ~count:session.host.timing_preload_details)
           row_id ~equal:String.equal
   then
     Option.iter view.index ~f:(fun index ->
@@ -2185,27 +2225,13 @@ and send_timing_detail ?inspection_request ?timing_receipt session (view : Inspe
   don't_wait_for (asic_request ?inspection_request ~timing_receipt:receipt session operation)
 
 and drive_timing_preload session =
+  let module P = Terminal_presentation.Timing_preload in
   (* Always give the current highlighted/explicit demand the next available slot. *)
   drive_timing_demand session;
   let scope = timing_preload_scope session in
-  let speculative =
-    session.host.timing_preload
-    && Option.is_some session.presentation_preferences_loaded
-    && not (Terminal_presentation.Retained_hydration.Coordinator.busy session.hydration)
-  in
+  let speculative = timing_background_enabled session in
   let stock_paths =
-    if not speculative
-    then []
-    else
-      Option.value_map session.host.registry ~default:[] ~f:(fun registry ->
-        Host.builtin_timing_workspaces registry
-        |> List.filter_map ~f:(fun workspace ->
-          let panes = Host.timing_panes registry workspace.id in
-          if Option.is_none (Host.coherent_timing_run registry panes)
-          then None
-          else
-            List.find panes ~f:(fun tile ->
-              String.equal tile.kind "timing-paths" && not tile.hidden)))
+    if speculative then List.map (Host.builtin_timing_paths session.host) ~f:fst else []
   in
   let inspection_active =
     timing_detail_busy session
@@ -2217,7 +2243,7 @@ and drive_timing_preload session =
   in
   (* The HTTP receipt only acknowledges queued work. The shared automatic index lane
      stays occupied until a later snapshot publishes the index or a terminal failure. *)
-  Option.iter session.timing_preload_receipt ~f:(fun (flight_scope, key, floor) ->
+  Option.iter session.timing_preload_receipt ~f:(fun (flight_scope, attempt, key, floor) ->
     if not (String.equal scope flight_scope)
     then session.timing_preload_receipt <- None
     else if session.asic_applied_id >= floor
@@ -2233,16 +2259,12 @@ and drive_timing_preload session =
         if terminal
         then (
           session.timing_preload_receipt <- None;
-          session.timing_preload
-          <- Terminal_presentation.Timing_preload.finish
-               session.timing_preload
-               ~scope
-               ~key;
+          session.timing_preload <- P.finish session.timing_preload ~scope ~key:attempt;
           session.host
           <- { session.host with
                timing =
                  List.map session.host.timing ~f:(fun (id, view) ->
-                   if String.equal (Inspection_view.index_key view) key
+                    if String.equal (P.index_attempt_key view) attempt
                    then
                      ( id
                      , { view with
@@ -2260,31 +2282,32 @@ and drive_timing_preload session =
                        } )
                    else id, view)
              })));
+  let visible = Host.visible_timing session.host |> Option.map ~f:fst in
   let candidates =
-    let visible = Host.visible_timing session.host |> Option.map ~f:fst in
     let candidate tile ~visible =
       Option.bind (Host.timing session.host tile) ~f:(fun view ->
         if Option.is_none view.index
            && Option.exists session.asic ~f:(fun snapshot ->
              Terminal_presentation.Overview_tiles.timing_index_available snapshot view ~visible)
-        then Some (Inspection_view.index_key view, (tile, view))
+        then Some (P.index_attempt_key view, (tile, view))
         else None)
     in
-     let hidden = List.filter_map stock_paths ~f:(candidate ~visible:false) in
+    let hidden = List.filter_map stock_paths ~f:(candidate ~visible:false) in
     Option.to_list (Option.bind visible ~f:(candidate ~visible:true)) @ hidden
   in
   let planner, next =
-    Terminal_presentation.Timing_preload.step
+    P.step
       session.timing_preload
       ~scope
-       ~enabled:(not session.selecting_chip)
-       ~interactive:inspection_active
+      ~enabled:(not session.selecting_chip)
+      ~interactive:inspection_active
       ~candidates:(List.map candidates ~f:fst)
   in
   session.timing_preload <- planner;
-  Option.iter next ~f:(fun key ->
+  Option.iter next ~f:(fun attempt ->
     let client = session.client in
-    let tile, view = List.Assoc.find_exn candidates key ~equal:String.equal in
+    let tile, view = List.Assoc.find_exn candidates attempt ~equal:String.equal in
+    let key = Inspection_view.index_key view in
     let epoch = view.workspace_epoch in
     session.host
     <- Host.set_timing session.host tile { view with index_loading = true; error = None };
@@ -2293,14 +2316,13 @@ and drive_timing_preload session =
       then
         (match response with
          | Ok () ->
-           session.timing_preload_receipt <- Some (scope, key, session.asic_request_id + 1)
+           session.timing_preload_receipt <- Some (scope, attempt, key, session.asic_request_id + 1)
          | Error _ ->
-           session.timing_preload
-           <- Terminal_presentation.Timing_preload.finish session.timing_preload ~scope ~key);
+           session.timing_preload <- P.finish session.timing_preload ~scope ~key:attempt);
       if phys_equal client session.client && String.equal scope (timing_preload_scope session)
       then
         Option.iter (Host.timing session.host tile) ~f:(fun current ->
-          if String.equal (Inspection_view.index_key current) key
+          if String.equal (P.index_attempt_key current) attempt
              && Option.equal String.equal epoch current.workspace_epoch
           then (
             let error =
@@ -2322,20 +2344,23 @@ and drive_timing_preload session =
       (asic_request
          ~timing_receipt
          session
-          (Inspection_view.operation ~refresh:false view)));
-  if Option.is_none next && not inspection_active && Option.is_none planner.running
+         (Inspection_view.operation ~refresh:false view)));
+  if speculative
+     && Option.is_none next
+     && not inspection_active
+     && Option.is_none planner.running
      && Option.is_some (current_project session)
-     && not session.selecting_chip && session.host.timing_preload_details > 0
+     && not session.selecting_chip
+     && session.host.timing_preload_details > 0
   then
     Option.iter session.asic ~f:(fun snapshot ->
       let candidates =
-        List.concat_map stock_paths ~f:(fun tile ->
+        List.concat_map (Option.to_list visible @ stock_paths) ~f:(fun tile ->
           Option.value_map (Host.timing session.host tile) ~default:[] ~f:(fun view ->
-            Terminal_presentation.Timing_preload.detail_candidates
-              view snapshot ~count:session.host.timing_preload_details))
+            P.detail_candidates view snapshot ~count:session.host.timing_preload_details))
       in
       let details, next =
-        Terminal_presentation.Timing_preload.step
+        P.step
           session.timing_detail_preload
           ~scope ~enabled:true ~interactive:false ~candidates:(List.map candidates ~f:fst)
       in
@@ -2344,8 +2369,7 @@ and drive_timing_preload session =
         let view, operation = List.Assoc.find_exn candidates key ~equal:String.equal in
         (* The shared lane owns serialization through daemon completion. The planner
            only keeps the finite attempt ledger. *)
-        session.timing_detail_preload
-        <- Terminal_presentation.Timing_preload.finish details ~scope ~key;
+        session.timing_detail_preload <- P.finish details ~scope ~key;
         send_timing_detail session view operation))
 ;;
 
@@ -2770,19 +2794,70 @@ let simulation_request session tile (operation : Simulation.Operation.t) =
   | _ -> simulation_request_unchecked session tile operation
 ;;
 
+let waveform_target host =
+  Option.bind host.Host.registry ~f:(fun registry ->
+    let active = Host.active host in
+    let stock (workspace : Workspace.Arrangement.t) =
+      Option.equal String.equal workspace.preset (Some Waveforms.definition.id)
+    in
+    match Option.filter active ~f:stock with
+    | Some _ as active -> active
+    | None ->
+      List.find (Workspace.open_workspaces registry) ~f:(fun workspace ->
+        stock workspace
+        && Option.exists active ~f:(fun active ->
+          Workspace.Window_id.equal active.window workspace.window)))
+;;
+
+let waveform_testing_tile host =
+  Option.bind (waveform_target host) ~f:(fun waveforms ->
+    if Option.is_some (Host.waveform_pin host waveforms.id)
+    then None
+    else
+      Option.bind host.registry ~f:(fun registry ->
+        List.find_map (Workspace.open_workspaces registry) ~f:(fun workspace ->
+          if Option.equal String.equal workspace.preset (Some "testing")
+             && Workspace.Window_id.equal waveforms.window workspace.window
+          then List.find registry.tiles ~f:(fun tile ->
+            Workspace.Workspace_id.equal tile.workspace workspace.id
+            && Testing_workspace.is_pane tile.kind)
+          else None)))
+;;
+
 let refresh_simulation session =
   let reads = session.retained_reads in
   let client = session.client in
-  Host.tiles session.host
-  |> List.filter ~f:(fun tile -> Host.simulation_kind tile.kind)
-  |> List.fold ~init:[] ~f:(fun acc tile ->
-    if Testing_workspace.is_pane tile.kind
-       && List.exists acc ~f:(fun old ->
-         Testing_workspace.is_pane old.Workspace.Tile.kind
-         && Workspace.Workspace_id.equal old.workspace tile.workspace)
-    then acc
-    else acc @ [ tile ])
-  |> Deferred.List.iter ~how:`Parallel ~f:(fun tile ->
+  let tiles = Host.tiles session.host in
+  let background =
+    if session.waveform_preferences_ready
+       && not session.waveform_preferences_failed
+       && Option.is_none session.waveform_preferences_pending
+       && Terminal_presentation.Retained_hydration.Load.ready session.navigation_loaded
+       && Option.is_none session.navigation_pending
+    then
+      Option.bind (waveform_testing_tile session.host) ~f:(fun tile ->
+        if List.exists tiles ~f:(fun active ->
+          Testing_workspace.is_pane active.kind
+          && Workspace.Workspace_id.equal active.workspace tile.workspace)
+        then None
+        else
+          Option.bind (current_project session) ~f:(fun project ->
+            session.host <- Host.establish_testing_scope session.host tile.id
+                ~scope:(Project_id.to_string project.id);
+            let identity = Host.simulation_identity session.host tile.id in
+            let sequence = session.snapshot.cursor.sequence in
+            let view = Host.simulation session.host tile.id in
+            if view.busy
+               || Option.exists session.waveform_testing_observed
+                    ~f:(fun (owner, token, seen) ->
+                      phys_equal client owner && phys_equal identity token && seen = sequence)
+            then None
+            else (
+              session.waveform_testing_observed <- Some (client, identity, sequence);
+              Some tile)))
+    else None
+  in
+  let refresh (tile : Workspace.Tile.t) =
     Option.iter (current_project session) ~f:(fun project ->
       session.host
       <- Host.establish_testing_scope
@@ -2813,7 +2888,19 @@ let refresh_simulation session =
                     (Option.map (current_project session) ~f:(fun p -> p.id))
             then Some (Host.simulation session.host tile.id)
             else None)
-          ~request:(simulation_request session tile.id)))
+           ~request:(simulation_request session tile.id))
+  in
+  Option.iter background ~f:(fun tile -> don't_wait_for (refresh tile));
+  tiles
+  |> List.filter ~f:(fun tile -> Host.simulation_kind tile.kind)
+  |> List.fold ~init:[] ~f:(fun acc tile ->
+    if Testing_workspace.is_pane tile.kind
+       && List.exists acc ~f:(fun old ->
+         Testing_workspace.is_pane old.Workspace.Tile.kind
+         && Workspace.Workspace_id.equal old.workspace tile.workspace)
+    then acc
+    else acc @ [ tile ])
+  |> Deferred.List.iter ~how:`Parallel ~f:refresh
 ;;
 
 (** This retained-state lane never waits on Updates, waveform or log I/O. *)
@@ -2993,7 +3080,7 @@ let activate_workspace ?(browse = false) session id =
     don't_wait_for (hydrate_retained ~reschedule:true session))
 ;;
 
-let new_waveform_runtime pin token previous =
+let new_waveform_runtime ~owner ~registry ~automatic pin token previous =
   let view, restore_navigation =
     match previous with
     | Some old when Waveforms.equal_pin old.pin pin ->
@@ -3006,8 +3093,12 @@ let new_waveform_runtime pin token previous =
   in
   { pin
   ; token
+  ; automatic
+  ; owner
+  ; registry
   ; epoch = ref ()
   ; view
+  ; prepared = None
   ; loading = false
   ; restore_navigation
   ; artifacts = []
@@ -3020,19 +3111,80 @@ let new_waveform_runtime pin token previous =
   }
 ;;
 
+let automatic_waveform_pin session =
+  let open Result.Let_syntax in
+  let%bind project =
+    current_project session |> Result.of_option ~error:"No open project"
+  in
+  let%bind project_key =
+    Or_error.try_with (fun () -> fst (preference_context session))
+    |> Result.map_error ~f:Error.to_string_hum
+  in
+  let%bind tile =
+    waveform_testing_tile session.host |> Result.of_option ~error:"No Testing workspace"
+  in
+  let%bind state =
+    Host.testing session.host tile.id
+    |> Option.bind ~f:(fun (_, scope, state) ->
+      Option.some_if (String.equal scope (Project_id.to_string project.id)) state)
+    |> Result.of_option ~error:"No observed Testing attempt"
+  in
+  let%map detail, artifact = Testing_workspace.intended_waveform state in
+  { Waveforms.project_key
+  ; project = project.id
+  ; artifact
+  ; log = Job { instance_id = session.hello.instance_id; job = detail.job }
+  }
+;;
+
 let reconcile_waveform_workspaces session =
+  let automatic =
+    if session.waveform_preferences_ready
+       && Option.is_none session.waveform_preferences_pending
+       && not session.waveform_preferences_failed
+       && Terminal_presentation.Retained_hydration.Load.ready session.navigation_loaded
+       && Option.is_none session.navigation_pending
+    then
+      waveform_target session.host
+      |> Option.bind ~f:(fun workspace ->
+        if Option.is_some (Host.waveform_pin session.host workspace.id)
+        then None
+        else
+          Result.ok (automatic_waveform_pin session)
+          |> Option.map ~f:(fun pin ->
+            Workspace.Workspace_id.to_string workspace.id, pin))
+    else None
+  in
+  let old = session.waveform_workspaces in
+  let registry = Option.map session.host.registry ~f:(fun registry -> registry.session_id) in
+  let owned (rt : waveform_runtime) =
+    phys_equal rt.owner session.client
+    && Option.equal Workspace.Session_id.equal rt.registry registry
+  in
+  let runtime key ~automatic token pin =
+    let previous = List.Assoc.find old key ~equal:String.equal in
+    match previous with
+    | Some rt
+      when owned rt
+           && Bool.equal rt.automatic automatic
+           && (automatic || phys_equal rt.token token)
+           && Waveforms.equal_pin rt.pin pin -> rt
+    | Some rt
+      when owned rt
+           && rt.automatic && not automatic
+           && Waveforms.equal_pin rt.pin pin
+           && (match rt.view.loaded with Ready _ -> true | _ -> false) ->
+      let pinned =
+        new_waveform_runtime ~owner:session.client ~registry ~automatic pin token None
+      in
+      { pinned with view = rt.view; prepared = rt.prepared }
+    | _ -> new_waveform_runtime ~owner:session.client ~registry ~automatic pin token previous
+  in
   session.waveform_workspaces
   <- List.map session.host.waveforms ~f:(fun (key, (token, pin)) ->
-       let previous =
-         List.Assoc.find session.waveform_workspaces key ~equal:String.equal
-       in
-       let rt =
-         match previous with
-         | Some old when phys_equal old.token token && Waveforms.equal_pin old.pin pin ->
-           old
-         | _ -> new_waveform_runtime pin token previous
-       in
-       key, rt)
+       key, runtime key ~automatic:false token pin)
+     @ (Option.to_list automatic
+        |> List.map ~f:(fun (key, pin) -> key, runtime key ~automatic:true (ref ()) pin))
 ;;
 
 let waveform_current session workspace rt =
@@ -3044,18 +3196,30 @@ let waveform_current session workspace rt =
     phys_equal epoch rt.epoch
     && phys_equal client session.client
     && V1.Daemon_instance_id.equal instance_id session.hello.instance_id
+    && Option.equal Workspace.Session_id.equal rt.registry
+         (Option.map session.host.registry ~f:(fun registry -> registry.session_id))
     && Option.equal
          Project_id.equal
          project
          (Option.map (current_project session) ~f:(fun p -> p.id))
-    && Option.value_map
-         (Host.waveform_identity session.host workspace)
-         ~default:false
-         ~f:(phys_equal rt.token)
-    && Option.value_map
-         (Host.waveform_pin session.host workspace)
-         ~default:false
-         ~f:(Waveforms.equal_pin rt.pin)
+    && (if rt.automatic
+        then
+          Option.exists
+            (waveform_target session.host)
+            ~f:(fun target -> Workspace.Workspace_id.equal workspace target.id)
+          && Option.exists
+               (List.Assoc.find session.waveform_workspaces
+                  (Workspace.Workspace_id.to_string workspace) ~equal:String.equal)
+               ~f:(phys_equal rt)
+          && Option.is_none (Host.waveform_pin session.host workspace)
+          && (match automatic_waveform_pin session with
+              | Ok pin -> Waveforms.equal_pin rt.pin pin
+              | Error _ -> false)
+        else
+          Option.exists (Host.waveform_identity session.host workspace)
+            ~f:(phys_equal rt.token)
+          && Option.exists (Host.waveform_pin session.host workspace)
+               ~f:(Waveforms.equal_pin rt.pin))
     &&
     match Or_error.try_with (fun () -> fst (preference_context session)) with
     | Ok key -> String.equal key rt.pin.project_key
@@ -3070,14 +3234,9 @@ let read_waveform_bytes session artifact ~current =
     and instance_id = session.hello.instance_id in
     let parsed = ref None in
     let%map result =
-      match Simulation_export.identity artifact with
+      match Simulation_export.embedded_vcd artifact with
       | Error e -> return (Error e)
-      | Ok (size, _) when size > Waveform_data.default_limits.max_bytes ->
-        return
-          (Or_error.error_string "Embedded VCD limit: 8 MiB; export remains available")
-      | Ok _ when not (String.equal (Simulation_export.suffix artifact) ".vcd") ->
-        return (Or_error.error_string "Embedded viewer supports VCD only")
-      | Ok _ ->
+      | Ok () ->
         Simulation_export.run_embedded
           ~artifact
           ~current
@@ -3117,7 +3276,18 @@ let read_waveform_bytes session artifact ~current =
       Or_error.of_option !parsed ~error:(Error.of_string "No parsed waveform"))
 ;;
 
-let refresh_waveform_runtime session workspace rt =
+let trace_waveform_preparation =
+  Option.equal String.equal (Sys.getenv "SILVER_TRACE_WAVEFORM_PREPARATION") (Some "1")
+;;
+
+let waveform_preparation_trace session message rt =
+  if trace_waveform_preparation
+  then append_diagnostic session.diagnostics_file
+      (message ^ " " ^ rt.pin.artifact.id ^ " "
+       ^ Option.value rt.pin.artifact.sha256 ~default:"no-digest")
+;;
+
+let refresh_waveform_runtime ?(background = false) session workspace rt =
   let current = waveform_current session workspace rt in
   if not (current ())
   then (
@@ -3129,18 +3299,27 @@ let refresh_waveform_runtime session workspace rt =
     rt.logs.fetch <- Error "Pinned project context unavailable")
   else (
     (match rt.view.loaded with
-     | Loading when not rt.loading ->
-       rt.loading <- true;
-       don't_wait_for
-         (let%map result = read_waveform_bytes session rt.pin.artifact ~current in
-          if current ()
-          then (
-            rt.loading <- false;
-            rt.view
-            <- Waveform_view.receive
-                 ~restore_navigation:rt.restore_navigation
-                 rt.view
-                 result;
+     | Loading when not rt.loading && not session.waveform_read_busy ->
+        rt.loading <- true;
+        session.waveform_read_busy <- true;
+        waveform_preparation_trace session "waveform read" rt;
+        don't_wait_for
+          (let%bind result = read_waveform_bytes session rt.pin.artifact ~current in
+           let%map hydrated =
+             if not (current ())
+             then return None
+             else (
+               let view = rt.view in
+               let restore_navigation = rt.restore_navigation in
+               let%map received = In_thread.run (fun () ->
+                 Waveform_view.receive ~restore_navigation view result)
+               in
+               Some received)
+           in
+           session.waveform_read_busy <- false;
+           rt.loading <- false;
+           Option.iter (Option.filter hydrated ~f:(fun _ -> current ())) ~f:(fun view ->
+             rt.view <- view;
             (* At most four parsed workspace models. Keep navigation for evicted runtime
                models; returning verifies bytes again. *)
             let count = ref 0 in
@@ -3151,12 +3330,13 @@ let refresh_waveform_runtime session workspace rt =
                 | Ready _ ->
                   incr count;
                   if !count > 3
-                  then (
-                    other.view <- Waveform_view.remember other.view;
-                    other.restore_navigation <- true)
-                | _ -> ()))))
+                    then (
+                      other.view <- Waveform_view.remember other.view;
+                      other.prepared <- None;
+                      other.restore_navigation <- true)
+                 | _ -> ()))))
      | _ -> ());
-    if (not rt.metadata_loaded) && not rt.metadata_busy
+     if (not background) && (not rt.metadata_loaded) && not rt.metadata_busy
     then (
       rt.metadata_busy <- true;
       Option.iter (current_project session) ~f:(fun project ->
@@ -3206,7 +3386,7 @@ let refresh_waveform_runtime session workspace rt =
                   rt.picker_status
                   <- "Pinned attempt detail unavailable; artifact pin retained")
              | Error e -> rt.picker_status <- "Pinned attempt artifacts unavailable: " ^ e))));
-    if not rt.log_busy
+     if (not background) && not rt.log_busy
     then (
       match Waveforms.log_job rt.pin ~instance_id:session.hello.instance_id with
       | Error e -> rt.logs.fetch <- Error ("Logs unavailable: " ^ Error.to_string_hum e)
@@ -3251,14 +3431,163 @@ let refresh_waveform_runtime session workspace rt =
                    rt.logs.fetch <- Received { eof = page.eof })))))
 ;;
 
+let waveform_pane_spec host tile pane ~width ~height =
+  let policy = Host.policy host tile in
+  { pane
+  ; width
+  ; height
+  ; hints = policy.hints
+  ; string_compression = policy.string_compression
+  }
+;;
+
+let displayed_host_of session (host : Host.t) =
+  match session.presentation_preference_notice with
+  | None -> host
+  | Some notice ->
+    { host with
+      Host.chrome = true
+    ; notice =
+        String.concat
+          ~sep:" | "
+          (List.filter [ notice; host.notice ] ~f:(Fn.non String.is_empty))
+    }
+;;
+
+let render_waveform_viewport_pane view pin ~appearance ~value_layout spec =
+  let { pane; width; height; hints; string_compression } = spec in
+  match pane with
+  | Waveforms.Session ->
+    let project_label =
+      match Or_error.try_with (fun () -> Sexp.of_string pin.Waveforms.project_key) with
+      | Ok (List (Atom root :: _)) -> Filename.basename root
+      | _ -> Project_id.to_string pin.project
+    in
+    Waveform_view.render_session
+      ~appearance
+      ~hints
+      ~string_compression
+      view
+      ~project_label
+      ~width
+      ~height
+  | Signals ->
+    Waveform_view.render_signals ~appearance ~hints ~value_layout view ~width ~height
+  | Waves -> Waveform_view.render_waves ~appearance ~hints view ~width ~height
+  | Picker | Logs -> Bonsai_term.View.none
+;;
+
+let waveform_viewport session workspace dimensions =
+  let host =
+    if Option.equal Workspace.Workspace_id.equal session.host.active (Some workspace)
+    then session.host
+    else Host.switch session.host workspace
+  in
+  let host = displayed_host_of session host in
+  let _, _, tiles = Host_view.tile_layout host dimensions in
+  let panes =
+    List.filter_map tiles ~f:(fun (tile, geometry) ->
+      match Waveforms.pane tile.kind with
+      | Some (Session | Signals | Waves as pane) ->
+        let _, _, _, width, height =
+          Host_view.body_geometry host tile ~width:geometry.width ~height:geometry.height
+        in
+        Option.some_if (width > 0 && height > 0)
+          (waveform_pane_spec host tile pane ~width ~height)
+      | _ -> None)
+  in
+  { appearance = Host.effective_appearance host
+  ; value_layout = session.waveform_value_layout
+  ; panes
+  }
+;;
+
+let prepare_waveform_workspace session workspace rt =
+  match rt.view.loaded, rt.view.identity_scroll, session.last_dimensions with
+  | Ready _, None, Some dimensions
+    when not session.waveform_prepare_busy
+         && dimensions.width <= 512 && dimensions.height <= 256 ->
+    let viewport = waveform_viewport session workspace dimensions in
+    let view = rt.view in
+     if not (List.is_empty viewport.panes)
+        && List.length viewport.panes <= 12
+        && not
+             (Option.exists rt.prepared ~f:(fun (source, prepared, _) ->
+                phys_equal view source && equal_waveform_viewport viewport prepared))
+    then (
+      session.waveform_prepare_busy <- true;
+      let current = waveform_current session workspace rt in
+      (* Fresh record: the graph memo is mutable and belongs to this worker
+         until publication. Navigation on the display keeps using its own. *)
+      let worker_view = { view with cache = view.cache } in
+      don't_wait_for
+        (let%map result =
+           In_thread.run (fun () ->
+             Or_error.try_with (fun () ->
+               let view =
+                 List.fold viewport.panes ~init:worker_view
+                   ~f:(fun view spec ->
+                     match spec.pane with
+                     | Signals ->
+                       Waveform_view.prepare_signals
+                         ~value_layout:viewport.value_layout view ~width:spec.width
+                     | Waves -> Waveform_view.prepare_waves view ~width:spec.width
+                     | _ -> view)
+               in
+               let panes =
+                 List.map viewport.panes ~f:(fun spec ->
+                    ( spec
+                    , render_waveform_viewport_pane
+                        view
+                        rt.pin
+                        ~appearance:viewport.appearance
+                        ~value_layout:viewport.value_layout
+                        spec ))
+               in
+               view, panes))
+         in
+         session.waveform_prepare_busy <- false;
+         if current ()
+            && phys_equal rt.view view
+            && Option.exists session.last_dimensions ~f:(fun dimensions ->
+              equal_waveform_viewport viewport (waveform_viewport session workspace dimensions))
+         then
+            match result with
+            | Error error ->
+              (* Memoize failure for this exact key as well; the foreground
+                 fallback stays available without retrying on every idle tick. *)
+              rt.prepared <- Some (view, viewport, []);
+              append_diagnostic session.diagnostics_file
+               ("waveform preparation failed: " ^ Error.to_string_hum error)
+           | Ok (view, panes) ->
+             rt.view <- view;
+             rt.prepared <- Some (view, viewport, panes);
+             waveform_preparation_trace session "waveform viewport prepared" rt))
+  | _ -> ()
+;;
+
+let waveform_workspace_runtime session (workspace : Workspace.Arrangement.t) =
+  List.Assoc.find
+    session.waveform_workspaces
+    (Workspace.Workspace_id.to_string workspace.id)
+    ~equal:String.equal
+;;
+
+let prepare_idle_waveforms session =
+  Option.iter (waveform_target session.host) ~f:(fun workspace ->
+    if not
+         (Option.equal Workspace.Workspace_id.equal session.host.active (Some workspace.id))
+    then (
+      reconcile_waveform_workspaces session;
+      Option.iter (waveform_workspace_runtime session workspace) ~f:(fun rt ->
+        refresh_waveform_runtime ~background:true session workspace.id rt;
+        prepare_waveform_workspace session workspace.id rt)))
+;;
+
 let refresh_waveforms session =
   reconcile_waveform_workspaces session;
   Option.iter (Host.active session.host) ~f:(fun workspace ->
-    Option.iter
-      (List.Assoc.find
-         session.waveform_workspaces
-         (Workspace.Workspace_id.to_string workspace.id)
-         ~equal:String.equal)
+    Option.iter (waveform_workspace_runtime session workspace)
       ~f:(refresh_waveform_runtime session workspace.id));
   save_waveform_preferences session
 ;;
@@ -3302,7 +3631,13 @@ let refresh_host session =
             return ())
        | Allocation_failed error ->
          session.view_on_allocation <- None;
-         session.host <- { session.host with notice = error };
+         let notice =
+           match List.find asic.workflows ~f:(fun w -> String.equal key w.key) with
+           | Some { phase = Cancelled; id; _ } ->
+             "Workflow " ^ id ^ " cancelled before physical allocation"
+           | _ -> error
+         in
+         session.host <- { session.host with notice };
          return ()
        | Awaiting -> return ())
     | _ -> return ()
@@ -3319,18 +3654,22 @@ let refresh_host session =
   match session.asic with
   | None -> return ()
   | Some snapshot ->
-    let timing_summary_run =
+    let timing_summary_runs =
       if session.selecting_chip
-      then None
-      else Option.map (Host.visible_timing session.host) ~f:snd
+      then []
+      else
+        Option.to_list (Option.map (Host.visible_timing session.host) ~f:snd)
+        @ (if timing_background_enabled session
+           then List.map (Host.builtin_timing_paths session.host) ~f:snd
+           else [])
     in
     let state, intents =
       Asic_intents.plan
         session.asic_reads
-        ?timing_summary_run
+        ~timing_summary_runs
         ~now:(Time_ns.now ())
         snapshot
-        ~visible:runs
+        ~visible:(timing_summary_runs @ runs)
     in
     session.asic_reads <- state;
     Deferred.List.iter intents ~how:`Sequential ~f:(asic_request session)
@@ -3507,7 +3846,8 @@ and reconnect session =
       session.navigation_focus_touched <- [];
       session.navigation_pending <- None;
       session.navigation_saved <- None;
-      session.waveform_preferences_loaded <- None;
+       session.waveform_preferences_loaded <- None;
+       session.waveform_preferences_ready <- false;
       session.waveform_preferences_pending <- None;
       session.waveform_preferences_saved <- None;
       session.view_on_allocation <- None;
@@ -4876,8 +5216,11 @@ let picker_page rt ~height =
 
 let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
   Option.map (Waveforms.pane tile.kind) ~f:(fun pane ->
-    let appearance = Host.effective_appearance session.host in
-    let hints = (Host.policy session.host tile).hints in
+    let host = session.host in
+    let appearance = Host.effective_appearance host in
+    let spec = waveform_pane_spec host tile pane ~width ~height in
+    let hints = spec.hints in
+    let value_layout = session.waveform_value_layout in
     let lines ?(role = Host_view.Role.Foreground) rows =
       Host_view.lines ~appearance ~role ~width ~height rows
     in
@@ -4888,36 +5231,47 @@ let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
         ~equal:String.equal
     with
     | None ->
-      lines [ "No retained waveform pinned"; "Select a VCD in Testing and press W" ]
+      let reason =
+        if Option.is_none (current_project session)
+        then "Open a project with a retained Testing VCD"
+        else if not session.waveform_preferences_ready
+           || Option.is_some session.waveform_preferences_pending
+           || Option.is_some session.navigation_pending
+        then "Restoring waveform context"
+        else if session.waveform_preferences_failed
+        then "Saved waveform bindings could not be loaded; choose a VCD explicitly"
+        else
+          match automatic_waveform_pin session with
+          | Error reason -> reason
+          | Ok _ -> "No waveform bound to this workspace"
+      in
+      lines [ "No retained waveform source"; reason; "Testing: capture a VCD or press W on one" ]
     | Some rt ->
+      let render_viewport_pane () =
+        let cached =
+          Option.bind rt.prepared ~f:(fun (source, viewport, panes) ->
+            if phys_equal source rt.view
+               && Appearance.equal appearance viewport.appearance
+               && Waveform_view.equal_value_layout value_layout viewport.value_layout
+            then List.Assoc.find panes spec ~equal:equal_waveform_pane_spec
+            else None)
+        in
+        match cached with
+        | Some pane -> pane
+        | None ->
+          (match rt.view.loaded, pane with
+           | Ready _, (Waves | Signals) ->
+             waveform_preparation_trace session "waveform viewport foreground" rt
+           | _ -> ());
+          rt.view
+          <- (match pane with
+              | Signals -> Waveform_view.prepare_signals ~value_layout rt.view ~width
+              | Waves -> Waveform_view.prepare_waves rt.view ~width
+              | _ -> rt.view);
+          render_waveform_viewport_pane rt.view rt.pin ~appearance ~value_layout spec
+      in
       (match pane with
-       | Session ->
-         let project_label =
-           match Or_error.try_with (fun () -> Sexp.of_string rt.pin.project_key) with
-           | Ok (List (Atom root :: _)) -> Filename.basename root
-           | _ -> Project_id.to_string rt.pin.project
-         in
-         Waveform_view.render_session
-           ~appearance
-           ~hints
-           ~string_compression:(Host.policy session.host tile).string_compression
-           rt.view
-           ~project_label
-           ~width
-           ~height
-       | Signals ->
-         rt.view
-         <- Waveform_view.prepare_signals
-              ~value_layout:session.waveform_value_layout
-              rt.view
-              ~width;
-         Waveform_view.render_signals
-           ~appearance
-           ~hints
-           ~value_layout:session.waveform_value_layout
-           rt.view
-           ~width
-           ~height
+       | Session | Signals -> render_viewport_pane ()
        | Waves ->
          (match rt.view.identity_scroll with
           | Some scroll ->
@@ -4939,11 +5293,9 @@ let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
              else "Exact identity · Esc/i return")
             :: (List.drop rows scroll |> Fn.flip List.take visible)
             |> lines
-          | None ->
-            rt.view <- Waveform_view.prepare_waves rt.view ~width;
-            Waveform_view.render_waves ~appearance ~hints rt.view ~width ~height)
+           | None -> render_viewport_pane ())
        | Picker ->
-         ([ "Pinned: "
+          ([ (if rt.automatic then "Applicable: " else "Pinned: ")
             ^ Waveform_view.shorten ~width:(Int.max 8 (width - 8)) rt.pin.artifact.label
           ]
           @ (picker_page rt ~height
@@ -4998,18 +5350,7 @@ let waveform_pane session (tile : Workspace.Tile.t) ~width ~height =
          |> lines))
 ;;
 
-let displayed_host session =
-  match session.presentation_preference_notice with
-  | None -> session.host
-  | Some notice ->
-    { session.host with
-      chrome = true
-    ; notice =
-        String.concat
-          ~sep:" | "
-          (List.filter [ notice; session.host.notice ] ~f:(Fn.non String.is_empty))
-    }
-;;
+let displayed_host session = displayed_host_of session session.host
 
 (** Called on the host that painted the hit, before focus-dependent geometry changes. *)
 let select_pointer_row session (tile : Workspace.Tile.t) dimensions ~column ~row =
@@ -5123,7 +5464,8 @@ let render
     reconcile_synthesis session;
     let data = host_data session in
     session.host <- Host_view.reconcile_simulation_viewports session.host data dimensions;
-    reconcile_waveform_workspaces session;
+    if List.exists (Host.tiles session.host) ~f:(fun tile -> Waveforms.is_pane tile.kind)
+    then reconcile_waveform_workspaces session;
     Host_view.render
       ~now
       ?indicator_frames
@@ -5299,8 +5641,12 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; waveform_visible = false
     ; waveform_generation = 0
     ; waveform_history = []
-    ; waveform_workspaces = []
-    ; waveform_preferences_loaded = None
+     ; waveform_workspaces = []
+     ; waveform_testing_observed = None
+     ; waveform_read_busy = false
+     ; waveform_prepare_busy = false
+     ; waveform_preferences_loaded = None
+     ; waveform_preferences_ready = false
     ; waveform_preferences_pending = None
     ; waveform_preferences_saved = None
     ; waveform_preferences_failed = false
@@ -6809,12 +7155,10 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
           session.view_on_allocation <- Some (key, target));
       if not intent.elaboration_only
       then
-        session.host
-        <- { session.host with
-             fresh_launch_origin =
-               Option.map target ~f:(fun target ->
-                 { Host.target; key; chip_target = intent.selection.chip_target })
-           };
+        Option.iter target ~f:(fun target ->
+          session.host
+          <- Host.start_fresh_launch_view session.host
+               { target; key; chip_target = intent.selection.chip_target });
       asic_request session (Launch_fresh { key; intent_id = intent.id }))
   in
   let stage_fresh
@@ -7211,8 +7555,9 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                 rt.epoch <- ref ();
                 rt.loading <- false;
                 rt.metadata_busy <- false;
-                rt.log_busy <- false;
-                rt.view <- Waveform_view.remember rt.view;
+                 rt.log_busy <- false;
+                 rt.view <- Waveform_view.remember rt.view;
+                 rt.prepared <- None;
                 rt.restore_navigation <- true;
                 rt.metadata_loaded <- false;
                 rt.logs.fetch <- Not_requested;
@@ -8647,7 +8992,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                      (C.viewed_flow
                         session.host
                         ~inspected:(inspected_run session)
-                        ~chip_target:snapshot.chip_target
+                        ~asic:(Some snapshot)
                         flows)
                    |> Option.exists ~f:matches
                  else List.exists flows ~f:matches)
@@ -9082,22 +9427,20 @@ let browse_host session delta =
     String.equal tile.kind "run-selector" || Host.job_attempt_kind tile.kind)
   |> Option.iter ~f:(fun tile ->
     let local = Host.local session.host tile.id in
-    let values =
+    let values, cursor =
       if String.equal tile.kind "run-selector"
-      then
-        Host_view.run_candidates (host_data session) ~filter:local.filter
-        |> List.map ~f:(fun (run, _) -> Host_view.run_label run)
+      then (
+        let data = host_data session in
+        ( Host_view.selector_candidates data ~filter:local.filter
+          |> List.map ~f:Host_view.selector_cursor
+        , Host_view.run_cursor ~data session.host tile ))
       else
-        project_jobs session
-        |> List.filter ~f:(fun job ->
-          (not (String.equal tile.kind "project-tests"))
-          || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
-        |> List.map ~f:(fun job -> Job_id.to_string job.id)
-    in
-    let cursor =
-      if String.equal tile.kind "run-selector"
-      then Host_view.run_cursor session.host tile
-      else local.cursor
+        ( project_jobs session
+          |> List.filter ~f:(fun job ->
+            (not (String.equal tile.kind "project-tests"))
+            || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
+          |> List.map ~f:(fun job -> Job_id.to_string job.id)
+        , local.cursor )
     in
     let index = Host_view.browse_index values ~cursor ~delta in
     let cursor = List.nth values index in
@@ -9240,15 +9583,26 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
     Option.iter (Host.focused host) ~f:(fun tile ->
       if String.equal tile.kind "run-selector"
       then (
-        let local = Host.local host tile.id in
-        let run =
-          Option.bind session.asic ~f:(fun asic ->
-            List.find asic.runs ~f:(fun r ->
-              Option.equal String.equal local.cursor (Some (Host_view.run_label r.run))))
-        in
-        Option.iter run ~f:(fun r ->
-          Option.iter (Host.select_run host (Some r.run)) ~f:(fun mutation ->
-            don't_wait_for (mutate_workspace session mutation)))));
+        match Host_view.selected_run_entry host (host_data session) tile with
+        | Some (Workflow w) ->
+          let local = Host.local host tile.id in
+          let host = Host.set_local host tile.id { local with cursor = Some (Host.workflow_cursor w.id) } in
+          let next =
+            if Planned_run.workflow_active w && not w.cancel_requested
+            then "; use Stop to cancel this workflow"
+            else ""
+          in
+          session.host <- { host with notice = "Workflow " ^ w.id ^ " · " ^ Planned_run.workflow_phase w ^ next }
+        | Some (Execution (run, _))
+          when Option.is_some (Host.local host tile.id).cursor
+               || not (Option.equal Run_ref.equal (Host.tile_run host tile) (Some run)) ->
+          Option.iter (Host.select_run host (Some run)) ~f:(fun mutation ->
+            (* The explicit pick wins immediately, before its registry
+               mutation races with the next allocation poll. *)
+            session.view_on_allocation <- None;
+            session.host <- { host with fresh_launch_origin = None };
+            don't_wait_for (mutate_workspace session mutation))
+        | Some (Execution _) | None -> ()));
     Some Effect.Ignore
   | Host.No_effect
     when modal
@@ -9659,14 +10013,20 @@ let modal_input session input ~exit =
     match input with
     | Host.Open_menu Project_menu -> host_catalog session
     | Open_menu Actions_menu ->
-      Option.value_map (inspected_run session) ~default:[] ~f:(fun run ->
-        let label = Host_view.run_label run in
-        let ids =
-          [ "asic.use-run-target"; "asic.artifacts." ^ label; "asic.refresh." ^ label ]
-        in
-        let catalog = host_catalog session in
-        List.filter_map ids ~f:(fun id ->
-          List.find catalog ~f:(fun c -> String.equal c.Host.id id)))
+      let ids =
+        match Option.bind (Host.focused session.host)
+                ~f:(Host_view.selected_run_entry session.host (host_data session))
+        with
+        | Some (Workflow _) when Option.is_none (Host.open_inspector session.host) ->
+          [ Host.cancel_flow_command_id ]
+        | _ ->
+          Option.value_map (inspected_run session) ~default:[] ~f:(fun run ->
+            let label = Host_view.run_label run in
+            [ "asic.use-run-target"; "asic.artifacts." ^ label; "asic.refresh." ^ label ])
+      in
+      let catalog = host_catalog session in
+      List.filter_map ids ~f:(fun id ->
+        List.find catalog ~f:(fun c -> String.equal c.Host.id id))
     | _ -> []
   in
   let menu_height = Option.value_map session.last_dimensions ~default:24 ~f:(fun d -> d.height) in
@@ -10137,17 +10497,18 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
            | `Down -> [])
      | Right, [] ->
        (match
-          Host_view.run_context_at (displayed_host session) (host_data session) dimensions ~x ~y
+          Host_view.selector_context_at
+            (displayed_host session) (host_data session) dimensions ~x ~y
         with
         | None -> Effect.Ignore
-        | Some (tile, run) ->
+        | Some (tile, entry) ->
           (* Bind the browse cursor before the menu captures its catalog and workspace. *)
           let local = Host.local session.host tile.id in
           session.host
           <- Host.set_local
                { session.host with focus = Some tile.id }
                tile.id
-               { local with cursor = Some (Host_view.run_label run) };
+               { local with cursor = Some (Host_view.selector_cursor entry) };
           modal_input session (Open_menu Actions_menu) ~exit)
      | (Left | Scroll _), [] ->
        let trigger =
@@ -10326,6 +10687,18 @@ let tui
     ~trigger_on_activate:true
     (Bonsai.return (Time_ns.Span.of_ms 500.))
     poll
+    graph;
+  (* Do not wait on the Updates/ASIC lanes to project an already known VCD. *)
+  let waveforms_idle =
+    Bonsai.map session ~f:(fun session ->
+      Effect.of_deferred_thunk (fun () ->
+        prepare_idle_waveforms session;
+        Deferred.unit))
+  in
+  Bonsai.Clock.every
+    ~when_to_start_next_effect:`Wait_period_after_previous_effect_finishes_blocking
+    (Bonsai.return (Time_ns.Span.of_ms 500.))
+    waveforms_idle
     graph;
   let display =
     Bonsai.map3

@@ -14,8 +14,18 @@ type t =
 let empty = { scope = ""; attempted = []; running = None }
 let limit = 128
 let max_details = 5
+let default_details = 2
 
 let valid_detail_count n = n >= 0 && n <= max_details
+
+let index_attempt_key (view : Inspection_view.t) =
+  (* A queued index read can fail when the public run advances before it finishes,
+     even for an unchanged frozen target. An already attached index needs no read. *)
+  Sexp.to_string_mach
+    [%sexp
+      (Inspection_view.index_key view : string),
+      (view.observation : (Asic.Reference.t * int * string option) option)]
+;;
 
 let detail_source (view : Inspection_view.t) (index : Asic_inspection.Index.t) =
   (* Same identity as the daemon's reusable cache, excluding observation timestamps
@@ -33,9 +43,12 @@ let detail_attempt_key ~source ~row_id = source ^ ":" ^ row_id
 let detail_candidates (view : Inspection_view.t) snapshot ~count =
   Option.value_map view.index ~default:[] ~f:(fun index ->
     let rows =
-      Timing_workspace.top_path_ids view ~count
+      Timing_workspace.preload_path_ids view ~count
       |> List.filter ~f:(fun row_id ->
-        Option.is_none (Timing_workspace.published_detail view snapshot ~row_id))
+        Option.is_none (Timing_workspace.published_detail view snapshot ~row_id)
+        && not
+             (Option.exists view.detail ~f:(fun detail ->
+                Option.is_none detail.error && String.equal detail.row_id row_id)))
     in
     if List.is_empty rows
     then []
@@ -90,6 +103,23 @@ let%test_unit "selection changes discard backlog without releasing active work" 
   let t = finish t ~scope:"s" ~key:"old-source" in
   let _, request = step t [ "new-source" ] in
   assert (Option.equal String.equal request (Some "new-source"))
+;;
+
+let%test_unit "index attempts follow exact observation without altering RPC coalescing" =
+  let view =
+    Timing_workspace.create ~generation:1 ~run:Asic_snapshot_fixture.run_a ~stage:"timing"
+  in
+  let key t =
+    index_attempt_key
+      { view with observation = Some ({ attempt = "/attempt"; stream_id = "stream" }, t, None) }
+  in
+  let step t n = step t ~scope:"project" ~enabled:true ~interactive:false ~candidates:[ key n ] in
+  let t, pending = step empty 4 in
+  assert (Option.is_some pending);
+  assert (Option.is_none (snd (step t 5)));
+  let t = finish t ~scope:"project" ~key:(key 4) in
+  assert (Option.is_none (snd (step t 4)));
+  assert (Option.equal String.equal (snd (step t 5)) (Some (key 5)))
 ;;
 
 let%test_unit "finite failure, coalescing, priority, scope fences and bounded memory" =
@@ -180,8 +210,13 @@ let%test_unit "top details follow path order, skip cache publications, and do no
   let snapshot = { Asic_snapshot_fixture.snapshot with inspections = [ index ] } in
   let view = Timing_workspace.create ~generation:1 ~run ~stage:"signoff" in
   let view = Inspection_view.reconcile { view with sort = Numeric_descending } snapshot in
+  assert (Option.equal String.equal view.selected (Some "d"));
   assert (
     List.equal String.equal (Timing_workspace.top_path_ids view ~count:5) [ "d"; "c"; "b"; "a" ]);
+  assert (
+    List.equal String.equal
+      (Timing_workspace.preload_path_ids { view with selected = Some "a" } ~count:2)
+      [ "a"; "d" ]);
   let published =
     { snapshot with inspection_details = [ detail "d"; detail ~error:"missing" "c" ] }
   in

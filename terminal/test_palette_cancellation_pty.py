@@ -365,16 +365,138 @@ os.execv(sys.executable, [sys.executable, {str(routing)!r} if routing else {str(
         session.stop()
 
 
+def preallocation(client, daemon, base):
+    """A private native launch can be selected and stopped before it has a Run_ref."""
+    base.mkdir()
+    root, tools = base / "project", base / "tools"
+    root.mkdir()
+    tools.mkdir()
+    (root / "dune-project").write_text("(lang dune 3.22)\n")
+    equipment(root, tools, [("watched", "main")])
+    preparation = root / "hardcaml-workbench-preparation.sexp"
+    preparation.write_text(preparation.read_text().replace("(timeout_seconds 15)",
+                                                           "(timeout_seconds 45)"))
+    dune = tools / "dune"
+    dune.write_text(dune.read_text().replace("       echo build >> build-calls", """
+       if test -f hold-build; then
+         touch build-waiting
+         while test -f hold-build; do sleep 0.05; done
+       fi
+       echo build >> build-calls"""))
+    session = Session(SimpleNamespace(client=client, daemon=daemon, outer_timeout=20), base, root)
+    session.env.update(PATH=str(tools) + ":" + session.env["PATH"],
+                       XDG_CONFIG_HOME=str(base / "client-config"),
+                       XDG_CACHE_HOME=str(base / "client-cache"))
+
+    def workflows():
+        return field(session.rpc("asic"), "workflows")
+
+    def main_selection():
+        ws = session.rpc("workspace")
+        context, = [c for c in field(ws, "contexts") if field(c, "id") == field(ws, "main_context")]
+        return field(context, "selected_run")
+
+    def focus(term, title):
+        # Status notices may temporarily replace the breadcrumb. Focus the
+        # actual painted tile heading, not a guessed tab position.
+        heading = "╭ " + title
+        screen = term.capture("focus-" + title, [heading])
+        y, line = next((y, r) for y, r in enumerate(screen.splitlines(), 1) if heading in r)
+        x = line.index(heading) + 3
+        press = f"\x1b[<0;{x};{y}"
+        os.write(term.master, (press + "M" + press + "m").encode())
+        term.drain(.2)
+
+    def phase_row(phase, workflow_id):
+        # The stock UI compresses opaque IDs; require this exact ID's visible
+        # suffix on the Runs row rather than just the separate Planned tile.
+        return re.compile(rf"{phase} · (?:work…|workflow-)[a-z0-9]*"
+                          rf"{re.escape(workflow_id[-4:])} · no physical run", re.I)
+
+    try:
+        session.start()
+        with observe_requests(session) as (url, requests, projects):
+            with closing(Terminal(session, argv=[str(client), "--connect", url,
+                                                "--project-root", str(root)],
+                                  width=210, height=50)) as term:
+                term.capture("preallocation-ready", ["Connection: connected", "available to launch"])
+                term.palette("synthesis")
+                wait(term, lambda: any(field(w, "phase") == "Completed" for w in workflows()),
+                     "Historical synthesis never finished")
+                old, = workflows()
+                old_run = field(old, "run")
+                assert old_run
+                wait(term, lambda: main_selection() == old_run, "Old run was not watched")
+
+                (root / "hold-build").touch()
+                focus(term, "stage checklist")
+                term.palette("synthesis")
+                wait(term, lambda: (root / "build-waiting").exists(), "New build did not start")
+                pending, = [w for w in workflows() if field(w, "id") != field(old, "id")]
+                pending_id = field(pending, "id")
+                assert field(pending, "phase") == "Building" and not field(pending, "run"), pending
+                assert field(pending, "cancel_requested") == "false", pending
+                assert len(field(session.rpc("asic"), "runs")) == 1 and main_selection() == old_run
+                term.capture("building-next-to-old-run", [phase_row("Building", pending_id)])
+
+                # Default Stop now refers to the exact pending launch even
+                # though the checklist and shared run context still show history.
+                row = selected_row(term, "stop current", "current-workflow")
+                expected = f"Cancel — Building · work…{pending_id[-4:]}"
+                assert expected in row, row
+                os.write(term.master, b"\r")
+                wait(term, lambda: requests, "Stop Enter did not dispatch")
+                assert requests == [(projects[str(root)], ["Cancel_workflow", pending_id])], requests
+                wait(term, lambda: any(field(w, "id") == pending_id and field(w, "phase") == "Cancelled"
+                                       for w in workflows()), "Pending workflow did not cancel")
+                term.capture("terminal-workflow-row", [phase_row("Cancelled", pending_id)],
+                             absent=[phase_row("Building", pending_id)])
+                assert main_selection() == old_run
+                assert len(field(session.rpc("asic"), "runs")) == 1
+
+                # A second held build completes and its Runs entry is replaced,
+                # never duplicated beside the authoritative physical row.
+                (root / "build-waiting").unlink()
+                term.palette("synthesis")
+                wait(term, lambda: (root / "build-waiting").exists(), "Replacement build did not start")
+                replacement, = [w for w in workflows() if field(w, "id") not in
+                                (field(old, "id"), pending_id)]
+                replacement_id = field(replacement, "id")
+                term.capture("replacement-before-allocation", [phase_row("Building", replacement_id)])
+                focus(term, "runs ")
+                os.write(term.master, b"\r")
+                term.capture("exact-workflow-selected",
+                             [f"Workflow {replacement_id} · Building; use Stop"])
+                assert main_selection() == old_run
+                row = selected_row(term, "stop", "stop-selected-workflow")
+                assert f"Cancel — Building · work…{replacement_id[-4:]}" in row, row
+                dismiss(term)
+                (root / "hold-build").unlink()
+                wait(term, lambda: main_selection() != old_run, "Replacement did not become watched")
+                new_run, = main_selection()
+                assert len(field(session.rpc("asic"), "runs")) == 2
+                term.capture("replacement-allocated", ["runs 3/3", field(new_run, "id")[-4:]],
+                             absent=[phase_row("Building", replacement_id),
+                                     phase_row("Physical", replacement_id),
+                                     phase_row("Completed", replacement_id)])
+                assert requests == [(projects[str(root)], ["Cancel_workflow", pending_id])], requests
+    finally:
+        session.stop()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--client", type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--daemon", type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--preallocation-only", action="store_true")
     args = parser.parse_args()
 
     def run(base):
-        for verb in ("cancel", "stop"):
-            exercise(args.client, args.daemon, base / verb, verb=verb)
+        preallocation(args.client, args.daemon, base / "preallocation")
+        if not args.preallocation_only:
+            for verb in ("cancel", "stop"):
+                exercise(args.client, args.daemon, base / verb, verb=verb)
 
     if args.evidence:
         args.evidence.mkdir()

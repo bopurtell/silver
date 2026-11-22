@@ -328,12 +328,14 @@ type cancellable_flow =
   { operation : Asic.Operation.t
   ; run : Run_ref.t option
   ; target : Asic.Chip_target.t option
-  ; workflow_key : string option
   ; label : string
   ; explicit_title : string
   }
 
 let cancellable_flows (snapshot : Asic.Snapshot.t) =
+  let display_id =
+    Presentation.identifiers ~compress:true (List.map snapshot.workflows ~f:(fun w -> w.id))
+  in
   let workflows =
     List.filter_map snapshot.workflows ~f:(fun w ->
       if Planned_run.workflow_active w && not w.cancel_requested
@@ -342,8 +344,10 @@ let cancellable_flows (snapshot : Asic.Snapshot.t) =
           { operation = Cancel_workflow w.id
           ; run = w.run
           ; target = w.intent.selection.chip_target
-          ; workflow_key = Some w.key
-          ; label = w.intent.selection.flow ^ " · " ^ w.key
+          ; label =
+              (if Option.is_none (Planned_run.registered_run snapshot w)
+               then Planned_run.workflow_phase w ^ " · " ^ display_id w.id ^ " · " ^ w.intent.selection.flow
+               else w.intent.selection.flow ^ " · " ^ w.key)
           ; explicit_title =
               "Cancel fresh workflow " ^ w.key ^ " (Elaboration: " ^ w.elaboration_status ^ ")"
           }
@@ -368,7 +372,6 @@ let cancellable_flows (snapshot : Asic.Snapshot.t) =
         { operation = Cancel_finalization { key = f.key; run = f.run }
         ; run = Some f.run
         ; target
-        ; workflow_key = None
         ; label = "Finalization · " ^ f.key
         ; explicit_title = "Cancel finalization " ^ f.key
         }
@@ -382,9 +385,25 @@ let selected_cancel_chip (snapshot : Asic.Snapshot.t) =
   | Some _ -> Error "Chip/variant missing from catalog"
 ;;
 
-let viewed_flow host ~inspected ~chip_target flows =
+let viewed_flow host ~inspected ~asic flows =
   let focused_kind kind =
     Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind kind)
+  in
+  let explicit_workflow =
+    Option.bind (H.focused host) ~f:(fun tile ->
+      if String.equal tile.kind "run-selector" && Option.is_none (H.open_inspector host)
+      then
+        let local = H.local host tile.id in
+        Option.filter local.cursor ~f:H.is_workflow_cursor
+        |> Option.map ~f:(fun cursor -> cursor, local.filter)
+      else None)
+  in
+  let explicit_view =
+    Option.is_some (H.open_inspector host)
+    || Option.exists (H.focused host) ~f:(fun tile ->
+      Option.exists (H.resource_owner host tile) ~f:(fun owner ->
+        not (Workspace.Binding.equal owner.binding Follow))
+      || (String.equal tile.kind "run-selector" && Option.is_some (H.local host tile.id).cursor))
   in
   let open Result.Let_syntax in
   let%bind inspected =
@@ -400,34 +419,54 @@ let viewed_flow host ~inspected ~chip_target flows =
       | [ run ] -> Ok (Some run)
       | _ -> Error "Multiple runs in view; focus the intended run")
   in
-  let displayed_workflow =
-    if focused_kind "planned-run"
-    then
-      Option.map (Planned_run.workflow host.H.planned_run) ~f:(fun w ->
-        Asic.Operation.Cancel_workflow w.id)
-    else None
+  let exact_workflow =
+    match explicit_workflow with
+    | Some (cursor, filter) ->
+      (match Option.bind asic ~f:(fun s ->
+         Option.map (H.cursor_workflow s cursor) ~f:(fun w -> w, Planned_run.registered_run s w))
+       with
+       | Some (_, Some run) when Option.equal Run_ref.equal inspected (Some run) ->
+         (* The cursor now paints a physical row, not a workflow row. *)
+         None
+       | Some (w, None) when Planned_run.workflow_matches w ~filter -> Some (Some w)
+       | _ -> Some None)
+    | None when focused_kind "planned-run" && not explicit_view ->
+      Some (Planned_run.workflow host.H.planned_run)
+    | _ -> None
   in
-  (* Without an inspected run, project-wide history is not a view target. Use
-     the exact local submission, never the newest workflow in the snapshot. *)
-  let origin =
-    if Option.is_none inspected
-    then H.unselected_launch_origin host ~chip_target
-    else None
+  let origin_override =
+    if explicit_view
+    then None
+    else
+      Option.bind (H.current_launch_origin host ~chip_target:(Launch_preferences.chip_target asic))
+        ~f:(fun key ->
+          let workflow =
+            Option.bind asic ~f:(fun s -> List.find s.workflows ~f:(fun w ->
+              String.equal key w.key && Planned_run.workflow_in_chip s w))
+          in
+          (* Once the exact run is in view, retain run-level ambiguity (e.g. a
+             separate finalization). Before then, the old Follow run isn't the
+             target of the new submission, even if it is still being displayed. *)
+          if Option.exists workflow ~f:(fun w ->
+               Option.exists inspected ~f:(fun run -> Option.exists w.run ~f:(Run_ref.equal run)))
+          then None
+          else Some workflow)
   in
+  let exact = Option.first_some exact_workflow origin_override in
   let candidates =
     List.filter flows ~f:(fun flow ->
-      match displayed_workflow, inspected with
-      | Some op, _ -> Asic.Operation.equal op flow.operation
-      | None, Some run when not (focused_kind "planned-run") ->
+      match exact, inspected with
+      | Some (Some w), _ -> Asic.Operation.equal (Cancel_workflow w.id) flow.operation
+      | None, Some run ->
         Option.equal Run_ref.equal flow.run (Some run)
-      | None, None ->
-        Option.exists origin ~f:(fun key ->
-          Option.equal String.equal flow.workflow_key (Some key)
-          && Option.equal Asic.Chip_target.equal flow.target chip_target)
       | _ -> false)
   in
   match candidates with
   | [ flow ] -> Ok flow
+  | [] when Option.is_some explicit_workflow && Option.is_some exact_workflow ->
+    Error "Selected workflow is unavailable or no longer cancellable"
+  | [] when Option.is_some origin_override ->
+    Error "Submitted workflow is unavailable or no longer cancellable"
   | [] -> Error "No cancellable ASIC flow in view"
   | _ -> Error "Multiple active flows for this run; select an explicit cancellation command"
 ;;
@@ -448,7 +487,7 @@ let cancellation_commands host ~project ~asic ~inspected =
       H.command ~unavailable:reason id (Artifact_view.safe title) aliases (H.Unavailable reason)
   in
   let viewed =
-    viewed_flow host ~inspected ~chip_target:(Launch_preferences.chip_target asic) flows
+    viewed_flow host ~inspected ~asic flows
   in
   let single =
     make ~viewed:true H.cancel_flow_command_id

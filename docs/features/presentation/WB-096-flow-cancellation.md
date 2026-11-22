@@ -45,6 +45,12 @@ make it clear which requested stages never ran.
 
 ## Verification
 
+The Runs pane lists a pending workflow by workflow ID and phase before a
+physical run is allocated. A new launch does not replace an older watched run.
+The private cancellation PTY verifies that Enter on **Stop current** dispatches
+the exact pending workflow ID, preserves the watched selection, and that a
+workflow reaching physical execution yields one run row rather than two.
+
 Delivered against an updated daemon. The [palette PTY regression](../../../terminal/test_palette_cancellation_pty.py)
 verifies Enter dispatch for both spellings, including `stop` from Timing after
 launching a controlled FIFO fixture, and the rendered skip reason after

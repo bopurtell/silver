@@ -33,7 +33,8 @@ the user picks one.
 
 **Setting:** `Timing preload: Top 5 path details` in the command palette
 saves `(timing_preload_details 5)` in the project's presentation preferences.
-The range is 0–5, default 0. For a client startup override use
+The range is 0–5, default 2 when no count was saved. A previously saved zero
+still means index-only. For a client startup override use
 `--timing-preload-details 5`.
 
 ## Acceptance criteria
@@ -42,8 +43,8 @@ The range is 0–5, default 0. For a client startup override use
   to warm. Support at least `0` (index-only background loading) and `5`;
   document the default and supported range. Existing explicit-only mode
   suppresses background reads regardless of the count.
-- [x] Once the current analysis index is available, warm the first N distinct
-  paths in Timing Paths order, or all available paths if fewer. Use real
+- [x] Once the current analysis index is available, warm up to N distinct
+  paths, starting with the highlighted path and continuing in Timing Paths order. Use real
   artifact detail, including fields absent from the index. No selection or
   explicit inspection is needed to start warm-up.
 - [x] Moving the highlight displays the exact cached detail immediately. For
@@ -68,3 +69,9 @@ explicit-only mode to check that neither issues background detail reads.
 Switch runs during an outstanding read to exercise the stale-response case.
 The [native PTY fixture](../../../scripts/test-timing-detail-preload.py) drives
 these checks against prebuilt daemon, terminal and preset exporter executables.
+It also launches a manual-gated synthetic physical flow through the daemon,
+keeps the terminal on Overview while it replaces its Timing source at Signoff
+completion, and checks the first complete Timing frame for the new full detail
+report and the next warm highlight for its own detail, with no provider reread.
+Use `--flow-only` to run just that regression against the three prebuilt
+executables and a new private `--evidence` directory.

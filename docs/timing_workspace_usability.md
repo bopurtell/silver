@@ -74,9 +74,10 @@ changes or becomes ready while the workspace is visible. Tabs, aliases, the
 workspace list and saved navigation all use the same rule. Index loading reads
 existing evidence; it does not run EDA, execute a refresh, or require path detail.
 If the summary is not hot, Silver can load the selected summary first, then
-request its exact captured analysis. For legacy evidence with no captured analysis
-identity, visible loading requires an observed completed Timing/Signoff stage for
-the registered execution. A synthesis-only run is not a Timing candidate.
+request its exact captured analysis. Without a captured analysis identity, a
+checkpoint-backed index requires an observed completed Timing/Signoff stage for
+the registered execution; hidden warm-up also requires a terminal run outcome.
+A synthesis-only run is not a Timing candidate.
 
 Default **Background index** mode observes exact completed analyses resolved by
 built-in Timing workspaces, even when hidden. It handles:
@@ -85,15 +86,25 @@ built-in Timing workspaces, even when hidden. It handles:
 - selecting an already-completed run;
 - reopening a cached index after client/daemon restart.
 
-It loads the **index**, then prepares reusable searchable/filter/sort state. If
-the project opts into detail preload, it also reads the first N distinct paths in
-the Timing Paths order, excluding non-path rows. It does not draw hidden terminal
-frames, change focus, select a newer run, or alter pins.
+It loads the **index**, prepares reusable searchable/filter/sort state, and
+warms **two distinct path reports by default**. An existing highlighted path
+comes first, followed by paths in Timing Paths order up to the configured
+count. Provenance rows remain available after actual paths and are not warmed.
+Silver attaches the matching report to Selected Path and prepares its text
+lines while Overview is idle. It does not draw hidden terminal frames, change
+focus, select a newer run, or alter pins.
+
+If a running flow publishes one Timing identity and completion replaces it,
+Silver rebinds to the new exact source. Matching path IDs alone cannot carry
+an old report across that change. If only the run observation advances, an
+unchanged frozen index remains reusable, but details must match the new
+observation.
 
 With detail preload enabled, the highlight shows matching published detail
-immediately, without Enter. Moving to a cold path shows its loading state and
-requests that path before any unsent warm-up reads. At the default count of zero,
-the index supplies slack, endpoints, corner and status; use Enter or explicit
+immediately, without Enter or provider I/O, once the warm-up has finished.
+Moving to a cold path shows its loading state and requests that path before any
+unsent warm-up reads. With an explicit count of zero, the index supplies slack,
+endpoints, corner and status; use Enter or explicit
 inspection to load full detail. Explicit inspection can also warm its configured
 neighbors in Background index mode. A cold provider read can take several seconds.
 
@@ -108,13 +119,15 @@ to see more of the original line.
 | Palette `Timing preload: Background index` | Enable and persist project loading policy; default |
 | Palette `Timing preload: Explicit only` | Suppress speculative reads and persist that choice |
 | Palette `Timing preload: Top 5 path details` | Save a project count of five (choices 0–5) |
-| Palette `Timing preload: Top 0 path details` | Save the default count, zero (index only) |
+| Palette `Timing preload: Top 2 path details` | Default for a project without a saved count |
+| Palette `Timing preload: Top 0 path details` | Save zero (index only) |
 | Client `--timing-preload background-index` | Initial override of the saved policy |
 | Client `--timing-preload explicit-only` | Initial explicit-only override |
 | Client `--timing-preload-details 5` | Initial override of the saved count (integer 0–5) |
 
 The client stores the count as `(timing_preload_details 5)` in the project's
-`presentation-<project-key-hash>.sexp` state file; a missing field means zero.
+`presentation-<project-key-hash>.sexp` state file; a missing field means two.
+An existing saved zero remains index-only.
 CLI overrides win initially; subsequent palette changes take effect and persist.
 **Explicit only** means no speculative index or detail reads, regardless of the
 saved count. Opening Timing still loads the visible index and Enter still loads
@@ -136,7 +149,8 @@ already-running read.
   analysis (including any reinspection lineage), index digest and row all match.
 - Each daemon/project scope remembers at most **128 attempted exact indexes** and
   **128 attempted exact path details** for background preparation. A missing or
-  failed detail does not stop the batch or retry on each poll. At the cap, further
+  failed read does not retry on each unchanged poll. A new observation can retry
+  a read invalidated by completion or another cursor change. At the cap, further
   inspection remains explicitly available; a new client or daemon/project scope
   resets the budget.
 - No run, no loaded index, loading, ready, empty, filtered, failure and
@@ -152,8 +166,9 @@ already-running read.
 
 ## Real-run evidence
 
-Actual retained run `a02325d9895a428aa7b90734314e4e4a` was verified through a private
-daemon/client using the installed provider and real report source:
+Before default detail warm-up, retained run `a02325d9895a428aa7b90734314e4e4a`
+was verified in index-only mode through a private daemon/client using the
+installed provider and real report source:
 
 - **1,021 index rows:** 1,020 timing paths and one input-reference row.
 - **Exactly one provider index read**, **zero detail reads** during hidden warm-up.

@@ -41,6 +41,7 @@ type t =
   { view : Simulation_view.t
   ; catalog : Simulation_catalog.t
   ; selected_artifact : string option
+  ; selected_waveform : S.Artifact.t option
   ; restored_artifact : artifact_identity option
   ; restored_metadata : S.Artifact.t option
   }
@@ -49,6 +50,7 @@ let empty =
   { view = Simulation_view.empty
   ; catalog = Simulation_catalog.empty
   ; selected_artifact = None
+  ; selected_waveform = None
   ; restored_artifact = None
   ; restored_metadata = None
   }
@@ -84,13 +86,29 @@ let artifact t =
         && String.equal original.kind a.kind)))
 ;;
 
-let artifact_metadata t = Option.first_some t.restored_metadata (artifact t)
+let artifact_metadata t =
+  Option.first_some t.restored_metadata (Option.first_some t.selected_waveform (artifact t))
+;;
 
 let artifact_identity t =
   Option.first_some
     t.restored_artifact
     (Option.map (raw_artifact t) ~f:(fun a ->
        { id = a.id; sha256 = a.sha256; size = a.size }))
+;;
+
+let navigation_artifact_identity t =
+  (* A default VCD cursor can be reconstructed from attempt/case. Persisting it
+     as an exact artifact would turn the first of several VCDs into an intended
+     waveform after restarting, even if the user never selected it. *)
+  match t.selected_waveform with
+  | Some a -> Some { id = a.id; sha256 = a.sha256; size = a.size }
+  | None ->
+    if Option.is_none t.restored_artifact
+       && Option.exists (raw_artifact t) ~f:(fun a ->
+            Or_error.is_ok (Simulation_export.embedded_vcd a))
+    then None
+    else artifact_identity t
 ;;
 
 let workload_artifact t =
@@ -143,19 +161,25 @@ let waveform_restore_available t =
           || Option.exists (workload_artifact t) ~f:(S.Artifact.equal a)))
 ;;
 
-let waveform_eligible t (a : S.Artifact.t) =
-  match Simulation_view.detail t.view with
-  | Some d when Option.equal String.equal t.view.attempt (Some d.id) ->
-    Option.is_none (selection_unavailable t)
+let waveform_case t (d : S.Attempt.t) =
+  Option.filter t.view.case_id ~f:(fun case_id ->
+    Option.equal String.equal t.view.attempt (Some d.id)
+    && Option.is_none (selection_unavailable t)
     && waveform_restore_available t
-    && String.equal a.attempt_id d.id
-    && Option.value_map t.view.case_id ~default:false ~f:(fun case_id ->
-      List.mem d.captured.selection.cases case_id ~equal:String.equal
-      && List.exists d.cases ~f:(fun c -> String.equal c.case_id case_id)
-      && Option.equal String.equal a.case_id (Some case_id))
-    && Or_error.is_ok (Simulation_export.embedded_vcd a)
-    && List.exists d.artifacts ~f:(S.Artifact.equal a)
-  | _ -> false
+    && List.mem d.captured.selection.cases case_id ~equal:String.equal
+    && List.exists d.cases ~f:(fun c -> String.equal c.case_id case_id))
+;;
+
+let waveform_in_case (d : S.Attempt.t) case_id (a : S.Artifact.t) =
+  String.equal a.attempt_id d.id
+  && Option.equal String.equal a.case_id (Some case_id)
+  && Or_error.is_ok (Simulation_export.embedded_vcd a)
+;;
+
+let waveform_eligible t (a : S.Artifact.t) =
+  Option.exists (Simulation_view.detail t.view) ~f:(fun d ->
+    Option.exists (waveform_case t d) ~f:(fun case_id ->
+      waveform_in_case d case_id a && List.exists d.artifacts ~f:(S.Artifact.equal a)))
 ;;
 
 let waveform_artifact t =
@@ -163,6 +187,39 @@ let waveform_artifact t =
     Option.first_some
       (Option.filter (artifact t) ~f:(waveform_eligible t))
       (List.find d.artifacts ~f:(waveform_eligible t)))
+;;
+
+(* The Testing cursor defaults to the first available artifact. That is useful
+   for browsing, but is not evidence of an explicit Waveforms binding. *)
+let intended_waveform t =
+  match Simulation_view.detail t.view with
+  | None ->
+    Error (Option.value (selection_unavailable t) ~default:"No observed Testing attempt")
+  | Some detail ->
+    (* Explicit selection (including retained intent restored from disk) is an
+       exact binding. The default browse cursor is not. *)
+    let selected =
+      Option.first_some
+        t.selected_waveform
+        (if Option.is_some t.restored_artifact
+         then Option.filter (artifact t) ~f:(waveform_eligible t)
+         else None)
+    in
+    (match selected with
+     | Some artifact when waveform_eligible t artifact -> Ok (detail, artifact)
+     | Some _ -> Error "Selected VCD unavailable or changed; choose a VCD in Testing"
+     | None ->
+       let candidates =
+         Option.value_map (waveform_case t detail) ~default:[] ~f:(fun case_id ->
+           List.filter detail.artifacts ~f:(waveform_in_case detail case_id))
+       in
+       (match candidates with
+        | [ artifact ] -> Ok (detail, artifact)
+        | [] ->
+          Error
+            (Option.value (selection_unavailable t)
+               ~default:"No available supported VCD for the selected Testing attempt/case")
+        | _ -> Error "Multiple applicable VCDs; select one in Testing"))
 ;;
 
 let waveform_unavailable t =
@@ -252,8 +309,10 @@ let set_view t view =
   let t =
     { view
     ; catalog
-    ; selected_artifact =
-        (if same_attempt && same_case then t.selected_artifact else None)
+     ; selected_artifact =
+         (if same_attempt && same_case then t.selected_artifact else None)
+     ; selected_waveform =
+         (if same_attempt && same_case then t.selected_waveform else None)
     ; restored_artifact = (if same_attempt then t.restored_artifact else None)
     ; restored_metadata = (if same_attempt then t.restored_metadata else None)
     }
@@ -274,7 +333,7 @@ let set_view t view =
 
 let select_attempt t id =
   set_view
-    { t with restored_artifact = None; restored_metadata = None }
+    { t with selected_waveform = None; restored_artifact = None; restored_metadata = None }
     (Simulation_view.select t.view id)
 ;;
 
@@ -296,7 +355,8 @@ let select_case t id =
     else
       { t with
         view = { t.view with case_id = Some id }
-      ; selected_artifact = None
+       ; selected_artifact = None
+       ; selected_waveform = None
       ; restored_artifact = None
       ; restored_metadata = None
       }
@@ -314,7 +374,9 @@ let select_artifact t id =
      | None -> t
      | Some a ->
        { t with
-         selected_artifact = Some id
+          selected_artifact = Some id
+        ; selected_waveform =
+            Option.some_if (Or_error.is_ok (Simulation_export.embedded_vcd a)) a
        ; restored_artifact = None
        ; restored_metadata = None
        ; view = { t.view with case_id = Option.first_some a.case_id t.view.case_id }
@@ -842,6 +904,35 @@ module Test_data = struct
       (Ok snapshot)
   ;;
 end
+
+let%test_unit "only an explicit Testing VCD cursor becomes a durable waveform binding" =
+  let a =
+    { Test_data.artifact with media_type = "text/vcd"; sha256 = Some (String.make 64 'a') }
+  in
+  let b = { a with id = "alternate" } in
+  let detail = { Test_data.attempt with artifacts = [ a; b ] } in
+  let t = select_attempt empty detail.id |> begin_request in
+  let t =
+    receive t ~ticket:t.view.request ~selected:t.view.attempt (Observe detail.id)
+      (Ok { Test_data.snapshot with detail = Some detail })
+  in
+  assert (Option.equal S.Artifact.equal (artifact t) (Some a));
+  assert (Result.is_error (intended_waveform t));
+  assert (Option.is_none (navigation_artifact_identity t));
+  let t = select_artifact t b.id in
+  let _, selected =
+    Or_error.ok_exn (intended_waveform t |> Result.map_error ~f:Error.of_string)
+  in
+  assert (S.Artifact.equal selected b);
+  assert (String.equal (Option.value_exn (navigation_artifact_identity t)).id b.id);
+  let replacement = { b with sha256 = Some (String.make 64 'b') } in
+  let snapshot =
+    { Test_data.snapshot with detail = Some { detail with artifacts = [ a; replacement ] } }
+  in
+  let t = set_view t { t.view with snapshot = Some snapshot } in
+  assert (Result.is_error (intended_waveform t));
+  assert (Option.equal S.Artifact.equal (artifact_metadata t) (Some b))
+;;
 
 let%test_unit "workload result handoff resolves only the selected completed case and \
                exact artifact"

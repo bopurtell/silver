@@ -31,8 +31,10 @@ if args == ["--version", "--json"]:
         sys.exit(130)
 
     signal.signal(signal.SIGTERM, stop_probe)
-    with open("probe-entered", "w") as out:
+    probe_marker = f"probe-entered.{os.getpid()}.tmp"
+    with open(probe_marker, "w") as out:
         out.write(str(os.getpid()))
+    os.replace(probe_marker, "probe-entered")
     while os.path.exists("hold-probe") and not os.path.exists("probe-release"):
         time.sleep(0.01)
     if os.path.exists("fail-probe"):

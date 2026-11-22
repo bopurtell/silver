@@ -55,6 +55,7 @@ and job_entry =
   ; mutable job : Job.t
   ; log_path : string
   ; log_writer : Writer.t
+  ; log_error : string option ref
   ; log_records : (int, log_record) Hashtbl.t
   ; mutable log_position : int
   ; mutable next_log_offset : int
@@ -63,6 +64,7 @@ and job_entry =
   ; mutable stdout_bytes : int
   ; mutable stdout_overflow : bool
   ; mutable process : Process.t option
+  ; mutable leader_reaped : unit -> bool
   ; mutable cancel_requested : bool
   ; mutable escalation_started : bool
   ; escalation_finished : unit Ivar.t
@@ -110,6 +112,7 @@ type submission =
 type t =
   { instance_id : V1.Daemon_instance_id.t
   ; log_dir : string
+  ; subprocess_temp_dir : string option
   ; artifact_dir : string
   ; output_dir : string
   ; workspace_service : Workspace_service.t
@@ -165,6 +168,7 @@ let check_instance t instance_id =
 
 let create
   ?state_dir
+  ?subprocess_temp_dir
   ?(authoring_roots = [])
   ?inspection_detail_cache_entries
   ?inspection_detail_cache_bytes
@@ -202,7 +206,8 @@ let create
   in
   Result.map result ~f:(fun authoring_service ->
     { instance_id
-    ; log_dir
+     ; log_dir
+     ; subprocess_temp_dir
     ; artifact_dir
     ; output_dir
     ; workspace_service = Workspace_service.create ~state_dir
@@ -323,13 +328,14 @@ let snapshot t ({ instance_id } : V1.Snapshot.Request.t) =
       }
 ;;
 
-let spawn_command ?prog_search_path ?setpgid invocation =
+let spawn_command ?prog_search_path ?setpgid ?temp_dir invocation =
   let args = List.tl invocation.Adapter.Invocation.argv |> Option.value ~default:[] in
   let argv0 = List.hd invocation.argv in
   Process.create
     ?prog_search_path
     ?setpgid
     ?argv0
+    ?env:(Option.map temp_dir ~f:(fun dir -> `Extend [ "TMPDIR", dir ]))
     ~working_dir:invocation.cwd
     ~prog:invocation.executable
     ~args
@@ -369,7 +375,11 @@ let opening_command_output ?prog_search_path t invocation =
         Deferred.unit)
       (fun () ->
         match%bind
-           spawn_command ?prog_search_path ~setpgid:Core_unix.Pgid.new_process_group invocation
+            spawn_command
+              ?prog_search_path
+              ~setpgid:Core_unix.Pgid.new_process_group
+              ?temp_dir:t.subprocess_temp_dir
+              invocation
         with
         | Error error -> return (Error (Error.to_string_hum error))
         | Ok process ->
@@ -716,6 +726,14 @@ let update_job t entry job =
   emit t (Job_upsert job)
 ;;
 
+let open_job_log path =
+  let%map writer = Writer.open_file ~append:true ~perm:0o600 path in
+  let error = ref None in
+  Monitor.detach_and_iter_errors (Writer.monitor writer) ~f:(fun exn ->
+    error := Some ("Job log write failed: " ^ Exn.to_string (Monitor.extract_exn exn)));
+  writer, error
+;;
+
 let append_log t (entry : job_entry) stream data =
   (match entry.operation, stream with
    | Simulation_task task, V1.Read_log.Stream.Stdout -> task.stdout data
@@ -733,17 +751,29 @@ let append_log t (entry : job_entry) stream data =
   let pieces = String.to_list data |> List.chunks_of ~length:(16 * 1024) in
   List.iter pieces ~f:(fun chars ->
     let data = String.of_char_list chars in
-    let offset = entry.next_log_offset in
-    let record = { stream; position = entry.log_position; length = String.length data } in
-    entry.next_log_offset <- offset + 1;
-    entry.log_position <- entry.log_position + record.length;
-    Hashtbl.set entry.log_records ~key:offset ~data:record;
     let previous = entry.log_tail in
     entry.log_tail
     <- (let%bind () = previous in
-        Writer.write entry.log_writer data;
-        let%map () = Writer.flushed entry.log_writer in
-        emit t (Log_available { job = entry.job.id; next_offset = offset + 1 })));
+        match !(entry.log_error) with
+        | Some _ -> return ()
+        | None ->
+          Writer.write entry.log_writer data;
+          (* [Writer.flushed] never resolves after a disk write failure. That would strand
+             the reader, the child wait, and the source lease behind the log. *)
+          let%map result = Writer.flushed_or_failed_with_result entry.log_writer in
+          (match result with
+           | Flushed _ ->
+             let offset = entry.next_log_offset in
+             let record =
+               { stream; position = entry.log_position; length = String.length data }
+             in
+             entry.next_log_offset <- offset + 1;
+             entry.log_position <- entry.log_position + record.length;
+             Hashtbl.set entry.log_records ~key:offset ~data:record;
+             emit t (Log_available { job = entry.job.id; next_offset = offset + 1 })
+           | Error | Consumer_left | Force_closed ->
+             if Option.is_none !(entry.log_error)
+             then entry.log_error := Some "Job log write failed")));
   entry.log_tail
 ;;
 
@@ -769,10 +799,17 @@ let begin_escalation t entry process =
   if not entry.escalation_started
   then (
     entry.escalation_started <- true;
-    signal_group process Signal.term;
+    let signal_owned_group signal =
+      if not (entry.leader_reaped ()) then signal_group process signal
+    in
+    signal_owned_group Signal.term;
     don't_wait_for
       (let%bind () = Clock.after t.kill_after in
-       signal_group process Signal.kill;
+       signal_owned_group Signal.kill;
+       (* A detached descendant may keep the pipes open after the owned group
+          is killed. Do not signal that descendant or wait forever for its EOF. *)
+       don't_wait_for (Reader.close (Process.stdout process));
+       don't_wait_for (Reader.close (Process.stderr process));
        Ivar.fill_if_empty entry.escalation_finished ();
        return ()))
 ;;
@@ -825,6 +862,13 @@ let finish_entry t (entry : job_entry) state status failure =
    | Simulation_task _ -> entry.operation <- Simulation_task Simulation_task.released
    | _ -> ());
   let now = Timestamp.of_time_ns (Time_ns.now ()) in
+  let failure =
+    match !(entry.log_error) with
+    | Some log_failure when Job.State.equal state Failed ->
+      Some
+        (Option.value_map failure ~default:log_failure ~f:(fun s -> s ^ "; " ^ log_failure))
+    | _ -> failure
+  in
   update_job
     t
     entry
@@ -1374,16 +1418,18 @@ let run_supervised t entry ~on_finished =
                ~configuration:configuration_key
                ~output_dir
          in
-         let args = List.tl invocation.argv |> Option.value ~default:[] in
-         let argv0 = List.hd invocation.argv in
-         let%bind created =
-           Process.create
-             ?argv0
-             ~working_dir:invocation.cwd
-             ~setpgid:Core_unix.Pgid.new_process_group
-             ~prog:invocation.executable
-             ~args
-             ()
+          let temp_dir =
+            match entry.operation with
+            | Dune_action _ | Driver_describe | Driver_generate_rtl _ -> t.subprocess_temp_dir
+            | Simulation_task _ when String.equal entry.job.kind.namespace "preparation" ->
+              t.subprocess_temp_dir
+            | Simulation_task _ -> None
+          in
+          let%bind created =
+            spawn_command
+              ~setpgid:Core_unix.Pgid.new_process_group
+              ?temp_dir
+              invocation
          in
          (match created with
           | Error launch_error ->
@@ -1459,7 +1505,14 @@ let run_supervised t entry ~on_finished =
             then begin_escalation t entry process;
             let stdout = drain t entry Stdout (Process.stdout process) in
             let stderr = drain t entry Stderr (Process.stderr process) in
-            let%bind () = Deferred.all_unit [ stdout; stderr; entry.log_tail ] in
+            let%bind () = Deferred.all_unit [ stdout; stderr ] in
+            let%bind () =
+              Deferred.all_unit
+                [ Reader.close (Process.stdout process)
+                ; Reader.close (Process.stderr process)
+                ; entry.log_tail
+                ]
+            in
             (* While descendants hold output pipes, keep the leader unreaped so
                timeout/cancellation can still signal the owned group safely. *)
             let%bind () =
@@ -1467,8 +1520,12 @@ let run_supervised t entry ~on_finished =
               then Ivar.read entry.escalation_finished
               else return ()
              in
-             let%bind status = Process.wait process in
-             entry.process <- None;
+            let waited = Process.wait process in
+            (* Cancel can arrive while a leader with closed pipes is still
+               running. Its wait may reap it before delayed escalation. *)
+            entry.leader_reaped <- (fun () -> Deferred.is_determined waited);
+            let%bind status = waited in
+            entry.process <- None;
             if String.equal entry.job.kind.namespace "preparation"
             then
               update_job
@@ -1485,12 +1542,12 @@ let run_supervised t entry ~on_finished =
                  | Error error -> task.fail (Error.to_string_hum error))
               | _ -> return ()
             in
-             let%bind () =
+            let%bind () =
               if entry.escalation_started
               then Ivar.read entry.escalation_finished
               else return ()
             in
-            let%bind () = Writer.close entry.log_writer in
+            let%bind () = Writer.close ~force_close:Deferred.unit entry.log_writer in
             let status = exit_status status in
             let%bind () =
               if entry.cancel_requested || t.shutting_down
@@ -1671,10 +1728,7 @@ let submit_job
               t.log_dir
               (sprintf "job-%d-%d.log" (Pid.to_int (Core_unix.getpid ())) t.next_job_id)
           in
-          let%map opened =
-            Monitor.try_with_or_error (fun () ->
-              Writer.open_file ~append:true ~perm:0o600 log_path)
-          in
+          let%map opened = Monitor.try_with_or_error (fun () -> open_job_log log_path) in
           (match opened with
            | Error open_error ->
              let failure =
@@ -1684,13 +1738,14 @@ let submit_job
              in
              Ivar.fill_exn submission.ready (Error failure);
              Error failure
-           | Ok log_writer ->
+           | Ok (log_writer, log_error) ->
              let entry =
                { operation = Dune_action action
                ; session
                ; job
                ; log_path
                ; log_writer
+               ; log_error
                ; log_records = Hashtbl.create (module Int)
                ; log_position = 0
                ; next_log_offset = 0
@@ -1699,6 +1754,7 @@ let submit_job
                ; stdout_bytes = 0
                ; stdout_overflow = false
                ; process = None
+               ; leader_reaped = (fun () -> false)
                ; cancel_requested = false
                ; escalation_started = false
                ; escalation_finished = Ivar.create ()
@@ -1775,7 +1831,7 @@ let generate_rtl
                  let%bind () =
                    In_thread.run (fun () -> Core_unix.mkdir output_dir ~perm:0o700)
                  in
-                 Writer.open_file ~append:true ~perm:0o600 log_path)
+                 open_job_log log_path)
              in
              (match opened with
               | Error open_error ->
@@ -1788,7 +1844,7 @@ let generate_rtl
                 Ivar.fill_exn submission.ready (Error failure);
                 don't_wait_for (cleanup_path output_dir);
                 Error failure
-              | Ok log_writer ->
+              | Ok (log_writer, log_error) ->
                 let entry =
                   { operation =
                       Driver_generate_rtl
@@ -1804,6 +1860,7 @@ let generate_rtl
                   ; job
                   ; log_path
                   ; log_writer
+                  ; log_error
                   ; log_records = Hashtbl.create (module Int)
                   ; log_position = 0
                   ; next_log_offset = 0
@@ -1812,6 +1869,7 @@ let generate_rtl
                   ; stdout_bytes = 0
                   ; stdout_overflow = false
                   ; process = None
+                  ; leader_reaped = (fun () -> false)
                   ; cancel_requested = false
                   ; escalation_started = false
                   ; escalation_finished = Ivar.create ()
@@ -1926,22 +1984,20 @@ let refresh_integration t ({ instance_id; project } : V1.Refresh_integration.Req
                     (Pid.to_int (Core_unix.getpid ()))
                     t.next_job_id)
              in
-             let%map opened =
-               Monitor.try_with_or_error (fun () ->
-                 Writer.open_file ~append:true ~perm:0o600 log_path)
-             in
+             let%map opened = Monitor.try_with_or_error (fun () -> open_job_log log_path) in
              (match opened with
               | Error open_error ->
                 error
                   Internal_failure
                   ("could not open discovery log: " ^ Error.to_string_hum open_error)
-              | Ok log_writer ->
+              | Ok (log_writer, log_error) ->
                 let entry =
                   { operation = Driver_describe
                   ; session
                   ; job
                   ; log_path
                   ; log_writer
+                  ; log_error
                   ; log_records = Hashtbl.create (module Int)
                   ; log_position = 0
                   ; next_log_offset = 0
@@ -1950,6 +2006,7 @@ let refresh_integration t ({ instance_id; project } : V1.Refresh_integration.Req
                   ; stdout_bytes = 0
                   ; stdout_overflow = false
                   ; process = None
+                  ; leader_reaped = (fun () -> false)
                   ; cancel_requested = false
                   ; escalation_started = false
                   ; escalation_finished = Ivar.create ()
@@ -2113,12 +2170,17 @@ let read_log
        in
        (match records with
         | Error message -> return (error Internal_failure message)
+        | Ok [] when offset = entry.next_log_offset && Option.is_some !(entry.log_error)
+          -> return (error Internal_failure (Option.value_exn !(entry.log_error)))
         | Ok records ->
           return
             (Ok
                { V1.Read_log.Payload.records
                ; next_offset
-               ; eof = Job.is_terminal entry.job && next_offset = entry.next_log_offset
+                ; eof =
+                   Job.is_terminal entry.job
+                   && next_offset = entry.next_log_offset
+                   && Option.is_none !(entry.log_error)
                })))
 ;;
 
@@ -2314,10 +2376,7 @@ let simulation t (request : Simulation.Request.t) =
              ~created_at:(Timestamp.of_time_ns (Time_ns.now ()))
          in
          let log_path = Filename.concat t.log_dir (Job_id.to_string id ^ ".log") in
-         let%bind opened =
-           Monitor.try_with_or_error (fun () ->
-             Writer.open_file ~append:true ~perm:0o600 log_path)
-         in
+          let%bind opened = Monitor.try_with_or_error (fun () -> open_job_log log_path) in
          let release error =
            Option.iter reservation ~f:(fun (key, submission) ->
              Ivar.fill_if_empty
@@ -2325,7 +2384,7 @@ let simulation t (request : Simulation.Request.t) =
                (Error (V1.Error.create Internal_failure (Error.to_string_hum error)));
              Hashtbl.remove t.submissions key)
          in
-         let log_writer =
+          let log_writer, log_error =
            match opened with
            | Ok writer -> writer
            | Error error ->
@@ -2375,6 +2434,7 @@ let simulation t (request : Simulation.Request.t) =
              ; job
              ; log_path
              ; log_writer
+             ; log_error
              ; log_records = Hashtbl.create (module Int)
              ; log_position = 0
              ; next_log_offset = 0
@@ -2383,6 +2443,7 @@ let simulation t (request : Simulation.Request.t) =
              ; stdout_bytes = 0
              ; stdout_overflow = false
              ; process = None
+             ; leader_reaped = (fun () -> false)
              ; cancel_requested = false
              ; escalation_started = false
              ; escalation_finished = Ivar.create ()
@@ -2522,7 +2583,7 @@ let preparation_internal
              ~created_at:(Timestamp.of_time_ns (Time_ns.now ()))
          in
          let log_path = Filename.concat t.log_dir (Job_id.to_string id ^ ".log") in
-         let%map log_writer = Writer.open_file ~append:true ~perm:0o600 log_path in
+         let%map log_writer, log_error = open_job_log log_path in
          let task =
            { task with
              drain =
@@ -2541,6 +2602,7 @@ let preparation_internal
            ; job
            ; log_path
            ; log_writer
+           ; log_error
            ; log_records = Hashtbl.create (module Int)
            ; log_position = 0
            ; next_log_offset = 0
@@ -2549,6 +2611,7 @@ let preparation_internal
            ; stdout_bytes = 0
            ; stdout_overflow = false
            ; process = None
+           ; leader_reaped = (fun () -> false)
            ; cancel_requested = false
            ; escalation_started = false
            ; escalation_finished = Ivar.create ()

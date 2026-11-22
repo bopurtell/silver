@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """WB-097 acceptance against prebuilt native daemon, terminal and preset exporter.
 
-Run with --daemon, --client, --preset-export and a new private --evidence directory
-(prefer /tmp/opencode). The fixture uses private synthetic provider data; keyboard
+Run with --daemon, --client, --preset-export and a new private --evidence directory.
+The fixture uses private synthetic provider data; keyboard
 input, workspace selection, native HTTP/cache and rendered PTY cells are real.
 """
 
@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -45,7 +46,48 @@ def token(case, number):
 
 def fixture_provider(base, argv):
     p = legacy.load('detail_preload_provider', base / 'project/synthetic-provider/provider.py')
-    old_report, old_inspect = p.report, p.inspect
+    old_advance, old_finish, old_report, old_inspect = p.advance, p.finish, p.report, p.inspect
+
+    def option(flag):
+        return argv[argv.index(flag) + 1]
+
+    def use_attempt_bundle(attempt):
+        p.BUNDLE = p.load(attempt / 'methodology-plan.json')['bundle_identity']
+
+    def publish_source(attempt, case):
+        captured = p.load(attempt / 'execution.json')
+        captured['status'] = 'running'
+        p.save(attempt / 'execution.json.timing-source', captured)
+        p.save(attempt / 'detail-preload-fixture.json',
+               dict(case=case, count=3, hold=[], missing=None))
+
+    def finish(attempt, state, status):
+        old_finish(attempt, state, status)
+        if status == 'completed' and state['selection']['endpoint'] == 'signoff':
+            publish_source(attempt, 'completed-flow')
+
+    def advance(attempt, cancel=False):
+        use_attempt_bundle(Path(attempt))
+        state = old_advance(attempt, cancel=cancel)
+        if state['writer_active'] and any(s['id'] == 'signoff' and s['status'] == 'running'
+                                          for s in state['stage_plan']['stages']):
+            attempt = Path(attempt)
+            # Publish Timing's execution prefix while Signoff is held. The
+            # fixture advances the same run/path/row IDs at final completion.
+            intermediate = p.load(attempt / 'observation.json')
+            finalize = p.finalize
+            p.finalize = lambda *_: None
+            try:
+                old_finish(attempt, intermediate, 'completed')
+            finally:
+                p.finalize = finalize
+            execution = p.load(attempt / 'execution.json')
+            execution.update(status='running', exit_code=None)
+            p.save(attempt / 'execution.json', execution)
+            publish_source(attempt, 'live-flow')
+            state['execution_file'] = str(attempt / 'execution.json')
+            p.save(attempt / 'observation.json', state)
+        return state
 
     def config(path):
         cfg = Path(path).parent / 'detail-preload-fixture.json'
@@ -106,17 +148,35 @@ def fixture_provider(base, argv):
                       attempt_id=a['attempt_id'], domain=domain, stage=stage,
                       analysis_id=a['analysis_id'], analysis_digest=a['source_digest'],
                       source_digest=digest, diagnostics=['WB-097 synthetic STA'], truncated=False,
-                      rows=[dict(id=row_id(n), category='timing_path', producer='OpenROAD.STAPostPNR',
+                       rows=[dict(id=row_id(n), category='timing_path', producer='OpenROAD.STAPostPNR',
                                  corner='slow', group='setup', name=row_name(case, n), value=(n - 7) / 10,
                                  unit='ns', status='violated', source='{}',
                                  fields=[['startpoint', f'from{n}'], ['endpoint', f'to{n}']])
-                            for n in numbers])
+                             for n in numbers])
+        if case == 'completed-flow':
+            result['rows'].insert(0, dict(result['rows'][0], id='inputs', category='input_references',
+                                          name='Recorded design and constraint inputs', value=-100.0))
         if number:
             result.update(row_id=row_id_arg, detail=token(case, number))
         event('returned')
         return result
 
-    p.report, p.inspect = report, inspect
+    p.advance, p.finish, p.report, p.inspect = advance, finish, report, inspect
+    if argv[:1] == ['stages']:
+        # Adapt the private playback producer to the daemon's prepared-input
+        # command. Its ordinary observation/report/inspect side still runs.
+        workspace = Path(option('--workspace'))
+        plan = p.load(option('--methodology-plan'))
+        assert plan['plan_identity'] == option('--expected-plan-identity')
+        assert p.load(Path(argv[1]) / 'manifest.json')['identity'] == plan['bundle_identity']
+        p.BUNDLE = plan['bundle_identity']
+        p.plan = lambda _: plan
+        allocate = p.allocate
+        p.allocate = lambda results, selected: allocate(workspace.parent, selected, workspace.name)
+        snapshot = plan['methodology']['snapshot']
+        argv = ['flow', 'run', '--flow', snapshot['selected']['flow'],
+                '--profile', snapshot['selected']['profile'], '--endpoint', snapshot['endpoint'],
+                '--expected-plan-identity', plan['plan_identity'], '--results-root', str(workspace.parent)]
     sys.argv = [str(base / 'project/synthetic-flow')] + argv
     p.main()
 
@@ -244,20 +304,122 @@ class Journey:
         self.t.capture(f'{case}-timing', [row_name(case, 1)])
         self.t.focus_view('timing paths')
 
+    def first_timing_frame(self, title, data, *, highlight=None):
+        # Inspect the first complete synchronized Notty frame after the tab (or
+        # highlight) changes. Do not predicate on the report being ready.
+        original = len(self.t.data)
+        self.t.key(data)
+
+        def first_frame():
+            self.t.drain(.02)
+            for marker in re.finditer(rb'\x1b\[\?2026l', self.t.data[original:]):
+                data = self.t.data[:original + marker.end()]
+                screen = C.Screen(bytes(data), self.t.width, self.t.height)
+                if re.search(r'\[\d+ Timing\]', screen.lines()[0]):
+                    if highlight is None or any(line.startswith('>') and highlight in line.split()
+                                                for line in self.body(screen, 'timing · paths').splitlines()):
+                        (self.base / (title + '-exact.ansi')).write_bytes(data)
+                        return screen
+            return None
+
+        return wait(first_frame, title, timeout=2)
+
+
+def completed_flow(j):
+    t, check = j.t, j.check
+    # Run the actual daemon Stage_fresh/Launch_fresh lifecycle. The provider advances the
+    # already-running attempt while the PTY is untouched on Overview; no fixture
+    # Register, summary, refresh or inspect RPC is sent for this new run.
+    selected = '((flow synthetic)(profile success)(endpoint signoff)(assignments ()))'
+    staged = j.native(f'(Stage_fresh (selection {selected})(elaboration_only false)(expected_plan_identity ()))')
+    intent = field(field(staged, 'fresh_intent')[0], 'id')
+    previous_runs = [field(r, 'run') for r in field(j.native(), 'runs')]
+    key = 'wb097-idle-overview-completion'
+    j.native('(Launch_fresh (key %s)(intent_id %s))' % (sexp(key), sexp(intent)))
+
+    def allocated():
+        snapshot = j.native()
+        workflow = next((w for w in field(snapshot, 'workflows') if field(w, 'key') == key), None)
+        if workflow and field(workflow, 'phase') in ('Failed', 'Cancelled', 'Interrupted'):
+            raise AssertionError(sexp(workflow))
+        return next((r for r in field(snapshot, 'runs')
+                     if field(r, 'run') not in previous_runs
+                     and Path(field(field(r, 'reference'), 'attempt'), 'observation.json').exists()), None)
+
+    run = wait(allocated, 'daemon-owned physical allocation')
+    case = 'completed-flow'
+    attempt = Path(field(field(run, 'reference'), 'attempt'))
+    j.runs[case], j.attempts[case] = field(run, 'run'), attempt
+    j.runs['live-flow'], j.attempts['live-flow'] = field(run, 'run'), attempt
+    j.select(case)
+    t.capture('flow-still-running-on-overview', ['[1 Overview]', 'planned-run'])
+    check(j.provider.load(attempt / 'observation.json')['writer_active'] and not j.index(case),
+          'Timing run selected before completion, with no cached path index')
+    workspace_before = j.registry()
+    keys_before = len(t.keys)
+    env = dict(os.environ, PWD=str(j.base / 'project'))
+    def advance():
+        subprocess.run([str(j.base / 'project/synthetic-flow'), 'advance', str(attempt)],
+                       cwd=j.base / 'project', env=env, check=True, stdout=subprocess.DEVNULL, timeout=5)
+    for _ in range(6):
+        advance()
+    check(any(s['id'] == 'signoff' and s['status'] == 'running'
+              for s in j.provider.load(attempt / 'observation.json')['stage_plan']['stages']),
+          'The real launch is gated before its terminal Signoff observation')
+    j.await_details('live-flow', (1, 2))
+    old_index = j.index('live-flow')
+    check(j.provider.load(attempt / 'observation.json')['writer_active'],
+          'Earlier exact Timing source and paths are warm while Signoff is still running')
+    advance()
+    wait(lambda: any(field(w, 'key') == key and field(w, 'phase') == 'Completed'
+                     for w in field(j.native(), 'workflows')), 'terminal workflow')
+    j.await_details(case, (1, 2))
+    check(len(t.keys) == keys_before and j.registry() == workspace_before,
+          'Default warm-up changes no workspace, selection or pin while idle on Overview')
+    check(j.starts(case) == [0, 1, 2],
+          'Real completion warms one exact index and the default two paths, not a provenance row')
+    index = j.index(case)
+    check(field(index, 'stage') == 'timing' and field(index, 'analysis')
+          and field(index, 'analysis') != field(old_index, 'analysis')
+          and token(case, 1) not in sexp(index), 'Completion binds the exact captured Timing target')
+    overview = t.capture('flow-ready-before-switch', ['[1 Overview]', '4 Timing'],
+                         ['timing · selected path'])
+    x = re.search(r'\bTiming\b', overview.lines()[0]).start() + 1
+    def timing_reads():
+        return [a for a in legacy.calls(j.base)
+                if a[:1] in (['report'], ['inspect']) and Path(a[1]).parent == attempt]
+    before = timing_reads()
+    j.assert_selected(j.first_timing_frame('flow-switch-frame',
+                                           f'\x1b[<0;{x};1M\x1b[<0;{x};1m'.encode()),
+                      'flow-first-timing-frame', case, 1, token(case, 1),
+                      absent=(token(case, 2), token('live-flow', 1)))
+    t.focus_view('timing paths')
+    j.assert_selected(j.first_timing_frame('flow-highlight-frame', b'j', highlight=row_name(case, 2)),
+                      'flow-highlight-auto-detail', case, 2, token(case, 2),
+                      absent=(token(case, 1),))
+    t.drain(1)
+    check(len(t.keys) > keys_before and all(k['hex'] != '0d' for k in t.keys[keys_before:])
+          and timing_reads() == before,
+          'Clicking Timing and moving the highlight need neither Enter nor provider inspection I/O')
+    j.overview()
+
 
 def acceptance(t, check, http, _runs, _presets):
     j = Journey(t, check, http)
     t.resize(180, 55)
 
-    # Never set the count before this test: verify the project default from a
-    # clean HOME/XDG, with a genuinely available new analysis index.
+    # Never set the count before exercising the real flow transition on Overview.
+    j.palette_selected('Timing preload: Top 2 path details', 'wb097-default-count')
+    completed_flow(j)
+
+    t.command('Timing preload: Top 0 path details')
     j.add('zero')
     j.select('zero')
-    wait(lambda: j.index('zero'), 'default-zero hidden index')
+    wait(lambda: j.index('zero'), 'explicit-zero hidden index')
     t.drain(2)
     check(j.starts('zero') == [0] and len(j.argv_calls('zero')) == 1 and not j.published('zero'),
-          'Clean default 0 on Overview: exactly one exact index request; no detail requests or publications')
-    j.palette_selected('Timing preload: Top 0 path details', 'wb097-default-count')
+          'Explicit 0 on Overview: exactly one exact index request; no detail requests or publications')
+    j.palette_selected('Timing preload: Top 0 path details', 'wb097-zero-count')
 
     t.command('Timing preload: Top 5 path details')
     j.add('warm', hold=(6,))
@@ -390,6 +552,14 @@ def acceptance(t, check, http, _runs, _presets):
     return 'Overview'
 
 
+def flow_acceptance(t, check, http, _runs, _presets):
+    j = Journey(t, check, http)
+    t.resize(180, 55)
+    j.palette_selected('Timing preload: Top 2 path details', 'wb097-default-count')
+    completed_flow(j)
+    return 'Overview'
+
+
 def restart_acceptance(t, check, http, _runs, _presets):
     j = Journey(t, check, http)
     t.capture('wb097-restarted-overview', ['Overview', 'planned-run'])
@@ -405,6 +575,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('daemon', 'client', 'preset-export', 'evidence'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--flow-only', action='store_true', help='run just the native flow-completion regression')
     args = parser.parse_args()
     for name in ('daemon', 'client', 'preset_export'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
@@ -421,6 +592,20 @@ def main():
         p = C.demo.provider
         settings = base / 'project/synthetic-settings.json'
         p.save(settings, dict(p.load(settings), executable_timing=True))
+        root = base / 'project'
+        fresh = HERE / 'fixtures/unified_fresh_prefix.py'
+        publisher = root / 'publisher-source'
+        command = [sys.executable, str(fresh), 'emit', str(root)]
+        publisher.write_text(f'#!{sys.executable}\nimport os,sys\nos.execv(sys.executable, {command!r} + sys.argv[1:])\n')
+        publisher.chmod(0o700)
+        (root / 'generation').write_text('wb097')
+        (root / 'build-trigger').write_text('0')
+        (root / 'dune').write_text('(rule (target publisher.exe) (deps publisher-source build-trigger) '
+                                  '(action (run ' + sexp(sys.executable) + ' ' + sexp(str(fresh)) +
+                                  ' build ' + sexp(str(root)) + ')))\n')
+        (root / 'hardcaml-workbench-preparation.sexp').write_text(sexp([
+            ['schema_version', 1], ['build_target', 'publisher.exe'],
+            ['results_root', str(base / 'publication')], ['timeout_seconds', 30]]))
         for name in ('tmp', 'cache', 'data', 'runtime', 'opam-logs'):
             (base / name).mkdir()
         os.environ.setdefault('OPAMROOT', str(Path.home() / '.opam'))
@@ -442,8 +627,8 @@ def main():
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('WB-097 wall-clock budget exhausted')))
     signal.alarm(240)
     try:
-        C.run(args, acceptance=acceptance, focused=True, extra_runs=(),
-              restart_acceptance=restart_acceptance)
+        C.run(args, acceptance=flow_acceptance if args.flow_only else acceptance,
+              focused=True, extra_runs=(), restart_acceptance=None if args.flow_only else restart_acceptance)
     except subprocess.CalledProcessError as error:
         if error.stderr:
             print(error.stderr, file=sys.stderr)

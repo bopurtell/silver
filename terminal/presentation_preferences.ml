@@ -75,7 +75,8 @@ let path ~state_directory ~project_key =
 (* Schema 6 adds sparse project/global and session/workspace compression choices. *)
 (* WB004 adds an optional quick-launch context-follow choice. Existing files inherit
    [true]; their stock layout/default migration is independent of this preference. *)
-(* WB-097 adds the optional Timing detail count. Older files inherit index-only (0). *)
+(* WB-097 adds the optional Timing detail count. A missing field inherits the
+   current default; a saved zero remains index-only. *)
 let schema_version = 6
 
 let appearance_of_overrides (o : T.overrides) ~tile ~workspace ~kind =
@@ -292,7 +293,7 @@ let apply t (host : Host.t) =
     ; timing_preload = Option.value t.timing_preload ~default:true
     ; timing_preload_details =
         Option.value (Option.filter t.timing_preload_details ~f:Timing_preload.valid_detail_count)
-          ~default:0
+          ~default:Timing_preload.default_details
     ; quick_launch_view = Option.value t.quick_launch_view ~default:true
     ; presentation = { host.presentation with string_compression = t.global_compression }
     }
@@ -314,7 +315,10 @@ let%test_unit "preload schema migration and durable explicit policy" =
   let restore stored = apply (decode ~project_key (encode stored)) Host.empty in
   assert (not (restore stored).timing_preload);
   assert ((restore stored).timing_preload_details = 5);
-  assert ((restore { stored with timing_preload_details = Some 6 }).timing_preload_details = 0);
+  assert ((restore { stored with timing_preload_details = Some 0 }).timing_preload_details = 0);
+  assert (
+    (restore { stored with timing_preload_details = Some 6 }).timing_preload_details
+    = Timing_preload.default_details);
   List.iter [ 1; 2; 3; 4 ] ~f:(fun schema_version ->
     let legacy =
       { stored with
@@ -327,7 +331,7 @@ let%test_unit "preload schema migration and durable explicit policy" =
       }
     in
     assert (restore legacy).timing_preload;
-    assert ((restore legacy).timing_preload_details = 0));
+    assert ((restore legacy).timing_preload_details = Timing_preload.default_details));
   assert (restore { stored with timing_preload = Some true }).timing_preload
 ;;
 

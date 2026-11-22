@@ -200,6 +200,8 @@ class Terminal:
                '--environment', environment]
         if getattr(args, 'timing_preload', None):
             cmd += ['--timing-preload', args.timing_preload]
+        if getattr(args, 'timing_preload_details', None) is not None:
+            cmd += ['--timing-preload-details', str(args.timing_preload_details)]
         self.process = subprocess.Popen(cmd if inherited else demo.switch_command(cmd),
             stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
             env=dict(os.environ, TERM='xterm-256color', HOME=str(base / 'home'),

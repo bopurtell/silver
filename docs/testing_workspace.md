@@ -219,6 +219,23 @@ workspace. This is a real persisted workspace with independent, themed tiles:
   Missing/expired jobs or a changed daemon instance show unavailable; logs from an
   unrelated current job are never substituted.
 
+If Waveforms is already open, switch to it directly: an explicit or restored
+Waveforms pin takes precedence. Without a pin, Waveforms follows an exact VCD
+selection in Testing or the sole supported VCD in its retained attempt/case.
+A missing or ambiguous source is reported without choosing an arbitrary artifact.
+Use **W** to pin one independently of later Testing selection. Selecting an ASIC
+Timing run does not supply a waveform.
+
+While another workspace is visible, Silver verifies and decodes the intended
+VCD and prepares the first Session, Signals and Waves viewport for the current
+terminal size and display settings. A ready viewport is reused on switch; a
+changed artifact, pin, or display setting cannot reuse its old panes. The idle
+lane warms one workspace at a time within the embedded 8 MiB and renderer limits.
+Picker metadata and captured logs still load separately when Waveforms is open.
+The isolated `terminal/test_waveform_preparation_pty.py` regression checks for
+the correct plotted signals and no VCD reads or viewport rendering at the
+first switch, including after source changes and resize.
+
 Use ordinary Tab/Shift-Tab focus, workspace switching, hide/zoom/layout actions and
 **Space c c** palette access. Space is no longer a signal-toggle key, including in
 quick inspection. `w` remains the temporary full-area inspection path, while `W`

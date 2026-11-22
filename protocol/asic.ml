@@ -407,6 +407,17 @@ module Fresh = struct
       ; finished_at : Timestamp.t option
       }
     [@@deriving bin_io, compare, equal, sexp]
+
+    (** Building/Emitting name workflow steps, not process state. An unattached
+        source job is still queued (e.g. awaiting the project source lease). *)
+    let source_queued t =
+      match t.phase with
+      | Building | Emitting ->
+        let job = if Phase.equal t.phase Building then t.build_job else t.emission_job in
+        Option.value_map job ~default:true ~f:(fun job -> Job.State.equal job.state Queued)
+      | Reserved | Prepared | Physical | Completed | Failed | Cancelled | Interrupted ->
+        false
+    ;;
   end
 end
 

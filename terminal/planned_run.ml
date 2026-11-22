@@ -198,6 +198,46 @@ let workflow_active (w : Asic.Fresh.Workflow.t) =
   | Completed | Failed | Cancelled | Interrupted -> false
 ;;
 
+let workflow_phase (w : Asic.Fresh.Workflow.t) =
+  if workflow_active w && w.cancel_requested
+  then "Cancelling"
+  else
+    Sexp.to_string (Asic.Fresh.Phase.sexp_of_t w.phase)
+    ^ (if Asic.Fresh.Workflow.source_queued w then " (queued)" else "")
+;;
+
+let workflow_without_run (w : Asic.Fresh.Workflow.t) =
+  if w.intent.elaboration_only
+  then "elaboration only"
+  else if workflow_active w
+  then "no physical run yet"
+  else "no physical run"
+;;
+
+let workflow_in_chip (snapshot : Asic.Snapshot.t) (w : Asic.Fresh.Workflow.t) =
+  Option.equal Asic.Chip_target.equal snapshot.chip_target w.intent.selection.chip_target
+;;
+
+let registered_run (snapshot : Asic.Snapshot.t) (w : Asic.Fresh.Workflow.t) =
+  Option.filter w.run ~f:(fun run ->
+    List.exists snapshot.runs ~f:(fun r -> Run_ref.equal r.run run))
+;;
+
+let preallocation_workflows (snapshot : Asic.Snapshot.t) =
+  List.filter snapshot.workflows ~f:(fun w ->
+    workflow_in_chip snapshot w && Option.is_none (registered_run snapshot w))
+;;
+
+let workflow_matches (w : Asic.Fresh.Workflow.t) ~filter =
+  String.is_substring
+    (String.lowercase
+       (String.concat ~sep:" "
+          [ "workflow"; w.id; w.key; w.intent.selection.flow; w.intent.selection.endpoint
+          ; workflow_phase w
+          ]))
+    ~substring:(String.lowercase filter)
+;;
+
 let shared_fresh_intent t = Option.bind t.snapshot ~f:(fun s -> s.fresh_intent)
 
 let fresh_intent t =
@@ -208,9 +248,10 @@ let fresh_intent t =
 
 let workflow t =
   Option.bind t.snapshot ~f:(fun s ->
+    let workflows = List.filter s.workflows ~f:(workflow_in_chip s) in
     match t.launch_intent with
-    | Some i -> List.find s.workflows ~f:(fun w -> String.equal w.key i.key)
-    | None -> List.hd s.workflows)
+    | Some i -> List.find workflows ~f:(fun w -> String.equal w.key i.key)
+    | None -> List.hd workflows)
 ;;
 
 let same_generation t (ticket : ticket) =
@@ -578,14 +619,14 @@ let raw_model t =
         ; run_id = Option.map w.run ~f:(fun r -> r.id)
         ; state
         ; message =
-            "Elaboration: "
+            workflow_phase w
+            ^ (if Option.is_some w.run
+               then ""
+               else " · " ^ workflow_without_run w)
+            ^ "; Elaboration: "
             ^ w.elaboration_status
             ^ "; workflow "
             ^ w.id
-            ^ "; "
-             ^ (if equal_launch_status state Cancelling
-                then "Cancelling…"
-                else Sexp.to_string (Asic.Fresh.Phase.sexp_of_t w.phase))
             ^ Option.value_map w.error ~default:"" ~f:(fun e ->
               ": " ^ Presentation.failure_summary e ^ " (details: d)")
         }

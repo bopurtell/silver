@@ -64,6 +64,14 @@ project. Sessions for the same checkout reuse state under
 `${XDG_STATE_HOME:-$HOME/.local/state}/silver/projects`; only one standalone
 session can own that project's state at a time.
 
+If `TMPDIR` is unset, the Silver service uses a private session directory under
+`${XDG_CACHE_HOME:-$HOME/.cache}/silver-runtime` for job logs, temporary artifacts,
+and scratch space for the Dune and source-preparation commands it launches. It
+removes the session directory on clean shutdown. Set `TMPDIR` before launching
+Silver or `silver-daemon` to keep using a different location. Silver does not
+change your shell environment, the project's `_build`, or configured results
+directories.
+
 Use the **Editor** workspace tab to reach the project's Cobalt buffers. With
 a FIFO case selected in **Testing → Catalog**, `gd` opens its declaration in
 Editor. **Alt+Left** takes you back to that case without closing the buffer;

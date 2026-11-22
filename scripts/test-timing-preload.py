@@ -108,7 +108,11 @@ def acceptance(t, check, http, runs, presets):
         context = next(x for x in field(r, 'contexts') if field(x, 'id') == field(overview, 'context'))
         http.mutate(r, '(Select_run (workspace %s)(context %s)(expected_selection_revision %s)(run (%s)))' %
             (sexp(field(overview, 'id')), sexp(field(context, 'id')), field(context, 'selection_revision'), sexp(run)))
-    def indexes(): return [a for a in calls(base) if a[:1] == ['inspect'] and '--row-id' not in a and '--expected-digest' in a]
+    def indexes():
+        # Keep the PTY drained while waiting for background publication: a
+        # blocked output writer can otherwise stall the terminal's poll loop.
+        t.drain(.02)
+        return [a for a in calls(base) if a[:1] == ['inspect'] and '--row-id' not in a and '--expected-digest' in a]
     def details(): return [a for a in calls(base) if a[:1] == ['inspect'] and '--row-id' in a]
     def refresh(run):
         native('(Refresh %s)' % sexp(run))
@@ -311,9 +315,10 @@ def main():
     ARGS = args
     for name in ('daemon', 'client', 'preset_export'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    if not args.evidence.resolve().is_relative_to('/tmp/opencode'):
-        parser.error('private /tmp/opencode evidence required')
+    if args.evidence.exists() or args.evidence.is_symlink():
+        parser.error('use a new private evidence directory')
     args.palette_only = False
+    args.timing_preload_details = 0  # This suite isolates index warm-up and restart.
     args.harness = 'default-on Timing preload'
     C.demo.provider.STAGES = C.demo.provider.STAGES[:-1] + ['timing', 'signoff']
     C.demo.provider.EXECUTABLE_TIMING = True

@@ -1121,7 +1121,7 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
       (C.validate_selected host ~asic:(Some snapshot) ~item:preparation ~run))
 ;;
 
-let%test_unit "cancel uses exact unselected launch origin, not chip history" =
+let%test_unit "cancel uses the exact launch or Runs cursor, preserving explicit pins" =
   let host, checklist, snapshot, selection = fixture () in
   let chip : Asic.Chip_target.t = { chip = "controlled_fifo"; variant = "default" } in
   let other_chip = { chip with variant = "other" } in
@@ -1142,7 +1142,7 @@ let%test_unit "cancel uses exact unselected launch origin, not chip history" =
   let rival = Asic_snapshot_fixture.workflow ~phase:Building "rival" intent in
   let snapshot = { snapshot with chip_target = Some chip; workflows = [ rival; launch ] } in
   let resolve host snapshot inspected =
-    C.viewed_flow host ~inspected ~chip_target:snapshot.Asic.Snapshot.chip_target
+    C.viewed_flow host ~inspected ~asic:(Some snapshot)
       (C.cancellable_flows snapshot)
   in
   assert (Result.is_error (resolve origin snapshot None));
@@ -1178,8 +1178,30 @@ let%test_unit "cancel uses exact unselected launch origin, not chip history" =
   in
   assert (Result.is_error (resolve (H.receive launched revision) snapshot None));
   let run = Asic_snapshot_fixture.run_a in
+  let watched_registry =
+    { registry with contexts = List.map registry.contexts ~f:(fun c -> { c with selected_run = Some run }) }
+  in
+  let watched = H.receive launched watched_registry in
+  let old = Asic_snapshot_fixture.workflow ~phase:Physical ~run "old" intent in
+  let snapshot = { snapshot with workflows = [ old; rival; launch ] } in
+  let check host ~inspected id =
+    let flow = resolve host snapshot inspected |> Result.ok_or_failwith in
+    assert (Asic.Operation.equal flow.operation (Cancel_workflow id))
+  in
+  check watched ~inspected:(Some run) launch.id;
+  let picked = H.set_local watched tile.id
+    { (H.local watched tile.id) with cursor = Some (H.workflow_cursor rival.id) }
+  in
+  check picked ~inspected:None rival.id;
+  let pinned_registry =
+    { watched_registry with tiles = List.map watched_registry.tiles ~f:(fun t ->
+        if Workspace.Tile_id.equal t.id checklist.id then { t with binding = Pin_run run } else t) }
+  in
+  let pinned = H.receive { watched with focus = Some checklist.id } pinned_registry in
+  check pinned ~inspected:(Some run) old.id;
   let observed = { snapshot with workflows =
     [ { rival with run = Some run }; { launch with phase = Physical; run = Some run } ] }
   in
-  assert (Result.is_error (resolve launched observed (Some run)))
+  assert (Result.is_error (resolve launched observed (Some run)));
+  assert (Result.is_error (resolve picked observed (Some run)))
 ;;

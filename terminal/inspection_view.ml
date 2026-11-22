@@ -23,6 +23,7 @@ type cache =
   ; group : string option
   ; producer : string option
   ; near : bool
+  ; paths_first : bool
   }
 
 type detail_cache =
@@ -60,6 +61,7 @@ type t =
   ; group : string option
   ; producer : string option
   ; near : bool
+  ; paths_first : bool
   ; requested : (string * string) option
   ; detail : Asic_inspection.Detail.t option
   ; info : bool
@@ -71,6 +73,7 @@ type t =
   ; operation_key : string option
   ; cache : cache option
   ; detail_cache : detail_cache option
+  ; timing_detail_lines : (Asic_inspection.Detail.t * string array) option
   }
 
 let defaults = [ "clocks", "signoff"; "physical", "placement"; "routing", "routing" ]
@@ -79,7 +82,7 @@ let stages =
   [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
 ;;
 
-let create ?analysis ?scope ?(generation = 0) ~run ~domain ~stage () =
+let create ?analysis ?scope ?(generation = 0) ?(paths_first = false) ~run ~domain ~stage () =
   { run
   ; scope
   ; workspace_epoch = None
@@ -98,6 +101,7 @@ let create ?analysis ?scope ?(generation = 0) ~run ~domain ~stage () =
   ; group = None
   ; producer = None
   ; near = false
+  ; paths_first
   ; requested = None
   ; detail = None
   ; info = false
@@ -113,6 +117,7 @@ let create ?analysis ?scope ?(generation = 0) ~run ~domain ~stage () =
          | None -> Asic_inspection.index_key ~run ~domain ~stage)
   ; cache = None
   ; detail_cache = None
+  ; timing_detail_lines = None
   }
 ;;
 
@@ -226,6 +231,10 @@ let row_text (r : Asic_inspection.Row.t) =
      @ List.concat_map r.fields ~f:(fun (key, value) -> [ key; value ]))
 ;;
 
+let is_timing_path (r : Asic_inspection.Row.t) =
+  List.mem [ "timing_path"; "path" ] r.category ~equal:String.equal
+;;
+
 let project_rows (t : t) projection =
   let filter = String.lowercase t.filter in
   projection
@@ -263,7 +272,10 @@ let project_rows (t : t) projection =
       | Numeric_ascending -> numeric a b
       | Numeric_descending -> numeric b a
     in
-    if order <> 0 then order else String.compare a.id b.id)
+    let category =
+      if t.paths_first then Bool.compare (is_timing_path b) (is_timing_path a) else 0
+    in
+    if category <> 0 then category else if order <> 0 then order else String.compare a.id b.id)
 ;;
 
 let same_source (a : Asic_inspection.Index.t) (b : Asic_inspection.Index.t) =
@@ -289,6 +301,7 @@ let same_query (t : t) (cache : cache) =
   && Option.equal String.equal t.group cache.group
   && Option.equal String.equal t.producer cache.producer
   && Bool.equal t.near cache.near
+  && Bool.equal t.paths_first cache.paths_first
 ;;
 
 let memoize (t : t) =
@@ -324,6 +337,7 @@ let memoize (t : t) =
              ; group = t.group
              ; producer = t.producer
              ; near = t.near
+             ; paths_first = t.paths_first
              }
        })
 ;;
@@ -343,6 +357,7 @@ let normalize (t : t) =
       selected = Option.map (List.hd rows) ~f:(fun r -> r.Asic_inspection.Row.id)
     ; requested = None
     ; detail = None
+    ; timing_detail_lines = None
     ; scroll = 0
     }
 ;;
@@ -414,6 +429,7 @@ let reconcile t (snapshot : Asic.Snapshot.t) =
       ; info = false
       ; scroll = 0
       ; detail_cache = None
+      ; timing_detail_lines = None
       }
     else { t with index }
   in

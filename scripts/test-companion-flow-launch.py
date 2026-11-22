@@ -204,9 +204,17 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     screen = ui.capture('c8-empty-editor', 'WB095_OUTSIDE_DOCUMENT')
     assert 'Silver flow kickoff' not in screen
     ui.command('silver stage checklist')
-    ui.capture('c8-checklist', 'Silver: Stage checklist', 'Routing', 'Ready:')
+    routing_available = '+ Routing    Available'
+    routing_selected = '› ' + routing_available
+    ui.capture('c8-checklist', 'Silver: Stage checklist',
+               '+ CTS        Available    endpoint cts', routing_available,
+               '+ Timing     Available    endpoint timing',
+               '+ Signoff    Available    endpoint signoff')
     ui.send(b'gg', b'j', b'j', b'j', b'j')
-    ui.capture('c8-routing-selected', '› Routing')
+    ui.capture('c8-routing-selected', routing_selected)
+    selected_style, = Screen(bytes(ui.ui.output), 260, 36).attrs_for(routing_selected)
+    selected_fg, available_fg = selected_style[0][0], selected_style[2][0]
+    assert selected_fg != available_fg and 'default' not in (selected_fg, available_fg)
     for name, endpoint, keys in [
             ('checklist', 'routing', [b'R']),
             ('synth', 'synthesis', []), ('timing', 'timing', []), ('routing', 'routing', [])]:
@@ -222,15 +230,15 @@ def c8(f, ui, native, native_trace, cobalt_trace):
         assert result['selection'] == compared['native-' + endpoint]['selection']
         compared[name] = result
         if keys:
-            ui.capture('c8-focus-after-R', '› Routing')
-    ui.capture('c8-last-ack', 'Accepted · workfl', '› Routing')
+            ui.capture('c8-focus-after-R', routing_selected)
+    ui.capture('c8-last-ack', 'Accepted · workfl', routing_selected)
     ui.palette('routing')
     ui.capture('c8-alias-reopened', 'Run routing ·')
     ui.send(b' checklist')
     screen = ui.capture('c8-related', 'routing checklist', '> Silver: Stage checklist')
     assert 'Run routing ·' not in screen, screen
     ui.send(b'\x1b')
-    ui.capture('c8-palette-restores-checklist', '› Routing')
+    ui.capture('c8-palette-restores-checklist', routing_selected)
     assert checklist.selected(f) == watched
     assert len({record['run'] for record in compared.values()}) == len(compared)
     assert len({record['workflow'] for record in compared.values()}) == len(compared)
@@ -253,7 +261,10 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     ui.send(b'\x1b')
 
     ui.send(b' vU', b'r', b'\x1b')
-    ui.capture('c8-routing-unavailable', 'does not advertise Routing')
+    routing_unavailable = '- Routing    Unavailable'
+    ui.capture('c8-routing-unavailable', routing_unavailable, 'Silver does not advertise')
+    unavailable_style, = Screen(bytes(ui.ui.output), 260, 36).attrs_for(routing_unavailable)
+    assert unavailable_style[0][0] not in ('default', selected_fg, available_fg)
     ui.palette('routing')
     screen = ui.capture('c8-exact-disabled', 'Run routing · Unavailable:')
     assert_first(screen, 'routing')
@@ -277,27 +288,60 @@ def assert_first(screen, alias):
 
 
 def c9(f, ui, native_url, cobalt_trace):
+    watched = checklist.selected(f)
+    before = len(field(f.snapshot(), 'workflows'))
+    ui.palette('st')
+    ui.send(b'\t', b'\r')
+    ui.capture('c9-stage-initial', '+ Routing    Available')
+    ui.send(b'g', b'g', b'j', b'j', b'j', b'j')
+    ui.capture('c9-stage-routing', '› + Routing    Available', 'standard/balanced')
+    ui.command('Focus Silver flow kickoff')
+    ui.capture('c9-flow-choice', 'WB095_OUTSIDE_DOCUMENT', 'Standard fixture · active', 'Explore fixture')
+    ui.send(b'j')
+    ui.capture('c9-flow-explore', '› Explore fixture · active')
+    ui.send(b'k')
+    ui.capture('c9-flow-standard', '› Standard fixture · active')
+    ui.send(b'j')
+    ui.capture('c9-flow-explore-again', '› Explore fixture · active')
+    assert not exchanges(cobalt_trace, 'Plan', 'Stage_fresh')
+    without_submit(cobalt_trace, f, 0, before)
+    ui.command('Toggle Silver flow kickoff')
+    screen = ui.capture('c9-selector-hidden', 'WB095_OUTSIDE_DOCUMENT')
+    assert 'Explore fixture' not in screen
+    ui.palette('st')
+    ui.send(b'\t', b'\r')
+    ui.capture('c9-stage-explore', '› + Routing    Available', 'explore/balanced')
+    begin = len(cobalt_trace)
+    ui.send(b'R')
+    stage = selected_workflow(f, TraceWindow(cobalt_trace, begin), 'Launch_fresh', 'selected-flow')
+    assert stage['selection'] == dict(flow='explore', profile='balanced', endpoint='routing',
+                                     assignments=[], chip_target=[[['chip', 'demo-chip'], ['variant', 'small']]])
+    assert not stage['expected_plan'] and checklist.selected(f) == watched
+    save(f.base / 'c9-selected-flow.json', stage)
+
     selection = dict(flow='explore', profile='review', endpoint='routing',
                      assignments=['STRATEGY=delay'], chip_target=[[['chip', 'demo-chip'], ['variant', 'small']]])
-    watched = checklist.selected(f)
     before = len(field(f.snapshot(), 'workflows'))
     expected = native_plan(f, native_url, selection)
     assert dict(field(expected, 'selection')) == selection
-    ui.command('Focus Silver flow kickoff')
-    ui.capture('c9-flow-choice', 'Flow choice: Explore fixture')
-    ui.send(b'j', b'\r')
+    ui.command('Review Silver flow kickoff')
+    ui.capture('c9-review-choices', '› Flow choice: Explore fixture')
+    begin = len(cobalt_trace)
+    ui.send(b'K')  # No reviewed preview: never submit anything else.
+    without_submit(cobalt_trace, f, begin, before)
+    ui.send(b'\r')
     ui.capture('c9-edit', 'Flow inputs', 'Explore fixture')
     ui.send(b'\x15', b'review', b'\t', b'\x15', b'routing', b'\t', b'\x15', b'delay', b'\r')
     ui.capture('c9-draft', 'Applied draft (not a preview)', 'Profile: review')
-    assert not exchanges(cobalt_trace, 'Plan')
-    without_submit(cobalt_trace, f, 0, before)
+    assert not exchanges(cobalt_trace[begin:], 'Plan')
+    without_submit(cobalt_trace, f, begin, before)
     ui.send(b'p')
     plan_id = field(expected, 'plan_identity')
     ui.capture('c9-preview', 'Reviewed preview: ' + plan_id, 'demo-chip / small',
                'Flow: explore', 'Profile: review', 'Endpoint: routing', 'Parameter STRATEGY = delay')
-    without_submit(cobalt_trace, f, 0, before)
+    without_submit(cobalt_trace, f, begin, before)
     ui.send(b'K', b'K')
-    result = selected_workflow(f, cobalt_trace, 'Run', 'kickoff')
+    result = selected_workflow(f, TraceWindow(cobalt_trace, begin), 'Run', 'kickoff')
     assert result['selection'] == selection and result['expected_plan'] == [plan_id]
     transmitted = field(op(exchanges(cobalt_trace, 'Run')[0]['request'])[1], 'preview')
     assert dict(transmitted) == dict(expected)

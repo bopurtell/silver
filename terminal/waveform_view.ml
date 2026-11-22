@@ -5,6 +5,7 @@ module Time = Waveform_time
 type value_layout = Waveform_preferences.value_layout =
   | Inline
   | Stacked
+[@@deriving equal]
 
 (* Legacy exact-renderer raster helper retained for API/probe compatibility. The
    production graph uses bounded original-event cell projection, not this tick cap. *)
