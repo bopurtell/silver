@@ -89,8 +89,9 @@ current selection.
 In **Fit** mode, the layout tree also defines Tab order: stacks top-to-bottom,
 columns left-to-right, completing each subtree before moving to the next.
 Shift-Tab reverses that sequence; both directions wrap. For stock Overview, after
-the workspace-tabs stop, this is **Session → Runs → Stage checklist → Planned run
-→ stage tiles**. Configured leaf keys distinguish tiles even when they share a kind.
+the workspace-tabs stop, this is **Session → Runs → Resources → Stage checklist
+→ Planned run → stage tiles**. Configured leaf keys distinguish tiles even when
+they share a kind.
 
 Hidden tiles are skipped, zoom restricts focus to the zoomed tile, and unmatched
 extra tiles follow the declared tiles in saved registry order. Existing sessions

@@ -67,6 +67,70 @@ let imported () =
   V.reconcile view ~run:(Some Asic_snapshot_fixture.run_a) ~filter:"" snapshot, snapshot
 ;;
 
+let%test_unit "Overview Resources preview keeps a compact headline and aligns taller details" =
+  let view, _ = imported () in
+  let render ?(width = 22) ?(height = 1) view =
+    V.summary_page view ~width ~height |> List.map ~f:Evidence_style.text
+  in
+  let same actual expected = assert (List.equal String.equal actual expected) in
+  same (render view) [ "2 · cached-unverified" ];
+  same (render ~width:20 view) [ "2 cached-unverified" ];
+  same (render ~height:2 view) [ "2 · cached-unverified"; "Verdict:   fail" ];
+  same
+    (render ~width:36 ~height:6 view)
+    [ "2 resources · cached-unverified"
+    ; "Verdict:      fail"
+    ; "Scope:        Imported coarse eviden"
+    ; "Binding:      Explicit · independent"
+    ; "Source:       retained source"
+    ; "Freshness:    CACHED UNVERIFIED"
+    ];
+  same (render { view with index = None }) [ "No index · Enter" ];
+  let empty = { index with rows = [] } in
+  let validated =
+    { view with source = Option.map view.source ~f:(fun s -> { s with freshness = Validated }) }
+  in
+  same (render { validated with index = Some empty }) [ "0 (verified empty)" ];
+  same
+    (render { view with index = Some { empty with inventory_status = Unavailable } })
+    [ "inventory unavailable" ];
+  same
+    (render { view with index = Some { empty with truncated = true } })
+    [ "0 retained · TRUNCATED" ];
+  same
+    (render ~width:20 { view with index = Some { empty with truncated = true } })
+    [ "0 · TRUNCATED" ];
+  let legacy view =
+    V.summary_page view ~titled:false ~width:28 ~height:1 |> List.map ~f:Evidence_style.text
+  in
+  same (legacy { view with index = None }) [ "Resources: No index · Enter" ];
+  same (legacy validated) [ "Resources: 2 · validated" ]
+;;
+
+let%test_unit "stock framed Resources preview spends one cell on each horizontal edge" =
+  let module H = Workspace_host in
+  let module P = Hardcaml_workbench_workspaces in
+  let host, data, find =
+    Host_view.refinement_fixture_with (fun initial ->
+      Workspace.apply initial (Initialize_config P.Presets.stock_config)
+      |> Result.ok
+      |> Option.value_exn)
+  in
+  let tile = find "resource-summary" in
+  let view, asic = imported () in
+  let host = H.set_local host tile.id { (H.local host tile.id) with resources = view } in
+  List.iter [ 40, "2 resources · cached-unverified"; 24, "2 cached-unverified" ]
+    ~f:(fun (width, headline) ->
+      let g = Host_view.panel_geometry host tile ~width ~height:3 in
+      let body = Host_view.body_bounds host tile g in
+      assert (g.border = 1 && g.horizontal_padding = 1 && g.vertical_padding = 0);
+      assert (body.x = 2 && body.width = width - 4 && body.height = 1);
+      let image = Host_view.tile_view host { data with asic } tile ~width ~height:3 in
+      let row = Host_view.plain_text image |> String.split_lines |> Fn.flip List.nth_exn 1 in
+      assert (String.is_prefix row ~prefix:("│ " ^ headline));
+      assert (String.is_suffix row ~suffix:" │"))
+;;
+
 let text view snapshot =
   V.contents view ~filter:"" ~asic:snapshot
   |> List.map ~f:Evidence_style.text
@@ -500,7 +564,9 @@ let%test_unit "truncation is explicit in compact, table, context and comparison 
   let view, snapshot = imported () in
   let view = { view with V.index = Some { index with truncated = true } } in
   let compact =
-    V.summary view |> List.map ~f:Evidence_style.text |> String.concat ~sep:"\n"
+    V.summary_page view ~width:160 ~height:20
+    |> List.map ~f:Evidence_style.text
+    |> String.concat ~sep:"\n"
   in
   assert (String.is_substring compact ~substring:"TRUNCATED");
   let captured, _ = V.input view ~filter:"" ~asic:snapshot Capture_left in
@@ -750,7 +816,7 @@ let%test_unit "typed inventory availability distinguishes unavailable, unknown, 
     |> String.concat ~sep:"\n"
   in
   let compact index =
-    V.summary { view with V.index = Some index }
+    V.summary_page { view with V.index = Some index } ~width:160 ~height:20
     |> List.map ~f:Evidence_style.text
     |> String.concat ~sep:"\n"
   in

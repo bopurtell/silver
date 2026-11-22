@@ -3,7 +3,7 @@ id: WB-092
 title: Module-provided jump actions for Silver tiles
 category: infrastructure
 feature_sets: [FS3, FS4]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a

@@ -9,7 +9,15 @@ run physical tools. The provider owns selection, reconciliation and measurements
 Open **Space c c** and choose **Inspect resources (open Resources workspace)**.
 Fresh default sessions include Resources after Timing. Existing saved layouts are
 preserved: this explicit action creates/opens Resources without resetting other
-workspaces. **Add resource-summary tile** adds the compact Overview entry.
+workspaces.
+
+The default Overview layout includes a **Resources** preview between **Runs** and
+**Stage checklist**. It shows the selected run's resource inventory and evidence
+status in one line when space is tight and aligns its fields when there's more
+room. Tab to the tile and press Enter to open the full Resources workspace.
+Use **Restore default layout: Overview (hide extras)** to upgrade an older
+Overview shortcut or bring back a hidden or missing preview. **Add
+resource-summary tile** adds the entry without restoring the rest of the layout.
 
 The Resources workspace has a **request list** and a linked **resource detail**
 tile. Browse the list with `j`/`k` or the arrow keys; the detail tile follows

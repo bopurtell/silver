@@ -3,7 +3,7 @@ id: WB-087
 title: Persistent Cobalt editor workspace and open-location action
 category: workspaces
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a

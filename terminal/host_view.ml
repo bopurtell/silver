@@ -1039,7 +1039,7 @@ let resource_page host data tile ~width ~height =
     in
     if String.equal tile.kind "resource-summary"
     then
-      Resources_view.summary view |> E.page ~width ~height ~offset:0
+      Resources_view.summary_page view ~titled:(T.show_title (H.policy host tile)) ~width ~height
       |> List.map ~f:(fun row -> None, row)
     else (
       let render =
@@ -2904,6 +2904,7 @@ let tile_view
           | "live-status" -> "session"
           | "workspace-tabs" -> "workspaces"
           | "stage-checklist" -> "stage checklist"
+          | "resource-summary" -> "resources"
           | "timing-paths" -> "timing · paths"
           | "timing-detail" -> "timing · selected path"
           | "timing-context" -> "timing · provenance"

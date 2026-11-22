@@ -967,12 +967,23 @@ let empty_table_rows t =
   | Some _ -> [ missing "No resource matches this filter in the available inventory" ]
 ;;
 
-let source_lines ?width t =
+let preview_label ~width label =
+  let label = label ^ ":" in
+  (* Leave most of the row for the value. On narrow tiles long labels can still
+     run into the value column rather than consuming an extra physical row. *)
+  let column = Int.min 14 (width / 2) in
+  label ^ String.make (Int.max 1 (column - String.length label)) ' '
+;;
+
+let source_lines ?width ?preview_width t =
   let field ?(role = E.Role.Plain) label value =
-    match width with
-    | Some width -> aligned_field ~width ~role label value
-    | None -> [ [ { E.text = label ^ ": " ^ value; role } ] ]
+    match width, preview_width with
+    | Some width, _ -> aligned_field ~width ~role label value
+    | None, Some width ->
+      [ E.plain (preview_label ~width label) @ [ { E.text = value; role } ] ]
+    | None, None -> [ [ { E.text = label ^ ": " ^ value; role } ] ]
   in
+  let separate_source = Option.is_some width || Option.is_some preview_width in
   field
     "Scope"
     (Option.value_map
@@ -980,15 +991,15 @@ let source_lines ?width t =
        ~default:"No selected run or explicit source"
        ~f:target_label)
   @ field
-      (if Option.is_some width then "Binding" else "Source")
+      (if separate_source then "Binding" else "Source")
       (if Option.is_some t.explicit
        then "Explicit · independent of Main"
        else "Exact run · follow/pin")
   @ Option.value_map t.source ~default:[] ~f:(fun source ->
     let role, text = freshness source.freshness in
-    (match width with
-     | Some _ -> field "Source" source.label @ field ~role "Freshness" text
-     | None -> [ [ { E.text; role }; { E.text = " · " ^ source.label; role = Muted } ] ])
+    (if separate_source
+     then field "Source" source.label @ field ~role "Freshness" text
+     else [ [ { E.text; role }; { E.text = " · " ^ source.label; role = Muted } ] ])
     @ Option.value_map source.error ~default:[] ~f:(field "Source error"))
   @ Option.value_map t.pending ~default:[] ~f:(fun _ ->
     [ missing "Read requested (retained evidence only)" ])
@@ -1095,10 +1106,21 @@ let execution_rows ~fact t asic =
 
 let execution_lines = execution_rows ~fact
 
-let summary t =
+let summary_headline t ~width =
+  let fits row = Bonsai_term.View.width (Bonsai_term.View.text (E.text row)) <= width in
+  let first_fitting rows ~default = List.find rows ~f:fits |> Option.value ~default in
   Option.value_map
     t.index
-    ~default:[ missing "Resources: inspect / import (Enter)" ]
+    ~default:
+      (if Option.is_none t.target
+       then
+         first_fitting
+           [ missing "No run selected · Enter" ]
+           ~default:(missing "No run · Enter")
+       else
+         first_fitting
+           [ missing "No resource index · Enter" ]
+           ~default:(missing "No index · Enter"))
     ~f:(fun i ->
       let role, _ =
         Option.value_map t.source ~default:(E.Role.Muted, "unavailable") ~f:(fun s ->
@@ -1116,29 +1138,73 @@ let summary t =
            | Refresh_failed _ -> "refresh failed"
            | Unsupported _ -> "unsupported")
       in
-      let compact_inventory =
+      let count = List.length i.rows in
+      let inventory_label =
         match i.inventory_status with
         | Available ->
-          if List.is_empty i.rows
-          then "0 (verified empty)"
-          else sprintf "%d resources" (List.length i.rows)
+          (match count with
+           | 0 when i.truncated -> "0 retained"
+           | 0 -> "0 (verified empty)"
+           | 1 -> "1 resource"
+           | count -> sprintf "%d resources" count)
         | Unavailable -> "inventory unavailable"
         | Unknown -> "inventory unknown"
       in
-      [ [ { E.text =
-              sprintf
-                "Resources%s: %s · "
-                (if i.truncated then " TRUNCATED" else "")
-                compact_inventory
-          ; role = (if i.truncated then E.Role.Stale else Plain)
-          }
-        ; { E.text = compact_status; role }
-        ; { E.text = " · "; role = Plain }
-        ; { E.text = i.verdict; role = E.status_role (E.normalize Verdict i.verdict) }
-        ; { E.text = " · Enter"; role = Muted }
-        ]
-      ])
-  @ source_lines t
+      let coverage =
+        if i.truncated then [ { E.text = " · TRUNCATED"; role = Stale } ] else []
+      in
+      let status_value = [ { E.text = compact_status; role } ] in
+      let status = E.plain " · " @ status_value in
+      let inventory = E.plain inventory_label @ coverage in
+      let short =
+        match i.inventory_status with
+        | Available -> E.plain (Int.to_string count) @ coverage
+        | Unavailable -> E.plain "unavailable" @ coverage
+        | Unknown -> E.plain "unknown" @ coverage
+      in
+      let alternatives =
+        if i.truncated
+           || not (R.Inventory_status.equal i.inventory_status Available)
+           || (count = 0 && E.Role.equal role Validated)
+        then [ inventory; short ]
+        else [ short @ status; short @ E.plain " " @ status_value; inventory ]
+      in
+      first_fitting ((inventory @ status) :: alternatives) ~default:short)
+;;
+
+let summary_page ?(titled = true) t ~width ~height =
+  let prefix = "Resources: " in
+  let width_of text = Bonsai_term.View.width (Bonsai_term.View.text text) in
+  let headline =
+    if titled
+    then summary_headline t ~width
+    else (
+      (* Saved stock layouts and explicit title overrides can leave the preview
+         without a separate heading. Keep its first line self-identifying. *)
+      let available = width - width_of prefix in
+      let first = summary_headline t ~width:available in
+      let first =
+        if Option.is_none t.index
+        then
+          if width_of (E.text first) <= available then first else missing "Enter"
+        else (
+          let with_hint = first @ missing " · Enter" in
+          if width_of (E.text with_hint) <= available then with_hint else first)
+      in
+      E.plain prefix @ first)
+  in
+  let details =
+    if height <= 1
+    then []
+    else
+      Option.value_map t.index ~default:[] ~f:(fun i ->
+        if String.is_empty (String.strip i.verdict)
+        then []
+        else [ E.fact ~label:(preview_label ~width "Verdict") Verdict i.verdict ])
+      @ source_lines ~preview_width:width t
+  in
+  (* Keep the verdict on the next physical row even when the status does not fit. *)
+  List.take (headline :: details) (Int.max 0 height) |> List.map ~f:(E.clip ~width)
 ;;
 
 let comparison_validation t asic =

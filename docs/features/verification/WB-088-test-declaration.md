@@ -3,7 +3,7 @@ id: WB-088
 title: Jump from a catalog test to its OCaml declaration
 category: verification
 feature_sets: [FS2, FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a

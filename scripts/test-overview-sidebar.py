@@ -25,7 +25,64 @@ field, sexp, require, wait = composition.field, composition.sexp, composition.re
 pane_rect, pane_body = refinement.pane_rect, refinement.pane_body
 
 
+def resources_preview(t, check, http, runs, presets):
+    screen = t.capture('sidebar-overview-120x40', ['planned-run', 'empty:', 'Reported cells (agg.): 128',
+        'not reported unknown', 'Analysis: not yet observed; no authoritative STA evidence',
+        'Check drc: pass', 'Acceptance (agg.): not_evaluated'], ['Aggregate Setup slack: 0.42 ns'])
+    # This fixture intentionally has successful terminal slack but no authoritative
+    # supplementary STA observation. Check actual Timing-pane cells, not just text
+    # somewhere else on the screen: WB069 must not borrow finalization's metrics.
+    left, top, right, bottom = pane_rect(screen, 'timing')
+    timing_body = '\n'.join(line[left + 1:right - 1]
+                            for line in screen.lines()[top + 1:bottom - 1])
+    check('not reported unknown' in timing_body and 'no authoritative STA evidence' in timing_body
+          and '0.42' not in timing_body and 'completed' not in timing_body,
+          'Timing pane explicitly reports absent authoritative STA and never borrows terminal slack/completion')
+    refinement.sidebar_geometry(screen, check)
+    left, top, right, _ = pane_rect(screen, 'resources')
+    preview_row = screen.lines()[top + 1][left + 1:right - 1]
+    check(preview_row.startswith(' ') and bool(preview_row[1:2].strip()),
+          'Resources preview body starts one cell inside the frame, matching adjacent tiles')
+    stages = [composition.status_text(line) for line in pane_body(screen, 'stage checklist')]
+    # The stable initial cursor can remain on Timing if it was first observed
+    # before physical stages hydrated. WB001 clips only a selected long label at
+    # this width. Require each canonical row exactly once, accepting that precise
+    # bounded selected-label fallback rather than assuming a hydration order.
+    names = ['Synthesis', 'Floorplan', 'Placement', 'CTS', 'Routing', 'Signoff']
+    def rendered_stage(line, name):
+        return name + ': completed' in line or (
+            len(name) > 7 and '> ' in line and name[:6] + '…: completed' in line)
+    check(all(sum(rendered_stage(line, name) for line in stages) == 1 for name in names),
+           'All six explicit stages are visible as vertical checklist rows at120x40')
+    check(sum('Timing: not reported' in line and 'unknown' in line for line in stages) == 1,
+          'Supplementary Timing row remains unknown independently of six completed physical stages')
+    check(sum('Elaboration:' in line or ('> ' in line and 'Elabor…:' in line) for line in stages) == 1,
+           'Elaboration also fits alongside the physical stages and Timing (eight checklist rows)')
+    check(not any('(agg.)' in line for line in stages), 'Compact checklist prioritizes stages over aggregate preamble')
+    # The selected run consumes part of the footer; use a wider screen so the
+    # full workspace and focused-pane breadcrumb can be read for each keypress.
+    t.resize(180, 55)
+    t.focus_view('run selector')
+    for key, focus, label in (
+            (b'\t', 'resource summary', 'tab-to-resources'),
+            (b'\t', 'stage checklist', 'tab-to-checklist'),
+            (b'\x1b[Z', 'resource summary', 'backtab-to-resources'),
+            (b'\x1b[Z', 'run selector', 'backtab-to-runs'),
+            (b'\t', 'resource summary', 'tab-to-resources-before-enter')):
+        t.key(key)
+        focused = t.capture(label, ['Overview › ' + focus])
+        check('overview › ' + focus in focused.lines()[-1].casefold(),
+              'Real focus traversal: ' + label)
+    t.key(b'\r')
+    t.capture('enter-opens-resources', ['[5 Resources]', 'resource-detail'])
+    return 'Resources'
+
+
 def acceptance(t, check, http, runs, presets):
+    resources_preview(t, check, http, runs, presets)
+    t.command('Switch to Overview')
+    t.focus_view('run selector')
+
     def registry(): return http.rpc(domain='workspace')
     def mutate(op): return http.mutate(registry(), op)
     def calls():
@@ -51,33 +108,8 @@ def acceptance(t, check, http, runs, presets):
         return [pane_rect(screen, title) for title in
                 ('synthesis', 'timing', 'placement', 'routing', 'checks', 'finalization')]
 
-    screen = t.capture('sidebar-overview-120x40', ['planned-run', 'empty:', 'Reported cells (agg.): 128',
-        'not reported unknown', 'Analysis: not yet observed; no authoritative STA evidence',
-        'Check drc: pass', 'Acceptance (agg.): not_evaluated'], ['Aggregate Setup slack: 0.42 ns'])
-    # This fixture intentionally has successful terminal slack but no authoritative
-    # supplementary STA observation. Check actual Timing-pane cells, not just text
-    # somewhere else on the screen: WB069 must not borrow finalization's metrics.
-    left, top, right, bottom = pane_rect(screen, 'timing')
-    timing_body = '\n'.join(line[left + 1:right - 1]
-                            for line in screen.lines()[top + 1:bottom - 1])
-    check('not reported unknown' in timing_body and 'no authoritative STA evidence' in timing_body
-          and '0.42' not in timing_body and 'completed' not in timing_body,
-          'Timing pane explicitly reports absent authoritative STA and never borrows terminal slack/completion')
-    refinement.sidebar_geometry(screen, check)
-    stages = [composition.status_text(line) for line in pane_body(screen, 'stage checklist')]
-    # The stable initial cursor can remain on Timing if it was first observed
-    # before physical stages hydrated. WB001 clips only a selected long label at
-    # this width. Require each canonical row exactly once, accepting that precise
-    # bounded selected-label fallback rather than assuming a hydration order.
-    names = ['Synthesis', 'Floorplan', 'Placement', 'CTS', 'Routing', 'Signoff']
-    def rendered_stage(line, name):
-        return name + ': completed' in line or (
-            len(name) > 7 and '> ' in line and name[:6] + '…: completed' in line)
-    check(all(sum(rendered_stage(line, name) for line in stages) == 1 for name in names),
-           'All six explicit stages are visible as vertical checklist rows at120x40')
-    check(sum('Timing: not reported' in line and 'unknown' in line for line in stages) == 1,
-          'Supplementary Timing row remains unknown independently of six completed physical stages')
-    check(not any('(agg.)' in line for line in stages), 'Compact checklist prioritizes stages over aggregate preamble')
+    t.resize(120, 44)
+    screen = t.capture('sidebar-selector-before-expansion', ['runs 4/6'])
     before = registry()
     t.command('Run selector: More visible rows (+1)')
     t.capture('sidebar-selector-five', ['runs 5/6'])
@@ -147,7 +179,8 @@ def acceptance(t, check, http, runs, presets):
               workspace + ': all four schemes have distinct actual accent attributes')
         return t.capture('sidebar-' + workspace + '-neon-retained', titles)
 
-    schemes('overview', ['session', 'runs', 'stage checklist', 'synthesis', 'timing', 'placement', 'routing', 'checks', 'finalization', 'planned-run'])
+    schemes('overview', ['session', 'runs', 'resources', 'stage checklist', 'synthesis', 'timing',
+                         'placement', 'routing', 'checks', 'finalization', 'planned-run'])
     t.command('Inspect timing paths ' + field(runs[0], 'id'))
     timing_neon = t.capture('sidebar-timing-inherits-neon', ['timing · paths', 'timing · selected path', 'timing · provenance'])
     check(sorted({a[1] for row in timing_neon.cells for _, a in row if a[1] != 'default'}) == scheme_samples['overview/Neon']['backgrounds'],
@@ -260,16 +293,20 @@ def main():
     for name in ('daemon', 'client', 'preset-export'): p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--evidence', type=Path)
     p.add_argument('--timeout', type=int, default=600)
+    p.add_argument('--resources-only', action='store_true',
+                   help='run only Overview Resources geometry, checklist and keyboard checks')
     args = p.parse_args()
     for name in ('daemon', 'client', 'preset_export'): setattr(args, name, getattr(args, name).resolve(strict=True))
     args.evidence = args.evidence or Path('/tmp/opencode') / ('overview-sidebar-' + secrets.token_hex(6))
     require(args.evidence.resolve().is_relative_to('/tmp/opencode'), 'Evidence must be private /tmp/opencode state')
     args.palette_only = False
-    args.harness = 'Overview sidebar/schemes/planned-run'
+    args.harness = ('Overview Resources preview' if args.resources_only
+                    else 'Overview sidebar/schemes/planned-run')
     os.umask(0o077)
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Sidebar acceptance budget exhausted')))
     signal.alarm(args.timeout)
-    try: composition.run(args, acceptance=acceptance)
+    try: composition.run(args, acceptance=resources_preview if args.resources_only else acceptance,
+                         focused=args.resources_only)
     finally: signal.alarm(0)
 
 

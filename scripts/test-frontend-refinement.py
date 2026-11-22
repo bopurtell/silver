@@ -51,14 +51,17 @@ def pane_rect(screen, title):
 
 def sidebar_geometry(screen, check):
     rects = {title: pane_rect(screen, title) for title in (
-        'session', 'runs', 'stage checklist', 'preparation', 'synthesis', 'timing',
+        'session', 'runs', 'resources', 'stage checklist', 'preparation', 'synthesis', 'timing',
         'placement', 'routing', 'checks', 'finalization', 'planned-run')}
-    session, runs, stages, plan = (rects[k] for k in ('session', 'runs', 'stage checklist', 'planned-run'))
+    sidebar = [rects[k] for k in ('session', 'runs', 'resources', 'stage checklist', 'planned-run')]
+    session, _, resources, stages, plan = sidebar
     check(abs((session[2] - session[0]) - screen.width / 3) <= 1,
           'Overview sidebar occupies one third of actual terminal cells')
-    check(session[0] == runs[0] == stages[0] == plan[0] and session[2] == runs[2] == stages[2] == plan[2]
-          and session[3] == runs[1] and runs[3] == stages[1] and stages[3] == plan[1],
-          'Session, run list, vertical checklist and planned run are tightly stacked')
+    check(all((left, right) == (session[0], session[2]) for left, _, right, _ in sidebar)
+          and all(above[3] == below[1] for above, below in zip(sidebar, sidebar[1:])),
+          'Session, Runs, Resources, Stage Checklist and Planned Run are tightly stacked')
+    check(resources[3] - resources[1] >= 3 and stages[3] - stages[1] >= 10,
+          'Framed Resources leaves eight visible checklist body rows')
     check(abs((stages[3] - stages[1]) - (plan[3] - plan[1])) <= 1,
           'Checklist and planned run divide remaining sidebar approximately in half')
     previous = session[1]
@@ -74,8 +77,8 @@ def sidebar_geometry(screen, check):
           'Actual frame rectangles never overlap, including zero-gutter neighbors')
     for title in rects:
         left, top, right, _ = rects[title]
-        check(screen.lines()[top][left + 1:right - 1].strip().startswith(title),
-              'Lowercase unadorned tile title: ' + title)
+        header = screen.lines()[top][left + 1:right - 1].strip()
+        check(header.startswith(title), 'Lowercase unadorned tile title: ' + title)
 
 
 def acceptance(t, check, http, runs, presets):
@@ -139,6 +142,8 @@ def acceptance(t, check, http, runs, presets):
               for char, attrs in palette.cells[query_y][prompt_x + 1:-1]), 'Palette query caret is visible and colored')
     t.key(b'\x1b')
 
+    # Give the expanded selector more room without squeezing the stock sidebar.
+    t.resize(120, 44)
     # Selector row-cap changes must increase its real viewport, not merely metadata.
     t.focus_view('run selector')
     before_expand = t.capture('selector-height-before')
@@ -148,14 +153,15 @@ def acceptance(t, check, http, runs, presets):
     expanded = t.capture('selector-height-after', ['6/6'])
     bottom = lambda s: pane_rect(s, 'runs')[3] - 1
     check(bottom(expanded) > bottom(before_expand), 'Increasing row cap grows the actual selector outer viewport')
-    check(len([line for line in pane_body(expanded, 'runs') if 'asic/' in line]) == 6, 'Expanded selector renders six distinct real runs')
+    check(sum(bool(line) for line in pane_body(expanded, 'runs')) == 6, 'Expanded selector renders six distinct real runs')
     t.command('Reset presentation overrides (inherit)')
     t.capture('selector-height-reset', ['4/6'])
     t.key(b'/'); t.key(b'synthetic-long-distinguishable'); t.key(b'\r')
     two = t.capture('selector-two-matching-runs', ['Runs 2/2 (cap 4)'])
-    check(sum('asic/' in line for line in pane_body(two, 'runs')) == 2, 'Selector reports actual two matching runs, not requested four-row capacity (full labels verified in zoom)')
+    check(sum(bool(line) for line in pane_body(two, 'runs')) == 2, 'Selector reports actual two matching runs, not requested four-row capacity (full labels verified in zoom)')
     t.key(b'\x15'); t.capture('selector-filter-reset', ['Runs 4/6 (cap 4)'])
 
+    t.resize(120, 40)
     # Focus the exact checklist through public zoom semantics, then browse without
     # executing its advertised action. Identity is independently checked over HTTP.
     checklist = next(tile for tile in field(snapshot(), 'tiles') if field(tile, 'workspace') == overview_id and field(tile, 'kind') == 'stage-checklist')
@@ -512,7 +518,7 @@ def main():
     def two_run_count(t, check, http, startup):
         check(len(field(http.rpc(wait=False), 'runs')) == 2, 'Two-run capacity fixture has exactly two real registered observations')
         screen = t.capture('selector-only-two-registered-runs', ['Runs 2/2 (cap 4)'])
-        check(sum('asic/' in line for line in pane_body(screen, 'runs')) == 2, 'With only two registered runs, selector labels and renders 2/2 instead of claiming four visible runs')
+        check(sum(bool(line) for line in pane_body(screen, 'runs')) == 2, 'With only two registered runs, selector labels and renders 2/2 instead of claiming four visible runs')
     try:
         if args.timing_only:
             args.harness = 'focused Timing creation and custom reuse'

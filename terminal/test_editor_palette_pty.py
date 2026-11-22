@@ -32,7 +32,8 @@ def exercise(client, base):
                  XDG_STATE_HOME=str(base / "state"), XDG_RUNTIME_DIR=str(base / "runtime")),
         evidence=base,
     )
-    term = Terminal(session, argv=[launcher, "--project-root", root], cwd=root, width=150)
+    # Leave room for Cobalt's status message beside the sandboxed project path.
+    term = Terminal(session, argv=[launcher, "--project-root", root], cwd=root, width=200)
 
     def send(data):
         os.write(term.master, data)

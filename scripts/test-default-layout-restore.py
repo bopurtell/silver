@@ -226,14 +226,20 @@ class Terminal(fs3.Terminal):
 
             def position(token, right=False):
                 return next(((x, y) for y, row in enumerate(rows)
-                             if (x := row.find(token, self.width // 3 if right else 0)) >= 2
+                             if (x := row.casefold().find(token, self.width // 3 if right else 0)) >= 2
                              and row[x - 2:x] in ('┌ ', '╭ ', '+ ')), None)
 
-            names = ['runs 0/0', 'stage checklist', 'planned-run', 'synthesis',
+            left_names = ['runs 0/0', 'resources', 'stage checklist', 'planned-run']
+            names = left_names + ['synthesis',
                      'timing', 'placement', 'routing', 'checks', 'finalization']
-            p = {name: position(name, right=i >= 3) for i, name in enumerate(names)}
-            right = [p[name] for name in names[3:]]
-            left = [p[name] for name in names[:3]]
+            p = {name: position(name, right=name not in left_names) for name in names}
+            right = [p[name] for name in names[len(left_names):]]
+            left = [p[name] for name in left_names]
+            resources, stages = p['resources'], p['stage checklist']
+            preview_framed = (resources and stages and resources[0] == stages[0] and
+                              stages[1] - resources[1] >= 3 and
+                              rows[stages[1] - 1][resources[0] - 2:resources[0] - 1]
+                              in ('└', '╰', '+'))
             # The tabs are an unframed full-width top row; each right summary
             # must be painted on a distinct row in a single common right track.
             # With five starters and imported roundtrips, bounded tabs need not
@@ -249,7 +255,8 @@ class Terminal(fs3.Terminal):
                   all(x < self.width // 2 for x, _ in left) and
                   len({x for x, _ in right}) == 1 and right[0][0] > self.width // 4 and
                   [y for _, y in right] == sorted({y for _, y in right}) and
-                  tabs < left[0][1] < left[1][1] < left[2][1] and
+                   tabs < left[0][1] < left[1][1] < left[2][1] < left[3][1] and
+                   preview_framed and
                   tabs < right[0][1] and 'simulation-catalog' not in text and
                   'timing · paths' not in text and
                   len(rows) == self.height and rows[-1].startswith('Space c c commands') and
@@ -388,10 +395,13 @@ def fixture(test, templates):
             ['geometry', [['x', '0'], ['y', '0'], ['width', '80'], ['height', '10']]]])
     # More than one existing occurrence, with the earliest run selector hidden.
     for tile in tiles(snapshot, wid):
+        height = '1' if field(tile, 'kind') == 'resource-summary' else '9'
         mutate(['Resize_tile', ['tile', field(tile, 'id')], ['geometry',
-            [['x', '11'], ['y', '13'], ['width', '37'], ['height', '9']]]])
+            [['x', '11'], ['y', '13'], ['width', '37'], ['height', height]]]])
     selector = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == 'run-selector')
     mutate(['Set_tile_hidden', ['tile', field(selector, 'id')], ['hidden', 'true']])
+    resources = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == 'resource-summary')
+    mutate(['Set_tile_hidden', ['tile', field(resources, 'id')], ['hidden', 'true']])
     for kind in ('synthesis', 'simulation-catalog'):
         tile = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == kind)
         pin = fs3.replace_field(run, 'id', 'pinned-' + kind)
@@ -450,6 +460,14 @@ def exercise(test):
         added = assert_restore(test, before, after, wid, templates['overview'])
         test.check(len(added) == 1 and field(added[0], 'kind') == 'finalization',
                    'Native restore creates the deliberately missing finalization occurrence only')
+        old_preview, = [t for t in tiles(before, wid) if field(t, 'kind') == 'resource-summary']
+        preview, = [t for t in tiles(after, wid) if field(t, 'kind') == 'resource-summary']
+        test.check(field(old_preview, 'hidden') == 'true'
+                   and field(field(old_preview, 'requested_geometry'), 'height') == '1'
+                   and field(preview, 'hidden') == 'false'
+                   and field(preview, 'id') == field(old_preview, 'id')
+                   and int(field(field(preview, 'requested_geometry'), 'height')) >= 3,
+                   'Overview restore unhides and expands the older one-row Resources preview')
         fitted_preferences = preferences(test, terminal, 'Fit')
         preserved_preferences(test, original_preferences, fitted_preferences, 'Acknowledged restore')
         terminal.composed('overview-restored-180x55')
@@ -580,7 +598,10 @@ def exercise(test):
         index = len(proxy.events)
         terminal.palette(title)
         event = proxy.receipt(terminal, index)
-        assert_restore(test, before, event['response'][1], destination, templates['overview'])
+        added = assert_restore(test, before, event['response'][1], destination, templates['overview'])
+        preview, = [t for t in added if field(t, 'kind') == 'resource-summary']
+        test.check(int(field(field(preview, 'requested_geometry'), 'height')) >= 3,
+                   'Overview restore creates the missing Resources preview at its new default height')
         preferences(test, terminal, 'Fit')
 
         # Restart the client and observe composed Fit in addition to disk storage.

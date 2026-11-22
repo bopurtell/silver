@@ -1148,20 +1148,22 @@ let%test_unit "weighted widths and configurable gutters are full-rectangle parti
         with
         | Compact -> assert false
         | Grid cells ->
-          let session = List.nth_exn cells 1 in
-          let synthesis = List.nth_exn cells 4 in
+          let placed = List.zip_exn (kinds Overview.definition) cells in
+          let cell kind = List.Assoc.find_exn placed kind ~equal:String.equal in
+          let session = cell "live-status" and synthesis = cell "synthesis" in
           assert (Int.abs (session.width - ((width - gutter) / 3)) <= 1);
           assert (synthesis.x = session.width + gutter);
           assert (synthesis.x + synthesis.width = width)));
   let d = Overview.definition in
   let ks = kinds d in
+  let index = List.findi_exn ks ~f:(fun _ k -> String.equal k "run-selector") |> fst in
   let selector required =
     match
-      Layout.compute d ~width:120 ~height:38 ~kinds:ks ~min_height_for_index:(fun i ->
-        if i = 2 then Some required else None)
+      Layout.compute d ~width:120 ~height:48 ~kinds:ks ~min_height_for_index:(fun i ->
+        if i = index then Some required else None)
     with
     | Compact -> assert false
-    | Grid cells -> List.nth_exn cells 2
+    | Grid cells -> List.nth_exn cells index
   in
   assert ((selector 12).height > (selector 7).height)
 ;;
@@ -1225,6 +1227,15 @@ let%test_unit "actual terminal content bounds at80x24,120x40,large" =
 
 let%test_unit "one-third sidebar splits stages and plan above six full-width domains" =
   let d = Overview.definition in
+  let preview =
+    List.find_exn (Definition.template d).views ~f:(fun view ->
+      String.equal view.kind "resource-summary")
+  in
+  assert (not preview.hidden && preview.geometry.height >= 3);
+  let presentation = Definition.presentation d ~kind:preview.kind |> Option.value_exn in
+  assert (Option.equal Bool.equal presentation.title (Some true));
+  assert (Option.equal Bool.equal presentation.frame (Some true));
+  assert (Option.equal Int.equal presentation.padding (Some 1));
   (* Reserve two rows for the host's global header/footer at 120x40. *)
   match Layout.compute d ~width:120 ~height:38 ~kinds:(kinds d) with
   | Compact -> assert false
@@ -1235,18 +1246,22 @@ let%test_unit "one-third sidebar splits stages and plan above six full-width dom
         (List.findi_exn (kinds d) ~f:(fun _ k -> String.equal kind k) |> fst)
     in
     let session = cell "live-status"
-    and selector = cell "run-selector" in
+    and selector = cell "run-selector"
+    and resources = cell "resource-summary"
+    and stages = cell "stage-checklist"
+    and plan = cell "planned-run" in
     assert (session.width = 40 && session.height = Overview.session_height);
     assert (selector.x = session.x && selector.y = session.y + session.height);
     assert (selector.width = session.width && selector.height = Overview.selector_height);
-    assert ((cell "resource-summary").y = selector.y + selector.height);
-    assert ((cell "stage-checklist").y = (cell "resource-summary").y + 1);
-    let stages = cell "stage-checklist"
-    and plan = cell "planned-run" in
+    assert (resources.x = selector.x && resources.width = selector.width);
+    assert (resources.y = selector.y + selector.height && resources.height >= 3);
+    assert (stages.y = resources.y + resources.height);
     assert (stages.x = 0 && stages.width = session.width);
     assert (plan.x = 0 && plan.width = session.width);
     assert (plan.y = stages.y + stages.height);
     assert (plan.y + plan.height = 38);
+    (* Eight checklist items and two frame rows must fit at the stock terminal size. *)
+    assert (stages.height >= 8 + 2);
     assert (stages.height >= Overview.checklist_height);
     assert (plan.height >= Overview.planned_run_height);
     assert (Int.abs (stages.height - plan.height) <= 1);
@@ -1268,27 +1283,37 @@ let%test_unit "one-third sidebar splits stages and plan above six full-width dom
     assert ((cell "workspace-tabs").height = 1)
 ;;
 
-let%test_unit "six-row selector preserves readable stages and balanced plan at120x40" =
+let%test_unit "stock and expanded selectors leave room for the framed Resources preview" =
   let d = Overview.definition in
-  List.iter [ 7; 9 ] ~f:(fun selector_height ->
+  let ks = kinds d in
+  let selector_index =
+    List.findi_exn ks ~f:(fun _ kind -> String.equal kind "run-selector") |> fst
+  in
+  List.iter [ 40, 7; 44, 9 ] ~f:(fun (terminal_height, selector_height) ->
+    let height = terminal_height - 2 in
     match
       Layout.compute
         d
         ~width:120
-        ~height:38
-        ~kinds:(kinds d)
-        ~min_height_for_index:(fun i -> if i = 2 then Some selector_height else None)
+        ~height
+        ~kinds:ks
+        ~min_height_for_index:(fun i ->
+          if i = selector_index then Some selector_height else None)
     with
     | Compact -> assert false
     | Grid cells ->
-      let selector = List.nth_exn cells 2
-      and stages = List.nth_exn cells 3
-      and plan = List.nth_exn cells 11 in
+      let placed = List.zip_exn ks cells in
+      let cell kind = List.Assoc.find_exn placed kind ~equal:String.equal in
+      let selector = cell "run-selector"
+      and stages = cell "stage-checklist"
+      and plan = cell "planned-run"
+      and resources = cell "resource-summary" in
       assert (selector.height = selector_height);
-      assert (stages.height >= 10 && plan.height >= 10);
+      assert (resources.y = selector.y + selector.height && resources.height >= 3);
+      assert (stages.height >= 8 + 2 && plan.height >= Overview.planned_run_height);
       assert (Int.abs (stages.height - plan.height) <= 1);
-      assert (stages.y = selector.y + selector.height + 1);
-      assert (plan.y = stages.y + stages.height && plan.y + plan.height = 38))
+      assert (stages.y = resources.y + resources.height);
+      assert (plan.y = stages.y + stages.height && plan.y + plan.height = height))
 ;;
 
 let%test_unit "shuffled membership keeps tile-to-cell association and duplicate extras" =
@@ -1431,6 +1456,39 @@ let%test_unit "unknown preset IDs never select a known definition by display nam
     }
   in
   assert (Option.is_none (Presets.for_arrangement w))
+;;
+
+let%test_unit "Overview restore unhides and expands an older one-row Resources preview" =
+  let module W = Workspace in
+  let initial = W.initial ~session_id:(W.Session_id.of_string "restore-resource-preview") in
+  let workspace = (List.hd_exn initial.workspaces).id in
+  let kind = "resource-summary" in
+  let mutate (s : W.Snapshot.t) mutation =
+    W.apply s (Mutate { expected_revision = s.revision; mutation })
+    |> Result.ok
+    |> Option.value_exn
+  in
+  let legacy =
+    mutate
+      initial
+      (Create_tile { workspace; kind; geometry = { x = 0; y = 0; width = 28; height = 1 } })
+  in
+  let preview = List.last_exn legacy.tiles in
+  let hidden = mutate legacy (Set_tile_hidden { tile = preview.id; hidden = true }) in
+  let restored = mutate hidden (Definition.restore Overview.definition ~workspace) in
+  let actual =
+    List.filter restored.tiles ~f:(fun t ->
+      W.Workspace_id.equal t.workspace workspace && String.equal t.kind kind)
+  in
+  let expected =
+    List.Assoc.find_exn (Definition.specs Overview.definition) kind ~equal:String.equal
+  in
+  assert (expected.height >= 3);
+  assert (
+    List.equal
+      W.Tile.equal
+      actual
+      [ { preview with hidden = false; requested_geometry = expected } ])
 ;;
 
 let%test_unit "shared restore API repairs every preset in the captured renamed workspace" =

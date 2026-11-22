@@ -90,7 +90,9 @@ def exercise(client, base):
         resize(80, 32)
         see("initial", overview_tab, re.compile(r"\b\d+ Editor\b"))
         click_tab("Editor")
-        see("editor-without-file", editor_tab, "Cobalt focus", "DIRECTORY", "Alt+Left")
+        see("editor-without-file", editor_tab, "Cobalt focus", "DIRECTORY", "Alt+Left",
+            "Directory: 0 marked", re.compile(r"╭─ .*?/alpha "),
+            absent=("Directory: 0 marked |",))
         editor_palette("ov", "Switch to Overview")
         send(b"\r")
         see("overview-from-directory", overview_tab, absent=("Cobalt focus",))

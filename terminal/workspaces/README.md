@@ -71,9 +71,9 @@ See [the full source map, customization guide and verification](../../docs/front
 for display overrides, migration, palette controls and synthetic startup.
 
 The [current sidebar polish](../../docs/real_asic_example_demo.md) makes Overview a
-one-third sidebar (Session, Runs, vertical checklist, planned-run) and six-panel
-right domain-summary stack. Checklist and planned-run divide the remaining sidebar
-height with named minima/weights. `stock.sexp` exposes the width weights
+one-third sidebar (Session, Runs, Resources, vertical checklist, planned-run) and
+a right-hand domain-summary stack. Resources previews inventory and evidence status;
+Enter opens the full inspector. `stock.sexp` exposes the width weights
 and minimum tile heights as source policy. `Weighted_columns` divides the full
 available width by positive integer weights, clamping undersized columns to descendant
 minima and redistributing the remaining width. This also provides Waveforms' narrow
@@ -94,10 +94,10 @@ In **Fit**, Tab follows the declared layout tree: `Stack` children top-to-bottom
 subtree before moving to the next. Column weights affect size, not traversal;
 `Narrow` preserves its child's order. Shift-Tab follows the exact reverse, and both
 directions wrap. Workspace tabs retain their normal focus stop. In Overview this
-means workspace tabs, then Session → Runs → Stage checklist → Planned run, then
-the right-hand stage tiles. In Testing it means workspace tabs → Session → Attempts
-→ Execution → Catalog → Detail → Cases → Artifacts → Logs. Testing's template
-order is unchanged except for removing Project Tests.
+means workspace tabs, then Session → Runs → Resources → Stage checklist →
+Planned run, then the right-hand stage tiles. In Testing it means workspace tabs
+→ Session → Attempts → Execution → Catalog → Detail → Cases → Artifacts → Logs.
+Testing's template order is unchanged except for removing Project Tests.
 
 Configured leaves address authoring keys, so two tiles of the same kind can have
 independent positions and focus stops. For example, `custom.sexp` visits `choose`
