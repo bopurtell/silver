@@ -68,6 +68,7 @@ and job_entry =
   ; escalation_finished : unit Ivar.t
   ; finished : unit Ivar.t
   ; mutable source_start : source_capture option
+  ; parallel_simulation : parallel_simulation option
   }
 
 and job_operation =
@@ -83,6 +84,13 @@ and job_operation =
       ; driver : string
       ; output_dir : string
       }
+
+and parallel_simulation =
+  { max_parallel_runs : int
+  ; config_digest : string
+  ; environment : V1.Environment_selection.t
+  ; discovery : bool
+  }
 
 type submission_operation =
   | Submit_dune of V1.Dune_action.t
@@ -113,8 +121,7 @@ type t =
   ; projects_by_key : (string, project_session) Hashtbl.t
   ; projects : (Project_id.t, project_session) Hashtbl.t
   ; root_queues : (string, job_entry Queue.t) Hashtbl.t
-  ; running_roots : String.Hash_set.t
-  ; preparation_waiters : String.Hash_set.t
+  ; active_root_slots : (string, parallel_simulation option Bag.t) Hashtbl.t
   ; jobs : (Job_id.t, job_entry) Hashtbl.t
   ; artifacts : (Artifact_id.t, artifact_entry) Hashtbl.t
   ; hierarchies : (Artifact_id.t, hierarchy_entry) Hashtbl.t
@@ -216,8 +223,7 @@ let create
     ; projects_by_key = Hashtbl.create (module String)
     ; projects = Project_id.Table.create ()
     ; root_queues = Hashtbl.create (module String)
-    ; running_roots = Hash_set.create (module String)
-    ; preparation_waiters = Hash_set.create (module String)
+    ; active_root_slots = Hashtbl.create (module String)
     ; jobs = Job_id.Table.create ()
     ; artifacts = Artifact_id.Table.create ()
     ; hierarchies = Artifact_id.Table.create ()
@@ -258,9 +264,9 @@ let check_authoring_project t (operation : Authoring.Request.t) =
        (* The recipe host independently rejects traversal and symlink components. *)
        let root = session.root in
        let prefix = if String.equal root "/" then "/" else root ^ "/" in
-        if String.equal destination root
+       if String.equal destination root
            || (not (Authoring.targets_project_root recipe)
-               && String.is_prefix destination ~prefix)
+              && String.is_prefix destination ~prefix)
        then Ok ()
        else error Invalid_request "destination is outside the selected project")
   | Bind_owner_project _ | Preview _ | Apply _ | Cancel _ -> Ok ()
@@ -363,14 +369,14 @@ let opening_command_output ?prog_search_path t invocation =
         Deferred.unit)
       (fun () ->
         match%bind
-          spawn_command ?prog_search_path ~setpgid:Core_unix.Pgid.new_process_group invocation
+           spawn_command ?prog_search_path ~setpgid:Core_unix.Pgid.new_process_group invocation
         with
         | Error error -> return (Error (Error.to_string_hum error))
         | Ok process ->
-          (* Don't reap the group leader while a subprocess might still hold a pipe.
-             Its unreaped PID reserves the group ID until we can safely signal it. *)
+           (* Don't reap the group leader while a subprocess might still hold a pipe.
+              Its unreaped PID reserves the group ID until we can safely signal it. *)
           let waited = lazy (Process.wait process) in
-          let stdout = Process.stdout process and stderr = Process.stderr process in
+           let stdout = Process.stdout process and stderr = Process.stderr process in
           Monitor.protect
             ~finally:(fun () ->
               if not (Lazy.is_val waited && Deferred.is_determined (Lazy.force waited))
@@ -1271,35 +1277,10 @@ let complete_generate_rtl
               return (Ok ()))))
 ;;
 
-let rec run_next t root =
-  let queue = Hashtbl.find_or_add t.root_queues root ~default:Queue.create in
-  let leased = Preparation_service.source_leased t.preparation_service root in
-  let next =
-    if not leased
-    then Queue.dequeue queue
-    else (
-      (* A preparation is one source transaction across two supervised jobs. Leave other
-         source-mutating jobs queued until its emission has finished. *)
-      let before, remaining =
-        List.split_while (Queue.to_list queue) ~f:(fun entry ->
-          not (String.equal entry.job.kind.namespace "preparation"))
-      in
-      match remaining with
-      | [] -> None
-      | entry :: rest ->
-        Queue.clear queue;
-        List.iter (before @ rest) ~f:(Queue.enqueue queue);
-        Some entry)
-  in
-  match next with
-  | None ->
-    if leased
-    then Hash_set.add t.preparation_waiters root
-    else Hash_set.remove t.running_roots root
-  | Some entry when Job.is_terminal entry.job -> run_next t root
-  | Some entry ->
-    don't_wait_for
-      (let started_at = Timestamp.of_time_ns (Time_ns.now ()) in
+let run_supervised t entry ~on_finished =
+  don't_wait_for
+    (let supervised =
+       let started_at = Timestamp.of_time_ns (Time_ns.now ()) in
        update_job
          t
          entry
@@ -1354,7 +1335,6 @@ let rec run_next t root =
            | Driver_generate_rtl { output_dir; _ } -> cleanup_path output_dir
            | Dune_action _ | Driver_describe | Simulation_task _ -> return ()
          in
-         run_next t root;
          return ()
        | Ok () ->
          let%bind () =
@@ -1428,7 +1408,6 @@ let rec run_next t root =
               | Driver_generate_rtl { output_dir; _ } -> cleanup_path output_dir
               | Dune_action _ | Driver_describe | Simulation_task _ -> return ()
             in
-            run_next t root;
             return ()
           | Ok process ->
             entry.process <- Some process;
@@ -1466,7 +1445,9 @@ let rec run_next t root =
                       (Time_float.Span.of_sec (Float.of_int task.timeout_seconds))
                       (Ivar.read entry.finished)
                   in
-                  if Poly.equal result `Timeout && not (Ivar.is_full entry.finished)
+                  if Poly.equal result `Timeout
+                     && Option.is_some entry.process
+                     && not (Ivar.is_full entry.finished)
                   then (
                     task.fail
                       (if String.equal entry.job.kind.namespace "preparation"
@@ -1478,8 +1459,16 @@ let rec run_next t root =
             then begin_escalation t entry process;
             let stdout = drain t entry Stdout (Process.stdout process) in
             let stderr = drain t entry Stderr (Process.stderr process) in
-            let%bind status = Process.wait process in
             let%bind () = Deferred.all_unit [ stdout; stderr; entry.log_tail ] in
+            (* While descendants hold output pipes, keep the leader unreaped so
+               timeout/cancellation can still signal the owned group safely. *)
+            let%bind () =
+              if entry.escalation_started
+              then Ivar.read entry.escalation_finished
+              else return ()
+             in
+             let%bind status = Process.wait process in
+             entry.process <- None;
             if String.equal entry.job.kind.namespace "preparation"
             then
               update_job
@@ -1496,7 +1485,11 @@ let rec run_next t root =
                  | Error error -> task.fail (Error.to_string_hum error))
               | _ -> return ()
             in
-            entry.process <- None;
+             let%bind () =
+              if entry.escalation_started
+              then Ivar.read entry.escalation_finished
+              else return ()
+            in
             let%bind () = Writer.close entry.log_writer in
             let status = exit_status status in
             let%bind () =
@@ -1555,8 +1548,77 @@ let rec run_next t root =
                      finish_entry t entry Failed (Some status) (Some reason));
                   return ())
             in
-            run_next t root;
-            return ()))
+            return ())
+     in
+     let%map () = supervised in
+     on_finished ())
+;;
+
+let rec run_next t root =
+  if not t.shutting_down
+  then
+    Option.iter (Hashtbl.find t.root_queues root) ~f:(fun queue ->
+      let take_next =
+        if not (Preparation_service.source_leased t.preparation_service root)
+        then
+          Option.map (Queue.peek queue) ~f:(fun entry ->
+            entry, fun () -> Queue.dequeue_exn queue |> ignore)
+        else (
+          (* Build through emission is one source transaction. No other work can start in
+             the gap, even when parallel simulation slots are available. *)
+          let before, remaining =
+            List.split_while (Queue.to_list queue) ~f:(fun entry ->
+              not (String.equal entry.job.kind.namespace "preparation"))
+          in
+          match remaining with
+          | [] -> None
+          | entry :: rest ->
+            Some
+              ( entry
+              , fun () ->
+                  Queue.clear queue;
+                  List.iter (before @ rest) ~f:(Queue.enqueue queue) ))
+      in
+      match take_next with
+      | None -> if Queue.is_empty queue then Hashtbl.remove t.root_queues root
+      | Some (entry, take) when Job.is_terminal entry.job ->
+        take ();
+        run_next t root
+      | Some (entry, take) ->
+        let active = Hashtbl.find_or_add t.active_root_slots root ~default:Bag.create in
+        let running = Bag.length active in
+        (* Parallelism is an opt-in for a particular provider config/environment. Do not
+           skip a blocked head of line: later simulations must not starve source jobs. *)
+        if running = 0
+           || Option.exists entry.parallel_simulation ~f:(fun next ->
+             (* Discovery is single-flight and doesn't spend a provider run slot. It is
+                still part of the root queue for source exclusion/fairness. *)
+             (Bag.fold active ~init:0 ~f:(fun count -> function
+                | Some current when Bool.equal current.discovery next.discovery ->
+                  count + 1
+                | _ -> count)
+              < if next.discovery then 1 else next.max_parallel_runs)
+             && Bag.for_all active ~f:(function
+               | Some current ->
+                 String.equal next.config_digest current.config_digest
+                 && V1.Environment_selection.equal next.environment current.environment
+               | None -> false))
+        then (
+          take ();
+          let slot = Bag.add active entry.parallel_simulation in
+          run_supervised t entry ~on_finished:(fun () ->
+            Bag.remove active slot;
+            if Bag.is_empty active then Hashtbl.remove t.active_root_slots root;
+            run_next t root);
+          run_next t root))
+;;
+
+let enqueue_job t entry =
+  let root = entry.session.root in
+  let queue = Hashtbl.find_or_add t.root_queues root ~default:Queue.create in
+  Queue.enqueue queue entry;
+  emit t (Job_upsert entry.job);
+  run_next t root
 ;;
 
 let action_kind = function
@@ -1642,19 +1704,12 @@ let submit_job
                ; escalation_finished = Ivar.create ()
                ; finished = Ivar.create ()
                ; source_start = None
+               ; parallel_simulation = None
                }
              in
              Hashtbl.set t.jobs ~key:id ~data:entry;
              Ivar.fill_exn submission.ready (Ok entry);
-             let queue =
-               Hashtbl.find_or_add t.root_queues session.root ~default:Queue.create
-             in
-             Queue.enqueue queue entry;
-             emit t (Job_upsert job);
-             if not (Hash_set.mem t.running_roots session.root)
-             then (
-               Hash_set.add t.running_roots session.root;
-               run_next t session.root);
+             enqueue_job t entry;
              Ok { V1.Submit_job.Payload.job })))
 ;;
 
@@ -1762,19 +1817,12 @@ let generate_rtl
                   ; escalation_finished = Ivar.create ()
                   ; finished = Ivar.create ()
                   ; source_start = None
+                  ; parallel_simulation = None
                   }
                 in
                 Hashtbl.set t.jobs ~key:id ~data:entry;
                 Ivar.fill_exn submission.ready (Ok entry);
-                let queue =
-                  Hashtbl.find_or_add t.root_queues session.root ~default:Queue.create
-                in
-                Queue.enqueue queue entry;
-                emit t (Job_upsert job);
-                if not (Hash_set.mem t.running_roots session.root)
-                then (
-                  Hash_set.add t.running_roots session.root;
-                  run_next t session.root);
+                enqueue_job t entry;
                 Ok { V1.Generate_rtl.Payload.job }))))
 ;;
 
@@ -1907,6 +1955,7 @@ let refresh_integration t ({ instance_id; project } : V1.Refresh_integration.Req
                   ; escalation_finished = Ivar.create ()
                   ; finished = Ivar.create ()
                   ; source_start = None
+                  ; parallel_simulation = None
                   }
                 in
                 Hashtbl.set t.jobs ~key:id ~data:entry;
@@ -1917,15 +1966,7 @@ let refresh_integration t ({ instance_id; project } : V1.Refresh_integration.Req
                      { reason = "driver discovery pending in job " ^ Job_id.to_string id })
                   []
                   [];
-                let queue =
-                  Hashtbl.find_or_add t.root_queues session.root ~default:Queue.create
-                in
-                Queue.enqueue queue entry;
-                emit t (Job_upsert job);
-                if not (Hash_set.mem t.running_roots session.root)
-                then (
-                  Hash_set.add t.running_roots session.root;
-                  run_next t session.root);
+                enqueue_job t entry;
                 Ok { V1.Refresh_integration.Payload.job = Some job }))))
 ;;
 
@@ -1978,6 +2019,7 @@ let cancel_entry t entry =
            []
        | Dune_action _ | Driver_generate_rtl _ | Simulation_task _ -> ());
       finish_entry t entry Cancelled None None;
+      run_next t entry.session.root;
       let%bind () = Writer.close entry.log_writer in
       let%bind () =
         match entry.operation with
@@ -2208,19 +2250,19 @@ let asic_without_preparation t (request : Asic.Request.t) =
             operation
         in
         match request.operation with
-        | In_context { context; initial_target; operation } ->
+         | In_context { context; initial_target; operation } ->
           (* Detach and first discovery are separate requests. An observer's Get
              can win that race; use the registry's immutable detach seed rather
              than letting whichever client polled first choose the target. *)
-          let scoped seed =
+           let scoped seed =
             handle (In_context { context; initial_target = Option.value seed ~default:initial_target; operation })
-          in
+           in
           (match Workspace_service.cached_context_seed t.workspace_service ~project_key:session.key context with
-           | Some _ as seed -> scoped seed
-           | None ->
+            | Some _ as seed -> scoped seed
+            | None ->
              (match%bind Workspace_service.handle t.workspace_service ~project_key:session.key Get with
-              | Error error -> return (Error error)
-              | Ok registry -> scoped (Workspace_service.context_seed registry context)))
+               | Error error -> return (Error error)
+               | Ok registry -> scoped (Workspace_service.context_seed registry context)))
         | operation -> handle operation)
 ;;
 
@@ -2245,7 +2287,7 @@ let simulation t (request : Simulation.Request.t) =
            && String.equal reference.id input.artifact_id
            && String.equal reference.sha256 input.sha256)
        in
-       let schedule ~name ~reservation ~prepare =
+       let schedule ~name ~config ~reservation ~prepare =
          let reservation =
            Option.map reservation ~f:(fun (key, payload) ->
              let key = "simulation:" ^ session.root ^ ":" ^ key in
@@ -2292,6 +2334,8 @@ let simulation t (request : Simulation.Request.t) =
          in
          match
            Result.try_with (fun () ->
+             if t.shutting_down
+             then Simulation_service.rpc_error Conflict "Daemon is shutting down";
              if not (List.is_empty !verified_asic)
              then (
                let current =
@@ -2344,20 +2388,22 @@ let simulation t (request : Simulation.Request.t) =
              ; escalation_finished = Ivar.create ()
              ; finished = Ivar.create ()
              ; source_start = None
+             ; parallel_simulation =
+                 (if config.Simulation_service.Config.max_parallel_runs > 1
+                  then
+                    Some
+                      { max_parallel_runs = config.max_parallel_runs
+                      ; config_digest = Simulation_service.config_digest config
+                      ; environment = session.environment
+                      ; discovery = String.equal name "discover"
+                      }
+                  else None)
              }
            in
            Hashtbl.set t.jobs ~key:id ~data:entry;
            Option.iter reservation ~f:(fun (_, submission) ->
              Ivar.fill_exn submission.ready (Ok entry));
-           let queue =
-             Hashtbl.find_or_add t.root_queues session.root ~default:Queue.create
-           in
-           Queue.enqueue queue entry;
-           emit t (Job_upsert job);
-           if not (Hash_set.mem t.running_roots session.root)
-           then (
-             Hash_set.add t.running_roots session.root;
-             run_next t session.root);
+           enqueue_job t entry;
            return id
        in
        let cancel job =
@@ -2508,6 +2554,7 @@ let preparation_internal
            ; escalation_finished = Ivar.create ()
            ; finished = Ivar.create ()
            ; source_start = None
+           ; parallel_simulation = None
            }
          in
          Hashtbl.set t.jobs ~key:id ~data:entry;
@@ -2521,14 +2568,7 @@ let preparation_internal
              Hashtbl.find_or_add t.root_queues session.root ~default:Queue.create
            in
            Queue.enqueue queue entry;
-           if Hash_set.mem t.preparation_waiters session.root
-           then (
-             Hash_set.remove t.preparation_waiters session.root;
-             run_next t session.root)
-           else if not (Hash_set.mem t.running_roots session.root)
-           then (
-             Hash_set.add t.running_roots session.root;
-             run_next t session.root));
+           run_next t session.root);
          entry.job
        in
        let import ~job ~valid ~output_dir ~files =
@@ -2625,11 +2665,7 @@ let preparation_internal
        Preparation_service.handle
          ~unique
          ?is_cancelled
-         ~on_release:(fun () ->
-           if Hash_set.mem t.preparation_waiters session.root
-           then (
-             Hash_set.remove t.preparation_waiters session.root;
-             run_next t session.root))
+         ~on_release:(fun () -> run_next t session.root)
          t.preparation_service
          ~root:session.root
          ~project_key:session.key

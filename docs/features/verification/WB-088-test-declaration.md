@@ -14,7 +14,7 @@ confidence: medium
 estimate_scope: incremental
 origin: owner-intake
 tags: [testing, cobalt, navigation]
-depends_on: [WB-087]
+depends_on: [WB-087, WB-092]
 related: [WB-032, WB-063, WB-066]
 ---
 
@@ -22,10 +22,13 @@ related: [WB-032, WB-063, WB-066]
 
 Carry an optional declaration position on a stable test catalog entry. Have one
 real provider capture it at the OCaml call site (for example with `[%here]`),
-not inside a shared registration helper. Route the Testing action through
-WB-087 rather than teaching the editor about tests.
+not inside a shared registration helper. The Testing module offers “Declaration”
+through [WB-092](../infrastructure/WB-092-module-jump-hook.md) for a captured
+catalog entry. WB-087 consumes the resulting location for the live embedded demo.
 
 ## Acceptance
+- Before integrating the editor, resolve a real entry through the shared hook
+  and assert the project, file and position at a recording destination.
 - With no run or failure required, select the test and invoke “Open declaration”
   (`gd` proposed). Cobalt focuses the correct project file and declaration.
 - Edit, go Back to the same Testing selection, and repeat the jump. Unsaved

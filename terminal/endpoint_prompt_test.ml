@@ -57,7 +57,7 @@ let () =
     H.input
       { host with
         palette =
-          Some { capture; commands = []; query; index = 0; argument = Some argument }
+          Some { capture; commands = []; query; index = 0; viewport = `Follow 0; argument = Some argument }
       }
       Enter
       ~commands:[]
@@ -165,6 +165,7 @@ let () =
               ; commands = []
               ; query = query "standard" "balanced"
               ; index = 0
+              ; viewport = `Follow 0
               ; argument = Some argument
               }
         }

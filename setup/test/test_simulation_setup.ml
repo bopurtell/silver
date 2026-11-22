@@ -93,6 +93,7 @@ let%test_unit "generated configuration round-trips through the strict parser" =
           ; provider_args = args
           ; discovery_timeout_seconds = 60
           ; run_timeout_seconds = Simulation_setup.default_run_timeout_seconds
+          ; max_parallel_runs = 1
           }
         in
         [%test_eq: Config.t] (Simulation_setup.config plan) expected;
@@ -104,7 +105,15 @@ let%test_unit "generated configuration round-trips through the strict parser" =
 
 let%test_unit "invalid inputs are rejected before anything is written" =
   with_project (fun ~base:_ ~root ->
-    let rejected ?(args = []) ?discovery ?run ?(root = root) executable fragment =
+    let rejected
+      ?(args = [])
+      ?discovery
+      ?run
+      ?max_parallel_runs
+      ?(root = root)
+      executable
+      fragment
+      =
       match
         Simulation_setup.prepare
           ~root
@@ -112,6 +121,7 @@ let%test_unit "invalid inputs are rejected before anything is written" =
           ~provider_args:args
           ?discovery_timeout_seconds:discovery
           ?run_timeout_seconds:run
+          ?max_parallel_runs
           ()
       with
       | Ok _ -> raise_s [%message "accepted" executable]
@@ -123,6 +133,8 @@ let%test_unit "invalid inputs are rejected before anything is written" =
     rejected "/p" ~discovery:61 "1..60";
     rejected "/p" ~run:0 "1..86400";
     rejected "/p" ~run:86_401 "1..86400";
+    rejected "/p" ~max_parallel_runs:0 "1..8";
+    rejected "/p" ~max_parallel_runs:9 "1..8";
     rejected "/p" ~args:(List.init 33 ~f:Int.to_string) "32 arguments";
     rejected "/p" ~args:[ "nul\000byte" ] "Invalid simulation provider argument";
     rejected "/p" ~root:(root ^/ "missing") "No such file";
@@ -132,6 +144,33 @@ let%test_unit "invalid inputs are rejected before anything is written" =
     Core_unix.unlink (root ^/ "sub" ^/ "dune");
     Core_unix.rmdir (root ^/ "sub");
     [%test_eq: string list] (listing root) [ "dune-project" ])
+;;
+
+let%test_unit "parallelism is opt-in and serial defaults retain their original config \
+               digest input"
+  =
+  let legacy =
+    "((schema_version 1)(provider_executable \
+     /p)(provider_args())(discovery_timeout_seconds 10)(run_timeout_seconds 300))"
+  in
+  let config = Config.parse_string legacy |> Or_error.ok_exn in
+  assert (config.max_parallel_runs = 1);
+  assert (Sexp.equal (Config.sexp_of_t config) (Sexp.of_string legacy));
+  with_project (fun ~base:_ ~root ->
+    match
+      Simulation_setup.prepare
+        ~root
+        ~provider_executable:"/p"
+        ~provider_args:[]
+        ~max_parallel_runs:2
+        ()
+    with
+    | Error message -> failwith message
+    | Ok plan ->
+      let parsed =
+        Config.parse_string (Simulation_setup.contents plan) |> Or_error.ok_exn
+      in
+      assert (parsed.max_parallel_runs = 2))
 ;;
 
 let%test_unit "preview names the destination, fields and provider state; prepare runs \

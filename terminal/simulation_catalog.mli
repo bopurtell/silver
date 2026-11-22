@@ -5,9 +5,16 @@ open Hardcaml_workbench_protocol
 type t
 
 val empty : t
+
+(** A refresh job is informational when the snapshot supplies the authoritative
+    catalog and digest. Locally retained data is only for browsing. *)
 val update : t -> Simulation.Snapshot.t -> t
+
 val invalidate : t -> t
+
+(** Wait for the explicit discovery request's first authoritative snapshot. *)
 val begin_discovery : t -> t
+
 val discovery_failed : t -> string -> t
 val suites : t -> Simulation.Suite.t list
 val suite : t -> Simulation.Suite.t option

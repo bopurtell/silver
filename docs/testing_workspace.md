@@ -405,7 +405,16 @@ changed/removed selections disable launch until explicitly corrected/accepted.
 The `e` settings form saves inputs in the current Testing workspace without
 running them. Switching suites or changing the discovery digest drops the saved
 seed and parameter overrides. The one-run Enter form never overwrites them.
-Failed/in-flight discovery can retain browsable catalog rows without enabling Run.
+**Discovery** asks the provider which suites and cases exist. A refresh with a
+still-valid catalog lets you keep launching; an initial discovery, a failed
+refresh, or rows retained from another configuration do not. If a refresh
+changes your selected inputs, review the new catalog and press `u` to accept.
+
+To submit another attempt while watching a run, focus **Catalog**, choose a
+suite and cases, and press `R`. **Attempts** shows each submission separately.
+With an overlap-safe provider configured for `max_parallel_runs > 1`, independent
+attempts can run together; while waiting for capacity or exclusive project
+work, a submitted attempt is **Queued**, not disabled.
 Already-open palette/forms keep captured inputs; stale launch requests are rejected
 by the normal backend digest/config checks rather than retargeted.
 

@@ -83,7 +83,12 @@ let init_command =
          "--run-timeout-seconds"
          (optional seconds_arg)
          ~doc:"SECONDS run timeout, 1..86400"
-     and dry_run =
+      and max_parallel_runs =
+        flag
+          "--max-parallel-runs"
+          (optional int)
+          ~doc:"N concurrent runs for an overlap-safe provider, 1..8 (default 1)"
+      and dry_run =
        flag "--dry-run" no_arg ~doc:" print the preview without writing anything"
      in
      fun () ->
@@ -94,7 +99,8 @@ let init_command =
            ~provider_executable
            ~provider_args
            ?discovery_timeout_seconds
-           ?run_timeout_seconds
+            ?run_timeout_seconds
+            ?max_parallel_runs
            ()
        with
        | Error message -> report_error message

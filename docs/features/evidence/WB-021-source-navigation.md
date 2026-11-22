@@ -25,7 +25,8 @@ read-only buffer or range-selection hook in Cobalt, track that change and its
 verification here alongside Silver's navigation action.
 
 **Cobalt delivery slice:** use the [retained-path trace](WB-091-timing-origin-trace.md)
-to select one producer and the [generic editor action](../workspaces/WB-087-cobalt-editor.md)
+to select one producer, the [module jump hook](../infrastructure/WB-092-module-jump-hook.md)
+to offer and resolve Timing actions, and the [generic editor action](../workspaces/WB-087-cobalt-editor.md)
 to open its result. For a whole path, offer launch/capture rather than silently
 choosing an endpoint. Open retained RTL read-only when that is the last proven hop;
 label ambiguous or stale origins explicitly. Back restores the exact Timing

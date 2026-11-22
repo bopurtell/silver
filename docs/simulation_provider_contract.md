@@ -37,7 +37,7 @@ For a native adapter, `provider_executable` names its absolute installed executa
 and `provider_args` may be empty. The Python configuration below remains valid.
 
 Opt-in root file `hardcaml-workbench-simulation.sexp`, independent of the generic
-manifest and ASIC config. All five fields are required; unknown fields are errors:
+manifest and ASIC config. The five fields below are required; unknown fields are errors:
 
 ```sexp
 ((schema_version 1)
@@ -46,6 +46,14 @@ manifest and ASIC config. All five fields are required; unknown fields are error
  (discovery_timeout_seconds 10)
  (run_timeout_seconds 300))
 ```
+
+Optional `max_parallel_runs` (1–8, default 1) opts the project into overlapping
+simulation attempts. Set it above one only for a provider that can handle two
+invocations from the same checkout: use attempt-specific paths for simulation
+outputs and serialize any build steps that write shared files. You can set it
+with `silver-simulation-setup init --max-parallel-runs N`. Attempts above the
+limit are accepted and queued rather than rejected. The limit is on attempts;
+selecting multiple cases in one attempt does not change the provider's case order.
 
 The executable is absolute; prefix arguments may be empty. No shell parsing,
 interpolation, PATH guessing, Dune build, or implicit provider build occurs. Run from
@@ -257,9 +265,13 @@ payload returns the same attempt/job even if it finished. Reusing key with diffe
 payload is Conflict; rerun needs a fresh key to create a distinct attempt. Persist
 key/payload mapping with retained attempt; once evicted, no cross-retention dedup
 guarantee. Rerun retries must check reservation before re-reading mutable source state.
-Latest current discovery is required for rerun; it never auto-refreshes or executes
+Current successful discovery is required for rerun; it never auto-refreshes or executes
 discovery on behalf of Observe/Get/History. Config is re-read at submission;
 discovery validity is tied to config identity so changed config requires Discover.
+A background refresh does not by itself invalidate the last successful catalog
+for the same configuration and environment. The submitted digest must still
+match at admission. An initial discovery or a failed refresh does not authorize
+launching from retained display rows.
 
 Not configured: Get/History/Observe/artifact reads still work; Discover/Launch/Rerun
 return Unsupported_operation. Missing attempt/artifact: Not_found. Invalid schema,

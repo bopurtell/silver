@@ -46,6 +46,7 @@ type t =
 
 type schedule =
   name:string
+  -> config:Config.t
   -> reservation:(string * string) option
   -> prepare:(Job_id.t -> Simulation_task.t)
   -> Job_id.t Deferred.t
@@ -352,6 +353,22 @@ let load_config p =
 
 let config_digest config = Files.digest (Sexp.to_string_mach (Config.sexp_of_t config))
 
+let catalog_is_current p config ~environment =
+  let digest = config_digest config in
+  Option.is_none p.discovery_error
+  && Option.equal String.equal p.discovery_config (Some digest)
+  && Option.equal
+       V1.Environment_selection.equal
+       p.discovery_environment
+       (Some environment)
+  && ((not p.discovering)
+      || Option.exists
+           p.last_discovery_request
+           ~f:(fun (requested_digest, requested_env) ->
+             String.equal digest requested_digest
+             && V1.Environment_selection.equal environment requested_env))
+;;
+
 let summary (a : Attempt.t) : Summary.t =
   { id = a.id
   ; job = a.job
@@ -365,7 +382,17 @@ let summary (a : Attempt.t) : Summary.t =
   }
 ;;
 
-let snapshot p ~configured ?detail ?byte_page ?before ?(limit = Limits.history_page) () =
+let snapshot
+  p
+  ~configured
+  ?discovery_digest
+  ?discovery_error
+  ?detail
+  ?byte_page
+  ?before
+  ?(limit = Limits.history_page)
+  ()
+  =
   let entries = ordered p in
   let entries =
     match before with
@@ -381,9 +408,9 @@ let snapshot p ~configured ?detail ?byte_page ?before ?(limit = Limits.history_p
   let page = List.take entries limit in
   { Snapshot.configured
   ; discovery = p.discovery
-  ; discovery_digest = p.discovery_digest
+  ; discovery_digest
   ; discovery_job = (if p.discovering then p.discovery_job else None)
-  ; discovery_error = p.discovery_error
+  ; discovery_error
   ; attempts = List.map page ~f:(fun e -> summary e.record.attempt)
   ; next_before =
       (if List.length entries > limit
@@ -711,13 +738,12 @@ let discover p config ~environment ~schedule =
   else (
     p.discovering <- true;
     p.last_discovery_request <- Some (config_digest config, environment);
-    p.discovery_error <- None;
     let output = Buffer.create 4096 in
     let failure = ref None in
     let fail reason = if Option.is_none !failure then failure := Some reason in
     let%map job =
       Monitor.try_with (fun () ->
-        schedule ~name:"discover" ~reservation:None ~prepare:(fun _ ->
+        schedule ~name:"discover" ~config ~reservation:None ~prepare:(fun _ ->
           { Simulation_task.invocation = Adapter.discover config ~root:p.root ~environment
           ; timeout_seconds = config.discovery_timeout_seconds
           ; preflight = (fun () -> return ())
@@ -844,24 +870,42 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
     let%map result =
       Monitor.try_with (fun () ->
         let p = project t root in
-        let config_result = Or_error.try_with (fun () -> load_config p) in
-        let configured =
-          match config_result with
-          | Ok None -> false
-          | _ -> true
-        in
-        (match config_result with
-         | Error error -> p.discovery_error <- Some (Error.to_string_hum error)
-         | _ -> ());
+        let read_config () = Or_error.try_with (fun () -> load_config p) in
         let config_exn () =
-          match config_result with
+          match read_config () with
           | Ok (Some config) -> config
           | Ok None ->
             rpc_error Unsupported_operation "Simulation provider is not configured"
           | Error error -> rpc_error Invalid_request (Error.to_string_hum error)
         in
         let snap ?detail ?byte_page ?before ?limit () =
-          snapshot p ~configured ?detail ?byte_page ?before ?limit ()
+          let config_result = read_config () in
+          let configured =
+            match config_result with
+            | Ok None -> false
+            | _ -> true
+          in
+          let discovery_digest =
+            match config_result with
+            | Ok (Some config) when catalog_is_current p config ~environment ->
+              p.discovery_digest
+            | Ok _ | Error _ -> None
+          in
+          let discovery_error =
+            match config_result with
+            | Error error -> Some (Error.to_string_hum error)
+            | Ok _ -> p.discovery_error
+          in
+          snapshot
+            p
+            ~configured
+            ?discovery_digest
+            ?discovery_error
+            ?detail
+            ?byte_page
+            ?before
+            ?limit
+            ()
         in
         match operation with
         | Operation.Get -> return (snap ())
@@ -887,9 +931,9 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
           let%map () = discover p (config_exn ()) ~environment ~schedule in
           snap ()
         | Ensure_discovered ->
-          (* Remember failed attempts as well as successes: reconnecting to a
-             daemon must not retry a broken provider. Discover can still retry. *)
-          (match config_result with
+          (* Remember failed attempts as well as successes: reconnecting to a daemon must
+             not retry a broken provider. Discover can still retry. *)
+          (match read_config () with
            | Ok (Some config)
              when not
                     (Option.exists p.last_discovery_request ~f:(fun (digest, env) ->
@@ -965,18 +1009,10 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
              return (snap ~detail:entry.record.attempt ())
            | None ->
              let config = config_exn () in
-             if p.discovering
-                || Option.is_some p.discovery_error
-                || (not
-                      (Option.equal
-                         V1.Environment_selection.equal
-                         p.discovery_environment
-                         (Some environment)))
-                || not
-                     (Option.equal
-                        String.equal
-                        p.discovery_config
-                        (Some (config_digest config)))
+             (* Until a refresh settles, the last successful matching catalog is still
+                authoritative. A failed refresh continues to fence new reservations until
+                a successful discovery replaces it. *)
+             if not (catalog_is_current p config ~environment)
              then rpc_error Conflict "Current successful simulation discovery is required";
              let discovery =
                match p.discovery with
@@ -1032,6 +1068,7 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
                Monitor.try_with (fun () ->
                  schedule
                    ~name:"run"
+                   ~config
                    ~reservation:(Some (submission_key, payload))
                    ~prepare:(fun job ->
                      let config_unchanged =
@@ -1040,23 +1077,12 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
                        | Ok None | Error _ -> false
                      in
                      if (not config_unchanged)
-                        || p.discovering
-                        || Option.is_some p.discovery_error
-                        || (not
-                              (Option.equal
-                                 String.equal
-                                 p.discovery_config
-                                 (Some (config_digest config))))
-                        || (not
-                              (Option.equal
-                                 String.equal
-                                 p.discovery_digest
-                                 (Some discovery_digest)))
+                        || (not (catalog_is_current p config ~environment))
                         || not
                              (Option.equal
-                                V1.Environment_selection.equal
-                                p.discovery_environment
-                                (Some environment))
+                                String.equal
+                                p.discovery_digest
+                                (Some discovery_digest))
                      then
                        rpc_error
                          Conflict

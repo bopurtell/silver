@@ -224,6 +224,14 @@ let default_detail t =
     }
 ;;
 
+let same_discovery (a : S.Snapshot.t) (b : S.Snapshot.t) =
+  Bool.equal a.configured b.configured
+  && Option.equal S.Discovery.equal a.discovery b.discovery
+  && Option.equal String.equal a.discovery_digest b.discovery_digest
+  && Option.equal Job_id.equal a.discovery_job b.discovery_job
+  && Option.equal String.equal a.discovery_error b.discovery_error
+;;
+
 let set_view t view =
   let had_detail = Option.is_some (Simulation_view.detail t.view) in
   let same_attempt =
@@ -231,7 +239,9 @@ let set_view t view =
   in
   let same_case = Option.equal String.equal t.view.case_id view.case_id in
   let catalog =
-    if Option.equal S.Snapshot.equal t.view.snapshot view.snapshot
+    (* Changing only investigation details (e.g. selecting an attempt) must not
+       reauthorize the retained catalog after reconnect or a failed Discover. *)
+    if Option.equal same_discovery t.view.snapshot view.snapshot
     then t.catalog
     else
       Option.value_map
@@ -1221,6 +1231,17 @@ let%test_unit "late responses reconnect and artifact removal cannot retarget \
   in
   assert (not stale.view.busy);
   assert (Or_error.is_error (Simulation_catalog.launch stale.catalog));
+  let switched = select_attempt stale "new-after-reconnect" in
+  assert (Option.is_none (Simulation_view.detail switched.view));
+  assert (Or_error.is_error (Simulation_catalog.launch switched.catalog));
+  let fresh = begin_request switched in
+  let started =
+    { Test_data.snapshot with discovery_job = Some (Job_id.of_string "discovery") }
+  in
+  let fresh =
+    receive fresh ~ticket:fresh.view.request ~selected:fresh.view.attempt Get (Ok started)
+  in
+  assert (Or_error.is_ok (Simulation_catalog.launch fresh.catalog));
   let t =
     Test_data.loaded () |> fun t -> select_artifact t "artifact-full-id" |> begin_request
   in

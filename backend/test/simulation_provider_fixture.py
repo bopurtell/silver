@@ -36,6 +36,15 @@ parser.add_argument('--request')
 parser.add_argument('--events')
 parser.add_argument('--artifact-dir')
 args = parser.parse_args()
+
+
+def hold(marker, release):
+    with open(marker, 'w') as started:
+        started.write(str(os.getpid()))
+    while not os.path.exists(release):
+        time.sleep(.01)
+
+
 if args.operation == 'discover':
     if os.path.exists('discovery-mode'):
         value = open('discovery-mode').read()
@@ -45,7 +54,10 @@ if args.operation == 'discover':
         if value == 'version':
             print('((protocol_version 2)(suites ()))')
             sys.exit(0)
-    print('((protocol_version 1)(suites (((id demo)(label Demo)'
+        if value == 'held':
+            hold('discovery-started', 'release-discovery')
+    label = 'Updated' if os.path.exists('updated-catalog') else 'Demo'
+    print('((protocol_version 1)(suites (((id demo)(label ' + label + ')'
           '(cases (((id one)(label One))((id two)(label Two))))'
           '(parameters (((key mode)(label Mode)(default pass)(choices ()))))'
           '(default_seed 42)))))')
@@ -82,6 +94,8 @@ for case in selection['cases']:
     emit(['Case_started', case])
     emit(['Progress', [['case_id', [case]], ['completed', 1],
                        ['total', []], ['unit_', 'cycles']]])
+    if mode.startswith('held-'):
+        hold(mode + '-started', 'release-' + mode)
     if mode == 'hang':
         time.sleep(30)
     if mode == 'bad':
@@ -95,7 +109,8 @@ for case in selection['cases']:
         os.symlink('/etc/hosts', path)
     else:
         with open(path, 'wb') as artifact:
-            artifact.write(b'\x00\xff\r\nVCD\x80')
+            data = mode.encode() if mode.startswith('held-') else b'\x00\xff\r\nVCD\x80'
+            artifact.write(data)
     emit(['Artifact', [['id', 'wave-' + case], ['case_id', [case]],
                        ['label', 'Trace'], ['kind', 'waveform'],
                        ['media_type', 'application/octet-stream'],

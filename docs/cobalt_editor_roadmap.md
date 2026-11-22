@@ -21,6 +21,7 @@ acceptance work.
 
 | Order | Ticket | What to try before moving on |
 | --- | --- | --- |
+| 1 (parallel) | [WB-092 — Shared module jump hook](features/infrastructure/WB-092-module-jump-hook.md) | Offer and resolve a jump headlessly, independent of Testing and editor choice. |
 | 1 | [WB-087 — Persistent editor and generic file open](features/workspaces/WB-087-cobalt-editor.md) | Open a project file at a line, edit it, leave, and come back to the same buffer. |
 | 2 | [WB-088 — Test declaration jump](features/verification/WB-088-test-declaration.md) | **First demo:** select a real test, jump to its OCaml declaration, then go back to the same catalog row. |
 | 3 | [WB-089 — Silver-wide ToggleTerm](features/integrations/WB-089-shared-toggleterm.md) | Start a shell from Testing; reopen that same numbered shell from Timing. |

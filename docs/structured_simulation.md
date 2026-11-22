@@ -30,6 +30,8 @@ below; worktree acceptance does not claim the main branch has been updated.
 - Versioned project-owned discovery and explicit suite/case/seed/parameter inputs.
 - Discovery and runs use the existing supervisor, per-root queue, jobs, logs,
   process-group cancellation and deadlines; no second process scheduler.
+  Providers that isolate concurrent runs can opt into [multiple simulation slots
+  per root](simulation_provider_contract.md#configuration-and-process-invocation).
 - Structured live case events/progress, failure messages and reports. Process exit,
   lifecycle and semantic result remain separate. Invalid/incomplete streams cannot
   create successful attempts; accepted partial results survive cancellation.

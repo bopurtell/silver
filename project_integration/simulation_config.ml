@@ -7,6 +7,7 @@ type t =
   ; provider_args : string list
   ; discovery_timeout_seconds : int
   ; run_timeout_seconds : int
+  ; max_parallel_runs : int [@default 1] [@sexp_drop_default.equal]
   }
 [@@deriving compare, equal, sexp]
 
@@ -27,6 +28,8 @@ let validate t =
   then failwith "Simulation discovery timeout must be in 1..60 seconds";
   if t.run_timeout_seconds < 1 || t.run_timeout_seconds > 86_400
   then failwith "Simulation run timeout must be in 1..86400 seconds";
+  if t.max_parallel_runs < 1 || t.max_parallel_runs > 8
+  then failwith "Simulation max_parallel_runs must be in 1..8";
   t
 ;;
 

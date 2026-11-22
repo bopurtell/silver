@@ -63,6 +63,7 @@ let prepare
   ~provider_args
   ?(discovery_timeout_seconds = default_discovery_timeout_seconds)
   ?(run_timeout_seconds = default_run_timeout_seconds)
+  ?(max_parallel_runs = 1)
   ()
   =
   let%bind.Result root = Project_discovery.explicit_root root in
@@ -86,6 +87,7 @@ let prepare
       ; provider_args
       ; discovery_timeout_seconds
       ; run_timeout_seconds
+      ; max_parallel_runs
       }
     in
     match Config.validate config with
@@ -131,6 +133,7 @@ let preview t =
     ; sprintf "provider_args:             %s\n" args
     ; sprintf "discovery_timeout_seconds: %d\n" t.config.discovery_timeout_seconds
     ; sprintf "run_timeout_seconds:       %d\n" t.config.run_timeout_seconds
+    ; sprintf "max_parallel_runs:         %d\n" t.config.max_parallel_runs
     ; "Rendered configuration:\n"
     ; t.contents
     ]

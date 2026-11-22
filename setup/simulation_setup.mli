@@ -33,6 +33,7 @@ val prepare
   -> provider_args:string list
   -> ?discovery_timeout_seconds:int
   -> ?run_timeout_seconds:int
+  -> ?max_parallel_runs:int
   -> unit
   -> (t, string) Result.t
 

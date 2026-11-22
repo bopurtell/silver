@@ -12,6 +12,7 @@ type t =
   ; digest : string option
   ; configured : bool
   ; blocked : string option
+  ; refreshing : bool
   ; suite_id : string option
   ; case_id : string option
   ; selected : string list
@@ -26,6 +27,7 @@ let empty =
   ; digest = None
   ; configured = false
   ; blocked = Some "Discover a simulation catalog first"
+  ; refreshing = false
   ; suite_id = None
   ; case_id = None
   ; selected = []
@@ -66,24 +68,29 @@ let select_suite t id =
     }
 ;;
 
+let pending_message = "Discovery in flight; retained catalog is browse-only"
+
 let update t (s : S.Snapshot.t) =
   let previous_suite = suite t in
+  let refreshing = Option.is_some s.discovery_job in
+  let blocked =
+    if not s.configured
+    then Some "No simulation provider configured"
+    else (
+      match s.discovery_error, s.discovery, s.discovery_digest with
+      | Some error, _, _ -> Some ("Discovery failed: " ^ error)
+      | None, Some _, Some _ -> None
+      | None, _, _ when refreshing -> Some pending_message
+      | None, None, _ -> Some "No current discovery; retained catalog is browse-only"
+      | None, Some _, None -> Some "Discovery digest unavailable; discover again")
+  in
   let t =
     { t with
       discovery = Option.first_some s.discovery t.discovery
-    ; digest = s.discovery_digest
+    ; digest = (if Option.is_none blocked then s.discovery_digest else None)
     ; configured = s.configured
-    ; blocked =
-        (if not s.configured
-         then Some "No simulation provider configured"
-         else if Option.is_some s.discovery_job
-         then Some "Discovery in flight; retained catalog is browse-only"
-         else
-           Option.first_some
-             (Option.map s.discovery_error ~f:(fun e -> "Discovery failed: " ^ e))
-             (if Option.is_none s.discovery
-              then Some "No current discovery; retained catalog is browse-only"
-              else None))
+    ; blocked
+    ; refreshing
     }
   in
   let t =
@@ -101,9 +108,9 @@ let update t (s : S.Snapshot.t) =
 
 let invalidate t = { t with blocked = Some "Reconnect: refresh discovery before launch" }
 
-let begin_discovery t =
-  { t with blocked = Some "Discovery in flight; retained catalog is browse-only" }
-;;
+(* Wait for the discovery RPC to report whether the current catalog remains
+   authoritative. Once it does, the background job is progress, not a launch fence. *)
+let begin_discovery t = { t with blocked = Some pending_message }
 
 let discovery_failed t error = { t with blocked = Some ("Discovery failed: " ^ error) }
 
@@ -233,8 +240,12 @@ let rows ?(string_compression = true) t =
   let row = Simulation_view.row in
   let reason = disabled_reason t in
   let readiness =
-    Option.value_map reason ~default:"Ready for explicit launch" ~f:(fun reason ->
-      "Launch disabled: " ^ reason)
+    match reason with
+    | Some reason -> "Launch disabled: " ^ reason
+    | None ->
+      if t.refreshing
+      then "Ready for explicit launch; discovery refresh in progress"
+      else "Ready for explicit launch"
   in
   [ row
       ~spans:
@@ -443,16 +454,41 @@ let%test_unit "refresh never retargets missing suite case or changed defaults" =
   assert (Or_error.is_ok (launch (select_suite t "different")))
 ;;
 
-let%test_unit "failed pending missing digest and reconnect discovery retain browsable \
-               catalog"
-  =
+let%test_unit "authoritative discovery remains launchable during background refresh" =
+  let snapshot = Test_data.snapshot [ Test_data.suite ] in
+  let started = { snapshot with discovery_job = Some (Job_id.of_string "discovery") } in
+  assert (Or_error.is_ok (launch (update empty started)));
+  let t = update empty snapshot |> fun t -> toggle_case t "directed" in
+  let _, defaults, _ = launch t |> Or_error.ok_exn in
+  let selection = { defaults with seed = "91" } in
+  let refreshing = update (begin_discovery (save_configuration t selection)) started in
+  let suite, actual, digest = launch refreshing |> Or_error.ok_exn in
+  assert (S.Suite.equal suite Test_data.suite);
+  assert (S.Selection.equal actual selection);
+  assert (String.equal digest "d1");
+  assert (
+    String.equal
+      (List.hd_exn (rows refreshing)).text
+      "Ready for explicit launch; discovery refresh in progress");
+  let changed = update refreshing { started with discovery_digest = Some "d2" } in
+  assert (Or_error.is_error (launch changed));
+  let _, accepted, digest = launch (accept changed) |> Or_error.ok_exn in
+  assert (S.Selection.equal accepted defaults);
+  assert (String.equal digest "d2")
+;;
+
+let%test_unit "missing or invalid authority retains a browse-only catalog even during refresh" =
   let snapshot = Test_data.snapshot [ Test_data.suite ] in
   let t = update empty snapshot in
+  let pending = { snapshot with discovery_job = Some (Job_id.of_string "discovery") } in
   List.iter
     [ begin_discovery t
     ; discovery_failed t "bad stream"
     ; invalidate t
-    ; update t { snapshot with discovery_job = Some (Job_id.of_string "job") }
+    ; update t { pending with discovery = None }
+    ; update t { pending with discovery_error = Some "invalid" }
+    ; update t { pending with discovery_digest = None }
+    ; update t { pending with configured = false }
     ; update t { snapshot with discovery = None; discovery_error = Some "invalid" }
     ; update t { snapshot with discovery = None }
     ; update t { snapshot with discovery_digest = None }
@@ -460,7 +496,7 @@ let%test_unit "failed pending missing digest and reconnect discovery retain brow
     ]
     ~f:(fun t ->
       assert (List.length (visible_cases t) = 2);
-      assert (Or_error.is_error (launch t)));
+      assert (Or_error.is_error (launch (accept t))));
   let changed_same_digest = { Test_data.suite with default_seed = "88" } in
   let t = update t (Test_data.snapshot [ changed_same_digest ]) in
   assert (Or_error.is_error (launch t));

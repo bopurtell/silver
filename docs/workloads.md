@@ -93,6 +93,12 @@ history and rerun. Actual emitted implementation RTL executes under Icarus; Exac
 uses both unchanged stock SRAM functional model files. No synthesis/P&R/STA starts.
 Both cases run sequentially when selected together.
 
+For two independent attempts at once (for example, a memory workload and a FIFO
+test), configure the prepared example checkout with
+`python3 -B scripts/configure-simulation.py --max-parallel-runs 2`. Start the
+updated Silver daemon and submit each attempt separately from Testing. Changing
+the limit is not necessary to run the two cases sequentially in one attempt.
+
 When the attempt completes, select the intended case in Testing and choose
 **Inspect workload result (selected Testing case)**. This reads its exact
 attempt/case-bound reference artifact, checks its byte digest and opens the retained

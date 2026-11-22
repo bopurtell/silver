@@ -124,7 +124,9 @@ let reducers () =
       cancelled
       (Sexp.to_string_mach (Provider.Event.sexp_of_t e))
       ~artifact:(fun _ -> failwith "Unexpected cancellation artifact"));
-  require (Option.is_none cancelled.attempt.diagnostic) "Rejected valid cancellation prefix";
+  require
+    (Option.is_none cancelled.attempt.diagnostic)
+    "Rejected valid cancellation prefix";
   require
     (Option.is_none (Reducer.finish cancelled ~cancelled:true (Some (Exited 130)))
      && Lifecycle.equal cancelled.attempt.lifecycle Cancelled
@@ -265,7 +267,8 @@ let review_store ~root ~state_dir ~config ~catalog =
     (Result.is_error (Or_error.try_with (fun () -> Store.load_config p)))
     "Invalid common simulation config fell back to legacy";
   Files.atomic common bytes;
-  Files.atomic legacy
+  Files.atomic
+    legacy
     (Sexp.to_string_mach (Config.sexp_of_t { config with run_timeout_seconds = 3 }));
   require
     (Result.is_error (Or_error.try_with (fun () -> Store.load_config p)))
@@ -299,35 +302,47 @@ let review_store ~root ~state_dir ~config ~catalog =
       ~verify_asic:(fun _ -> return ())
       operation
   in
-  let unexpected ~name:_ ~reservation:_ ~prepare:_ =
+  let unexpected ~name:_ ~config:_ ~reservation:_ ~prepare:_ =
     failwith "Unexpected provider scheduling"
   in
   (* Read-only hydration reuses the retained catalog, including when the old job has
      finished or disappeared from the scheduler. No provider is scheduled. *)
-  let check_get expected_job =
-    let%map result = handle unexpected Get in
+  let check_get ?environment ~launchable expected_job =
+    let%map result = handle ?environment unexpected Get in
     let snapshot = ok result in
     require
       (Option.equal Discovery.equal snapshot.discovery catalog.discovery
-       && Option.equal String.equal snapshot.discovery_digest catalog.discovery_digest)
-      "Get lost retained discovery";
+       && Option.equal
+            String.equal
+            snapshot.discovery_digest
+            (if launchable then catalog.discovery_digest else None))
+      "Get lost retained discovery or exposed an unusable digest";
     require
       (Option.equal Job_id.equal snapshot.discovery_job expected_job)
       "Get reported inactive discovery as in flight"
   in
   p.discovery_job <- Some (Job_id.of_string "finished-or-pruned-discovery");
-  let%bind () = check_get None in
+  let%bind () = check_get ~launchable:true None in
+  let other_environment : V1.Environment_selection.t = Opam_switch "different-context" in
+  let%bind () = check_get ~environment:other_environment ~launchable:false None in
   p.discovery_job <- None;
-  let%bind () = check_get None in
+  let%bind () = check_get ~launchable:true None in
   p.discovering <- true;
   p.discovery_job <- Some (Job_id.of_string "active-discovery");
-  let%bind () = check_get p.discovery_job in
+  p.last_discovery_request <- Some (identity, Inherit_daemon);
+  let%bind () = check_get ~launchable:true p.discovery_job in
+  p.last_discovery_request <- Some (identity, other_environment);
+  let%bind () = check_get ~launchable:false p.discovery_job in
+  let%bind () =
+    check_get ~environment:other_environment ~launchable:false p.discovery_job
+  in
   p.discovering <- false;
   p.discovery_error <- Some "retained discovery failure";
   let%bind failed_discovery = handle unexpected Get in
   require
-    (Option.equal String.equal (ok failed_discovery).discovery_error p.discovery_error)
-    "Get lost discovery failure";
+    (Option.equal String.equal (ok failed_discovery).discovery_error p.discovery_error
+     && Option.is_none (ok failed_discovery).discovery_digest)
+    "Get lost discovery failure or exposed failed catalog digest";
   p.discovery_error <- None;
   p.discovery_job <- None;
   let%bind mismatch =
@@ -335,7 +350,7 @@ let review_store ~root ~state_dir ~config ~catalog =
   in
   expect_error mismatch Conflict;
   let config_path = Filename.concat root Config.filename in
-  let schedule_changed ~name:_ ~reservation:_ ~prepare =
+  let schedule_changed ~name:_ ~config:_ ~reservation:_ ~prepare =
     Files.atomic
       config_path
       (Sexp.to_string_mach (Config.sexp_of_t { config with run_timeout_seconds = 3 }));
@@ -346,11 +361,12 @@ let review_store ~root ~state_dir ~config ~catalog =
   in
   let%bind changed = handle schedule_changed operation in
   expect_error changed Conflict;
+  let%bind () = check_get ~launchable:false None in
   require
     (Hashtbl.is_empty p.entries)
     "Pre-reservation conflict left an accepted reservation";
   Files.atomic config_path (Sexp.to_string_mach (Config.sexp_of_t config));
-  let schedule_full ~name:_ ~reservation:_ ~prepare =
+  let schedule_full ~name:_ ~config:_ ~reservation:_ ~prepare =
     List.iter (Sys_unix.ls_dir p.dir) ~f:(fun name ->
       Files.mkdir (Filename.concat (Filename.concat p.dir name) "record.sexp"));
     ignore
@@ -376,7 +392,7 @@ let review_store ~root ~state_dir ~config ~catalog =
     "Get blocked behind mutation/export gate";
   Ivar.fill_exn release ();
   let%bind () = held in
-  let schedule_drain ~name:_ ~reservation:_ ~prepare =
+  let schedule_drain ~name:_ ~config:_ ~reservation:_ ~prepare =
     let job = Job_id.of_string "review-drain" in
     let task : Hardcaml_workbench_backend.Simulation_task.t = prepare job in
     let entry =
@@ -433,7 +449,7 @@ let review_store ~root ~state_dir ~config ~catalog =
     | Launch request -> Launch { request with submission_key = "terminal-write-failure" }
     | _ -> assert false
   in
-  let terminal_failure ~name:_ ~reservation:_ ~prepare =
+  let terminal_failure ~name:_ ~config:_ ~reservation:_ ~prepare =
     let job = Job_id.of_string "terminal-write-failure" in
     let task : Hardcaml_workbench_backend.Simulation_task.t = prepare job in
     let entry =
@@ -457,6 +473,141 @@ let review_store ~root ~state_dir ~config ~catalog =
     "Terminal persistence failure concealed store error"
 ;;
 
+let concurrent_runs ~root ~config ~create =
+  let config = { config with Config.max_parallel_runs = 2; run_timeout_seconds = 15 } in
+  let write file data = Files.atomic (Filename.concat root file) data in
+  let exists file =
+    match Sys_unix.file_exists (Filename.concat root file) with
+    | `Yes -> true
+    | `No | `Unknown -> false
+  in
+  let marker file = bounded (wait (fun () -> return (exists file)) Fn.id) >>| ignore in
+  write Config.filename (Sexp.to_string_mach (Config.sexp_of_t config));
+  let%bind service, instance_id, project = create "parallel" in
+  Monitor.protect
+    ~finally:(fun () -> Service.shutdown service)
+    (fun () ->
+      let rpc operation =
+        Service.simulation service { instance_id; project; operation }
+      in
+      let get operation = rpc operation >>| ok in
+      let detail snapshot = Option.value_exn snapshot.Snapshot.detail in
+      let observe id = get (Observe id) >>| detail in
+      let terminal attempt =
+        bounded (wait (fun () -> observe attempt.Attempt.id) (Fn.non Files.is_active))
+      in
+      let job id =
+        (ok (Service.snapshot service { instance_id })).jobs
+        |> List.find_exn ~f:(fun job -> Job_id.equal job.id id)
+      in
+      let wait_job id predicate = bounded (wait (fun () -> return (job id)) predicate) in
+      let%bind started = get Discover in
+      let%bind (_ : Job.t) =
+        wait_job (Option.value_exn started.discovery_job) Job.is_terminal
+      in
+      let%bind catalog = get Get in
+      let digest = Option.value_exn catalog.discovery_digest in
+      let launch ?(mode = "pass") key : Operation.t =
+        Launch
+          { submission_key = key
+          ; discovery_digest = digest
+          ; selection =
+              { suite = "demo"
+              ; cases = [ "one" ]
+              ; seed = "42"
+              ; parameters = [ "mode", mode ]
+              ; asic_inputs = []
+              }
+          }
+      in
+      let a_request = launch ~mode:"held-a" "parallel-a" in
+      let%bind a = get a_request >>| detail in
+      let%bind () = marker "held-a-started" in
+      write "discovery-mode" "held";
+      write "updated-catalog" "";
+      let%bind refreshing = get Discover in
+      let refresh_job = Option.value_exn refreshing.discovery_job in
+      let%bind () = marker "discovery-started" in
+      let b_request = launch ~mode:"held-b" "parallel-b" in
+      let%bind b, retry =
+        Deferred.both (get b_request >>| detail) (get b_request >>| detail)
+      in
+      require (String.equal b.id retry.id) "Parallel retry launched a second attempt";
+      let%bind () = marker "held-b-started" in
+      require
+        (Job.State.equal (job a.job).state Running
+         && Job.State.equal (job refresh_job).state Running)
+        "Second simulation did not overlap both the first run and held discovery";
+      let%bind c = get (launch ~mode:"held-c" "parallel-c") >>| detail in
+      let%bind queued = get (launch "parallel-cancel-queued") >>| detail in
+      require
+        (List.for_all [ c; queued ] ~f:(fun a -> Job.State.equal (job a.job).state Queued)
+         && not (exists "held-c-started"))
+        "Run limit did not queue excess simulations";
+      let%bind queued = get (Cancel queued.id) >>| detail in
+      require (Lifecycle.equal queued.lifecycle Cancelled) "Queued cancellation failed";
+      write "hold-generic" "";
+      let%bind build =
+        Service.submit_job
+          service
+          { instance_id; project; action = Build; submission_key = "parallel-build" }
+        >>| ok
+      in
+      let%bind d = get (launch ~mode:"held-d" "parallel-d") >>| detail in
+      write "release-held-a" "";
+      let%bind a = terminal a in
+      let%bind () = marker "held-c-started" in
+      let%bind c = get (Cancel c.id) >>| detail in
+      require (Lifecycle.equal c.lifecycle Cancelled) "Running cancellation failed";
+      write "release-held-b" "";
+      let%bind b = terminal b in
+      let%bind () =
+        Deferred.List.iter
+          [ a, "held-a"; b, "held-b" ]
+          ~how:`Sequential
+          ~f:(fun (attempt, expected) ->
+            require (Outcome.equal attempt.outcome Passed) "Held run failed";
+            let artifact = List.hd_exn attempt.artifacts in
+            let%map result =
+              get
+                (Read_artifact_bytes
+                   { attempt_id = attempt.id
+                   ; artifact_id = artifact.id
+                   ; sha256 = Option.value_exn artifact.sha256
+                   ; offset = 0
+                   ; limit = 64
+                   })
+            in
+            require
+              (String.equal
+                 (Option.value_exn result.byte_page).bytes_hex
+                 (Files.hex expected))
+              "Parallel attempts captured each other's artifacts")
+      in
+      require
+        (Job.State.equal (job build.job.id).state Queued
+         && Job.State.equal (job d.job).state Queued
+         && (not (exists "generic-started"))
+         && not (exists "held-d-started"))
+        "Discovery did not exclude source jobs, or a later simulation bypassed the build";
+      write "release-discovery" "";
+      let%bind () = marker "generic-started" in
+      require
+        (Job.State.equal (job d.job).state Queued)
+        "Simulation ran alongside an exclusive build";
+      let%bind stale = rpc (launch "parallel-stale") in
+      expect_error stale Conflict;
+      let%bind replay = get b_request >>| detail in
+      require (String.equal replay.id b.id) "Refresh broke idempotent retry";
+      write "release-generic" "";
+      let%bind () = marker "held-d-started" in
+      write "release-held-d" "";
+      let%map d = terminal d in
+      require
+        (Outcome.equal d.outcome Passed && String.equal d.captured.discovery_digest digest)
+        "Queued reservation lost its captured catalog after refresh")
+;;
+
 let tests fixture =
   codecs ();
   reducers ();
@@ -474,6 +625,7 @@ let tests fixture =
     ; provider_args = [ fixture ]
     ; discovery_timeout_seconds = 5
     ; run_timeout_seconds = 2
+    ; max_parallel_runs = 1
     }
   in
   Files.atomic
@@ -489,7 +641,12 @@ let tests fixture =
         ~kill_after:(Time_float.Span.of_ms 50.)
         ~action_invocation:(fun ~root ~environment _ ->
           { executable = "/bin/sh"
-          ; argv = [ "/bin/sh"; "-c"; "sleep 0.2" ]
+          ; argv =
+              [ "/bin/sh"
+              ; "-c"
+              ; "if [ -f hold-generic ]; then touch generic-started; while [ ! -f \
+                 release-generic ]; do sleep 0.02; done; else sleep 0.2; fi"
+              ]
           ; cwd = root
           ; environment
           })
@@ -533,7 +690,9 @@ let tests fixture =
       in
       let%bind catalog = discovery () in
       let%bind (_ : Snapshot.t) = get Ensure_discovered in
-      let job_count () = List.length (ok (Service.snapshot service { instance_id })).jobs in
+      let job_count () =
+        List.length (ok (Service.snapshot service { instance_id })).jobs
+      in
       require (job_count () = 1) "Startup discovery scheduled duplicate jobs";
       let digest = Option.value_exn catalog.discovery_digest in
       let selection ?(cases = [ "one"; "two" ]) mode =
@@ -700,13 +859,14 @@ let tests fixture =
           let%bind failed = refresh () in
           require
             (Option.is_some failed.discovery_error
-             && Option.equal String.equal failed.discovery_digest (Some digest))
-             "Failed refresh discarded catalog or concealed error";
-           let before = job_count () in
-           let%bind unchanged = get Ensure_discovered in
-           require
-             (Option.is_some unchanged.discovery_error && job_count () = before)
-             "Passive reconnect retried a failed provider";
+             && Option.equal Discovery.equal failed.discovery catalog.discovery
+             && Option.is_none failed.discovery_digest)
+            "Failed refresh discarded catalog or concealed error";
+          let before = job_count () in
+          let%bind unchanged = get Ensure_discovered in
+          require
+            (Option.is_some unchanged.discovery_error && job_count () = before)
+            "Passive reconnect retried a failed provider";
           let%map blocked = rpc (launch ("blocked-" ^ mode) "pass") in
           expect_error blocked Conflict)
       in
@@ -742,11 +902,17 @@ let tests fixture =
              (fun () -> observe hanging.id)
              (fun a -> Lifecycle.equal a.lifecycle Running))
       in
+      let%bind serial = get (launch "serial-run" "pass") >>| detail in
+      require
+        (Lifecycle.equal serial.lifecycle Queued)
+        "Non-opted-in simulations ran concurrently";
       let%bind cancelled = get (Cancel hanging.id) >>| detail in
       require
         (Lifecycle.equal cancelled.lifecycle Cancelled
          && Outcome.equal cancelled.outcome Incomplete)
         "Cancellation lost partial state";
+      let%bind serial = terminal serial in
+      require (Outcome.equal serial.outcome Passed) "Default serial queue did not resume";
       let%bind provisional = get (launch "provisional" "post-finish-hang") >>| detail in
       let%bind provisional =
         bounded
@@ -944,6 +1110,7 @@ let tests fixture =
         (String.equal (detail retry).id first.id)
         "Durable reservation lost on restart";
       let%bind () = Service.shutdown restarted in
+      let%bind () = concurrent_runs ~root ~config ~create in
       (* Pure store pressure: retain active entries and evict oldest terminal entry. *)
       let store = Store.create ~state_dir:(Filename.concat tree "bounded") in
       let bounded_project = Store.project store root in

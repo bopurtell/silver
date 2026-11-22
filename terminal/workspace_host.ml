@@ -7065,7 +7065,7 @@ let%test_unit "catalog reducer browses filters and captures subset without launc
     { configured = true
     ; discovery = Some { protocol_version = 1; suites = [ suite ] }
     ; discovery_digest = Some "exact-digest"
-    ; discovery_job = None
+    ; discovery_job = Some (Job_id.of_string "discovery")
     ; discovery_error = None
     ; attempts =
         [ { Simulation.Summary.id = "attempt"
@@ -7075,8 +7075,8 @@ let%test_unit "catalog reducer browses filters and captures subset without launc
           ; execution_timing = None
           ; created_at = "now"
           ; parent = None
-          ; lifecycle = Finished
-          ; outcome = Passed
+          ; lifecycle = Running
+          ; outcome = Unknown
           }
         ]
     ; next_before = None
@@ -7104,13 +7104,19 @@ let%test_unit "catalog reducer browses filters and captures subset without launc
   let catalog = Testing_workspace.catalog (testing_state host tile.id) in
   assert (List.equal String.equal (Simulation_catalog.selected_cases catalog) [ "second" ]);
   assert (String.equal (Simulation_catalog.filter catalog) "s");
-  let host, effect = input host Enter ~commands:[] in
-  (match effect with
-   | Execute (_, Testing_launch (id, captured)) ->
-     assert (W.Tile_id.equal id tile.id);
-     assert (List.equal String.equal captured.inputs.selection.cases [ "second" ]);
-     assert (Or_error.is_ok (validate_testing_launch host id captured))
-   | _ -> assert false);
+  let check_launch host =
+    match input host Enter ~commands:[] with
+    | host, Execute (_, Testing_launch (id, captured)) ->
+      assert (W.Tile_id.equal id tile.id);
+      assert (List.equal String.equal captured.inputs.selection.cases [ "second" ]);
+      assert (Or_error.is_ok (validate_testing_launch host id captured));
+      host
+    | _ -> assert false
+  in
+  (* Neither a running workload nor a pending background observation owns launch. *)
+  ignore
+    (check_launch (update_testing host tile.id Testing_workspace.begin_request) : t);
+  let host = check_launch host in
   (* Initial retained history now defaults to its newest attempt, independently of catalog
      filtering/launch capture. No execution or extra request was issued. *)
   assert (Option.equal String.equal (simulation host tile.id).attempt (Some "attempt"));
@@ -7333,6 +7339,12 @@ let%test_unit "catalog launch captures exact inputs and rejects changed catalog 
          (Simulation_catalog.move_case catalog 1
           |> fun catalog -> Simulation_catalog.set_filter catalog "b")
          captured));
+  let refreshing =
+    Simulation_catalog.update
+      (Simulation_catalog.begin_discovery catalog)
+      { snapshot with discovery_job = Some (Job_id.of_string "discovery") }
+  in
+  assert (Or_error.is_ok (validate_testing_inputs refreshing captured));
   let reject catalog =
     match validate_testing_inputs catalog captured with
     | Ok () -> assert false

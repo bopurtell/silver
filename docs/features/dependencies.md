@@ -8,8 +8,8 @@ described in ticket bodies, not reintroduced as unfinished tickets.
 
 ## Required additional ticket interfaces
 
-For the [Cobalt editor roadmap](../cobalt_editor_roadmap.md), WB-087 → WB-088
-delivers the test-declaration demo. WB-087 + WB-089 → WB-090 delivers the
+For the [Cobalt editor roadmap](../cobalt_editor_roadmap.md), WB-092 (resolve)
+and WB-087 (open) feed WB-088 for the test-declaration demo. WB-087 + WB-089 → WB-090 delivers the
 embedded ToggleTerm handoff. WB-091 informs the producer choice for WB-021;
 neither hardware ticket gates the editor or terminal demos.
 
