@@ -71,6 +71,7 @@ type mount =
   ; scheme : Appearance.Scheme.t Bonsai.Expert.Var.t
   ; commands : Cobalt_hosted.Host_command.t list Bonsai.Expert.Var.t
   ; mutable select_command : string -> unit Effect.t
+  ; mutable toggle_terminal : int option -> unit Effect.t
   ; mutable command_generation : int
   }
 
@@ -112,6 +113,7 @@ let mount mounts (owner : t) project =
          { key; project; startup; config; config_warning; scheme
          ; commands = Bonsai.Expert.Var.create []
          ; select_command = (fun _ -> Effect.Ignore)
+         ; toggle_terminal = (fun _ -> Effect.Ignore)
          ; command_generation = 0
          }
        in
@@ -188,6 +190,7 @@ let component mounts (local_ graph) =
               Cobalt_hosted.component ~layout:entry.config.layout ~appearance
                 ~host_commands:(Bonsai.Expert.Var.value entry.commands)
                 ~on_host_command:(Bonsai.return (fun id -> entry.select_command id))
+                ~on_toggle_terminal:(Bonsai.return (fun number -> entry.toggle_terminal number))
                 entry.startup ~dimensions ~visible ~focused graph
             in
             Bonsai.map pane ~f:Option.some

@@ -3,6 +3,8 @@ open Bonsai_term
 
 module Model = Cobalt_terminal_pool.Model
 
+let header_rows = 1
+
 let color : Model.color -> Attr.Color.t = function
   | Default -> Attr.Color.Expert.default
   | Indexed n -> Attr.Color.xterm_256 (Int.max 0 (Int.min 255 n))
@@ -92,6 +94,7 @@ let render ~number ~cwd ~status ~(snapshot : Model.snapshot option)
   then View.none
   else (
     let attrs = [ Attr.bold; Attr.invert ] in
+    let body_height = height - header_rows in
     let header =
       sprintf " Terminal %d (local) | %s | %s " number status cwd
       |> View.text ~attrs
@@ -99,10 +102,10 @@ let render ~number ~cwd ~status ~(snapshot : Model.snapshot option)
     in
     let body =
       match snapshot with
-      | None -> View.rectangle ~width ~height:(height - 1) ()
+      | None -> View.rectangle ~width ~height:body_height ()
       | Some snapshot ->
         View.vcat
-          (List.init (height - 1) ~f:(fun row ->
+          (List.init body_height ~f:(fun row ->
              let cursor =
                Option.is_none snapshot.exited
                && snapshot.cursor_visible

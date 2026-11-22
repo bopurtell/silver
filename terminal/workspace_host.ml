@@ -189,7 +189,9 @@ type action =
   | Toggle_browser_hints
   | Toggle_palette_hints
   | Toggle_terminal of int option
+  | Close_terminal
   | Restart_terminal
+  | Set_terminal_placement of [ `Center | `Bottom ]
   | Set_timing_preload of bool
   | Set_appearance of Appearance.t
   | Choose_theme
@@ -5229,6 +5231,10 @@ let global_palette_aliases =
   ; "veri", verify_evidence_command_id
   ; "verify evidence", verify_evidence_command_id
   ; "theme", choose_theme_id
+  ; "close term", "terminal.close"
+  ; "restart term", "terminal.restart"
+  ; "term center", "terminal.center"
+  ; "term bottom", "terminal.bottom"
   ]
 ;;
 
@@ -5323,6 +5329,15 @@ let capture_global_palette t ~commands =
     ; viewport = `Follow 0
     ; argument = None
     })
+;;
+
+let open_global_palette t ~commands =
+  { t with prefix = 0; palette = capture_global_palette t ~commands }
+;;
+
+let is_terminal_action = function
+  | Toggle_terminal _ | Close_terminal | Restart_terminal | Set_terminal_placement _ -> true
+  | _ -> false
 ;;
 
 let workspace_destination_prefix (c : command) =
@@ -6749,7 +6764,12 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
              set_local t tile.id { l with hierarchy }, No_effect)
          | Character 'c', 1 -> { t with prefix = 2 }, No_effect
          | Character 'c', 2 ->
-           { t with prefix = 0; palette = capture_global_palette t ~commands }, No_effect
+           open_global_palette t ~commands, No_effect
+        | Character '/', 1 ->
+          let t = { t with prefix = 0 } in
+          (match capture t with
+           | None -> t, No_effect
+           | Some capture -> t, Execute (capture, Toggle_terminal None))
         (* Hint chords stay available while every hint area is hidden; they route through
            the same captured command path as the palette entries. *)
         | Character (('h' | 'p') as key), 2 ->

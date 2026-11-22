@@ -66,7 +66,7 @@ startup treatment, not an accepted final aesthetic.
 | `c` | Cancel the focused tile's browsed job, if cancellable |
 | `i` | Refresh hardware integration |
 | `q` | Exit outside text-entry/modal capture |
-| `F10` | Show or hide the most recently selected terminal in this local project (starts at 1) |
+| `Space /` or `F10` | Show or hide the most recently selected terminal in this local project (starts at 1) |
 | `Alt+1`–`Alt+9` | Toggle a numbered terminal, or switch to that number if a different terminal is visible. Use the command palette for numbered access from the focused Cobalt editor. |
 | `F12` | Show the current terminal and restart it if it exited or failed. Use the palette when Cobalt has focus. |
 | Ctrl-C | Interrupt the foreground command when the shell has focus. Otherwise exit the client, including from filters, palette and incomplete paste; daemon work continues. |
@@ -94,7 +94,15 @@ separate from each other and shared across that project's workspaces. Hiding
 the shell returns input to the previous tile without stopping the shell. Clicking
 a visible workspace tab hides the overlay and restores the destination workspace's
 focus. A shell's final screen and exit status remain until you restart it.
-To exit Silver from the overlay, hide it with `F10`, then use Ctrl-C or `q`.
+From the shell, type `Space c c` as a chord to open Silver's command palette.
+`Esc` dismisses it and returns input to the shell. Search **close term** to hide
+the terminal without ending the shell, or **restart term** to restart an exited
+shell without using a function key.
+
+The default placement is **bottom**. Choose **term center** for a centered
+floating terminal or **term bottom** to switch back. You can do this with the
+shell open: its window size changes, but its process and cwd stay the same.
+To exit Silver, hide the overlay first, then use Ctrl-C or `q`.
 
 ## ASIC path
 

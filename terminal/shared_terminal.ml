@@ -34,12 +34,24 @@ type paste =
   ; mutable overflow : bool
   }
 
+type placement =
+  [ `Bottom
+  | `Center
+  ]
+
+type geometry =
+  { x : int
+  ; y : int
+  ; dimensions : Dimensions.t
+  }
+
 type t =
   { pool : Pool.t
   ; revision : int Bonsai.Expert.Var.t
   ; projects : project String.Table.t
   ; by_id : shell Int.Table.t
   ; mutable selected : shell option
+  ; mutable placement : placement
   ; mutable dimensions : Dimensions.t
   ; mutable paste : paste option option
   ; mutable closed : bool
@@ -74,6 +86,7 @@ let create () =
     ; projects = String.Table.create ()
     ; by_id = Int.Table.create ()
     ; selected = None
+    ; placement = `Bottom
     ; dimensions = { width = 80; height = 24 }
     ; paste = None
     ; closed = false
@@ -94,18 +107,57 @@ let create () =
   t
 ;;
 
-let pty_size ({ width; height } : Dimensions.t) =
-  (* The top row is Silver's status bar. Stay inside Cobalt's grid limit even
-     on unusually large terminal emulators, and never send a zero dimension. *)
-  let cols = Int.max 1 (Int.min 1000 width) in
-  let rows = Int.max 1 (Int.min (Int.min 500 (250_000 / cols)) (height - 1)) in
+let placement t = t.placement
+
+let floating_extent viewport_extent =
+  if viewport_extent < 4
+  then viewport_extent
+  else viewport_extent - Int.max 2 (viewport_extent / 4)
+;;
+
+let geometry t ~dimensions:({ width; height } : Dimensions.t) =
+  let width = Int.max 0 width in
+  let height = Int.max 0 height in
+  let tile_width, tile_height =
+    match t.placement with
+    | `Bottom ->
+      (* Keep the workspace strip visible except on small screens. *)
+      let top = if height < 10 then 0 else height / 3 in
+      width, height - top
+    | `Center -> floating_extent width, floating_extent height
+  in
+  (* Limit the visible grid as well as the PTY so their sizes agree even on unusually
+     large terminal emulators. *)
+  let tile_width = Int.min 1000 tile_width in
+  let max_rows = Int.min 500 (250_000 / Int.max 1 tile_width) in
+  let tile_height = Int.min (max_rows + Shared_terminal_view.header_rows) tile_height in
+  let x, y =
+    match t.placement with
+    | `Bottom -> 0, height - tile_height
+    | `Center -> (width - tile_width) / 2, (height - tile_height) / 2
+  in
+  { x; y; dimensions = { width = tile_width; height = tile_height } }
+;;
+
+let contains ({ x; y; dimensions = { width; height } } : geometry) ~x:col ~y:row =
+  col >= x && col < x + width && row >= y && row < y + height
+;;
+
+let pty_size t =
+  let ({ dimensions = { width; height }; _ } : geometry) =
+    geometry t ~dimensions:t.dimensions
+  in
+  (* A header-only tile (or an empty viewport) has no drawable grid, but the PTY still
+     needs positive dimensions. *)
+  let rows = Int.max 1 (height - Shared_terminal_view.header_rows) in
+  let cols = Int.max 1 width in
   rows, cols
 ;;
 
 let submit t (shell : shell) request = Pool.submit t.pool [ shell.id, request ]
 
 let start t (shell : shell) =
-  let rows, cols = pty_size t.dimensions in
+  let rows, cols = pty_size t in
   shell.phase <- Starting;
   shell.generation <- shell.generation + 1;
   shell.snapshot <- None;
@@ -121,7 +173,7 @@ let live (shell : shell) =
 ;;
 
 let resize_selected t (shell : shell) =
-  let rows, cols = pty_size t.dimensions in
+  let rows, cols = pty_size t in
   let same_size = Option.exists shell.size ~f:(fun (r, c) -> r = rows && c = cols) in
   if live shell && not same_size
   then (
@@ -132,6 +184,14 @@ let resize_selected t (shell : shell) =
 let resize t ~dimensions =
   t.dimensions <- dimensions;
   Option.iter t.selected ~f:(resize_selected t)
+;;
+
+let set_placement t placement =
+  if (not t.closed) && not (Poly.equal t.placement placement)
+  then (
+    t.placement <- placement;
+    Option.iter t.selected ~f:(resize_selected t);
+    changed t)
 ;;
 
 let is_visible t = Option.is_some t.selected
@@ -294,6 +354,7 @@ let input t (event : Event.t) =
 
 let render t ~dimensions =
   Option.map t.selected ~f:(fun shell ->
+    let ({ dimensions; _ } : geometry) = geometry t ~dimensions in
     let status =
       match shell.phase, shell.notice with
       | Starting, _ -> "Starting…"

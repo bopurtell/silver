@@ -96,11 +96,24 @@ type waveform_runtime =
   ; mutable log_busy : bool
   }
 
+type terminal_attachment =
+  { project_root : string
+  ; session_id : Workspace.Session_id.t
+  ; workspace : Workspace.Workspace_id.t
+  }
+
+type terminal_prefix =
+  { owner : terminal_attachment
+  ; reversed_keys : Bonsai_term.Event.t list
+  ; deadline : Time_ns.t
+  }
+
 type session =
   { requested_endpoint : string option
   ; local_project_files : bool
   ; mutable terminal : Shared_terminal.t option
-  ; mutable terminal_workspace : (Workspace.Session_id.t * Workspace.Workspace_id.t) option
+  ; mutable terminal_workspace : terminal_attachment option
+  ; mutable terminal_prefix : terminal_prefix option
   ; editor : Editor_workspace.t
   ; mutable painted_editor : Editor_workspace.placement option
   ; mutable project_entry : [ `New | `Open ] option
@@ -333,6 +346,7 @@ let create_session
       ; local_project_files
       ; terminal = None
       ; terminal_workspace = None
+      ; terminal_prefix = None
       ; editor = Editor_workspace.create ()
       ; painted_editor = None
       ; project_entry = None
@@ -468,21 +482,24 @@ let editor_project session : Editor_workspace.project option =
 let terminal_project_root session = Option.map (editor_project session) ~f:(fun p -> p.root)
 
 let terminal_workspace session =
-  Option.map (Host.capture session.host) ~f:(fun capture -> capture.session, capture.workspace)
+  Option.map2 (terminal_project_root session) (Host.capture session.host)
+    ~f:(fun project_root capture ->
+      { project_root; session_id = capture.session; workspace = capture.workspace })
 ;;
 
 let hide_terminal session =
+  session.terminal_prefix <- None;
   session.terminal_workspace <- None;
   Option.iter session.terminal ~f:Shared_terminal.hide
 ;;
 
 let terminal_workspace_is_current session =
-  let equal (session_a, workspace_a) (session_b, workspace_b) =
-    Workspace.Session_id.equal session_a session_b
-    && Workspace.Workspace_id.equal workspace_a workspace_b
+  let equal (a : terminal_attachment) (b : terminal_attachment) =
+    String.equal a.project_root b.project_root
+    && Workspace.Session_id.equal a.session_id b.session_id
+    && Workspace.Workspace_id.equal a.workspace b.workspace
   in
-  Option.is_some (terminal_project_root session)
-  && Option.equal equal session.terminal_workspace (terminal_workspace session)
+  Option.equal equal session.terminal_workspace (terminal_workspace session)
 ;;
 
 let terminal_visible session =
@@ -497,31 +514,30 @@ let sync_terminal_workspace session =
   then hide_terminal session
 ;;
 
-(* Leave the top of the dashboard (including its usual workspace strip) on
-   screen. On small terminals give the shell the full allocation instead. *)
-let terminal_allocation (dimensions : Bonsai_term.Dimensions.t) =
-  let top = if dimensions.height < 10 then 0 else dimensions.height / 3 in
-  top, { dimensions with height = dimensions.height - top }
-;;
-
 let terminal_action session ~dimensions action =
   sync_terminal_workspace session;
-  match session.terminal, terminal_project_root session, terminal_workspace session with
-  | Some terminal, Some project_root, Some workspace ->
+  match session.terminal, terminal_workspace session with
+  | Some terminal, Some workspace ->
     session.host <- { session.host with prefix = 0 };
-    let _, dimensions = terminal_allocation dimensions in
     let toggle number =
-      Shared_terminal.toggle terminal ~project_root ~number ~dimensions
+      Shared_terminal.toggle terminal ~project_root:workspace.project_root ~number ~dimensions
     in
     (match action with
-     | `Toggle number -> toggle number
-     | `Restart ->
-       if not (Shared_terminal.is_visible terminal) then toggle None;
+     | `Placement placement ->
        Shared_terminal.resize terminal ~dimensions;
-       Shared_terminal.restart terminal);
-    (* Unlike a regular tile, the overlay never edits Host.focus. Hiding it
-       restores input to the invoking tile (or Editor companion) as-is. *)
-    session.terminal_workspace <- Option.some_if (Shared_terminal.is_visible terminal) workspace
+       Shared_terminal.set_placement terminal placement
+     | (`Toggle _ | `Restart) as action ->
+       session.terminal_prefix <- None;
+       (match action with
+        | `Toggle number -> toggle number
+        | `Restart ->
+          if not (Shared_terminal.is_visible terminal) then toggle None;
+          Shared_terminal.resize terminal ~dimensions;
+          Shared_terminal.restart terminal);
+       (* A fresh attachment fences delayed input from previous selections,
+          including close/reopen of the same number in the same workspace. *)
+       session.terminal_workspace <-
+         Option.some_if (Shared_terminal.is_visible terminal) workspace)
   | _ ->
     session.host
     <- { session.host with notice = "Terminal requires an open local Silver project" }
@@ -1494,6 +1510,7 @@ let workspace_request ?(poll = false) ?(on_snapshot = fun _ -> ()) session opera
           in
           session.host
           <- (if poll && unchanged then { host with notice = previous.notice } else host);
+        sync_terminal_workspace session;
         reconcile_launch_context session project;
         session.presentation_preferences <- pending;
         apply_waveform_preferences session;
@@ -3234,6 +3251,7 @@ and reconnect session =
     session.snapshot <- snapshot;
     session.host
     <- Host.reconnect session.host ~replacement:(instance_changed || project_changed);
+    sync_terminal_workspace session;
     session.hydration <- Terminal_presentation.Retained_hydration.Coordinator.create ();
     Terminal_presentation.Retained_hydration.Load.reconnect
       session.navigation_loaded
@@ -4843,6 +4861,7 @@ let render
   ?extra_pane
   ?editor_companion
   ?editor_companion_focused
+  ?(terminal_overlay = Fn.id)
   session
   dimensions
   =
@@ -4853,6 +4872,14 @@ let render
   let remember_palette (host : Host.t) =
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
     if Option.is_some session.browser then { host with palette = None } else host
+  in
+  let render_legacy () =
+    let background = render_legacy session dimensions in
+    if terminal_visible session
+    then
+      Host_view.render_palette (remember_palette (displayed_host session)) dimensions
+        (terminal_overlay background)
+    else background
   in
   let render_host () =
     session.last_dimensions <- Some dimensions;
@@ -4865,6 +4892,7 @@ let render
       ?indicator_frames
       ?editor_companion
       ?editor_companion_focused
+      ~overlay_background:terminal_overlay
       ~render_pane:(fun tile ~width ~height ->
         match Option.bind extra_pane ~f:(fun render -> render tile ~width ~height) with
         | Some pane -> Some pane
@@ -4878,7 +4906,7 @@ let render
   in
   let background =
   match session.waveform_visible, session.waveform with
-  | _ when session.show_connection_details -> render_legacy session dimensions
+  | _ when session.show_connection_details -> render_legacy ()
   | true, Some view ->
     session.last_dimensions <- Some dimensions;
     let appearance = Host.effective_appearance session.host in
@@ -4893,7 +4921,7 @@ let render
     Host_view.render_palette
       (remember_palette session.host)
       dimensions
-      (Waveform_view.render
+      (terminal_overlay (Waveform_view.render
          ~appearance
          ~value_layout:session.waveform_value_layout
          ~string_compression:
@@ -4903,18 +4931,18 @@ let render
                 (Option.value session.host.presentation.string_compression ~default:true)
               ~f:(fun tile -> (Host.policy session.host tile).string_compression))
          view
-         dimensions)
+         dimensions))
   | _ ->
     (match session.host.registry with
      | None
        when Option.is_some session.opened
             && List.mem session.hello.capabilities "workspace" ~equal:String.equal ->
        render_host ()
-     | None -> render_legacy session dimensions
+     | None -> render_legacy ()
      | Some _
        when Option.is_some session.hierarchy_view
             || Option.is_some session.artifact_view
-            || session.show_connection_details -> render_legacy session dimensions
+            || session.show_connection_details -> render_legacy ()
      | Some _ -> render_host ())
   in
   match session.browser with
@@ -4943,6 +4971,7 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; local_project_files = false
     ; terminal = None
     ; terminal_workspace = None
+    ; terminal_prefix = None
     ; editor = Editor_workspace.create ()
     ; painted_editor = None
     ; project_entry = None
@@ -5256,10 +5285,17 @@ let host_catalog_base session =
         (Editor_prompt project.id) ])
   @ (match session.terminal, terminal_project_root session with
      | Some _, Some _ ->
-       [ Host.command "terminal.toggle" "Toggle Terminal (F10)" "shell toggleterm"
+       [ Host.command "terminal.toggle" "Toggle Terminal (Space /, F10)" "shell toggleterm"
            (Toggle_terminal None)
+       ; Host.command
+           ?unavailable:(Option.some_if (not (terminal_visible session)) "No terminal is open")
+           "terminal.close" "Close Terminal" "hide terminal shell toggleterm" Close_terminal
        ; Host.command "terminal.restart" "Restart Exited Terminal (F12)" "shell toggleterm restart"
            Restart_terminal
+       ; Host.command "terminal.center" "Terminal: Center" "shell floating center placement"
+           (Set_terminal_placement `Center)
+       ; Host.command "terminal.bottom" "Terminal: Bottom" "shell dock bottom placement"
+           (Set_terminal_placement `Bottom)
        ]
        @ List.init 9 ~f:(fun i ->
          let number = i + 1 in
@@ -6572,14 +6608,25 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
        };
     Effect.Ignore)
   else (
+    (* A command that needs the workbench hands it input focus before running,
+       even if it opens another Silver surface instead of changing workspace. *)
+    if terminal_visible session && not (Host.is_terminal_action action)
+    then hide_terminal session;
     match action with
     | Host.Toggle_terminal number ->
       Option.iter session.last_dimensions ~f:(fun dimensions ->
         terminal_action session ~dimensions (`Toggle number));
       Effect.Ignore
+    | Close_terminal ->
+      hide_terminal session;
+      Effect.Ignore
     | Restart_terminal ->
       Option.iter session.last_dimensions ~f:(fun dimensions ->
         terminal_action session ~dimensions `Restart);
+      Effect.Ignore
+    | Set_terminal_placement placement ->
+      Option.iter session.last_dimensions ~f:(fun dimensions ->
+        terminal_action session ~dimensions (`Placement placement));
       Effect.Ignore
     | Host.Editor_prompt project ->
       Editor_workspace.cancel session.editor;
@@ -9676,7 +9723,7 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
      | Some host, Some palette
        when Option.exists host.palette ~f:(phys_equal palette)
             && not (session.host.paste || session.host.editing_filter)
-            && (Option.is_some session.browser ||
+            && (terminal_visible session || Option.is_some session.browser ||
                 (not session.show_connection_details && (session.waveform_visible
                  || (Option.is_none session.hierarchy_view && Option.is_none session.artifact_view))))
             && Option.is_none session.host.menu ->
@@ -9972,25 +10019,27 @@ let tui
            | Some _, _ -> notice "Opening project in Cobalt…")
       else None
     in
-    let background =
-      render ~now ?indicator_frames ~extra_pane
-        ?editor_companion:origin
-        ~editor_companion_focused:(companion_focused session dimensions origin) session dimensions
+    let terminal_overlay background =
+      if not (terminal_visible session)
+      then background
+      else (
+        let { Shared_terminal.x; y; dimensions = _ } =
+          Shared_terminal.geometry terminal ~dimensions
+        in
+        match Shared_terminal.render terminal ~dimensions with
+        | None -> background
+        | Some overlay -> View.zcat [ View.pad ~l:x ~t:y overlay; background ])
     in
-    if not (terminal_visible session)
-    then background
-    else (
-      let top, dimensions = terminal_allocation dimensions in
-      match Shared_terminal.render terminal ~dimensions with
-      | None -> background
-      | Some overlay -> View.zcat [ View.pad ~t:top overlay; background ])
+    render ~now ?indicator_frames ~extra_pane ~terminal_overlay
+      ?editor_companion:origin
+      ~editor_companion_focused:(companion_focused session dimensions origin) session dimensions
   in
   Bonsai.Edge.after_display
     (let%arr session and dimensions in
      Effect.of_thunk (fun () ->
        sync_terminal_workspace session;
        if terminal_visible session
-       then Shared_terminal.resize terminal ~dimensions:(snd (terminal_allocation dimensions))))
+       then Shared_terminal.resize terminal ~dimensions))
     graph;
   Bonsai.Edge.after_display
     (let%arr session and editors and dimensions and update_revision in
@@ -10306,6 +10355,28 @@ let tui
       let captured = palette.capture in
       let client = session.client in
       let navigation_revision = session.navigation_revision in
+      let still_focused () =
+        Option.equal Int.equal session.editor.key (Some entry.key)
+        && not (modal session)
+        && workspace_layer session
+        && Option.exists (editor_project session) ~f:(Editor_workspace.equal_project entry.project)
+        && Option.exists (placement session dimensions (companion session)) ~f:(fun pane ->
+          pane.focused && pane.key = entry.key)
+      in
+      (* Cobalt owns recognizing this chord in the focused editor, so typing
+         and paste are interpreted by its mode, not by a second Silver parser. *)
+      entry.toggle_terminal <- (fun number ->
+        Effect.lazy_ (lazy (
+          if not (still_focused ()
+                  && phys_equal client session.client
+                  && navigation_revision = session.navigation_revision
+                  && Option.equal Dimensions.equal session.last_dimensions (Some dimensions))
+          then Effect.Ignore
+          else (
+            let previous = session.host in
+            terminal_action session ~dimensions (`Toggle number);
+            publish_with_entry session ~update:update_revision ~write:write_to_tty
+              ~on_entry previous Effect.Ignore))));
       (* Cobalt freezes the visible rows when opening the palette. A row's opaque
          ID only survives a refresh if its captured action and target survive. *)
       let previous =
@@ -10351,10 +10422,7 @@ let tui
           Effect.Ignore
         in
         let effect =
-          if not (Option.equal Int.equal session.editor.key (Some entry.key)
-                  && not (modal session) && editor_active session && workspace_layer session
-                  && editor_tile_focused session
-                  && not (companion_focused session dimensions (companion session)))
+          if not (still_focused ())
           then Effect.Ignore
           else if not (phys_equal client session.client)
                   || navigation_revision <> session.navigation_revision
@@ -10404,6 +10472,61 @@ let tui
       | Host.No_effect -> retain_companion_browse session projected
       | _ -> ())
   in
+  (* Match standalone Cobalt's inter-key timeout. *)
+  let prefix_wait = Time_ns.Span.of_ms 200. in
+  let flush_terminal_prefix session pending =
+    if Option.exists session.terminal_prefix ~f:(phys_equal pending)
+    then (
+      session.terminal_prefix <- None;
+      if terminal_visible session
+         && Option.exists session.terminal_workspace ~f:(phys_equal pending.owner)
+         && not (host_modal session || Shared_terminal.is_pasting terminal)
+      then List.iter (List.rev pending.reversed_keys) ~f:(Shared_terminal.input terminal))
+  in
+  let buffer_terminal_prefix session owner reversed_keys =
+    let pending =
+      { owner; reversed_keys; deadline = Time_ns.add (Time_ns.now ()) prefix_wait }
+    in
+    session.terminal_prefix <- Some pending;
+    (* A new key, selection, or workspace supersedes the timer. No callback
+       can deliver bytes into the next owner, even if the same shell reopens. *)
+    don't_wait_for
+      (Deferred.map (Clock_ns.after prefix_wait) ~f:(fun () ->
+         flush_terminal_prefix session pending))
+  in
+  let rec route_terminal_key session event ~send ~publish ~toggle =
+    Option.iter session.terminal_prefix ~f:(fun pending ->
+      if Time_ns.(now () >= pending.deadline) then flush_terminal_prefix session pending);
+    let plain char =
+      match event with
+      | Event.Key_press { key; mods = [] } -> key_is char key
+      | _ -> false
+    in
+    match session.terminal_prefix, session.terminal_workspace with
+    | None, Some owner when plain ' ' ->
+      buffer_terminal_prefix session owner [ event ];
+      Effect.Ignore
+    | Some { reversed_keys = [ _ ]; _ }, _ when plain '/' ->
+      session.terminal_prefix <- None;
+      toggle ()
+    | Some ({ reversed_keys = [ _ ]; _ } as pending), Some owner when plain 'c' ->
+      buffer_terminal_prefix session owner (event :: pending.reversed_keys);
+      Effect.Ignore
+    | Some ({ reversed_keys = [ _; _ ]; _ } as pending), _ when plain 'c' ->
+      let host = Host.open_global_palette session.host ~commands:(host_catalog session) in
+      if Option.is_some host.palette
+      then (
+        session.terminal_prefix <- None;
+        session.host <- host;
+        publish Effect.Ignore)
+      else (
+        flush_terminal_prefix session pending;
+        send event)
+    | Some pending, _ ->
+      flush_terminal_prefix session pending;
+      route_terminal_key session event ~send ~publish ~toggle
+    | None, _ -> send event
+  in
   let handler =
     let paste_owner = ref None in
     let%arr session and on_entry and update_revision and write_to_tty and editors and dimensions in
@@ -10436,16 +10559,17 @@ let tui
          && Option.is_some (editor_project session)
          && Option.is_some
               (hosted_body session dimensions origin ~f:(fun tile -> Host.editor_kind tile.kind))
-       in
+      in
       let captured = modal session in
+      let terminal_palette = terminal_visible session && Option.is_some session.host.palette in
       let owner =
-        if terminal_visible session then `Terminal
+        if terminal_visible session && not (host_modal session) then `Terminal
         else if captured then `Host
         else if editor_focus then `Cobalt session.editor.key
         else `Host
       in
       let terminal_event event =
-        Shared_terminal.resize terminal ~dimensions:(snd (terminal_allocation dimensions));
+        Shared_terminal.resize terminal ~dimensions;
         Shared_terminal.input terminal event;
         Effect.Ignore
       in
@@ -10454,8 +10578,9 @@ let tui
         publish Effect.Ignore
       in
       let terminal_pointer ~x ~y =
-        let top, _ = terminal_allocation dimensions in
-        if y >= top
+        let geometry = Shared_terminal.geometry terminal ~dimensions in
+        if Shared_terminal.contains geometry ~x ~y
+           || Option.is_some session.painted_palette
            || not (workspace_layer session)
            || not (Option.equal Dimensions.equal session.last_dimensions (Some dimensions))
         then Effect.Ignore
@@ -10547,7 +10672,19 @@ let tui
          | _ -> host_event event)
       in
       let dispatch_event () =
-        if captured || not editor_layer then host_event event else editor_event ()
+        if terminal_palette
+        then (
+          match event with
+          | Mouse _ -> host_event event
+          | _ ->
+            let decode =
+              if Host.has_theme_picker session.host
+              then Host.decode_theme_event
+              else Host.decode_event
+            in
+            Option.value_map (decode event) ~default:Effect.Ignore ~f:(fun input ->
+              publish (modal_input session input ~exit)))
+        else if captured || not editor_layer then host_event event else editor_event ()
       in
       let in_terminal = Poly.equal owner `Terminal in
       (* A workspace can change asynchronously in the middle of a paste. The
@@ -10562,7 +10699,7 @@ let tui
          | _, Event.Mouse _ -> Effect.Ignore
          | `Terminal, _ -> terminal_event event
          | `Cobalt _, _ -> send_editor event
-         | _ -> host_event event)
+         | _ -> dispatch_event ())
       else if in_terminal
         || (not (host_modal session) && workspace_layer session
             && Option.is_some (terminal_project_root session))
@@ -10577,7 +10714,9 @@ let tui
          | Mouse { kind = Left; mods = []; position = { x; y } }
            when in_terminal && not no_mouse -> terminal_pointer ~x ~y
          | Mouse _ when in_terminal -> Effect.Ignore
-         | _ when in_terminal -> terminal_event event
+         | _ when in_terminal ->
+           route_terminal_key session event ~send:terminal_event ~publish
+             ~toggle:(fun () -> terminal_command (`Toggle None))
          | _ -> dispatch_event ())
       else dispatch_event ()
   in

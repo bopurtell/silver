@@ -1,9 +1,9 @@
 ---
 id: WB-093
-title: Silver quick launch from standalone Cobalt
+title: Test quick launch from standalone Cobalt
 category: integrations
 feature_sets: [FS2, FS4]
-status: proposed
+status: closed
 kind: feature
 priority: P2
 severity: n/a
@@ -13,14 +13,16 @@ points: 21
 confidence: low
 estimate_scope: incremental
 origin: owner-intake
-tags: [cobalt, quick-launch, testing, stages]
+tags: [cobalt, quick-launch, testing]
 depends_on: []
-related: [WB-032, WB-063]
+related: [WB-032, WB-063, WB-095]
 ---
 
-# WB-093 — Silver quick launch from standalone Cobalt
+# WB-093 — Test quick launch from standalone Cobalt
 
-**Slice 1 implemented and live-tested; slice 2 pending.** This ticket owns cross-repo acceptance
+**Closed for test quick launch.** The owner confirmed the two-monitor
+`hardcaml_asic_example` workflow and requested a separate ticket for stage
+and flow launch. This ticket owns cross-repo acceptance
 for Cobalt C6 (`docs/backlog/silver_integration.md` in Cobalt). Silver owns
 execution and launch semantics; Cobalt's optional Silver module owns client state.
 The separate Silver window need not have the target selected or even have focus.
@@ -49,14 +51,5 @@ with `n=50`. The real catalog and launch exchange are in Cobalt's
 `dune runtest` also exercises default precedence, first use, and lost
 acknowledgement without replay.
 
-## Slice 2: stage checklist and fundamental aliases
-
-Identify the public operation(s) corresponding to Silver's own quick launch.
-Compare the resolved flow, profile and endpoint for checklist `R` and a palette
-alias against Silver's native launch through that stage.
-
-**Live acceptance:** select a non-synthesis row; exact `synth` must still offer
-synthesis first and launch through synthesis. `R` must instead honor the selected
-row. Repeat alias target checks for `timing` and `routing`. Extra query text
-exposes related commands; an unavailable exact target cannot dispatch a runner-up.
-Neither launch path moves focus to a different window or changes the watched run.
+The former second slice, including checklist `R` and exact stage aliases,
+moved to [WB-095 — Companion flow launch](WB-095-companion-flow-launch.md).

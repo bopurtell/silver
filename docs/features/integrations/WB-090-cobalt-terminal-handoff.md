@@ -3,7 +3,7 @@ id: WB-090
 title: Delegate embedded editor terminal requests to Silver
 category: integrations
 feature_sets: [FS3]
-status: proposed
+status: closed
 kind: feature
 priority: P2
 severity: n/a
@@ -20,7 +20,8 @@ related: []
 
 # WB-090 — Delegate Cobalt terminal toggles to its host
 
-**Design agreed (2026-11-22); Silver wiring pending.** One input owner per
+**Closed at the owner's request (2026-11-22).** The hosted PTY probe verified
+shell reuse and restoration of Insert mode. One input owner per
 keystroke: Cobalt recognizes the chord while editing; Silver selects the
 number and owns overlay focus. Verify the unnumbered case across workspaces:
 select shell 2 in Timing, hide it, toggle from Cobalt Insert mode, see the same

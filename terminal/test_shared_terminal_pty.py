@@ -20,7 +20,10 @@ from support.terminal import Terminal
 
 
 PROMPT = "wb089$"
-OVERLAY = re.compile(r"(?m)^ Terminal \d+ \(local\) \|")
+OVERLAY = re.compile(r" Terminal \d+ \(local\) \|")
+PALETTE = "COMMAND PALETTE"
+PALETTE_KEYS = b" cc"
+TOGGLE_KEYS = b" /"
 EXITED = re.compile(r"\bexited 23\b", re.IGNORECASE)
 F10, F12 = b"\x1b[21~", b"\x1b[24~"
 
@@ -111,19 +114,72 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         send(F10 if number is None else b"\x1b" + str(number).encode())
 
     def shown(label, number, *expected, absent=()):
-        title = re.compile(rf"(?m)^ Terminal {number} \(local\) \|")
+        title = re.compile(rf" Terminal {number} \(local\) \|")
         return see(label, title, *expected, absent=absent)
+
+    def chord(keys):
+        for key in keys:
+            send(bytes([key]))
+            term.drain(.04)
+
+    def paste(data):
+        send(b"\x1b[200~" + data + b"\x1b[201~")
+
+    def open_palette(label):
+        chord(PALETTE_KEYS)
+        see(label, PALETTE)
+
+    def palette_command(query, title):
+        label = query.replace(" ", "-")
+        open_palette("open-" + label)
+        send(query.encode())
+        see("query-" + label, PALETTE, "> " + query + "▏", "│ > " + title)
+        send(b"\r")
 
     def resize(width, height):
         term.width, term.height = width, height
         fcntl.ioctl(term.master, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
         term.process.send_signal(signal.SIGWINCH)
 
-    def inner_size(label):
+    def inner_size(label, *, after=None):
         pattern = re.compile(rf"WB_SIZE_{label}=<(\d+) (\d+)>")
-        command(f"""printf 'WB_SIZE_%s=<%s>\\n' {label} "$(stty size)" """)
-        screen = shown("size-" + label, 2, pattern)
-        return tuple(map(int, pattern.search(screen).groups()))
+        # An outer SIGWINCH and shell input can arrive in either order.
+        wait = ""
+        if after is not None:
+            rows, cols = after[:2]
+            wait = (f"""for i in {{1..40}}; do [ "$(stty size)" != '{rows} {cols}' ] && break; """
+                    "sleep .05; done; ")
+        command(wait + f"""printf 'WB_SIZE_%s=<%s>\\n' {label} "$(stty size)" """)
+        screen = shown("size-" + label, 2, pattern, absent=(PALETTE,))
+        rows, cols = map(int, pattern.search(screen).groups())
+        title_y, title_x = next((y, match.start())
+                                for y, line in enumerate(screen.splitlines())
+                                if (match := OVERLAY.search(line)))
+        return rows, cols, title_y, title_x
+
+    def check_center(geometry):
+        rows, cols, y, x = geometry
+        assert 0 < rows < term.height - 1 and 0 < cols < term.width, geometry
+        assert x > 0 and y > 0, geometry
+        # Allow one cell of rounding and room for a frame around the PTY.
+        assert abs(2 * x + cols - term.width) <= 3, geometry
+        assert abs(2 * y + rows + 1 - term.height) <= 3, geometry
+
+    def check_bottom(geometry):
+        rows, cols, y, x = geometry
+        assert x == 0 and y > 0, geometry
+        assert cols == term.width and y + rows + 1 == term.height, geometry
+
+    def arm_read(label, *, count=None):
+        # Echo is disabled and IFS= preserves the leading space. For timeout,
+        # read two bytes without Enter so no later key can trigger the replay.
+        option = "" if count is None else f" -n {count}"
+        command(f"printf 'WB_READY_%s\\n' {label}; IFS= read -r{option} WB_INPUT; "
+                f"""printf 'WB_READ_%s=<%s>\\n' {label} "$WB_INPUT" """)
+        shown("read-ready-" + label, 2, f"WB_READY_{label}")
+
+    def read_result(label, literal):
+        shown("read-result-" + label, 2, f"WB_READ_{label}=<{literal}>", absent=(PALETTE,))
 
     def await_condition(label, condition):
         deadline = time.monotonic() + 8
@@ -184,15 +240,79 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         shown("switch-back-to-two", 2, "WB_TWO=<number_two>", absent=("WB_ISOLATED_one",))
         assert started() == {one, two}
 
-        wide_rows, wide_cols = inner_size("wide")
+        wide_rows, wide_cols, *_ = inner_size("wide")
         resize(116, 32)
-        small_rows, small_cols = inner_size("small")
+        small_rows, small_cols, *_ = inner_size("small", after=(wide_rows, wide_cols))
         assert 0 < small_rows < wide_rows <= 40, (small_rows, wide_rows)
         assert 0 < small_cols < wide_cols <= 132, (small_cols, wide_cols)
         toggle()
         see("timing-focus-restored-after-resize", timing, absent=(OVERLAY,))
         toggle()
         shown("unnumbered-reopens-most-recent", 2, "WB_SIZE_small")
+
+        chord(TOGGLE_KEYS)
+        see("space-slash-hides-and-restores-focus", timing, absent=(OVERLAY, PALETTE))
+        paste(TOGGLE_KEYS)
+        see("pasted-space-slash-does-not-open", timing, absent=(OVERLAY, PALETTE))
+        open_palette("palette-from-workspace")
+        chord(TOGGLE_KEYS)
+        see("space-slash-does-not-open-from-palette", PALETTE, ">  /▏", absent=(OVERLAY,))
+        send(b"\x1b")
+        see("escape-returns-to-workspace", timing, absent=(OVERLAY, PALETTE))
+        chord(TOGGLE_KEYS)
+        shown("space-slash-opens-most-recent-from-workspace", 2, "WB_SIZE_small",
+              absent=(PALETTE,))
+        assert started() == {one, two}, "Space / replaced a shell"
+
+        arm_read("escape")
+        open_palette("palette-from-live-terminal")
+        chord(TOGGLE_KEYS)
+        see("space-slash-stays-in-palette-query", PALETTE, ">  /▏")
+        send(b"\x1b")
+        shown("escape-returns-to-terminal", 2, "WB_READY_escape", absent=(PALETTE,))
+        command("resumed")
+        read_result("escape", "resumed")
+
+        arm_read("rejected")
+        send(b" cx literal\r")
+        read_result("rejected", " cx literal")
+
+        arm_read("slow", count=2)
+        send(b" c")
+        read_result("slow", " c")
+
+        arm_read("paste")
+        paste(PALETTE_KEYS + TOGGLE_KEYS)
+        send(b"\r")
+        read_result("paste", " cc /")
+
+        bottom = inner_size("before_center")
+        check_bottom(bottom)
+        palette_command("term center", "Terminal: Center")
+        see("centered-overlay", re.compile(r"(?m)^.+ Terminal 2 \(local\) \|"),
+            absent=(PALETTE,))
+        center = inner_size("center")
+        check_center(center)
+        assert center[:2] != bottom[:2], (center, bottom)
+        resize(104, 28)
+        smaller = inner_size("smaller_center", after=center)
+        check_center(smaller)
+        assert smaller[0] < center[0] and smaller[1] < center[1], (smaller, center)
+        palette_command("term bottom", "Terminal: Bottom")
+        shown("bottom-overlay", 2, re.compile(r"(?m)^ Terminal 2 \(local\) \|"),
+              absent=(PALETTE,))
+        check_bottom(inner_size("returned_bottom"))
+        resize(116, 32)
+
+        command("""[ "$(pwd -P)" = "$WB089_PROJECT/subdir" ] && [ "$WB_VALUE" = number_two ] """
+                """&& history | grep -q 'history_only''_two' && printf 'WB_PLACEMENT_%s\\n' kept""")
+        shown("placement-kept-shell-state", 2, "WB_PLACEMENT_kept")
+        palette_command("close term", "Close Terminal")
+        see("palette-close-restores-focus", timing, absent=(OVERLAY, PALETTE))
+        assert live(two, require_running=True), "Close terminal stopped its shell"
+        toggle()
+        shown("reopen-after-palette-close", 2, "WB_PLACEMENT_kept", absent=(PALETTE,))
+        assert started() == {one, two}, "Placement or close/reopen replaced a shell"
 
         command("printf 'WB_LAST_%s\\n' two; exit 23")
         shown("two-retains-final-screen", 2, "WB_LAST_two", EXITED)
@@ -204,17 +324,24 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         assert started() == {one, two}
         send(F12)
         shown("explicit-restart", 2, PROMPT, absent=(EXITED, "WB_LAST_two"))
-        new_two, = started() - {one, two}
-        assert new_two != two
+        f12_two, = started() - {one, two}
         command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$WB089_PROJECT" ] && printf 'WB_RESTART_%s\\n' clean""")
         shown("restarted-two-has-fresh-state", 2, "WB_RESTART_clean")
+        command("WB_VALUE=discard_me; cd subdir; printf 'WB_PALETTE_EXIT_%s\\n' two; exit 23")
+        shown("two-exited-before-palette-restart", 2, "WB_PALETTE_EXIT_two", EXITED)
+        palette_command("restart term", "Restart Exited Terminal (F12)")
+        shown("palette-restart", 2, PROMPT, absent=(PALETTE, EXITED, "WB_PALETTE_EXIT_two"))
+        new_two, = started() - {one, two, f12_two}
+        assert not live(f12_two), "Palette restart left the old shell alive"
+        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$WB089_PROJECT" ] && printf 'WB_PALETTE_RESTART_%s\\n' clean""")
+        shown("palette-restart-has-fresh-state", 2, "WB_PALETTE_RESTART_clean")
         child_two = persistent_child(2)
 
         toggle(1)
         shown("one-survived-two-restart", 1, "WB_ISOLATED_one")
         command("""printf 'WB_ONE=<%s>\\n' "$WB_VALUE" """)
         shown("one-retained-its-variable", 1, "WB_ONE=<number_one>")
-        assert started() == {one, two, new_two}
+        assert started() == {one, two, f12_two, new_two}
         assert live(one) and live(new_two)
         assert live(child_one, require_running=True) and live(child_two, require_running=True)
         switch_workspace("Testing", "╭ simulation-catalog ", absent=(OVERLAY,))

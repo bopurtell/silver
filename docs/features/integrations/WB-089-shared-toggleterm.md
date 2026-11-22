@@ -3,7 +3,7 @@ id: WB-089
 title: Numbered ToggleTerm sessions across Silver workspaces
 category: integrations
 feature_sets: [FS3]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a
@@ -20,7 +20,7 @@ related: [WB-090]
 
 # WB-089 — One ToggleTerm pool across Silver workspaces
 
-**Delivered and automatically verified; awaiting owner acceptance.** A number identifies
+**Closed at the owner's request (2026-11-22).** A number identifies
 a live local shell shared by **all workspaces** in the project. Keep number
 selection project-local by default. An unnumbered toggle uses the most recent
 number (1 initially); requesting a different number while visible switches

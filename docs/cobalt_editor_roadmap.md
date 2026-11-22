@@ -17,11 +17,13 @@ on the Silver ticket; no matching Cobalt ticket is required.
 For asynchronous implementation, the **Cobalt repo** has a module-level work
 queue at `docs/backlog/silver_integration.md`. C1/C2 hand off the editor and
 generic open action; C3 hands off ToggleTerm. C4 addresses a separately running
-main editor; C5 covers standalone monitoring. [WB-093 — Cobalt quick launch](features/integrations/WB-093-cobalt-quick-launch.md)
-owns C6's two live demos: test tile/`test` alias first, then checklist/stage aliases.
-The latter tracks can proceed independently of the embedded editor demo. The
-Cobalt harnesses prove module readiness; the live two-app demos remain Silver
-acceptance work.
+main editor; C5 covers standalone monitoring. [WB-093](features/integrations/WB-093-cobalt-quick-launch.md)
+and C6 are closed for test quick launch, including the live tile/`test` alias demo.
+
+| Companion follow-up | Cobalt can start independently | Silver handoff for live acceptance |
+| --- | --- | --- |
+| [WB-094 — Project sharing](features/integrations/WB-094-editor-project-sharing.md) | C7: connection picker using fixture advertisements | Publish and withdraw real shares for the current project service and verify both clients see the same history. |
+| [WB-095 — Stage and flow launch](features/integrations/WB-095-companion-flow-launch.md) | C8: checklist and exact aliases; C9: flow kickoff tile. Exercise both against a fake launch service. | Supply examples of native flow resolution and submission; compare live launches. Use an explicit connection independently of WB-094. |
 
 | Order | Ticket | What to try before moving on |
 | --- | --- | --- |
@@ -34,9 +36,9 @@ acceptance work.
 | 6 | [WB-021 — Evidence-backed source navigation](features/evidence/WB-021-source-navigation.md) | Use the trace to implement and exercise the first evidence-backed Timing → Editor handoff. |
 
 This order gets a useful editing loop in hand before taking on terminal input or
-synthesis provenance. WB-089 and WB-091 can be investigated independently.
-As of 2026-11-22, the terminal behavior (WB-089/090), retained-path research
-plan (WB-091), and navigation behavior (WB-021) are agreed working designs.
+synthesis provenance. Silver-wide ToggleTerm (WB-089) and embedded terminal
+handoff (WB-090) are closed. Retained-path research (WB-091) and navigation
+(WB-021) remain proposed.
 WB-091's findings will guide WB-021's mapping format and artifact handoff.
 Only revisit daemon-owned sessions if reconnect/reattach or remote shell execution
 becomes a requirement; neither demo needs those semantics.

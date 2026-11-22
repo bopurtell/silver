@@ -4747,6 +4747,7 @@ let render
   ?render_pane
   ?editor_companion
   ?editor_companion_focused
+  ?(overlay_background = Fn.id)
   host
   data
   dimensions
@@ -4793,7 +4794,7 @@ let render
         data
         dimensions
   in
-  render_palette host dimensions (render_menu host dimensions background)
+  render_palette host dimensions (render_menu host dimensions (overlay_background background))
 ;;
 
 let appearance_cases =

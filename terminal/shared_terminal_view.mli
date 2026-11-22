@@ -1,3 +1,5 @@
+val header_rows : int
+
 val render
   :  number:int
   -> cwd:string
