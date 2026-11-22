@@ -495,9 +495,11 @@ let%test_unit "reserved aliases block when missing only in the global palette" =
   let host, _, snapshot, _ = fixture () in
   let cases =
     [ "synth", "stage.launch-view.synthesis"
-    ; "a launch", "asic.launch"
-    ; "cts", "stage.launch-view.cts"
-    ; "elaboration", "preparation.quick-launch"
+     ; "a launch", "asic.launch"
+     ; "cts", "stage.launch-view.cts"
+     ; "silver timing", "stage.launch-view.timing"
+     ; "quick launch timing", "stage.launch-view.timing"
+     ; "elaboration", "preparation.quick-launch"
     ; "chip", "asic.pick-chip"
     ]
   in
@@ -554,7 +556,8 @@ let%test_unit "bare stage names dispatch the captured launch behind stronger fuz
     command, next, effect
   in
   List.iter
-    (List.map (physical @ [ "metal-fill" ]) ~f:(fun id -> id, id) @ [ " CtS ", "cts" ])
+     (List.map (physical @ [ "metal-fill" ]) ~f:(fun id -> id, id)
+      @ [ " CtS ", "cts"; "Silver Timing", "timing"; "quick launch timing", "timing" ])
     ~f:(fun (query, endpoint) ->
       let command, closed, effect = dispatch snapshot query in
       assert (String.equal command.id ("stage.launch-view." ^ endpoint));
@@ -583,13 +586,14 @@ let%test_unit "bare stage names dispatch the captured launch behind stronger fuz
       flows = [ { flow with fresh_stage_endpoints = [ "synthesis" ] } ]
     }
   in
-  let command, rejected, effect = dispatch unavailable "cts" in
-  assert (String.equal command.id "stage.launch-view.cts");
-  assert (Option.is_some rejected.palette);
-  (match effect with
-   | No_effect ->
-     assert (String.is_substring rejected.notice ~substring:"Unsupported fresh endpoint")
-   | _ -> failwith "unavailable CTS dispatched a competing command");
+   List.iter [ "cts", "cts"; "silver timing", "timing" ] ~f:(fun (query, endpoint) ->
+     let command, rejected, effect = dispatch unavailable query in
+     assert (String.equal command.id ("stage.launch-view." ^ endpoint));
+     assert (Option.is_some rejected.palette);
+     match effect with
+     | No_effect ->
+       assert (String.is_substring rejected.notice ~substring:"Unsupported fresh endpoint")
+     | _ -> failwithf "unavailable %s dispatched a competing command" endpoint ());
   let command, _, effect = dispatch snapshot "unselected-only" in
   assert (String.equal command.id "fixture.competing.stage");
   match effect with

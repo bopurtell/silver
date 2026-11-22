@@ -91,6 +91,7 @@ type action =
   | Run_existing of Asic.Selection.t
   | Registry of W.Mutation.t
   | Switch of W.Workspace_id.t
+  | Browse_workspace of W.Workspace_id.t
   | Build
   | Test
   | Cancel of Job_id.t
@@ -307,6 +308,9 @@ type t =
   { registry : W.Snapshot.t option
   ; active : W.Workspace_id.t option
   ; focus : W.Tile_id.t option
+  (* The strip focus acquired by browsing is temporary. [Some None] keeps
+     routing navigation when a destination has no visible strip. *)
+  ; workspace_browse : W.Tile_id.t option option
   ; locals : (string * local) list
   ; palette : palette option
   ; menu : menu option
@@ -347,6 +351,7 @@ let empty =
   { registry = None
   ; active = None
   ; focus = None
+  ; workspace_browse = None
   ; locals = []
   ; palette = None
   ; menu = None
@@ -1202,6 +1207,26 @@ let focused t =
     List.find (tiles t) ~f:(fun tile -> W.Tile_id.equal tile.id id))
 ;;
 
+let workspace_tabs kind = String.equal kind "workspace-tabs"
+
+let workspace_browsing t =
+  Option.exists t.workspace_browse ~f:(Option.equal W.Tile_id.equal t.focus)
+;;
+
+let workspace_tabs_focused t =
+  workspace_browsing t || Option.exists (focused t) ~f:(fun tile -> workspace_tabs tile.kind)
+;;
+
+let focus_workspace_tabs t =
+  let focus =
+    match focused t with
+    | Some tile when workspace_tabs tile.kind -> Some tile
+    | _ -> List.find (tiles t) ~f:(fun tile -> workspace_tabs tile.kind)
+  in
+  let focus = Option.map focus ~f:(fun tile -> tile.id) in
+  { t with focus; workspace_browse = Some focus }
+;;
+
 let resource_pane kind = String.equal kind "resources" || String.equal kind "resource-detail"
 
 let workspace_tile t (tile : W.Tile.t) kind =
@@ -1293,6 +1318,7 @@ let receive t (s : W.Snapshot.t) =
         { (invalidate_layout_intent t) with
           active = None
         ; focus = None
+        ; workspace_browse = None
         ; locals = []
         ; workspace_focus = []
         ; workspace_presentation = []
@@ -1403,7 +1429,7 @@ let receive t (s : W.Snapshot.t) =
     let active_changed = not (Option.equal W.Workspace_id.equal active t.active) in
     let workspace_focus =
       let previous_focus =
-        if not active_changed
+        if not active_changed || workspace_browsing t
         then t.workspace_focus
         else
           Option.value_map t.active ~default:t.workspace_focus ~f:(fun id ->
@@ -1500,7 +1526,9 @@ let receive t (s : W.Snapshot.t) =
       in
       Option.first_some selected (Option.map default ~f:(fun tile -> tile.id))
     in
-    { t with focus }
+    if not active_changed && workspace_browsing t
+    then focus_workspace_tabs t
+    else { t with focus; workspace_browse = None }
 ;;
 
 (** A new transport invalidates receipts even if the daemon/session survives. Retain
@@ -1565,6 +1593,7 @@ let reconnect t ~replacement =
       registry = None
     ; active = None
     ; focus = None
+    ; workspace_browse = None
     ; locals = []
     ; workspace_focus = []
     ; workspace_presentation = []
@@ -1879,17 +1908,20 @@ let%test_unit "same-session reconnect retains browsing and rejects old response 
   assert (Option.is_none new_daemon.registry && List.is_empty new_daemon.locals)
 ;;
 
-let switch t id =
+let switch ?(browse = false) t id =
   if not (Option.exists t.registry ~f:(fun s -> W.is_workspace_open s id))
   then t
   else (
     let workspace_focus =
-      Option.value_map t.active ~default:t.workspace_focus ~f:(fun old ->
-        List.Assoc.add
-          t.workspace_focus
-          ~equal:String.equal
-          (W.Workspace_id.to_string old)
-          t.focus)
+      if workspace_browsing t || (browse && workspace_tabs_focused t)
+      then t.workspace_focus
+      else
+        Option.value_map t.active ~default:t.workspace_focus ~f:(fun old ->
+          List.Assoc.add
+            t.workspace_focus
+            ~equal:String.equal
+            (W.Workspace_id.to_string old)
+            t.focus)
     in
     let focus =
       List.Assoc.find workspace_focus ~equal:String.equal (W.Workspace_id.to_string id)
@@ -1902,6 +1934,7 @@ let switch t id =
       ; menu = None
       ; layout_intent = (if changed then ref () else t.layout_intent)
       ; focus
+      ; workspace_browse = None
       ; workspace_focus
       ; stage_generation = (t.stage_generation + if changed then 1 else 0)
       ; stage_preparation =
@@ -1910,7 +1943,8 @@ let switch t id =
            else t.stage_preparation)
       }
     in
-    Option.value_map t.registry ~default:t ~f:(receive t))
+    let t = Option.value_map t.registry ~default:t ~f:(receive t) in
+    if browse then focus_workspace_tabs t else t)
 ;;
 
 let blank_workspace_mutation (registry : W.Snapshot.t) ~window =
@@ -1968,6 +2002,7 @@ let navigation_preferences ~project_key t =
         let id = W.Workspace_id.to_string workspace.id in
         let focus =
           if Option.equal W.Workspace_id.equal t.active (Some workspace.id)
+             && not (workspace_browsing t)
           then t.focus
           else List.Assoc.find t.workspace_focus id ~equal:String.equal |> Option.join
         in
@@ -2412,10 +2447,9 @@ let%test_unit "Timing reconnect keeps investigation until pane or session identi
     Option.is_none invalidated.selected && Option.is_none invalidated.workspace_epoch)
 ;;
 
-(** Cursor identity is a registry ID, never a display name or an ordinal. An unset or
-    removed cursor starts from the active workspace. Browsing is client-local. *)
-let workspace_choices t id =
-  let filter = String.lowercase (local t id).filter in
+(** Tabs use stable IDs and the same registry order as numbered workspace jumps. *)
+let filtered_workspaces t filter =
+  let filter = String.lowercase filter in
   Option.value_map t.registry ~default:[] ~f:(fun s ->
     List.filter (W.open_workspaces s) ~f:(fun w ->
       String.is_substring
@@ -2423,32 +2457,25 @@ let workspace_choices t id =
         ~substring:filter))
 ;;
 
+let workspace_choices t id = filtered_workspaces t (local t id).filter
+
 let workspace_cursor t id =
-  let choices = workspace_choices t id in
-  let selected =
-    Option.bind (local t id).cursor ~f:(fun cursor ->
-      List.find choices ~f:(fun w -> String.equal cursor (W.Workspace_id.to_string w.id)))
-  in
-  Option.first_some
-    selected
-    (Option.bind t.active ~f:(fun active ->
-       List.find choices ~f:(fun w -> W.Workspace_id.equal active w.id)))
+  List.find (workspace_choices t id) ~f:(fun w ->
+    Option.equal W.Workspace_id.equal (Some w.id) t.active)
 ;;
 
-let browse_workspaces t id ~delta =
-  let choices = workspace_choices t id in
+let workspace_step t ~delta =
+  let choices =
+    match t.focus with
+    | Some id -> workspace_choices t id
+    | None -> filtered_workspaces t ""
+  in
   let index =
-    Option.bind (workspace_cursor t id) ~f:(fun selected ->
-      List.findi choices ~f:(fun _ w -> W.Workspace_id.equal selected.id w.id)
-      |> Option.map ~f:fst)
-    |> Option.value ~default:(if delta > 0 then -1 else 1)
+    List.findi choices ~f:(fun _ w -> Option.equal W.Workspace_id.equal t.active (Some w.id))
+    |> Option.value_map ~f:fst ~default:(if delta > 0 then -1 else List.length choices)
   in
   let index = Int.max 0 (Int.min (List.length choices - 1) (index + delta)) in
-  let cursor =
-    Option.map (List.nth choices index) ~f:(fun w -> W.Workspace_id.to_string w.id)
-  in
-  let l = local t id in
-  set_local t id { l with cursor; scroll = index }
+  List.nth choices index
 ;;
 
 let current t (c : capture) =
@@ -3249,6 +3276,24 @@ let navigation_tiles t =
        P.Layout.navigation_order definition ~kinds:(layout_keys t eligible)
        |> List.map ~f:(fun index -> indexed.(index)))
   | _ -> eligible
+;;
+
+let enter_workspace t =
+  let visible = navigation_tiles t in
+  let body = List.filter visible ~f:(fun tile -> not (workspace_tabs tile.kind)) in
+  let remembered =
+    Option.bind t.active ~f:(fun id ->
+      List.Assoc.find t.workspace_focus ~equal:String.equal (W.Workspace_id.to_string id)
+      |> Option.join)
+  in
+  let preferred =
+    if Option.exists (active t) ~f:editor_workspace
+    then List.find body ~f:(fun tile -> editor_kind tile.kind)
+    else List.find body ~f:(fun tile -> Option.equal W.Tile_id.equal remembered (Some tile.id))
+  in
+  match Option.first_some preferred (List.hd body) with
+  | Some tile -> { t with focus = Some tile.id; workspace_browse = None; prefix = 0 }
+  | None -> { t with prefix = 0 }
 ;;
 
 let restore_commands (workspace : W.Arrangement.t) =
@@ -5146,6 +5191,8 @@ let global_palette_aliases =
   ; "new module", "project.new-module"
   ; "a launch", "asic.launch"
   ; "synth", named_stage_command_id "synthesis"
+  ; "silver timing", named_stage_command_id "timing"
+  ; "quick launch timing", named_stage_command_id "timing"
   ; "chip", "asic.pick-chip"
   ; "elaboration", "preparation.quick-launch"
   ; "elab", "preparation.quick-launch"
@@ -6739,17 +6786,19 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                     mod List.length visible))
                 ~f:(fun tile -> tile.id)
           in
-          { t with focus; prefix = 0 }, No_effect
-        | (Character 'j' | Next | Character 'k' | Previous), _
-          when Option.exists (focused t) ~f:(fun tile ->
-                 String.equal tile.kind "workspace-tabs") ->
-          let tile = Option.value_exn (focused t) in
+          { t with focus; workspace_browse = None; prefix = 0 }, No_effect
+        | (Character 'j' | Next | Character 'k' | Previous), _ when workspace_tabs_focused t ->
           let delta =
             match event with
             | Character 'k' | Previous -> -1
             | _ -> 1
           in
-          browse_workspaces { t with prefix = 0 } tile.id ~delta, No_effect
+          let t = { t with prefix = 0 } in
+          (match workspace_step t ~delta, capture t with
+           | Some workspace, Some capture
+             when not (W.Workspace_id.equal workspace.id capture.workspace) ->
+             t, Execute (capture, Browse_workspace workspace.id)
+           | _ -> t, No_effect)
         | (Character 'j' | Next | Character 'k' | Previous), _
           when Option.exists (focused t) ~f:(fun tile ->
                  String.equal tile.kind "preparation") ->
@@ -6799,14 +6848,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
           let tile = Option.value_exn (focused t) in
           let l = local t tile.id in
           set_local t tile.id { l with utility_detail = true; scroll = 0 }, No_effect
-        | Enter, _
-          when Option.exists (focused t) ~f:(fun tile ->
-                 String.equal tile.kind "workspace-tabs") ->
-          let tile = Option.value_exn (focused t) in
-          let t = { t with prefix = 0 } in
-          (match workspace_cursor t tile.id, capture t with
-           | Some workspace, Some capture -> t, Execute (capture, Switch workspace.id)
-           | _ -> t, No_effect)
+        | Enter, _ when workspace_tabs_focused t -> enter_workspace t, No_effect
         | (Character ('j' | 'k' | 'n' | 'p' | 'x' | 'a') | Next | Previous), _
           when Option.exists (focused t) ~f:(fun tile ->
                  Testing_workspace.is_pane tile.kind) ->
@@ -8026,58 +8068,123 @@ let%test_unit "closed Waveforms and Testing stock instances are not handoff dest
   assert (W.Workspace_id.equal (Option.value_exn (find reopened)).id workspace.id)
 ;;
 
-let%test_unit "workspace tabs browse registry IDs and switch without mutating contexts" =
+let%test_unit "workspace strip activates by ID, retains focus and enters the body" =
   let s = W.initial ~session_id:(W.Session_id.of_string "workspace-tabs") in
   let overview = List.hd_exn s.workspaces
   and timing = List.find_exn s.workspaces ~f:(fun w -> has_preset w "timing") in
-  let tile = { (List.hd_exn s.tiles) with kind = "workspace-tabs" } in
+  let overview_body = List.hd_exn s.tiles in
+  let timing_body = List.nth_exn s.tiles 1 in
+  let tab name (body : W.Tile.t) =
+    { body with id = W.Tile_id.of_string name; kind = "workspace-tabs" }
+  in
+  let overview_tab = tab "overview-tab" overview_body
+  and timing_tab = tab "timing-tab" timing_body in
   (* Duplicate labels must not merge destinations; registry ordering is authoritative. *)
   let s =
     { s with
-      tiles = tile :: List.tl_exn s.tiles
-    ; workspaces = [ overview; { timing with name = overview.name } ]
+      tiles = overview_tab :: timing_tab :: s.tiles
+    ; workspaces =
+        List.map s.workspaces ~f:(fun w ->
+          if W.Workspace_id.equal w.id timing.id then { w with name = overview.name }
+          else w)
+    }
+  in
+  let host =
+    receive empty s
+    |> fun t -> { t with focus = Some overview_body.id }
+    |> fun t -> switch t timing.id
+    |> fun t -> { t with focus = Some timing_body.id }
+    |> fun t -> switch t overview.id
+    |> fun t -> { t with focus = Some overview_tab.id }
+  in
+  let step t key =
+    match input t key ~commands:[] with
+    | t, Execute (captured, Browse_workspace id) ->
+      assert (current t captured);
+      switch ~browse:true t id
+    | t, No_effect -> t
+    | _ -> failwith "Unexpected workspace strip effect"
+  in
+  let assert_focus t id =
+    assert (Option.equal W.Tile_id.equal t.focus (Some id))
+  in
+  let assert_browse t id =
+    assert (Option.equal W.Workspace_id.equal t.active (Some id));
+    assert (workspace_tabs_focused t);
+    assert (Option.equal W.Snapshot.equal host.registry t.registry)
+  in
+  let timing_browse = step host (Character 'j') in
+  assert_browse timing_browse timing.id;
+  assert_focus timing_browse timing_tab.id;
+  assert (
+    W.Workspace_id.equal
+      (Option.value_exn (workspace_cursor timing_browse timing_tab.id)).id timing.id);
+  assert_focus (switch timing_browse overview.id) overview_body.id;
+  assert_focus (switch timing_browse timing.id) timing_body.id;
+  let saved = Option.value_exn (navigation_preferences ~project_key:"fixture" timing_browse) in
+  let saved_timing =
+    List.find_exn saved.workspaces ~f:(fun w ->
+      String.equal w.id (W.Workspace_id.to_string timing.id))
+  in
+  assert (Option.equal String.equal saved_timing.focus (Some (W.Tile_id.to_string timing_body.id)));
+  assert_focus (step timing_browse Enter) timing_body.id;
+  let editor_browse = step timing_browse Next in
+  assert_browse editor_browse W.Editor.workspace_id;
+  assert (not (Option.exists (focused editor_browse) ~f:(fun t -> editor_kind t.kind)));
+  assert (workspace_browsing (receive editor_browse { s with revision = s.revision + 1 }));
+  assert (
+    Option.exists (focused (step editor_browse Enter)) ~f:(fun t -> editor_kind t.kind));
+  assert (
+    Option.exists (focused (switch editor_browse W.Editor.workspace_id)) ~f:(fun t ->
+      editor_kind t.kind));
+  assert_browse (step editor_browse (Character 'j')) W.Editor.workspace_id;
+  let back = step (step editor_browse (Character 'k')) Previous in
+  assert_browse back overview.id;
+  assert_focus back overview_tab.id;
+  assert_browse (step back (Character 'k')) overview.id;
+  let renewed = receive editor_browse { s with session_id = W.Session_id.of_string "replacement" } in
+  assert (not (workspace_browsing renewed));
+  assert (List.is_empty renewed.workspace_focus)
+;;
+
+let%test_unit "workspace browse can pass through a custom layout without a visible strip" =
+  let s = W.initial ~session_id:(W.Session_id.of_string "workspace-hidden-tabs") in
+  let overview = List.hd_exn s.workspaces and custom = List.nth_exn s.workspaces 1 in
+  let first = List.hd_exn s.tiles and body = List.nth_exn s.tiles 1 in
+  let hidden =
+    { body with id = W.Tile_id.of_string "hidden-tab"; kind = "workspace-tabs"; hidden = true }
+  in
+  let other_window = W.Window_id.of_string "other-window" in
+  let s =
+    { s with
+      windows = s.windows @ [ { id = other_window; name = "Other" } ]
+    ; workspaces =
+        [ overview
+        ; { custom with
+            id = W.Workspace_id.of_string "closed-workspace"
+          ; closed = true
+          ; preset = None
+          }
+        ; { custom with preset = None; window = other_window }
+        ; List.last_exn s.workspaces
+        ]
+    ; tiles = { first with kind = "workspace-tabs" } :: hidden :: List.tl_exn s.tiles
     }
   in
   let host = receive empty s in
-  let step t key = fst (input t key ~commands:[]) in
   assert (
-    W.Workspace_id.equal (Option.value_exn (workspace_cursor host tile.id)).id overview.id);
-  let browsed = step host (Character 'j') in
-  assert (phys_equal browsed.registry host.registry);
-  assert (Option.equal W.Workspace_id.equal browsed.active host.active);
+    match input host Next ~commands:[] with
+    | _, Execute (_, Browse_workspace id) -> W.Workspace_id.equal id custom.id
+    | _ -> false);
+  let browsed = switch ~browse:true host custom.id in
+  assert (workspace_tabs_focused browsed && Option.is_none (focused browsed));
   assert (
-    W.Workspace_id.equal
-      (Option.value_exn (workspace_cursor browsed tile.id)).id
-      timing.id);
-  let pending, effect = input browsed Enter ~commands:[] in
-  assert (Option.equal W.Workspace_id.equal pending.active browsed.active);
-  let selected =
-    match effect with
-    | Execute (_, Switch id) -> switch pending id
-    | _ -> failwith "Sidebar Enter must use the host activation effect"
-  in
-  assert (Option.equal W.Workspace_id.equal selected.active (Some timing.id));
-  assert (Option.equal W.Snapshot.equal selected.registry host.registry);
-  let returned = switch selected overview.id in
-  assert (Option.equal W.Tile_id.equal returned.focus (Some tile.id));
-  assert (
-    W.Workspace_id.equal
-      (Option.value_exn (workspace_cursor returned tile.id)).id
-      timing.id);
-  assert (phys_equal (switch returned (W.Workspace_id.of_string "missing")) returned);
-  let removed = receive browsed { s with workspaces = [ overview ] } in
-  assert (
-    W.Workspace_id.equal
-      (Option.value_exn (workspace_cursor removed tile.id)).id
-      overview.id);
-  let renewed =
-    receive browsed { s with session_id = W.Session_id.of_string "replacement" }
-  in
-  assert (List.is_empty renewed.locals && List.is_empty renewed.workspace_focus);
-  assert (
-    W.Workspace_id.equal
-      (Option.value_exn (workspace_cursor renewed tile.id)).id
-      overview.id)
+    match input browsed Next ~commands:[] with
+    | _, Execute (_, Browse_workspace id) -> W.Workspace_id.equal id W.Editor.workspace_id
+    | _ -> false);
+  let entered, _ = input browsed Enter ~commands:[] in
+  assert (Option.equal W.Tile_id.equal entered.focus (Some body.id));
+  assert (not (workspace_tabs_focused entered))
 ;;
 
 let%test_unit "overview utilities and explicit Testing creation are available additively" =
@@ -9208,9 +9315,8 @@ let%test_unit "blank workspaces start with one navigation tile and accept more t
   in
   check_fit host first [ { x = 0; y = 0; width = 80; height = 1 } ];
   let commands = catalog host ~project:None ~jobs:[] in
-  let browsing, _ = input host (Character 'k') ~commands in
-  (match input browsing Enter ~commands with
-   | _, Execute (capture, Switch destination) ->
+  (match input host (Character 'k') ~commands with
+   | _, Execute (capture, Browse_workspace destination) ->
      assert (W.Workspace_id.equal capture.workspace id);
      assert (W.Workspace_id.equal destination (List.last_exn registry.workspaces).id)
    | _ -> assert false);

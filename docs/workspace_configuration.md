@@ -20,8 +20,10 @@ Open **Space c c**, choose **Create blank workspace**, and press Enter. Workbenc
 creates and switches to `Workspace N` using the next available name. Its first
 tile is the same borderless, one-line workspace strip used in Overview.
 In Fit mode it stays at the top, leaving the space below for tiles such as
-Hierarchy. With the strip focused, use `j` / `k` to highlight a workspace
-and Enter to switch to it.
+Hierarchy. With the strip focused, `j` shows the next workspace and `k`
+shows the previous one immediately. Focus stays on the strip: you can browse
+past Editor without sending keys to Cobalt. Press **Enter** when you want to
+work in the displayed workspace.
 It belongs to the current window, follows Main context, and persists in the daemon
 registry. Switching occurs only after successful creation.
 

@@ -98,6 +98,14 @@ module Role = struct
   ;;
 end
 
+let workspace_focus_attrs appearance role =
+  [ Attr.fg (Role.foreground appearance Focus)
+  ; Attr.bg (Role.backdrop appearance role)
+  ; Attr.bold
+  ; Attr.underline
+  ]
+;;
+
 let%test_unit "btop rendering gives each monitor role its own ink in Vivid only" =
   let scheme = Option.value_exn (Appearance.Scheme.of_key "btop-kanagawa-wave") in
   let vivid = { Appearance.default with scheme; color = Vivid } in
@@ -812,19 +820,7 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
          |> List.filter ~f:(fun row ->
            Option.exists row.Overview_tiles.workspace ~f:(fun id ->
              List.exists (H.workspace_choices host tile.id) ~f:(fun w ->
-               W.Workspace_id.equal id w.id)))
-         |> List.map ~f:(fun row ->
-           let browsing =
-             Option.equal
-               W.Workspace_id.equal
-               row.workspace
-               (Option.map (H.workspace_cursor host tile.id) ~f:(fun w -> w.id))
-           in
-           { row with
-             value =
-               (if row.active then "active" else if browsing then "Enter to open" else "")
-           ; role = (if browsing then Active else row.role)
-           }))
+               W.Workspace_id.equal id w.id))))
     | "stage-checklist" ->
       let local = H.local host tile.id in
       let observed =
@@ -2020,10 +2016,14 @@ let menu_button appearance label =
   View.text ~attrs:(Role.attrs appearance Surface @ [ Attr.bold ]) (" " ^ label ^ " ▾ ")
 ;;
 
-let project_prefix appearance ~width =
+let project_prefix ?(focused = false) appearance ~width =
   let button = menu_button appearance "Project" in
   if width >= View.width button + 5
-  then View.hcat [ button; View.text ~attrs:(Role.attrs appearance Border) "│" ]
+  then
+    View.hcat
+      [ button
+      ; View.text ~attrs:(Role.attrs appearance (if focused then Focus else Border)) "│"
+      ]
   else View.none
 ;;
 
@@ -2244,7 +2244,8 @@ let checklist_page host data tile ~height rows =
   hints, hint_height, available, List.drop rows start
 ;;
 
-let workspace_page host tile ~width ~height rows =
+let workspace_page ?(focused = false) host (tile : W.Tile.t) ~width ~height rows =
+  let cursor = Option.map (H.workspace_cursor host tile.id) ~f:(fun w -> w.id) in
   let chips ~compact =
     List.mapi rows ~f:(fun i row ->
       let i =
@@ -2253,15 +2254,16 @@ let workspace_page host tile ~width ~height rows =
             Option.equal W.Workspace_id.equal row.Overview_tiles.workspace (Some w.id)))
         |> Option.value_map ~default:i ~f:fst
       in
-      let role =
-        if row.active
-        then Role.Active_tab
-        else if Overview_tiles.Role.equal row.role Active
-        then Selection
-        else Inactive_tab
+      let role = if row.active then Role.Active_tab else Role.Inactive_tab in
+      (* An underline acts as the focus edge even when the entire pane is one cell
+         high. Keep the active brackets and the same chip widths for pointer hits. *)
+      let attrs =
+        if focused && row.active
+        then workspace_focus_attrs host.appearance role
+        else Role.attrs host.appearance role
       in
       ( View.text
-          ~attrs:(Role.attrs host.appearance role)
+          ~attrs
           (sprintf
              "%s%s%d %s%s%s"
              (if compact && not row.active then "" else " ")
@@ -2287,8 +2289,7 @@ let workspace_page host tile ~width ~height rows =
   else if height = 1
   then (
     (* A one-line workspace strip never turns into a one-entry vertical list.
-       Keep the browsed tab visible while retaining as many neighbours as fit. *)
-    let cursor = Option.map (H.workspace_cursor host tile.W.Tile.id) ~f:(fun w -> w.id) in
+       Keep the active tab visible while retaining as many neighbours as fit. *)
     let selected =
       List.findi chips ~f:(fun _ (_, id) -> Option.equal W.Workspace_id.equal id cursor)
       |> Option.value_map ~default:0 ~f:fst
@@ -2305,12 +2306,9 @@ let workspace_page host tile ~width ~height rows =
     in
     `Strip (trim chips selected used))
   else (
-    let selected =
-      Option.map (H.workspace_cursor host tile.W.Tile.id) ~f:(fun w -> w.id)
-    in
     let index =
       List.findi rows ~f:(fun _ row ->
-        Option.equal W.Workspace_id.equal row.Overview_tiles.workspace selected)
+        Option.equal W.Workspace_id.equal row.Overview_tiles.workspace cursor)
       |> Option.value_map ~default:0 ~f:fst
     in
     `Rows
@@ -2960,7 +2958,12 @@ let tile_view
         heading
         ^ E.text (E.clip ~width:(Int.max 0 (room - cell_width heading)) (E.plain filter))
       in
-      [ View.text ~attrs:(Role.attrs appearance Heading) heading ])
+       let attrs =
+         if focused && geometry.border = 0 && String.equal tile.kind "workspace-tabs"
+         then workspace_focus_attrs appearance Heading
+         else Role.attrs appearance Heading
+       in
+       [ View.text ~attrs heading ])
     else []
   in
   let border_title = if geometry.border > 0 then View.vcat header else View.none in
@@ -3169,18 +3172,24 @@ let tile_view
            ]
          |> box ~width:body_width ~height:body_height
        | Some rows when String.equal tile.kind "workspace-tabs" ->
-         let prefix = project_prefix appearance ~width:body_width in
+         let prefix = project_prefix ~focused appearance ~width:body_width in
          let width = body_width - View.width prefix in
          let navigation =
-           match workspace_page host tile ~width ~height:body_height rows with
+           match workspace_page ~focused host tile ~width ~height:body_height rows with
            | `Strip chips -> View.hcat (List.map chips ~f:fst)
            | `Rows page ->
+             let row_attrs (row : Overview_tiles.row) =
+               if focused && row.active
+               then fun _ -> workspace_focus_attrs appearance Selection
+               else utility_attrs appearance
+             in
              Overview_tiles.render
                ?indicator_frames
                ~indicator_fg:(Role.foreground appearance Running)
                ~selected_bg:(Role.backdrop appearance Selection)
                ~appearance
                ~attrs:(utility_attrs appearance)
+               ~row_attrs
                ~width
                ~height:(Int.max 1 (body_height - 1))
                page
@@ -3195,7 +3204,7 @@ let tile_view
                   ~role:Muted
                   ~width:body_width
                   ~height:1
-                  [ "j/k browse | Enter open | 1-9 jump" ])
+                   [ "j/k switch | Enter focus pane | 1-9 jump" ])
            ]
          |> box ~width:body_width ~height:body_height
        | Some rows ->
@@ -4719,6 +4728,13 @@ let plain_text view =
   Buffer.contents buffer
 ;;
 
+let ansi_cell view ~x ~y =
+  let buffer = Buffer.create 64 in
+  let cell = View.crop ~l:x ~t:y view in
+  Notty.Render.to_buffer buffer Notty.Cap.ansi (0, 0) (1, 1) (View.Private.notty_image cell);
+  Buffer.contents buffer
+;;
+
 let refinement_fixture_with initialize =
   let initial = W.initial ~session_id:(W.Session_id.of_string "refinement-render") in
   let apply registry mutation =
@@ -5305,6 +5321,80 @@ let%test_unit "default Editor is a clickable tab at 80 columns and owns a hosted
   assert (String.is_substring top ~substring:"[6 Editor]")
 ;;
 
+let%test_unit "the frameless workspace strip shows keyboard focus without moving hits" =
+  let host, data, find =
+    refinement_fixture_with (fun initial ->
+      W.apply initial (Initialize_config P.Presets.stock_config)
+      |> Result.ok
+      |> Option.value_exn)
+  in
+  let tile = find "workspace-tabs" in
+  let dimensions = { Dimensions.width = 80; height = 40 } in
+  List.iter
+    [ Appearance.Scheme.silver_dark, Appearance.Color.Vivid
+    ; Appearance.Scheme.silver_light, Restrained
+    ]
+    ~f:(fun (scheme, color) ->
+      let host =
+        { host with
+          focus = None
+        ; appearance = { host.appearance with scheme; color; density = Compact }
+        }
+      in
+      let active_focus, _ = H.input host Focus ~commands:[] in
+      assert (Option.equal W.Tile_id.equal active_focus.focus (Some tile.id));
+      let blurred, _ = H.input active_focus Focus ~commands:[] in
+      assert (not (Option.equal W.Tile_id.equal blurred.focus (Some tile.id)));
+      let normal = render blurred data dimensions in
+      let focused = render active_focus data dimensions in
+      let top view = List.hd_exn (String.split_lines (plain_text view)) in
+      assert (String.equal (top normal) (top focused));
+      assert ([%equal: Dimensions.t] (View.dimensions focused) dimensions);
+      let top = top focused in
+      let x pattern =
+        cell_width (String.prefix top (String.substr_index_exn top ~pattern))
+      in
+      let separator = x "│" and active = x "1 Overview" and next = x "2 " in
+      let cell view x = ansi_cell view ~x ~y:0 in
+      let expected_cursor text =
+        View.text
+          ~attrs:
+            [ Attr.fg (Role.foreground host.appearance Focus)
+            ; Attr.bg (Role.backdrop host.appearance Selection)
+            ; Attr.bold
+            ; Attr.underline
+            ]
+          text
+        |> fun view -> cell view 0
+      in
+      [%test_eq: string] (cell focused active) (expected_cursor "1");
+      assert (not (String.equal (cell focused active) (cell normal active)));
+      assert (String.equal (cell focused next) (cell normal next));
+      assert (not (String.equal (cell focused separator) (cell normal separator)));
+      let clipped = tile_view active_focus data tile ~width:5 ~height:1 in
+      assert (View.width clipped = 5 && View.height clipped = 1);
+      [%test_eq: string] (cell clipped 2) (expected_cursor "1");
+      let hit host x =
+        Option.bind (pointer_geometry host dimensions ~x ~y:0) ~f:(fun (tile, body, hit) ->
+          Option.bind hit ~f:(fun (column, row) ->
+            workspace_tab_at host data tile ~width:body.width ~height:body.height ~column ~row))
+      in
+      assert (Option.equal W.Workspace_id.equal (hit active_focus active) active_focus.active);
+      for x = 0 to dimensions.width - 1 do
+        assert (Option.equal W.Workspace_id.equal (hit active_focus x) (hit blurred x))
+      done;
+      let _, effect = H.input active_focus Next ~commands:[] in
+      match effect with
+      | Execute (_, Browse_workspace workspace) ->
+        assert (Option.equal W.Workspace_id.equal (hit active_focus next) (Some workspace));
+        let switched = H.switch ~browse:true active_focus workspace in
+        let view = render switched data dimensions in
+        let top = List.hd_exn (String.split_lines (plain_text view)) in
+        let next = cell_width (String.prefix top (String.substr_index_exn top ~pattern:"2 ")) in
+        assert (String.equal (cell view next) (expected_cursor "2"))
+      | _ -> assert false)
+;;
+
 let%test_unit "Editor and origin use separate native frames and share their body hit geometry" =
   let host, data, _ =
     refinement_fixture_with (fun initial ->
@@ -5538,7 +5628,37 @@ let%test_unit "authored workspace navigation retains intentional panel chrome" =
   in
   assert (x = 4);
   assert (Poly.equal (menu_trigger_at host data dimensions ~x ~y:2) (Some `Project));
-  assert (Option.is_none (menu_trigger_at host data dimensions ~x ~y:1))
+  assert (Option.is_none (menu_trigger_at host data dimensions ~x ~y:1));
+  (* A narrow authored panel falls back to rows, but retains both its focus
+     border and its cursor styling without moving the row target. *)
+  let unfocused = { host with focus = None } in
+  let focused, _ = H.input unfocused Focus ~commands:[] in
+  let width = 12 and height = 5 in
+  let normal = tile_view unfocused data tile ~width ~height in
+  let selected = tile_view focused data tile ~width ~height in
+  assert (View.width selected = width && View.height selected = height);
+  assert (String.equal (plain_text normal) (plain_text selected));
+  let g = panel_geometry focused tile ~width ~height in
+  assert (g.border = 1 && g.content_width = 6);
+  let body = body_bounds focused tile g in
+  let cell view x y = ansi_cell view ~x ~y in
+  let expected_corner = View.text ~attrs:(Role.attrs host.appearance Focus) "╭" in
+  assert (String.equal (cell selected 0 0) (cell expected_corner 0 0));
+  assert (not (String.equal (cell selected 0 0) (cell normal 0 0)));
+  let expected_label =
+    View.text
+      ~attrs:
+        (Role.attrs host.appearance Focus
+         @ [ Attr.bg (Role.backdrop host.appearance Selection); Attr.underline ])
+      "a"
+  in
+  (* The row keeps its active marker, then starts its clipped label. *)
+  [%test_eq: string] (cell selected (body.x + 2) body.y) (cell expected_label 0 0);
+  let click host =
+    workspace_tab_at host data tile ~width:body.width ~height:body.height ~column:2 ~row:0
+  in
+  assert (Option.equal W.Workspace_id.equal (click focused) focused.active);
+  assert (Option.equal W.Workspace_id.equal (click focused) (click unfocused))
 ;;
 
 let%test_unit "preparation pointer selects wrapped history headings but not attempt \
@@ -9379,8 +9499,7 @@ let%test_unit "utility navigation filters match input and inspection scroll is b
       String.equal
       (List.map rows ~f:(fun row -> row.Overview_tiles.label))
       [ "Timing" ]);
-  let host = H.browse_workspaces host tile.id ~delta:1 in
-  assert (String.equal (Option.value_exn (H.workspace_cursor host tile.id)).name "Timing");
+  assert (String.equal (Option.value_exn (H.workspace_step host ~delta:1)).name "Timing");
   let registry =
     { registry with
       tiles =

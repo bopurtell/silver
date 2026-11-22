@@ -1124,6 +1124,7 @@ let render
   ?selected_bg
   ~(appearance : Appearance.t)
   ~attrs
+  ?(row_attrs = fun _ -> attrs)
   ~width
   ~height
   rows
@@ -1164,18 +1165,19 @@ let render
   let content =
     List.map
       rows
-      ~f:
-        (render_row
-           ?indicator_frames
-           ?indicator_fg
-           ?selected_bg
-           ?status_column
-           ~status_width
-           ~time_width
-           ~appearance
-           ~attrs
-           ~width
-           ~indent)
+      ~f:(fun row ->
+        render_row
+          ?indicator_frames
+          ?indicator_fg
+          ?selected_bg
+          ?status_column
+          ~status_width
+          ~time_width
+          ~appearance
+          ~attrs:(row_attrs row)
+          ~width
+          ~indent
+          row)
   in
   let view = View.vcat (heading @ content) in
   let view =

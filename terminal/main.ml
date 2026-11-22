@@ -2683,7 +2683,7 @@ let hydrate_retained ?(reschedule = false) session =
           ])
 ;;
 
-let activate_workspace session id =
+let activate_workspace ?(browse = false) session id =
   if Option.exists session.host.registry ~f:(fun s -> Workspace.is_workspace_open s id)
   then (
     if not (Option.equal Workspace.Workspace_id.equal session.host.active (Some id))
@@ -2704,7 +2704,8 @@ let activate_workspace session id =
     session.timing_demand <- None;
     session.waveform_visible <- false;
     session.waveform_generation <- session.waveform_generation + 1;
-    session.host <- Host.switch session.host id;
+    if browse then session.editor.companion_focused <- false;
+    session.host <- Host.switch ~browse session.host id;
     Option.iter (current_project session) ~f:(reconcile_launch_context session);
     reconcile_synthesis session;
     Option.iter session.asic ~f:(fun snapshot ->
@@ -7024,6 +7025,9 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Switch id ->
       activate_workspace session id;
       Effect.Ignore
+    | Browse_workspace id ->
+      activate_workspace ~browse:true session id;
+      Effect.Ignore
     | Create_blank_workspace ->
       async (fun () ->
         match session.host.registry, Host.active session.host with
@@ -8676,9 +8680,11 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
     || session.host.paste
   in
   let input = Host.decode_event event in
+  let strip_focused = Host.workspace_tabs_focused session.host in
   let workspace_navigation =
-    Option.exists (Host.focused session.host) ~f:(fun tile ->
-      String.equal tile.kind "workspace-tabs" || String.equal tile.kind "hierarchy")
+    (strip_focused
+     || Option.exists (Host.focused session.host) ~f:(fun tile ->
+          String.equal tile.kind "hierarchy"))
     && Option.exists input ~f:(function
       | Host.Character ('j' | 'k') | Next | Previous | Enter -> true
       | _ -> false)
@@ -8690,6 +8696,12 @@ let host_handler_regular session event ~exit : unit Bonsai_term.Effect.t option 
       Host.input ?palette_capacity:(palette_input_capacity session)
         session.host input ~commands:(host_catalog session))
   in
+  if strip_focused
+     && not modal
+     && Poly.equal input (Some Host.Enter)
+     && Option.exists (Host.focused host) ~f:(fun tile -> Host.editor_kind tile.kind)
+  then session.editor.companion_focused <- false;
+  if strip_focused && workspace_navigation then clear_waveform_on_navigation session host;
   session.host <- host;
   if host.editing_filter
   then (
@@ -9688,7 +9700,9 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
                  (* Switching tabs restores the destination's focus. *)
                  if Option.equal Workspace.Workspace_id.equal session.host.active (Some tile.workspace)
                  then (
-                   let host = { session.host with focus = Some tile.id } in
+                    let host =
+                      { session.host with focus = Some tile.id; workspace_browse = None }
+                    in
                    clear_waveform_on_navigation session host;
                    session.host <- host);
                 Effect.Ignore
@@ -9799,7 +9813,8 @@ let tui
   let focus_editor session =
     session.editor.companion_focused <- false;
     Option.iter (List.find (Host.tiles session.host) ~f:(fun tile -> Host.editor_kind tile.kind))
-      ~f:(fun tile -> session.host <- { session.host with focus = Some tile.id })
+      ~f:(fun tile ->
+        session.host <- { session.host with focus = Some tile.id; workspace_browse = None })
   in
   let report_editor_error ?relative_path session error =
     let path = Option.value_map relative_path ~default:"" ~f:(fun path ->

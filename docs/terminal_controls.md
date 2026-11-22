@@ -57,6 +57,7 @@ startup treatment, not an accepted final aesthetic.
 | Right-click a run / `F3` | Open actions for the run under the pointer or, with `F3`, the highlighted run. Arrow keys or `j`/`k` move, a count repeats movement, `/` filters, and `Enter` invokes the highlighted action. `Esc` exits filtering, then dismisses the menu. |
 | `1`, `2` | Overview, Timing |
 | `Tab` | Next visible tile |
+| `j` / `k` with the workspace list focused | Show the next / previous workspace. The list keeps keyboard focus, including while Editor is displayed. Press `Enter` to give the displayed workspace focus. |
 | `j` / `k`, down / up | Browse runs or project attempts in the focused tile |
 | `Enter` in a run selector | Select the browsed run in the workspace's context |
 | `/` | Edit the focused tile's filter; `Enter`/`Esc` finishes |

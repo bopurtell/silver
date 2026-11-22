@@ -211,19 +211,19 @@ let restoration_regressions () =
   in
   assert (Option.equal W.Tile_id.equal restored.focus focused.focus);
   assert (Option.equal W.Workspace_id.equal restored.active focused.active);
-  (* Sidebar Enter returns the same Switch effect consumed by main's command route. *)
+  (* Sidebar movement uses the browse activation route; Enter moves focus locally. *)
   let sidebar = List.find_exn (H.tiles fresh) ~f:(fun tile -> String.equal tile.kind "workspace-tabs") in
   let sidebar_host = { fresh with focus = Some sidebar.id } in
-  let browsed = H.browse_workspaces sidebar_host sidebar.id ~delta:1 in
-  let before_switch, effect = H.input browsed Enter ~commands:[] in
-  assert (Option.equal W.Workspace_id.equal before_switch.active browsed.active);
-  (match effect with
-   | Execute (_, Switch id) ->
-     assert (
-       W.Workspace_id.equal
-         id
-         (Option.value_exn (H.workspace_cursor browsed sidebar.id)).id)
-   | _ -> failwith "Sidebar bypassed activation effect");
+  let browsed =
+    match H.input sidebar_host Next ~commands:[] with
+    | host, Execute (_, Browse_workspace id) -> H.switch ~browse:true host id
+    | _ -> failwith "Sidebar movement bypassed browse activation"
+  in
+  assert (H.workspace_tabs_focused browsed);
+  let entered, effect = H.input browsed Enter ~commands:[] in
+  assert (Poly.equal effect H.No_effect);
+  assert (Option.equal W.Workspace_id.equal entered.active browsed.active);
+  assert (not (H.workspace_tabs_focused entered));
   let tile = find registry "timing-paths" in
   let check_rejected saved snapshot =
     let restored = H.restore_navigation_selections saved fresh ~scope:"project" in

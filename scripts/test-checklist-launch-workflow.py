@@ -60,7 +60,8 @@ def preference(base, selection, inherited=False):
 
 
 def selected(f):
-    f.terminal.drain(.05)
+    if hasattr(f, 'terminal'):
+        f.terminal.drain(.05)
     ws = f.http.rpc(domain='workspace')
     overview = next(w for w in field(ws, 'workspaces') if field(w, 'preset') == ['overview'])
     context = next(x for x in field(ws, 'contexts') if field(x, 'id') == field(overview, 'context'))
@@ -240,11 +241,11 @@ def quick_case(args, check, view=True, failure=False, changed=False, named=False
             shared.finish(f)
 
 
-def consumed_synthesis_timing_case(args, check):
-    """One raw ASCII R replaces a consumed synthesis intent with fresh timing work."""
+def consumed_synthesis_timing_case(args, check, route='raw-R'):
+    """Quick launch replaces a consumed synthesis intent with fresh timing work."""
     f = proxy = None
     try:
-        f, presets = shared.setup(args, 'consumed-synthesis-timing', check)
+        f, presets = shared.setup(args, 'consumed-synthesis-timing-' + route, check)
         f.launch('completed-synthesis')
         synthesis = f.done('completed-synthesis')
         old = field(f.snapshot(), 'fresh_intent')[0]
@@ -253,30 +254,75 @@ def consumed_synthesis_timing_case(args, check):
               'Completed synthesis retains its consumed synthesis intent')
         setup_workspace(f.http, field(synthesis, 'run')[0], presets)
         f.terminal.close()
-        proxy = shared.StageReplyGate(f)
-        proxy.release.set()
-        f.terminal = t = c.Terminal(f.base, f.client_args, proxy.url, 180, 55)
-        position(f, 6)  # Elaboration followed by physical stages through Timing.
-        t.capture('timing-selected-before-R', ['> · timing:', 'not requested'])
-        check(any('timing' in field(flow, 'fresh_stage_endpoints')
-                  for flow in field(f.snapshot(), 'flows')), 'Live synthetic catalog advertises timing')
-        t.key(b'R')
+        del f.terminal
+        if route == 'merged':
+            # --connect deliberately disables local editing. Reopen exactly this
+            # private fixture's persisted store in standalone Silver for Cobalt.
+            f.stop()
+            client = f.base / 'standalone-client'
+            client.write_text('#!' + sys.executable + '\nimport os,sys\n'
+                              'a=sys.argv[1:]\n'
+                              'i=a.index("--connect")\ndel a[i:i+2]\n'
+                              'a[a.index("--environment")+1]="inherited"\n'
+                              'os.environ["PATH"]=' + repr(str(f.base / 'bin') + ':') + ' + os.environ["PATH"]\n'
+                              'os.execv(' + repr(str(args.client)) + ', ' +
+                              repr([str(args.client), '--standalone', '--standalone-state-dir', str(f.base / 'state')]) + ' + a)\n')
+            client.chmod(0o700)
+            f.client_args.client = client
+            url = f.url  # The wrapper strips this; it is not a live daemon.
+        else:
+            proxy = shared.StageReplyGate(f)
+            proxy.release.set()
+            url = proxy.url
+        f.terminal = t = c.Terminal(f.base, f.client_args, url, 180, 55)
+        t.capture('completed-synthesis-visible', ['endpoint: synthesis', 'stage checklist', 'Completed'])
+        if route in ('raw-R', 'selected'):
+            position(f, 6)  # Elaboration followed by physical stages through Timing.
+            t.capture('timing-selected', ['> · timing:', 'not requested'])
+        else:
+            t.focus_view('stage checklist')
+        if route == 'raw-R':
+            t.key(b'R')
+        elif route == 'selected':
+            t.type_action('quick lau', 'Quick launch selected stage', 'timing-selected-action')
+        elif route == 'named':
+            t.type_action('quick launch timing', 'Launch timing and view', 'timing-named-action')
+        elif route == 'merged':
+            t.type_action('ed', 'Switch to Editor', 'editor-action')
+            t.capture('editor-focused', ['Cobalt focus', 'DIRECTORY'])
+            for key in (b' ', b'c', b'c'):
+                t.key(key)
+            t.key(b'silver timing')
+            t.capture('timing-merged-action', ['> Silver: Launch timing and view'], ['COMMAND PALETTE · captured target'])
+            t.key(b'\r')
+        else:
+            raise AssertionError(route)
         t.drain(1)
-        t.capture('after-raw-R')
+        t.capture('after-quick-launch')
+        if route == 'merged':
+            wait(lambda: len(f.events('physical-admitted')) == 2, 'merged Timing provider admission', timeout=25)
+            t.key(b'\x1b[18~')  # F7 Back from Editor to the original Overview.
+            t.capture('standalone-timing-completed', ['endpoint: timing', 'Completed'])
+            t.close()
+            del f.terminal
+            f.start()
         workflow = wait(lambda: next((w for w in field(f.snapshot(), 'workflows')
                                      if field(w, 'id') != field(synthesis, 'id')), None),
-                        'raw R timing workflow', timeout=25)
+                        route + ': timing workflow', timeout=25)
         intent = field(workflow, 'intent')
         check(field(intent, 'id') != field(old, 'id') and
               field(field(intent, 'selection'), 'endpoint') == 'timing',
-              'Raw R stages a distinct timing intent and launches without a manual step')
-        f.done(field(workflow, 'key'))
-        t.drain(1)
+              route + ': stages a distinct timing intent and launches without a manual step')
+        workflow = f.done(field(workflow, 'key'))
+        wait(lambda: selected(f) == field(workflow, 'run'), route + ': follows exact Timing allocation', timeout=12)
         check(len(field(f.snapshot(), 'workflows')) == 2 and
               len(f.events('emit-start')) == 2 and len(f.events('physical-admitted')) == 2 and
-              sum('(Stage_fresh' in r['request'] for r in proxy.requests) == 1 and
-              sum('(Launch_fresh' in r['request'] for r in proxy.requests) == 1,
-              'One raw R sends exactly one Stage_fresh and one Launch_fresh, producing one new workflow')
+              f.events('physical-admitted')[-1]['stages'][-1] == 'timing',
+              route + ': produces exactly one new recording-provider prefix through Timing')
+        if proxy:
+            check(sum('(Stage_fresh' in r['request'] for r in proxy.requests) == 1 and
+                  sum('(Launch_fresh' in r['request'] for r in proxy.requests) == 1,
+                  route + ': sends exactly one Stage_fresh and one Launch_fresh')
     finally:
         if proxy:
             proxy.close()
@@ -392,7 +438,7 @@ def main():
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--evidence', type=Path)
     parser.add_argument('--timeout', type=int, default=900)
-    choices = ('historical-default', 'remembered', 'default-not-first', 'stale-profile', 'nonfresh', 'unsupported-endpoint', 'changed-context', 'synthetic', 'selected-async', 'consumed-synthesis-timing')
+    choices = ('historical-default', 'remembered', 'default-not-first', 'stale-profile', 'nonfresh', 'unsupported-endpoint', 'changed-context', 'synthetic', 'selected-async', 'consumed-synthesis-timing', 'timing-palette')
     parser.add_argument('--case', action='append', choices=choices)
     args = parser.parse_args()
     for name in ('daemon', 'client', 'preset_export'):
@@ -425,6 +471,9 @@ def main():
                 selected_async_case(args, check, change)
         if not args.case or 'consumed-synthesis-timing' in args.case:
             consumed_synthesis_timing_case(args, check)
+        if not args.case or 'timing-palette' in args.case:
+            for route in ('named', 'selected', 'merged'):
+                consumed_synthesis_timing_case(args, check, route=route)
         result['status'] = 'passed'
     except BaseException:
         result['error'] = traceback.format_exc()

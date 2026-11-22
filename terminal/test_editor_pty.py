@@ -81,6 +81,9 @@ def exercise(client, base):
     alt_left = b"\x1b[1;3D"
     editor_tab = re.compile(r"\[\d+ Editor\]")
     overview_tab = re.compile(r"\[\d+ Overview\]")
+    timing_tab = re.compile(r"\[\d+ Timing\]")
+    resources_tab = re.compile(r"\[\d+ Resources\]")
+    workspace_list_focus = re.compile(r" {2,}(?:\w+ [›>] )?workspaces *\Z")
     # The lightweight ANSI oracle leaves the trailing cell of a wide glyph
     # visible as a space. Assert the textual position without that artifact.
     alpha = re.compile(r"é界 *target_alpha")
@@ -149,12 +152,49 @@ def exercise(client, base):
         see("narrow-tabs-focus", editor_tab, "Silver focus", dirty)
         assert cursor() is None
         send(f6)
-        see("narrow-editor-focus", "Cobalt focus", dirty)
+        screen = see("narrow-editor-focus", "Cobalt focus", dirty)
+        target_x, target_y = frame(screen, "target_alpha")
+        caret_x, caret_y = cursor()
+        caret_offset = (caret_x - target_x, caret_y - target_y)
+        send(f6)
+        see("narrow-tabs-refocused", editor_tab, "Silver focus", dirty)
         resize(120, 40)
+        see("wide-tabs-focus", editor_tab, dirty, workspace_list_focus, absent=("Cobalt focus",))
+        assert cursor() is None
+
+        # The workspace strip keeps input as it crosses ordinary workspaces and
+        # the mounted Cobalt pane. Each key alone must repaint the destination.
+        for key, label, tab, content in (
+            (b"k", "resources", resources_tab, "╭ resources "),
+            (b"k", "timing", timing_tab, "Timing · Paths"),
+            (b"j", "resources-again", resources_tab, "╭ resources "),
+            (b"j", "editor", editor_tab, dirty),
+            (b"k", "resources-from-editor", resources_tab, "╭ resources "),
+            (b"j", "editor-again", editor_tab, dirty),
+        ):
+            send(key)
+            see("workspace-list-" + label, tab, content, workspace_list_focus,
+                absent=("Cobalt focus",))
+            assert cursor() is None
+
+        # `u` would undo the dirty edit if the list had leaked input to Cobalt.
+        send(b"u")
+        see("workspace-list-owns-input", editor_tab, dirty, workspace_list_focus,
+            absent=("Cobalt focus",))
+        assert cursor() is None
+        send(b"\r")
+        screen = see("workspace-list-enter-editor", editor_tab, "Cobalt focus", dirty)
+        target_x, target_y = frame(screen, "target_alpha")
+        assert cursor() == (target_x + caret_offset[0], target_y + caret_offset[1])
+        send(b"u")
+        see("workspace-list-enter-editor-undo", editor_tab, "Cobalt focus", alpha, absent=(dirty,))
+        send(b"\x12")
         see("wide-editor", editor_tab, "F6 Focus pane", dirty)
 
         send(f7)
-        see("hidden", overview_tab, absent=("DIRTY_target_alpha",))
+        see("hidden", resources_tab, "╭ resources ", absent=(dirty, "Cobalt focus"))
+        click_tab("Overview")
+        see("overview-before-reopen", overview_tab, "Project: alpha")
         open_file("draft.txt:2")
         see("retained", "Cobalt focus", dirty)
         send(b"u")

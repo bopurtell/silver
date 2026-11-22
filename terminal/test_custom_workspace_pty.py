@@ -18,6 +18,8 @@ Session, field = native["Session"], native["field"]
 GENERIC_BANNER = re.compile(r"^Workspace \d+ \|", re.M)
 TABS_PANEL = re.compile(r"\bworkspaces\s+\[project\]|: (?:active|Enter to open)\b", re.I)
 PANEL_FRAME = re.compile(r"[┌┐└┘╭╮╰╯╔╗╚╝]")
+LIST_FOCUS = re.compile(r" {2,}(?:[\w ]+ [›>] )?workspaces *\Z")
+SESSION_FOCUS = re.compile(r" {2,}(?:Testing [›>] )?session *\Z")
 
 
 def expect_registry(before, after, *, revisions=1, **changes):
@@ -131,15 +133,26 @@ def exercise(args, evidence):
                 "x": "0", "y": "0", "width": "80", "height": "1",
             }, tile
 
-            # Walk from the last workspace back to Overview without activating any
-            # intermediate workspace. Enter must use the cursor, not the active tab.
-            os.write(t.master, b"k" * len(stock))
-            expect_strip(t, "browsed-overview", custom_tab, "1 Overview", empty=True)
+            # Every list move switches the visible workspace without entering its
+            # content, even when several moves arrive in one input batch.
+            os.write(t.master, b"k" * (len(stock) - 1))
+            expect_strip(t, "list-testing", "2 Testing",
+                         expected=["simulation-catalog", LIST_FOCUS])
+            os.write(t.master, b"k")
+            expect_strip(t, "list-overview", "1 Overview",
+                         expected=["Connection: connected", LIST_FOCUS], absent=["simulation-catalog"])
+            os.write(t.master, b"j")
+            expect_strip(t, "list-testing-again", "2 Testing",
+                         expected=["simulation-catalog", LIST_FOCUS])
             os.write(t.master, b"\r")
-            expect_strip(t, "opened-overview", "1 Overview")
+            expect_strip(t, "entered-testing", "2 Testing",
+                         expected=["simulation-catalog", SESSION_FOCUS])
+            os.write(t.master, b"k")
+            expect_strip(t, "testing-keeps-content-focus", "2 Testing",
+                         expected=["simulation-catalog", SESSION_FOCUS])
 
-            # Return to the custom workspace, then click a different tab from the
-            # retained keyboard cursor to verify pointer dispatch uses the hit.
+            # Return to the custom workspace, then click a different tab to
+            # verify pointer dispatch uses the hit, not the active workspace.
             t.palette("Switch to Workspace 1")
             top = expect_strip(t, "returned-to-custom", custom_tab, "2 Testing", empty=True)
             click(t, top.index("2 Testing"), 0)
@@ -169,13 +182,15 @@ def exercise(args, evidence):
             expect_strip(t, "custom-reopened", custom_tab, survivor_tab, empty=True)
             reopened = s.rpc("workspace")
             expect_registry(with_survivor, reopened, revisions=2)
-            # The first j still works on the restored workspace-tabs focus and
-            # advances from its retained Overview cursor, not from Workspace 1.
+            # Reopening restores list focus; navigation starts at the active
+            # workspace, not wherever this strip was last used.
             os.write(t.master, b"j")
-            expect_strip(t, "browsed-after-reopen", custom_tab, "2 Testing", empty=True)
-            os.write(t.master, b"\r")
-            expect_strip(t, "opened-testing-after-reopen", "2 Testing",
-                         expected=["simulation-catalog"])
+            expect_strip(t, "list-next-after-reopen", survivor_tab, custom_tab,
+                         expected=[LIST_FOCUS], empty=True)
+            os.write(t.master, b"k")
+            expect_strip(t, "list-previous-after-reopen", custom_tab, survivor_tab,
+                         expected=[LIST_FOCUS], empty=True)
+            assert s.rpc("workspace") == reopened, "List navigation changed the registry"
 
         with closing(Terminal(s)) as t:
             t.capture("tabs-with-custom-reopened", ["Project ▾", custom_tab, survivor_tab])

@@ -366,6 +366,19 @@ def run_live(args):
                    [workspace_tab("Editor", active=True), "Cobalt focus", tty.caret(declaration, column)])
         tty.key(ALT_LEFT)
         tty.accept("real-project-ed-back", [workspace_tab("Overview", active=True)])
+        # Navigate the actual stock strip, including the Editor with the file
+        # still open. Merely displaying that buffer must not give it input.
+        focus_pane(tty, "workspace-tabs")
+        for name, key in (("Testing", b"j"), ("Waveforms", b"j"), ("Timing", b"j"),
+                          ("Resources", b"j"), ("Editor", b"j"), ("Resources", b"k"),
+                          ("Editor", b"j")):
+            tty.key(key)
+            tty.capture("real-project-strip-" + name, [workspace_tab(name, active=True)],
+                        absent=["Cobalt focus"])
+        tty.key(b"\r")
+        tty.accept("real-project-enter-from-strip",
+                   ["Cobalt focus", tty.caret(declaration, column)])
+        tty.key(ALT_LEFT)
         tty.quit_silver()
     finally:
         tty.close()
