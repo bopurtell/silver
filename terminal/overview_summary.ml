@@ -255,11 +255,20 @@ let rows
       Option.filter summary ~f:(fun (s : Asic.Summary.t) -> Run_ref.equal s.run run)
     in
     let analysis = Option.bind summary ~f:(fun s -> s.Asic.Summary.timing_analysis) in
-    let details = O.analysis_details ~decimal_places ~run summary in
+    let physical = O.physical_timing stages in
+    let details = O.analysis_details ~decimal_places ?physical ~run summary in
     let fact ?(role = O.Role.Muted) ?indicator label value =
       O.row ~role ?indicator ~details label value
     in
-    let physical = List.find stages ~f:(fun s -> String.equal s.Asic.Stage.id "timing") in
+    let supplementary =
+      Option.exists physical ~f:(fun s ->
+        not (Asic.Stage.Status.equal s.status Completed))
+    in
+    let stale =
+      not
+        (Option.exists summary ~f:(fun s ->
+           Asic.Summary.Freshness.equal s.freshness Validated))
+    in
     let stage =
       Option.value_map
         physical
@@ -288,10 +297,14 @@ let rows
             ~role:
               (match a.timing_goal with
                | Fail -> Failure
+               | Pass when supplementary || stale -> Muted
                | Pass -> Success
                | Unknown -> Muted)
-            "Goal"
-            (O.goal_label a.timing_goal ^ " · " ^ a.target.stage ^ " / post-PNR STA")
+            (if supplementary then "Captured STA" else "Goal")
+            (O.goal_label a.timing_goal
+             ^ if supplementary
+               then " (report only, not stage result)"
+               else " · " ^ a.target.stage ^ " / post-PNR STA")
         ]
         @ List.map a.metrics ~f:(fun m ->
           fact
@@ -320,11 +333,6 @@ let rows
     then (
       (* At the stock five-cell height there are only three body rows. Keep status AND
          time on the first row, ahead of metrics and verbose provenance. *)
-      let stale =
-        not
-          (Option.exists summary ~f:(fun s ->
-             Asic.Summary.Freshness.equal s.freshness Validated))
-      in
       let compact_evidence =
         match analysis with
         | None -> (if stale then [ freshness_row ] else []) @ evidence
@@ -375,7 +383,7 @@ let rows
             ; fact "Captured source" a.enclosing_status
             ]
       in
-      ({ stage with
+      { stage with
          label = ""
        ; status = None
        ; time = None
@@ -385,10 +393,9 @@ let rows
             ^ time.value
             ^ " · "
             ^ if Option.is_some physical then "stage time" else "STA runtime")
-       ; details
+       ; details = stage.details @ details
        }
-       :: sta_runtime)
-      @ compact_evidence)
+       :: (sta_runtime @ compact_evidence))
     else (stage :: time :: sta_runtime) @ (freshness_row :: evidence))
 ;;
 
@@ -509,7 +516,7 @@ let%test_unit "typed metrics preserve zero, units, missing and nonfinite without
     List.exists compact ~f:(fun r ->
       String.is_substring r.value ~substring:"refresh failed"));
   let inspected = O.inspection_lines compact |> String.concat ~sep:"\n" in
-  assert (not (String.is_substring inspected ~substring:"tool failed"));
+  assert (String.is_substring inspected ~substring:"tool failed");
   assert (String.is_substring inspected ~substring:"offline");
   let quiet =
     rows

@@ -844,18 +844,28 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
     | "timing" when (H.local host tile.id).utility_detail ->
       Some
         (Option.value_map selected_run ~default:[] ~f:(fun run ->
-           let stage =
-             Overview_tiles.observed_stages ~asic:data.asic ~run
-             |> List.find ~f:(fun s -> String.equal s.Asic.Stage.id "timing")
-             |> Option.map ~f:(Overview_tiles.asic_stage_row ~now ~run ~selected:false)
+           let rows =
+             Overview_summary.rows
+               ~now
+               ~decimal_places:policy.decimal_places
+               ~kind:"timing"
+               ~run
+               ~summary:(data.summary run)
+               ~stages:(Overview_tiles.observed_stages ~asic:data.asic ~run)
+               ()
            in
-           Option.to_list stage
-           @ [ Overview_tiles.analysis_row
-                 ~decimal_places:policy.decimal_places
-                 ~run
-                 ~selected:false
-                 (data.summary run)
-             ]))
+           let headlines =
+             List.hd_exn rows
+             :: List.filter (List.tl_exn rows) ~f:(fun row ->
+                  List.mem [ "Goal"; "Captured STA"; "Analysis" ] row.label ~equal:String.equal)
+           in
+           let details =
+             List.concat_map headlines ~f:(fun row -> row.Overview_tiles.details)
+             |> List.stable_dedup ~compare:String.compare
+           in
+           List.mapi headlines ~f:(fun i row ->
+             { row with Overview_tiles.details =
+                 (if i = List.length headlines - 1 then details else []) })))
     | "live-status" when H.compact_summary host tile ->
       Some
         [ Overview_tiles.row
@@ -879,7 +889,12 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
            ~active_workspace:host.active
            ~project:data.project
            ~selected_run
+           ~run_population:(List.map data.runs ~f:(fun (run, _) -> run.id))
+           ?newer_run:
+             (Option.bind selected_run ~f:(fun run ->
+                Overview_tiles.newer_run ~asic:data.asic ~run))
            ~connection:data.status
+           ()
          @ [ Evidence_activity.session_row ?selected_run host data.asic ])
     | "workspace-tabs" ->
       Some
@@ -930,7 +945,8 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
             | Physical_stage s when String.equal s.id "timing" ->
               { row with
                 details =
-                  row.details @ Overview_tiles.analysis_details ~run (data.summary run)
+                  row.details
+                  @ Overview_tiles.analysis_details ~run ~physical:s (data.summary run)
               }
             | _ -> row
             in
@@ -961,6 +977,7 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
       in
       let facts =
         Option.bind selected_run ~f:data.summary
+        |> Option.filter ~f:(fun s -> Option.exists selected_run ~f:(Run_ref.equal s.run))
         |> Option.value_map ~default:[] ~f:(fun summary ->
           Overview_tiles.summary_rows ~freshness:policy.freshness summary)
       in
@@ -1257,7 +1274,8 @@ let metrics_offset local data run =
 
 let compact_summary_enabled host tile =
   let local = H.local host tile.W.Tile.id in
-  H.compact_summary host tile
+  (* Expanded Timing uses the same typed stage/analysis facts as the compact tile. *)
+  (H.compact_summary host tile || String.equal tile.kind "timing")
   && Overview_summary.supports tile.kind
   && Option.is_none local.inspection
   && Option.is_none local.artifacts
@@ -2732,6 +2750,7 @@ let timing_body
   ?(presentation = T.defaults)
   ?indicator_frames
   ?(reading = false)
+  ?(report_only = false)
   appearance
   ~pane
   ~scroll
@@ -2741,6 +2760,7 @@ let timing_body
   =
   let source = Timing_workspace.rows ~presentation ~pane ~scroll ~width ~height view in
   let text role value =
+    let role = match role with Role.Success when report_only -> Role.Muted | role -> role in
     View.text ~attrs:(Role.attrs appearance role) (Artifact_view.safe value)
   in
   match pane with
@@ -2895,6 +2915,12 @@ let tile_view
   let policy = H.policy host tile in
   let show_title = T.show_title policy in
   let show_badge = T.show_badge policy (H.binding_kind tile) in
+  let incomplete_timing =
+    Option.bind (H.timing host tile) ~f:(fun view ->
+      let stages = Overview_tiles.observed_stages ~asic:data.asic ~run:view.run in
+      Overview_tiles.physical_timing stages)
+    |> Option.filter ~f:(fun stage -> not (Asic.Stage.Status.equal stage.status Completed))
+  in
   let focused =
     Option.value_map host.H.focus ~default:false ~f:(W.Tile_id.equal tile.id)
   in
@@ -3012,6 +3038,11 @@ let tile_view
           | Details -> "synthesis/detail"
           | Metrics -> "synthesis/metrics"
           | Evidence -> "synthesis/evidence")
+      in
+      let title =
+        Option.value_map incomplete_timing ~default:title ~f:(fun stage ->
+          title ^ " · stage "
+          ^ Overview_tiles.Status.label (Overview_tiles.asic_stage_status stage.status))
       in
       (* Host-generated titles stay lowercase; binding badges retain exact run IDs. Focus
          belongs to border styling, never a decorative title prefix. *)
@@ -3362,6 +3393,7 @@ let tile_view
           ~presentation:policy
           ?indicator_frames
           ~reading:(evidence_reading data ~views:[ view ] ~runs:[])
+          ~report_only:(Option.is_some incomplete_timing)
           appearance
           ~pane
           ~scroll:local.scroll
@@ -8365,7 +8397,7 @@ let%test_unit "Timing panes render typed selection and exact scoped detail with 
   assert (
     List.exists prefix ~f:(fun (role, text) ->
       match role with
-      | Metric -> String.equal text "Slack: 28.000 ns · violated"
+      | Metric -> String.equal text "Slack: 28.000 ns · violated (reported)"
       | _ -> false));
   let prefix = timing_semantic_prefix ~pane:Context ~width:70 state in
   assert (

@@ -419,6 +419,65 @@ let type_query host commands query =
     next)
 ;;
 
+let%test_unit "WB-096 exact stop and cancel dispatch the same captured flow despite fuzzy rivals" =
+  let host, _, snapshot, selection = fixture () in
+  let chip : Asic.Chip_target.t = { chip = "fifo"; variant = "deep" } in
+  let project = Project_id.of_string "stop-palette" in
+  let intent =
+    { (Asic_snapshot_fixture.fresh_intent "stop") with
+      selection = { selection with chip_target = Some chip }
+    }
+  in
+  let run = Asic_snapshot_fixture.run_a in
+  let viewed = Asic_snapshot_fixture.workflow ~run ~phase:Physical "viewed" intent in
+  let other =
+    Asic_snapshot_fixture.workflow ~run:Asic_snapshot_fixture.run_b ~phase:Physical "other" intent
+  in
+  let snapshot =
+    { snapshot with
+      chip_target = Some chip
+    ; chips = [ { id = "fifo"; label = "FIFO"; default_variant = "deep"
+                ; variants = [ { id = "deep"; label = "Deep" } ] } ]
+    ; workflows = [ other; viewed ]
+    }
+  in
+  let catalog snapshot =
+    H.command "fixture.remove-stop" "Remove / Stop" "stop all cancel all" H.Toggle_chrome
+    :: C.cancellation_commands host ~project:(Some project) ~asic:(Some snapshot) ~inspected:(Some run)
+  in
+  let commands = catalog snapshot in
+  let open_query commands query = type_query (open_palette host commands) commands query in
+  let check query ~bulk =
+    let typed = open_query commands query in
+    let ids = H.matches (Option.value_exn typed.palette) |> List.map ~f:(fun c -> c.H.id) in
+    if bulk
+    then assert (String.equal (List.hd_exn ids) H.cancel_all_flows_command_id)
+    else
+      assert (List.equal String.equal (List.take ids 2) [ H.cancel_flow_command_id; H.cancel_all_flows_command_id ]);
+    assert (List.mem ids "fixture.remove-stop" ~equal:String.equal);
+    match H.input typed Enter ~commands with
+    | _, Execute (_, Cancel_asic_flows { project = captured; bulk_chip; viewed = single; operations }) ->
+      assert (Project_id.equal captured project);
+      assert (Bool.equal single (not bulk));
+      assert (Option.equal Asic.Chip_target.equal bulk_chip (Option.some_if bulk chip));
+      assert (List.equal Asic.Operation.equal operations
+                (if bulk then [ Cancel_workflow other.id; Cancel_workflow viewed.id ]
+                 else [ Cancel_workflow viewed.id ]))
+    | _ -> assert false
+  in
+  List.iter [ "cancel"; "stop"; "STOP" ] ~f:(check ~bulk:false);
+  List.iter [ "cancel all"; "stop all" ] ~f:(check ~bulk:true);
+  let commands = catalog { snapshot with workflows = [ other ] } in
+  List.iter [ "cancel"; "stop" ] ~f:(fun query ->
+    let typed = open_query commands query in
+    assert (String.equal (selected typed).id H.cancel_flow_command_id);
+    match H.input typed Enter ~commands with
+    | next, No_effect ->
+      assert (Option.is_some next.palette);
+      assert (String.equal next.notice "No cancellable ASIC flow in view")
+    | _ -> assert false)
+;;
+
 let%test_unit "WB-076 exact launch aliases dispatch by identity against stronger fuzzy matches" =
   let host, _, snapshot, historical = fixture () in
   let selection = { historical with endpoint = "cts"; assignments = [ "X=2" ] } in
@@ -1060,4 +1119,67 @@ let%test_unit "live selected launch guards reject tile-local drift and same-row 
   assert (
     Result.is_error
       (C.validate_selected host ~asic:(Some snapshot) ~item:preparation ~run))
+;;
+
+let%test_unit "cancel uses exact unselected launch origin, not chip history" =
+  let host, checklist, snapshot, selection = fixture () in
+  let chip : Asic.Chip_target.t = { chip = "controlled_fifo"; variant = "default" } in
+  let other_chip = { chip with variant = "other" } in
+  let registry = Option.value_exn host.registry in
+  let registry =
+    { registry with
+      contexts = List.map registry.contexts ~f:(fun c -> { c with selected_run = None })
+    }
+  in
+  let tile = List.find_exn registry.tiles ~f:(fun t -> String.equal t.kind "run-selector") in
+  let origin = { (H.receive host registry) with focus = Some tile.id } in
+  let intent =
+    { (Asic_snapshot_fixture.fresh_intent "timing") with
+      selection = { selection with chip_target = Some chip; endpoint = "timing" }
+    }
+  in
+  let launch = Asic_snapshot_fixture.workflow ~phase:Building "timing" intent in
+  let rival = Asic_snapshot_fixture.workflow ~phase:Building "rival" intent in
+  let snapshot = { snapshot with chip_target = Some chip; workflows = [ rival; launch ] } in
+  let resolve host snapshot inspected =
+    C.viewed_flow host ~inspected ~chip_target:snapshot.Asic.Snapshot.chip_target
+      (C.cancellable_flows snapshot)
+  in
+  assert (Result.is_error (resolve origin snapshot None));
+  let on_checklist = { origin with focus = Some checklist.id } in
+  let history =
+    { on_checklist with planned_run = Planned_run.receive origin.planned_run ~revision:2 snapshot }
+  in
+  assert (Result.is_error (resolve history snapshot None));
+  let target = H.launch_target origin |> Option.value_exn in
+  let launched =
+    { origin with fresh_launch_origin = Some { target; key = launch.key; chip_target = Some chip } }
+  in
+  let expect_launch host snapshot =
+    let found = resolve host snapshot None |> Result.ok_or_failwith in
+    assert (Asic.Operation.equal found.operation (Cancel_workflow launch.id))
+  in
+  expect_launch launched snapshot;
+  expect_launch launched { snapshot with workflows = [ rival; { launch with phase = Physical } ] };
+  expect_launch { launched with focus = Some checklist.id } snapshot;
+  let another_workspace =
+    List.find_exn (W.open_workspaces registry) ~f:(fun w ->
+      not (W.Workspace_id.equal w.id target.workspace_id))
+  in
+  assert (Result.is_error (resolve (H.switch launched another_workspace.id) snapshot None));
+  assert (Result.is_error (resolve launched { snapshot with chip_target = Some other_chip } None));
+  assert (Result.is_error (resolve launched
+    { snapshot with workflows = [ rival; { launch with cancel_requested = true } ] } None));
+  let revision =
+    { registry with contexts =
+        List.map registry.contexts ~f:(fun c ->
+          { c with selection_revision = c.selection_revision + 1 })
+    }
+  in
+  assert (Result.is_error (resolve (H.receive launched revision) snapshot None));
+  let run = Asic_snapshot_fixture.run_a in
+  let observed = { snapshot with workflows =
+    [ { rival with run = Some run }; { launch with phase = Physical; run = Some run } ] }
+  in
+  assert (Result.is_error (resolve launched observed (Some run)))
 ;;

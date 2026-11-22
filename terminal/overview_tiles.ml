@@ -233,6 +233,27 @@ let observed_stages ~asic ~run =
   execution ~asic ~run |> Option.value_map ~default:[] ~f:(fun run -> run.stages)
 ;;
 
+let physical_timing stages =
+  List.find stages ~f:(fun s -> String.equal s.Asic.Stage.id "timing")
+;;
+
+(** The registry list is ordered by last update, not launch. Compare producer
+    start times, and don't infer ordering for older records without them. *)
+let newer_run ~asic ~run =
+  let started (run : Asic.Run.t) =
+    Option.bind run.execution_timing ~f:(fun timing -> timing.started_at)
+  in
+  let open Option.Let_syntax in
+  let%bind snapshot = asic in
+  let%bind selected = execution ~asic ~run in
+  let%bind since = started selected in
+  List.filter_map snapshot.Asic.Snapshot.runs ~f:(fun candidate ->
+    let%bind at = started candidate in
+    Option.some_if (Timestamp.compare at since > 0) (at, candidate))
+  |> List.max_elt ~compare:(fun (a, _) (b, _) -> Timestamp.compare a b)
+  |> Option.map ~f:snd
+;;
+
 (** An endpoint is captured intent, not evidence of its prefix or its outcome. Do not
     use the current catalog or a global preview to reconstruct a historical recipe. *)
 let unconfirmed_endpoint (selection : Asic.Selection.t) : Asic.Stage.t =
@@ -413,10 +434,14 @@ let timing_metric_value ~decimal_places ~key ~unit_ value =
   else Presentation.decimal ~places:decimal_places value
 ;;
 
-let analysis_details ?(decimal_places = 3) ~run (summary : Asic.Summary.t option) =
+let analysis_details ?(decimal_places = 3) ?physical ~run (summary : Asic.Summary.t option) =
+  let summary = Option.filter summary ~f:(fun s -> Run_ref.equal s.run run) in
   [ "Run: " ^ run_identity run
   ; "Analysis: post-PNR STA (independent of physical stage completion)"
   ]
+  @ Option.to_list
+      (Option.map physical ~f:(fun (stage : Asic.Stage.t) ->
+         "Timing stage: " ^ Status.label (asic_stage_status stage.status)))
   @ Option.value_map
       summary
       ~default:[ "No authoritative analysis observation" ]
@@ -446,7 +471,7 @@ let analysis_details ?(decimal_places = 3) ~run (summary : Asic.Summary.t option
               ; "Execution SHA256: " ^ a.target.execution_sha256
               ; "Current execution outcome: " ^ s.completion
               ; "Captured source status: " ^ a.enclosing_status
-              ; "Timing goal: "
+              ; "Captured STA goal: "
                 ^ goal_label a.timing_goal
                 ^ " (independent of analysis completion and signoff acceptance)"
               ; (if String.equal a.target.stage "timing"
@@ -496,7 +521,8 @@ let analysis_details ?(decimal_places = 3) ~run (summary : Asic.Summary.t option
               | _ -> []))
 ;;
 
-let analysis_row ?(decimal_places = 3) ~run ~selected summary =
+let analysis_row ?(decimal_places = 3) ~run ~selected (summary : Asic.Summary.t option) =
+  let summary = Option.filter summary ~f:(fun s -> Run_ref.equal s.run run) in
   let analysis = Option.bind summary ~f:(fun s -> s.Asic.Summary.timing_analysis) in
   let status =
     match analysis with
@@ -908,7 +934,10 @@ let status_rows
   ~active_workspace
   ~(project : Project.t option)
   ~(selected_run : Run_ref.t option)
+  ?(run_population = [])
+  ?newer_run
   ~connection
+  ()
   =
   let arrangement =
     Option.bind active_workspace ~f:(fun id ->
@@ -963,10 +992,15 @@ let status_rows
     ; row
         ~details:
           (Option.to_list
-             (Option.map selected_run ~f:(fun run -> "Run: " ^ run_identity run)))
-        "Run"
+             (Option.map selected_run ~f:(fun run -> "Displayed run: " ^ run_identity run))
+           @ Option.to_list
+               (Option.map newer_run ~f:(fun (run : Asic.Run.t) ->
+                  "Newer run: " ^ run_identity run.run ^ " · " ^ run.status)))
+        (if Option.is_some newer_run then "Run (older)" else "Run")
         (Option.value_map selected_run ~default:"none selected" ~f:(fun run ->
-           let id = Presentation.identifier ~compress:string_compression run.id in
+           let id =
+             Presentation.identifiers ~compress:string_compression run_population run.id
+           in
            match run.label with
            | Some label
              when (not (String.is_empty label)) && not (String.equal label run.id) ->
@@ -1995,6 +2029,7 @@ let%test_unit "missing session contexts use unavailable without inventing linkag
           ~project:None
           ~selected_run:None
           ~connection:"local"
+          ()
       in
       let context = List.nth_exn rows 2 in
       [%test_result: string] context.value ~expect:value;
@@ -2181,6 +2216,7 @@ let%expect_test "context linkage avoids nested colons and keeps names visible" =
         ~project:None
         ~selected_run:None
         ~connection:"local"
+        ()
     in
     let linkage = List.nth_exn rows 2 in
     (* Exactly one label colon; only the linked keyword carries emphasis. *)

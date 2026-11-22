@@ -4,7 +4,8 @@
 is delivered. A saved count controls how many paths are ready to inspect on selection.
 
 **ASIC flow cancellation:** [WB-096 — Cancel active ASIC flows from the palette](presentation/WB-096-flow-cancellation.md)
-is delivered. It covers `cancel`, chip-scoped `cancel all`, and the checklist status of stages skipped after cancellation.
+is delivered. It covers `cancel` / `stop`, chip-scoped `cancel all` / `stop all`, and the
+checklist status of stages skipped after cancellation.
 
 **Cobalt companion:** [WB-093 — Test quick launch](integrations/WB-093-cobalt-quick-launch.md)
 is closed. [WB-094 — Share the current project with editors](integrations/WB-094-editor-project-sharing.md)

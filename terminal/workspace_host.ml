@@ -316,6 +316,21 @@ type menu =
   ; count : int
   }
 
+type launch_target =
+  { session_id : W.Session_id.t
+  ; workspace_id : W.Workspace_id.t
+  ; context_id : W.Context_id.t
+  ; binding_revision : int
+  ; selection_revision : int
+  }
+[@@deriving equal]
+
+type fresh_launch_origin =
+  { target : launch_target
+  ; key : string
+  ; chip_target : Asic.Chip_target.t option
+  }
+
 type t =
   { registry : W.Snapshot.t option
   ; active : W.Workspace_id.t option
@@ -352,6 +367,7 @@ type t =
   ; testing : (string * (unit ref * string * Testing_workspace.t)) list
   ; waveforms : (string * (unit ref * P.Waveforms.pin)) list
   ; planned_run : Planned_run.t
+  ; fresh_launch_origin : fresh_launch_origin option
   ; stage_preparation : string option
   ; timing_navigation_notice : string option
   ; stage_generation : int
@@ -394,6 +410,7 @@ let empty =
   ; testing = []
   ; waveforms = []
   ; planned_run = Planned_run.empty
+  ; fresh_launch_origin = None
   ; stage_preparation = None
   ; timing_navigation_notice = None
   ; stage_generation = 0
@@ -1346,6 +1363,7 @@ let receive t (s : W.Snapshot.t) =
         ; menu = None
         ; prefix = 0
         ; editing_filter = false
+        ; fresh_launch_origin = None
         }
       | _ -> t
     in
@@ -1570,6 +1588,7 @@ let reconnect t ~replacement =
     ; stage_preparation = None
     ; timing_navigation_notice = None
     ; planned_run = Planned_run.reset t.planned_run ~scope:""
+    ; fresh_launch_origin = None
     ; timing = List.map t.timing ~f:(fun (id, view) -> id, invalidate_inspection view)
     ; testing =
         List.map t.testing ~f:(fun (id, (identity, scope, state)) ->
@@ -5233,6 +5252,7 @@ let named_stage_command_id endpoint = named_stage_command_prefix ^ endpoint
 let verify_evidence_command_id = "asic.verify-evidence"
 let cancel_flow_command_id = "asic.cancel-viewed-flow"
 let cancel_all_flows_command_id = "asic.cancel-chip-flows"
+let viewed_flow_palette_queries = [ "cancel"; "stop" ]
 
 let known_stage_endpoints =
   [ "synthesis"; "floorplan"; "placement"; "cts"; "routing"; "timing"; "signoff" ]
@@ -5253,15 +5273,16 @@ let global_palette_aliases =
   ; "verification", "testing.suites"
   ; "veri", verify_evidence_command_id
   ; "verify evidence", verify_evidence_command_id
-  ; "cancel", cancel_flow_command_id
-  ; "cancel", cancel_all_flows_command_id
   ; "cancel all", cancel_all_flows_command_id
+  ; "stop all", cancel_all_flows_command_id
   ; "theme", choose_theme_id
   ; "close term", "terminal.close"
   ; "restart term", "terminal.restart"
   ; "term center", "terminal.center"
   ; "term bottom", "terminal.bottom"
   ]
+  @ List.concat_map viewed_flow_palette_queries ~f:(fun query ->
+    [ query, cancel_flow_command_id; query, cancel_all_flows_command_id ])
 ;;
 
 let stock_workspace_palette_aliases t commands =
@@ -5422,14 +5443,15 @@ let ranked_command_matches (p : palette) =
   in
   let query = String.strip p.query in
   let folded = String.lowercase query in
-  (* Prefer the exact spelling when a provider distinguishes endpoint IDs by case. *)
   let exact =
-    if String.equal folded "cancel"
+    (* A disabled viewed-flow row must still win over bulk or a fuzzy Stop match. *)
+    if List.mem viewed_flow_palette_queries folded ~equal:String.equal
     then
       List.filter_map [ cancel_flow_command_id; cancel_all_flows_command_id ] ~f:(fun id ->
         List.find p.commands ~f:(fun c ->
-          String.equal c.id id && List.mem c.exact_queries "cancel" ~equal:String.equal))
+          String.equal c.id id && List.mem c.exact_queries folded ~equal:String.equal))
     else
+      (* Prefer the exact spelling when a provider distinguishes endpoint IDs by case. *)
       Option.first_some
         (List.find p.commands ~f:(fun c -> List.mem c.exact_queries query ~equal:String.equal))
         (List.find p.commands ~f:(fun c ->
@@ -8779,14 +8801,6 @@ let%test_unit "Ctrl-U clears focused filters without submitting or touching othe
   | _ -> assert false
 ;;
 
-type launch_target =
-  { session_id : W.Session_id.t
-  ; workspace_id : W.Workspace_id.t
-  ; context_id : W.Context_id.t
-  ; binding_revision : int
-  ; selection_revision : int
-  }
-
 let launch_target t =
   match t.registry, active t with
   | Some s, Some w ->
@@ -8799,6 +8813,19 @@ let launch_target t =
       ; selection_revision = c.selection_revision
       }
   | _ -> None
+;;
+
+(* An unselected launch origin can address its own submitted workflow even before the
+   provider returns a run. Do not carry that authority into another workspace/binding,
+   across a run selection change, or to another chip. *)
+let unselected_launch_origin t ~chip_target =
+  Option.bind t.fresh_launch_origin ~f:(fun origin ->
+    Option.bind t.registry ~f:(fun registry ->
+      if Option.exists (launch_target t) ~f:(equal_launch_target origin.target)
+         && Option.equal Asic.Chip_target.equal chip_target origin.chip_target
+         && Option.is_none (W.context registry origin.target.context_id).selected_run
+      then Some origin.key
+      else None))
 ;;
 
 let selection_after_allocation (s : W.Snapshot.t) target run =

@@ -72,15 +72,20 @@ def observe_requests(session):
             thread.join()
 
 
-def exercise(client, daemon, base):
+def exercise(client, daemon, base, *, verb):
+    base.mkdir()
+    bulk_query = verb + " all"
     root, tools = base / "project", base / "tools"
     root.mkdir()
     tools.mkdir()
     (root / "dune-project").write_text("(lang dune 3.22)\n")
-    electrum = ("electrum", "main")
+    target = ("controlled_fifo", "main") if verb == "stop" else ("electrum", "main")
+    chip, variant = target
+    bulk_title = f"Cancel All — {chip}/{variant}"
+    bulk_two = bulk_title + " (2 "  # The palette may clip the trailing “flows)”.
     outside = ("other-chip", "other")
-    equipment(root, tools, [electrum, outside])
-    catalog_path = root / "electrum.json"
+    equipment(root, tools, [target, outside])
+    catalog_path = root / (chip + ".json")
     catalog = json.loads(catalog_path.read_text())
     catalog["declaration"]["entries"][0]["methodology"]["endpoints"] = ["synthesis", "timing"]
     catalog_path.write_text(json.dumps(catalog))
@@ -138,6 +143,11 @@ os.execv(sys.executable, [sys.executable, {str(routing)!r} if routing else {str(
         pair = [["chip", target[0]], ["variant", target[1]]]
         session.rpc("asic", sexp(["Select_chip", pair]), wait=True)
 
+    def selected_main_run():
+        ws = session.rpc("workspace")
+        context, = [c for c in field(ws, "contexts") if field(c, "id") == field(ws, "main_context")]
+        return field(context, "selected_run")
+
     def select_run(run):
         ws = session.rpc("workspace")
         main = field(ws, "main_context")
@@ -187,51 +197,80 @@ os.execv(sys.executable, [sys.executable, {str(routing)!r} if routing else {str(
                                   width=210, height=50)) as term:
                 term.capture("ready", ["Connection: connected", "available to launch"])
                 project = projects[str(root)]
-                first = launch("electrum-first", electrum, "timing")
-                wait(term, lambda: field(workflows()["electrum-first"], "run"),
-                     "First Electrum run never allocated")
-                second = launch("electrum-second", electrum)
+                # Drive the user's real launch-and-view path for `stop`, not
+                # just an RPC-seeded run and a separately painted command.
+                if verb == "stop":
+                    row = selected_row(term, "timing", "launch-timing")
+                    assert all(text in row for text in ("in view", f"{chip}/{variant}", chip + "-flow")), row
+                    os.write(term.master, b"\r")
+                    wait(term, lambda: workflows(), "Timing Enter did not launch a workflow")
+                    first_key, = workflows()
+                    workflow = workflows()[first_key]
+                    first = field(workflow, "id")
+                    selection = field(field(workflow, "intent"), "selection")
+                    assert field(selection, "endpoint") == "timing", workflow
+                else:
+                    first_key = "electrum-first"
+                    first = launch(first_key, target, "timing")
+                wait(term, lambda: field(workflows()[first_key], "run"),
+                     "Timing run never allocated")
+                run, = field(workflows()[first_key], "run")
+                if verb == "stop":
+                    wait(term, lambda: selected_main_run() == [run],
+                         "Launch and view did not select its allocated run")
+                second = launch("second", target)
                 select_chip(outside)
                 out = launch("out-of-scope", outside)
-                select_chip(electrum)
-                wait(term, lambda: all_physical("electrum-first", "electrum-second", "out-of-scope"),
+                select_chip(target)
+                wait(term, lambda: all_physical(first_key, "second", "out-of-scope"),
                      "Daemon did not own the three real workflows simultaneously")
 
-                # No run in view: exact Enter must not fall through to the newest workflow.
-                row = selected_row(term, "cancel", "unavailable-single")
-                assert "Cancel — flow in view" in row, row
-                disabled_enter(term, "unavailable-single-enter", "No cancellable ASIC flow in view",
-                               requests, [])
-                not_cancel_requested("electrum-first", "electrum-second", "out-of-scope")
-
-                run, = field(workflows()["electrum-first"], "run")
                 observed, = [r for r in field(asic(), "runs") if field(r, "run") == run]
                 workspace = Path(field(field(observed, "reference"), "attempt")).parent
-                select_run(run)
-                focused_checklist(term)
-                term.capture("run-in-view", [re.compile(r"Routing:\s+running", re.I)])
+                if verb == "stop":
+                    term.palette("Switch to Timing")
+                    term.capture("timing-in-view", ["Timing ›"], absent=["COMMAND PALETTE"])
+                else:
+                    # No run in view: exact Enter must not fall through to the newest workflow.
+                    row = selected_row(term, verb, "unavailable-single")
+                    assert "Cancel — flow in view" in row, row
+                    disabled_enter(term, "unavailable-single-enter", "No cancellable ASIC flow in view",
+                                   requests, [])
+                    not_cancel_requested(first_key, "second", "out-of-scope")
+                    select_run(run)
+                    focused_checklist(term)
+                    term.capture("run-in-view", [re.compile(r"Routing:\s+running", re.I)])
 
-                row = selected_row(term, "cancel", "exact-cancel")
-                assert "Cancel — electrum-flow · electrum-first" in row, row
+                # The native submission key can be clipped in the palette;
+                # the recorder below checks the full dispatched workflow ID.
+                viewed_title = f"Cancel — {chip}-flow · "
+                if verb == "cancel":
+                    viewed_title += first_key
+                row = selected_row(term, verb, "exact-single")
+                assert viewed_title in row, row
                 rows = term.capture("cancel-order", [
-                    "Cancel All — electrum/main (2 flows)", "Cancel fresh workflow electrum-second",
+                    bulk_two, "Cancel fresh workflow second",
                 ]).splitlines()
-                first_pos = next(i for i, r in enumerate(rows) if "> Cancel — electrum-flow" in r)
-                assert "Cancel All — electrum/main (2 flows)" in rows[first_pos + 1], rows
+                first_pos = next(i for i, r in enumerate(rows) if "> " + viewed_title in r)
+                assert bulk_two in rows[first_pos + 1], rows
                 assert any("Cancel fresh workflow" in r for r in rows[first_pos + 2:]), rows
                 before = asic()
-                assert any(field(op, "key") == "run:electrum-first" and field(op, "state") == "executing"
+                assert any(field(op, "key") == "run:" + first_key and field(op, "state") == "executing"
                            for op in field(before, "operations")), before
 
                 os.write(term.master, b"\r")
                 try:
+                    if verb == "stop":
+                        wait(term, lambda: requests, "Exact stop Enter did not dispatch")
+                        term.palette("Switch to Overview")
+                        focused_checklist(term)
                     term.capture("cancelling-routing", [re.compile(r"Routing:\s+cancelling…", re.I)],
                                  timeout=8)
                 finally:
                     (workspace / "cleanup-release").touch()
-                wait(term, lambda: cancelled("electrum-first"), "Single Enter did not cancel viewed flow")
+                wait(term, lambda: cancelled(first_key), "Single Enter did not cancel viewed flow")
                 assert requests == [(project, ["Cancel_workflow", first])], requests
-                not_cancel_requested("electrum-second", "out-of-scope")
+                not_cancel_requested("second", "out-of-scope")
                 terminal_rows = [re.compile(r"Routing:\s+cancelled", re.I),
                                  re.compile(r"Timing:\s+skipped — flow cancelled during routing", re.I)]
                 term.capture("skipped-after-cleanup", terminal_rows)
@@ -247,77 +286,77 @@ os.execv(sys.executable, [sys.executable, {str(routing)!r} if routing else {str(
                                and e["data"]["occurrence"]["action_key"] == "implementation.timing"
                                for e in generation["events"]), generation
 
-                third = launch("electrum-third", electrum)
-                wait(term, lambda: all_physical("electrum-second", "electrum-third", "out-of-scope"),
+                third = launch("third", target)
+                wait(term, lambda: all_physical("second", "third", "out-of-scope"),
                      "Daemon did not own the bulk candidates")
                 # Wait for the terminal poll, independently of the API snapshot.
                 for attempt in range(8):
-                    row = selected_row(term, "cancel all", f"bulk-{attempt}")
-                    if "Cancel All — electrum/main (2 flows)" in row:
+                    row = selected_row(term, bulk_query, f"bulk-{attempt}")
+                    if bulk_two in row:
                         break
                     dismiss(term)
                 else:
                     raise AssertionError(row)
 
-                newer = launch("electrum-newer", electrum)
-                wait(term, lambda: all_physical("electrum-newer"), "Newer workflow not active")
+                newer = launch("newer", target)
+                wait(term, lambda: all_physical("newer"), "Newer workflow not active")
                 # Never refresh or reopen: operate on the two IDs in the painted command.
                 os.write(term.master, b"\r")
                 # The serialized physical queue may defer cleanup for the
                 # captured flow behind the intentionally held out-of-scope one.
-                wait(term, lambda: cancellation_latched("electrum-second", "electrum-third"),
+                wait(term, lambda: cancellation_latched("second", "third"),
                      "Bulk Enter did not cancel precisely the captured in-scope flows")
                 expected = [(project, ["Cancel_workflow", w]) for w in [first, third, second]]
                 assert requests == expected, (requests, expected, out, newer)
-                not_cancel_requested("electrum-newer", "out-of-scope")
+                not_cancel_requested("newer", "out-of-scope")
 
-                # A separate owned finalization for the visible execution makes exact
-                # "cancel" ambiguous. Its legacy key intentionally collides with another
+                # A separate owned finalization for the visible execution makes the single
+                # alias ambiguous. Its legacy key intentionally collides with another
                 # workflow's key; only its typed explicit operation may be sent.
                 wait(term, lambda: field(workflows()["out-of-scope"], "run"),
                      "Out-of-scope run never acquired released physical slot")
                 run, = field(workflows()["out-of-scope"], "run")
                 observed, = [r for r in field(asic(), "runs") if field(r, "run") == run]
                 execution = Path(field(field(observed, "reference"), "attempt")) / "execution.json"
-                session.rpc("asic", sexp(["Finalize", ["key", "electrum-newer"], ["run", run],
+                session.rpc("asic", sexp(["Finalize", ["key", "newer"], ["run", run],
                                          ["execution_file", str(execution)], ["acceptance", []]]))
                 select_run(run)
                 for attempt in range(8):
-                    row = selected_row(term, "cancel", f"ambiguous-{attempt}")
+                    row = selected_row(term, verb, f"ambiguous-{attempt}")
                     if "Multiple active flows" in row:
                         break
                     dismiss(term)
                 else:
                     raise AssertionError(row)
                 disabled_enter(term, "ambiguous-enter", "Multiple active flows", requests, expected)
-                row = selected_row(term, "Cancel finalization electrum-newer", "finalization-exact")
-                assert "Cancel finalization electrum-newer" in row, row
+                row = selected_row(term, "Cancel finalization newer", "finalization-exact")
+                assert "Cancel finalization newer" in row, row
                 os.write(term.master, b"\r")
-                expected += [(project, ["Cancel_finalization", ["key", "electrum-newer"], ["run", run]])]
+                expected += [(project, ["Cancel_finalization", ["key", "newer"], ["run", run]])]
                 wait(term, lambda: len(requests) >= len(expected), "No exact finalization dispatch")
                 assert requests == expected, (requests, expected)
-                not_cancel_requested("electrum-newer", "out-of-scope")
+                not_cancel_requested("newer", "out-of-scope")
 
                 catalog_path = root / "chips.json"
                 catalog = json.loads(catalog_path.read_text())
                 catalog["default_chip"] = outside[0]
-                catalog["chips"] = [c for c in catalog["chips"] if c["id"] != electrum[0]]
+                catalog["chips"] = [c for c in catalog["chips"] if c["id"] != chip]
                 catalog_path.write_text(json.dumps(catalog))
                 term.palette("Discover ASIC flows and runs")
                 for attempt in range(8):
-                    row = selected_row(term, "cancel all", f"missing-chip-{attempt}")
-                    if "Cancel All — electrum/main" in row and "missing from catalog" in row:
+                    row = selected_row(term, bulk_query, f"missing-chip-{attempt}")
+                    if bulk_title in row and "Chip/variant missing from" in row:
                         break
                     dismiss(term)
                 else:
                     raise AssertionError(row)
                 disabled_enter(term, "missing-chip-enter", "missing from catalog",
                                requests, expected)
-                not_cancel_requested("electrum-newer", "out-of-scope")
+                not_cancel_requested("newer", "out-of-scope")
                 (root / "release-basic").touch()
-                wait(term, lambda: cancelled("electrum-second", "electrum-third"),
+                wait(term, lambda: cancelled("second", "third"),
                      "Captured bulk workflows did not settle to Cancelled")
-                wait(term, lambda: any(field(f, "key") == "electrum-newer"
+                wait(term, lambda: any(field(f, "key") == "newer"
                                       and field(f, "state") == "interrupted"
                                       for f in field(asic(), "finalizations")),
                      "Exact queued finalization did not settle as interrupted")
@@ -332,9 +371,14 @@ if __name__ == "__main__":
     parser.add_argument("--daemon", type=lambda p: Path(p).resolve(), required=True)
     parser.add_argument("--evidence", type=Path)
     args = parser.parse_args()
+
+    def run(base):
+        for verb in ("cancel", "stop"):
+            exercise(args.client, args.daemon, base / verb, verb=verb)
+
     if args.evidence:
         args.evidence.mkdir()
-        exercise(args.client, args.daemon, args.evidence.resolve())
+        run(args.evidence.resolve())
     else:
         with TemporaryDirectory(prefix="palette-cancellation-") as tmp:
-            exercise(args.client, args.daemon, Path(tmp))
+            run(Path(tmp))

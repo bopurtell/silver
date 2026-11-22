@@ -27,9 +27,10 @@ make it clear which requested stages never ran.
 
 ## Acceptance criteria
 
-- [x] For exact `cancel`, pin **Cancel — \<flow in view\>** first and **Cancel
-  All — \<selected chip\> (\<active flow count\> flows)** second, ahead of
-  competing fuzzy matches. Exact `cancel all` selects the bulk action first.
+- [x] For exact `cancel` or `stop`, pin **Cancel — \<flow in view\>** first and
+  **Cancel All — \<selected chip\> (\<active flow count\> flows)** second, ahead of
+  competing fuzzy matches. Exact `cancel all` or `stop all` selects the bulk
+  action first.
 - [x] Enter on **Cancel** dispatches the existing cancellation action for the
   active run or workflow in view. If there is no unambiguous cancellable flow
   in view, keep that row first with a reason; Enter dispatches nothing.
@@ -45,10 +46,12 @@ make it clear which requested stages never ran.
 ## Verification
 
 Delivered against an updated daemon. The [palette PTY regression](../../../terminal/test_palette_cancellation_pty.py)
-verified Enter dispatch and the rendered skip reason after refresh. The private
-Routing cancellation fixture passed 42 lifecycle assertions, including child
-cleanup, no Timing start, cold refresh after restart, and a provider-only
-interruption not being reported as user cancellation.
+verifies Enter dispatch for both spellings, including `stop` from Timing after
+launching a controlled FIFO fixture, and the rendered skip reason after
+refresh. The private Routing cancellation fixture passed 42 lifecycle
+assertions, including child cleanup, no Timing start, cold refresh after
+restart, and a provider-only interruption not being reported as user
+cancellation.
 
 Use short fixtures. Exercise **Enter dispatch**, not just row order: include
 a competing fuzzy match, two active Electrum flows, and an out-of-scope flow.
@@ -60,7 +63,8 @@ with the reason after refresh.
 ## Starting points
 
 - [Exact palette ordering](../../../terminal/workspace_host.ml) (`ranked_command_matches`)
-  currently pins one command; [WB-076](WB-076-palette-intent-aliases.md) sets the precedent.
+  pins the single and bulk actions in that order for `cancel` and `stop`;
+  [WB-076](WB-076-palette-intent-aliases.md) sets the precedent.
 - [Fresh workflow commands](../../../terminal/stage_launch_commands.ml) already
   dispatch cancellation by workflow ID.
 - [Stage normalization](../../../backend/asic_public.ml) maps `unreached` to

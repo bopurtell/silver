@@ -328,6 +328,7 @@ type cancellable_flow =
   { operation : Asic.Operation.t
   ; run : Run_ref.t option
   ; target : Asic.Chip_target.t option
+  ; workflow_key : string option
   ; label : string
   ; explicit_title : string
   }
@@ -341,6 +342,7 @@ let cancellable_flows (snapshot : Asic.Snapshot.t) =
           { operation = Cancel_workflow w.id
           ; run = w.run
           ; target = w.intent.selection.chip_target
+          ; workflow_key = Some w.key
           ; label = w.intent.selection.flow ^ " · " ^ w.key
           ; explicit_title =
               "Cancel fresh workflow " ^ w.key ^ " (Elaboration: " ^ w.elaboration_status ^ ")"
@@ -366,6 +368,7 @@ let cancellable_flows (snapshot : Asic.Snapshot.t) =
         { operation = Cancel_finalization { key = f.key; run = f.run }
         ; run = Some f.run
         ; target
+        ; workflow_key = None
         ; label = "Finalization · " ^ f.key
         ; explicit_title = "Cancel finalization " ^ f.key
         }
@@ -379,7 +382,7 @@ let selected_cancel_chip (snapshot : Asic.Snapshot.t) =
   | Some _ -> Error "Chip/variant missing from catalog"
 ;;
 
-let viewed_flow host ~inspected flows =
+let viewed_flow host ~inspected ~chip_target flows =
   let focused_kind kind =
     Option.exists (H.focused host) ~f:(fun tile -> String.equal tile.kind kind)
   in
@@ -397,10 +400,18 @@ let viewed_flow host ~inspected flows =
       | [ run ] -> Ok (Some run)
       | _ -> Error "Multiple runs in view; focus the intended run")
   in
-  let planned_workflow = Planned_run.workflow host.H.planned_run in
   let displayed_workflow =
-    if focused_kind "planned-run" || (focused_kind "stage-checklist" && Option.is_none inspected)
-    then Option.map planned_workflow ~f:(fun w -> Asic.Operation.Cancel_workflow w.id)
+    if focused_kind "planned-run"
+    then
+      Option.map (Planned_run.workflow host.H.planned_run) ~f:(fun w ->
+        Asic.Operation.Cancel_workflow w.id)
+    else None
+  in
+  (* Without an inspected run, project-wide history is not a view target. Use
+     the exact local submission, never the newest workflow in the snapshot. *)
+  let origin =
+    if Option.is_none inspected
+    then H.unselected_launch_origin host ~chip_target
     else None
   in
   let candidates =
@@ -409,6 +420,10 @@ let viewed_flow host ~inspected flows =
       | Some op, _ -> Asic.Operation.equal op flow.operation
       | None, Some run when not (focused_kind "planned-run") ->
         Option.equal Run_ref.equal flow.run (Some run)
+      | None, None ->
+        Option.exists origin ~f:(fun key ->
+          Option.equal String.equal flow.workflow_key (Some key)
+          && Option.equal Asic.Chip_target.equal flow.target chip_target)
       | _ -> false)
   in
   match candidates with
@@ -432,7 +447,9 @@ let cancellation_commands host ~project ~asic ~inspected =
     | Error reason ->
       H.command ~unavailable:reason id (Artifact_view.safe title) aliases (H.Unavailable reason)
   in
-  let viewed = viewed_flow host ~inspected flows in
+  let viewed =
+    viewed_flow host ~inspected ~chip_target:(Launch_preferences.chip_target asic) flows
+  in
   let single =
     make ~viewed:true H.cancel_flow_command_id
       ("Cancel — " ^ Option.value_map (Result.ok viewed) ~default:"flow in view" ~f:(fun flow -> flow.label))

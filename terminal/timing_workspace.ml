@@ -236,7 +236,8 @@ let semantic_prefix
            ^ " "
            ^ Option.value row.unit_ ~default:"(unit unreported)"
            ^ " · "
-           ^ row.status )
+           ^ row.status
+           ^ " (reported)" )
        ; ( Metadata
          , "Corner: "
            ^ Option.value row.corner ~default:"—"
@@ -278,7 +279,7 @@ let semantic_prefix
           (identity a.attempt_id ^ " / " ^ identity a.occurrence_id)
       ; field "Analysis digest" (identity a.source_digest)
       ; field "Captured stage" a.stage
-      ; Metadata, "Exact STA evidence; current execution may have failed downstream"
+      ; Metadata, "Captured STA report, not a stage or signoff verdict"
       ])
     @ observation
     @

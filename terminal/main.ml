@@ -1882,8 +1882,12 @@ and perform_asic_request
     if selecting then (
       session.selecting_chip <- true;
       session.context_epoch <- session.context_epoch + 1;
-      session.host <- { session.host with
-        stage_generation = session.host.stage_generation + 1; stage_preparation = None });
+      session.host
+      <- { session.host with
+           stage_generation = session.host.stage_generation + 1
+         ; stage_preparation = None
+         ; fresh_launch_origin = None
+         });
     let epoch = session.context_epoch in
     let context = launch_context session in
     let scope = plan_scope session project in
@@ -2046,9 +2050,13 @@ and perform_asic_request
             (Launch_preferences.chip_target session.asic) snapshot.chip_target)
         in
         if changed then
-          session.host <- { session.host with
-            stage_generation = session.host.stage_generation + 1;
-            stage_preparation = None; planned_preparation = false };
+          session.host
+          <- { session.host with
+               stage_generation = session.host.stage_generation + 1
+             ; stage_preparation = None
+             ; planned_preparation = false
+             ; fresh_launch_origin = None
+             };
         let missing = Launch_preferences.missing_target snapshot in
         if not (Option.equal String.equal missing
                   (Option.bind session.asic ~f:Launch_preferences.missing_target))
@@ -6799,6 +6807,14 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       then
         Option.iter target ~f:(fun target ->
           session.view_on_allocation <- Some (key, target));
+      if not intent.elaboration_only
+      then
+        session.host
+        <- { session.host with
+             fresh_launch_origin =
+               Option.map target ~f:(fun target ->
+                 { Host.target; key; chip_target = intent.selection.chip_target })
+           };
       asic_request session (Launch_fresh { key; intent_id = intent.id }))
   in
   let stage_fresh
@@ -8627,7 +8643,12 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                  in
                  if viewed
                  then
-                   Result.ok (C.viewed_flow session.host ~inspected:(inspected_run session) flows)
+                   Result.ok
+                     (C.viewed_flow
+                        session.host
+                        ~inspected:(inspected_run session)
+                        ~chip_target:snapshot.chip_target
+                        flows)
                    |> Option.exists ~f:matches
                  else List.exists flows ~f:matches)
              in

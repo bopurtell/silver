@@ -74,6 +74,24 @@ available while Signoff runs and survives later failure/cancellation. Failed Tim
 segments can retain independently proven STA output without claiming a successful
 stage/checkpoint. Missing/skipped STA never earns completed analysis.
 
+For example, controlled FIFO attempt `d0b38396110146d98f9e0034290c54da`
+records Routing `completed` (record 18, 43.978751s), Timing `started` (19)
+and `interrupted` (20, exit 143, 21.017292s), then an `interrupted` outcome (21).
+There is no Timing publication. A read-only Silver `Get` at cursor 21 returned
+run `cancelled`, Routing `Completed`, Timing `Cancelled`, and Signoff
+`Not_requested`. The separate validated summary returned execution
+`interrupted`, acceptance `not_evaluated` and native `OpenROAD.STAPostPNR`
+`Completed`/`Pass` (6.21s). That Pass is report-only: it cannot make the
+explicit Timing stage green, even when the summary is validated. Silver only
+attributes provider interruption to user cancellation when the owned run was
+actually signalled; exit 143 alone is not enough. The cancellation fixture
+covers both cases and checks cached history and explicit Refresh:
+
+```sh
+./scripts/with-switch.sh python3 -B scripts/test-asic-signoff-cancellation.py \
+  --fixture --daemon _build/default/daemon/main.exe
+```
+
 New recipes use schema 4 and analysis schema 2, stage `timing`. Historical recipe
 schemas 2/3 and analysis schema 1, stage `signoff`, retain their original meaning.
 Captured targets include stage and exact source path/hash; caches, details, pins and

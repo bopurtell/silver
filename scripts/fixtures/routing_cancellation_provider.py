@@ -23,6 +23,44 @@ def emit(data):
     print(json.dumps(data), flush=True)
 
 
+def native_sta(path, execution):
+    """Exact Timing analysis from the interrupted execution, not a checkpoint."""
+    directory = path.parent.parent / "fixture-sta"
+
+    def source(name):
+        file = directory / name
+        return dict(path=str(file), sha256=hashlib.sha256(file.read_bytes()).hexdigest())
+
+    attempt = execution["attempt_id"]
+    metrics = [
+        dict(key=key, raw_key=raw + "__corner:slow", corner="slow",
+             availability="available", value=value, unit=unit, reason=None,
+             source=dict(file=source("slow/sta.log"), state=source("state_out.json"), line=1),
+             units_source=source("slow/generated.lib") if unit == "ns" else None)
+        for key, raw, value, unit in (
+            ("setup_slack", "timing__setup__ws", 16., "ns"),
+            ("hold_slack", "timing__hold__ws", .125, "ns"),
+            ("setup_violations", "timing__setup_vio__count", 0, "count"),
+            ("hold_violations", "timing__hold_vio__count", 0, "count"))
+    ]
+    provenance = ["config.json", "runtime.txt", "state_out.json", "slow/sta.log", "slow/generated.lib"]
+    payload = envelope("timing-analysis", 2, attempt_id=attempt,
+                       occurrence_id=attempt + "/implementation.timing",
+                       analysis_id=attempt + "/post-pnr-sta", stage="timing",
+                       execution_file=str(path), execution_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                       status="completed", reason=None, enclosing_status=execution["status"],
+                       evidence_scope="immutable_timing_execution_source_not_checkpoint",
+                       native_grammar="librelane-3.1.0.dev3-step-output-runtime-v1",
+                       duration=dict(seconds=6.21, precision_seconds=.001, basis="librelane_step_wall_clock",
+                                     source=source("runtime.txt")),
+                       producer=dict(class_id="OpenROAD.STAPostPNR", directory=str(directory), config=source("config.json")),
+                       inventory=[source(name) for name in provenance],
+                       corners=[dict(corner="slow", status="measured", setup_goal="pass", hold_goal="pass")],
+                       metrics=metrics, timing_goal="pass")
+    return dict(payload, source_digest=hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+
+
 def produce(option):
     plan = json.loads(Path(option("--methodology-plan")).read_text())
     assert plan["plan_identity"] == option("--expected-plan-identity")
@@ -73,7 +111,8 @@ def produce(option):
     event("allocated", request=request, workspace=str(workspace))
     event("planned", plan=recipe)
     event("prepared", runtime_record=None)
-    for stage in recipe["stages"][:4]:
+    stopping_stage = "timing" if Path(__file__).with_name("stop-in-timing").exists() else "routing"
+    for stage in recipe["stages"][:recipe["stages"].index(stopping_stage)]:
         checkpoint = workspace / (stage + "-checkpoint")
         checkpoint.write_text(stage)
         artifact = dict(boundary=stage, path=str(checkpoint), identity=hashlib.sha256(stage.encode()).hexdigest())
@@ -90,12 +129,22 @@ def produce(option):
 
     signal.signal(signal.SIGTERM, terminate)
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    (workspace / "routing-child").write_text(str(child.pid))
+    (workspace / (stopping_stage + "-child")).write_text(str(child.pid))
     try:
-        occurrence("routing", "started", "running", None)
+        occurrence(stopping_stage, "started", "running", None)
         publish()
         emit(envelope("stage-observation", event="observation_allocated",
                       attempt=str(attempt), stream_id=stream))
+        if stopping_stage == "timing":
+            # Like the real attempt, STA finishes and publishes its own evidence
+            # while the surrounding Timing segment is still owned and running.
+            for name, data in (("config.json", "{}"), ("runtime.txt", "6.21"),
+                               ("state_out.json", "{}"), ("slow/sta.log", "positive slack"),
+                               ("slow/generated.lib", "time_unit : \"1ns\";")):
+                file = workspace / "fixture-sta" / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text(data)
+            (workspace / "sta-finished").touch()
         deadline = time.monotonic() + 30
         while stop is None and not (workspace / "interrupt").exists() and time.monotonic() < deadline:
             time.sleep(.02)
@@ -104,14 +153,17 @@ def produce(option):
             deadline = time.monotonic() + 10
             while not (workspace / "cleanup-release").exists() and time.monotonic() < deadline:
                 time.sleep(.02)
-        error = "Routing interrupted by " + (stop or "fixture producer")
+        error = ("backend execution interrupted" if stopping_stage == "timing"
+                 else "Routing interrupted by " + (stop or "fixture producer"))
     finally:
         child.terminate()
         child.wait(timeout=2)
     (workspace / "cleanup-finished").touch()
-    occurrence("routing", "finished", "interrupted", 143 if stop else 130,
+    # Bare interruption can have the exact same SIGTERM status as user cancellation.
+    exit_code = 143 if stop or stopping_stage == "timing" else 130
+    occurrence(stopping_stage, "finished", "interrupted", exit_code,
                duration=time.monotonic() - started, error=error)
-    outcome = dict(status="interrupted", exit_code=143 if stop else 130, error=error)
+    outcome = dict(status="interrupted", exit_code=exit_code, error=error)
     event("outcome", **outcome)
     publish(outcome)
     emit(envelope("stage-observation", event="observation_terminal", execution_file=str(execution_file)))
@@ -142,9 +194,12 @@ def main():
         path = Path(args[1])
         inspection = json.loads((path.parent / "journal.json").read_text())["inspection"]
         execution = json.loads(path.read_text())
-        emit(envelope("report", execution=execution, methodology=inspection["methodology"],
-                      checkpoints=[dict(reference=a) for a in execution["artifacts"]],
-                      completion=dict(physical="partial"), acceptance="not_evaluated"))
+        report = envelope("report", execution=execution, methodology=inspection["methodology"],
+                          checkpoints=[dict(reference=a) for a in execution["artifacts"]],
+                          completion=dict(physical="partial"), acceptance="not_evaluated")
+        if (path.parent.parent / "sta-finished").exists():
+            report["timing_analysis"] = native_sta(path, execution)
+        emit(report)
     else:
         raise ValueError(args)
     return 0
