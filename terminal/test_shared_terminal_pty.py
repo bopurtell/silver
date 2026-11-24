@@ -63,6 +63,10 @@ def exercise(client, base):
     # Disable PTY input echo so output assertions cannot match the typed command.
     shell.write_text("""#!/bin/sh
 cat "/proc/$$/stat" > "$SHARED_TERMINAL_TEST_AUDIT/shell.$$"
+if [ -f "$SHARED_TERMINAL_TEST_AUDIT/fail-startup" ]; then
+    printf 'WB_STARTUP_FAILURE\\n'
+    exit 23
+fi
 stty -echo
 export PS1='shared-shell$ ' HISTFILE=/dev/null HISTSIZE=1000
 unset PROMPT_COMMAND HISTCONTROL HISTIGNORE HISTTIMEFORMAT
@@ -317,14 +321,20 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         command("printf 'WB_LAST_%s\\n' two; exit 23")
         shown("two-retains-final-screen", 2, "WB_LAST_two", EXITED)
         assert not live(two), "Exited terminal 2 shell was not reaped"
+        term.drain(.5)
+        assert started() == {one, two}, "An exited visible shell respawned without user intent"
         toggle()
         see("hide-exited-two", absent=(OVERLAY, EXITED))
         toggle(2)
-        shown("toggle-does-not-restart-exited-two", 2, "WB_LAST_two", EXITED)
-        assert started() == {one, two}
+        shown("reopen-restarts-exited-two", 2, PROMPT, absent=(EXITED, "WB_LAST_two"))
+        reopened_two, = started() - {one, two}
+        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_REOPEN_%s\\n' clean""")
+        shown("reopened-two-has-fresh-state", 2, "WB_REOPEN_clean")
+        command("printf 'WB_F12_EXIT_%s\\n' two; exit 23")
+        shown("exited-before-explicit-restart", 2, "WB_F12_EXIT_two", EXITED)
         send(F12)
-        shown("explicit-restart", 2, PROMPT, absent=(EXITED, "WB_LAST_two"))
-        f12_two, = started() - {one, two}
+        shown("explicit-restart", 2, PROMPT, absent=(EXITED, "WB_F12_EXIT_two"))
+        f12_two, = started() - {one, two, reopened_two}
         command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_RESTART_%s\\n' clean""")
         shown("restarted-two-has-fresh-state", 2, "WB_RESTART_clean")
         command("WB_VALUE=discard_me; cd subdir; printf 'WB_PALETTE_EXIT_%s\\n' two; exit 23")
@@ -335,15 +345,55 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         assert not live(f12_two), "Palette restart left the old shell alive"
         command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_PALETTE_RESTART_%s\\n' clean""")
         shown("palette-restart-has-fresh-state", 2, "WB_PALETTE_RESTART_clean")
+        # A different numbered shell can exit while hidden. Reselecting it
+        # must start exactly one replacement and leave terminal 1 untouched.
+        hidden_exit = audit / "exit-hidden"
+        command("""while [ ! -f "$SHARED_TERMINAL_TEST_AUDIT/exit-hidden" ]; do sleep .05; done; exit 23""")
+        toggle(1)
+        shown("one-survived-two-restart", 1, "WB_ISOLATED_one")
+        hidden_exit.touch()
+        await_condition("hidden shell was not reaped", lambda: not live(new_two))
+        term.drain(.5)
+        assert started() == {one, two, reopened_two, f12_two, new_two}
+        toggle(2)
+        shown("select-exited-hidden-number", 2, PROMPT, absent=(EXITED, "WB_PALETTE_RESTART_clean"))
+        final_two, = started() - {one, two, reopened_two, f12_two, new_two}
+        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_HIDDEN_RESTART_%s\\n' clean""")
+        shown("hidden-restart-has-fresh-shell", 2, "WB_HIDDEN_RESTART_clean")
         child_two = persistent_child(2)
 
         toggle(1)
         shown("one-survived-two-restart", 1, "WB_ISOLATED_one")
         command("""printf 'WB_ONE=<%s>\\n' "$WB_VALUE" """)
         shown("one-retained-its-variable", 1, "WB_ONE=<number_one>")
-        assert started() == {one, two, f12_two, new_two}
-        assert live(one) and live(new_two)
+        assert started() == {one, two, reopened_two, f12_two, new_two, final_two}
+        assert live(one) and live(final_two)
         assert live(child_one, require_running=True) and live(child_two, require_running=True)
+        # An immediately exiting shell may be caused by a broken startup file.
+        # Neither rendering nor an unsuccessful reopen may produce a respawn loop.
+        fail_startup = audit / "fail-startup"
+        fail_startup.touch()
+        before = started()
+        toggle(3)
+        shown("startup-shell-exits", 3, "WB_STARTUP_FAILURE", EXITED)
+        first_failure, = started() - before
+        term.drain(.5)
+        assert started() == before | {first_failure}
+        toggle()
+        see("hide-startup-failure", absent=(OVERLAY,))
+        toggle()
+        shown("startup-shell-exits-once-per-open", 3, "WB_STARTUP_FAILURE", EXITED)
+        second_failure, = started() - before - {first_failure}
+        term.drain(.5)
+        assert started() == before | {first_failure, second_failure}
+        fail_startup.unlink()
+        toggle(1)
+        shown("existing-shell-survives-startup-failures", 1, "WB_ONE=<number_one>")
+        toggle(3)
+        shown("startup-recovered-on-next-selection", 3, PROMPT, absent=(EXITED, "WB_STARTUP_FAILURE"))
+        three, = started() - before - {first_failure, second_failure}
+        command("printf 'WB_RECOVERED_%s\\n' three")
+        shown("recovered-shell-accepts-input", 3, "WB_RECOVERED_three")
         switch_workspace("Testing", "╭ simulation-catalog ", absent=(OVERLAY,))
         toggle(1)
         shown("one-survived-visible-workspace-switch", 1, "WB_ONE=<number_one>")
@@ -353,7 +403,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         send(b"\x03")  # Silver Ctrl-C, not input to the numbered shell.
         await_condition("Silver did not exit", lambda: term.process.poll() is not None)
         assert term.process.returncode == 0, term.process.returncode
-        assert not live(one) and not live(new_two), "Silver exited without reaping both shells"
+        assert not any(live(shell) for shell in (one, final_two, three)), "Silver exited without reaping its shells"
         await_condition("Silver left a shell's background child running",
                         lambda: not any(live(child, require_running=True)
                                         for child in (child_one, child_two)))

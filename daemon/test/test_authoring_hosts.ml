@@ -63,6 +63,52 @@ let exercise ~endpoint ~root ~outside =
   | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
 ;;
 
+let bluespec_authoring ~endpoint ~parent =
+  let root = Filename.concat parent "bluespec" in
+  Core_unix.mkdir root;
+  Core_unix.mkdir (Filename.concat root ".silver");
+  Out_channel.write_all
+    (Filename.concat root ".silver/project.json")
+    ~data:
+      {|{"schema_version":1,"name":"classic","build_label":"//:rtl","test_label":"//:simulation","language":"bluespec-classic"}|};
+  let client = Client.create endpoint in
+  let%bind hello = Client.hello client >>| Or_error.ok_exn in
+  let instance_id = hello.instance_id in
+  let%bind opened =
+    Client.open_project client { instance_id; root; environment = Inherit_daemon }
+    >>| Or_error.ok_exn
+  in
+  let project =
+    match opened with
+    | Ok o -> o.project.id
+    | Error e -> raise_s [%sexp (e : V1.Error.t)]
+  in
+  let call operation =
+    Client.authoring client { instance_id; operation } >>| Or_error.ok_exn
+  in
+  let commit ?object_id recipe name expected =
+    let%bind preview =
+      call (Preview { target = { destination = root; project = Some project; object_id }; recipe; name })
+    in
+    let p =
+      match preview with
+      | Ok (Previewed p) ->
+        assert (List.equal String.equal p.new_files expected);
+        p
+      | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+    in
+    let%map applied = call (Apply { preview_id = p.preview_id }) in
+    match applied with
+    | Ok (Applied { created_files; registration = Not_requested }) ->
+      assert (List.equal String.equal created_files expected)
+    | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
+  in
+  let%bind () =
+    commit Authoring.ip_empty_recipe "lib" [ "ip/lib/Lib.bs"; "ip/lib/BUILD.bazel" ]
+  in
+  commit ~object_id:"ip/lib" Authoring.module_recipe "other" [ "ip/lib/Other.bs" ]
+;;
+
 (* This path exercises the separately installed provider. Run with WORKBENCH_TEST_REAL_CHIP_STARTER=1
    and the matching hardcaml-asic-starter on PATH. *)
 let chip_integration ~endpoint ~parent =
@@ -333,8 +379,9 @@ let run daemon () =
             let endpoint =
               String.chop_prefix_exn line ~prefix:"silver-daemon listening on "
             in
-            let%bind () = exercise ~endpoint ~root:connected ~outside:root in
-            if Option.is_some (Sys.getenv "WORKBENCH_TEST_REAL_CHIP_STARTER")
+             let%bind () = exercise ~endpoint ~root:connected ~outside:root in
+             let%bind () = bluespec_authoring ~endpoint ~parent:connected in
+             if Option.is_some (Sys.getenv "WORKBENCH_TEST_REAL_CHIP_STARTER")
             then chip_integration ~endpoint ~parent:connected
             else return ()))
 ;;

@@ -283,18 +283,35 @@ let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
   match Result.bind (check_instance t instance_id) ~f:(fun () -> check_authoring_project t operation) with
   | Error _ as e -> return e
   | Ok () ->
-    let project_identity =
+    let project_session =
       match operation with
       | Describe_owner { project; _ }
       | New_flow { owner = { project; _ }; _ }
       | Duplicate_profile { owner = { project; _ }; _ }
       | Preview_chip { target = { project = Some project; _ }; _ } ->
-        Option.map (Hashtbl.find t.projects project) ~f:(fun s -> s.root_identity)
+        Hashtbl.find t.projects project
+      | Preview { target = { project = Some project; destination; _ }; _ } ->
+        Option.filter (Hashtbl.find t.projects project) ~f:(fun s ->
+          (* Existing Dune recipes may intentionally target a subdirectory. Bazel
+             source recipes must stay bound to the opened project root. *)
+          Option.is_some s.bazel_manifest || String.equal destination s.root)
       | _ -> None
     in
+    let project_identity = Option.map project_session ~f:(fun s -> s.root_identity) in
+    let bazel_project =
+      Option.exists project_session ~f:(fun s -> Option.is_some s.bazel_manifest)
+    in
     Throttle.enqueue t.authoring_queue (fun () ->
-      if t.shutting_down then return (error Conflict "daemon is shutting down")
-       else In_thread.run (fun () -> Ok (Authoring_service.handle ?project_identity t.authoring_service operation)))
+      if t.shutting_down
+      then return (error Conflict "daemon is shutting down")
+      else
+        In_thread.run (fun () ->
+          Ok
+            (Authoring_service.handle
+               ?project_identity
+               ~bazel_project
+               t.authoring_service
+               operation)))
 ;;
 
 let emit t event =
@@ -564,7 +581,11 @@ let canonical_project_root root =
         | S_REG -> ()
         | _ -> failwith "dune-project is not a regular file");
       let stat = Core_unix.stat root in
-      root, (stat.st_dev, stat.st_ino), bazel_manifest))
+      let bluespec_authoring =
+        Option.is_some bazel_manifest
+        && Integration.Silver_manifest.supports_bluespec_authoring ~root
+      in
+      root, (stat.st_dev, stat.st_ino), bazel_manifest, bluespec_authoring))
   >>| Result.map_error ~f:(fun exn -> Exn.to_string exn)
 ;;
 
@@ -762,9 +783,10 @@ let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Op
     (match canonical with
      | Error message -> return (error Invalid_request message)
      | Ok _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
-     | Ok (root, root_identity, bazel_manifest) ->
+     | Ok (root, root_identity, bazel_manifest, bluespec_authoring) ->
        let key = root ^ "\000" ^ environment_key environment in
-       (match Hashtbl.find t.projects_by_key key with
+       let%map response =
+         match Hashtbl.find t.projects_by_key key with
         | Some session when not (Poly.equal session.root_identity root_identity) ->
           return (error Conflict "Open project directory was replaced; restart the session")
         | Some session
@@ -777,7 +799,16 @@ let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Op
           (match bazel_manifest with
            | Some manifest ->
              return (open_bazel_project t ~key ~root ~root_identity ~environment manifest)
-           | None -> open_dune_project ?prog_search_path t ~key ~root ~root_identity ~environment)))
+           | None -> open_dune_project ?prog_search_path t ~key ~root ~root_identity ~environment)
+       in
+       Result.map response ~f:(fun (opened : V1.Open_project.Payload.t) ->
+         if bluespec_authoring
+         then
+           { opened with
+             workspace =
+               V1.Dune_workspace.Inspection.advertise_bluespec_authoring opened.workspace
+           }
+         else opened))
 ;;
 
 let update_job t entry job =

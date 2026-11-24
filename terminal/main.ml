@@ -5861,6 +5861,13 @@ let share_command =
     Share_with_cobalt
 ;;
 
+let authoring_build_tool session = Option.value (project_build_tool session) ~default:Dune
+
+let offers_project_authoring (opened : V1.Open_project.Payload.t) =
+  V1.Environment_summary.uses_dune opened.environment
+  || V1.Dune_workspace.Inspection.supports_bluespec_authoring opened.workspace
+;;
+
 let host_catalog_base session =
   (if session.local_project_files && Option.is_some session.opened
    then Host.project_entry_commands
@@ -5870,13 +5877,22 @@ let host_catalog_base session =
    | None -> []
    | Some _ when not (List.mem session.hello.capabilities Authoring.capability ~equal:String.equal) ->
      []
+   | Some opened when not (offers_project_authoring opened) -> []
    | Some _ ->
-     [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
-     ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
-     ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
-     ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
-     ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
-     ]
+     (match authoring_build_tool session with
+      | Dune ->
+        [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
+        ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
+        ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
+        ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
+        ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
+        ]
+      | Bazel ->
+        [ Host.command "project.new-ip" "New IP Library…" "new ip bluespec bazel"
+            (Name_starter Bluespec_ip)
+        ; Host.command "project.new-module" "New Module…" "new module bluespec bazel"
+            Choose_module_directory
+        ])
      @ library_commands session ~f:(fun label dir ->
        Host.command ("project.library." ^ label ^ ":" ^ dir)
          (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
@@ -5890,6 +5906,7 @@ let host_catalog_base session =
   @
   (if session.local_project_files
       && Option.is_some session.opened
+      && (match authoring_build_tool session with Dune -> true | Bazel -> false)
       && not (adopted_here session)
       && not (Option.exists session.asic ~f:(fun asic -> asic.configured))
    then
@@ -7888,20 +7905,26 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       (match project_action with
        | Share_with_cobalt -> begin_share_wizard session
        | _ ->
-         let ip =
-           List.find (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip")
+         let build_tool = authoring_build_tool session in
+         let commands = host_catalog session in
+         let find id = List.find commands ~f:(fun c -> String.equal c.Host.id id) in
+         let ip = find "project.new-ip" in
+         let new_module =
+           match build_tool with Dune -> None | Bazel -> find "project.new-module"
          in
          let libraries, asic =
            match ip with
            | None -> [], None
-           | Some _ -> library_commands session ~f:(fun label dir -> label, dir), session.asic
+           | Some _ ->
+             ( library_commands session ~f:(fun label dir -> label, dir)
+             , match build_tool with Dune -> session.asic | Bazel -> None )
          in
          session.browser_epoch <- session.context_epoch;
          session.browser <-
            Some
              (Browser.create
                 captured
-                (Browser.catalog ?ip ~share:share_command ~libraries asic));
+                (Browser.catalog ~build_tool ?ip ?new_module ~share:share_command ~libraries asic));
          Effect.Ignore)
     | Browse_chip_profiles chip ->
       (match session.browser, session.opened with
@@ -8039,7 +8062,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ];
              Effect.Ignore
           | Library_actions dir ->
-             form None ~commands:(Host.library_authoring_commands dir);
+             form None ~commands:(Host.library_authoring_commands ~build_tool:(authoring_build_tool session) dir);
              Effect.Ignore
            | Choose_chip_source ->
              form None ~commands:
@@ -8057,7 +8080,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            | Enter_chip_directory -> form (Some Chip_directory); Effect.Ignore
            | Map_chip dir -> form (Some (Chip_mapping dir)); Effect.Ignore
            | Choose_module_directory ->
-             form (Some Module_directory);
+             form (Some (Module_directory (authoring_build_tool session)));
              Effect.Ignore
            | Name_starter starter ->
              form (Some (Starter_name starter));
@@ -8071,7 +8094,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             wait (fun token ->
               let target : Authoring.Target.t =
                 { destination = root; project = Some opened.project.id
-                ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
+                 ; object_id =
+                     (match starter with
+                      | Module_in dir | Bluespec_module_in dir -> Some dir
+                      | _ -> None)
+                 }
               in
               let%bind () = match old_id with
                 | Some preview_id -> call (Cancel { preview_id }) >>| ignore
@@ -8143,7 +8170,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                        ; "Build the chip executable for launch. Discover ASIC flows refreshes the picker." ]
                      | Registered path -> [ "Registered: " ^ path ]
                      | Skipped { path; reason } ->
-                       [ (if for_module then "Manual Dune edit: " else "Skipped registration: ") ^ path
+                        [ (if for_module then
+                             match authoring_build_tool session with
+                             | Dune -> "Manual Dune edit: "
+                             | Bazel -> "Manual Bazel edit: "
+                           else "Skipped registration: ") ^ path
                        ; reason ]
                        @ Option.value_map preview.registration ~default:[] ~f:(fun edit ->
                          String.split_lines edit.snippet))
@@ -12255,14 +12286,43 @@ let run
             | Some message -> Or_error.error_string message))))
 ;;
 
+type endpoint_error =
+  | State_locked of { project_root : string; state_dir : string }
+  | Startup_error of Error.t
+
+let state_lock_lines ~project_root ~state_dir =
+  [ "Another Silver session is using this state directory."
+  ; "Project: " ^ project_root
+  ; "State directory: " ^ state_dir
+  ; "Close the other Silver window with q, then reopen this project."
+  ]
+;;
+
+let endpoint_failure = function
+  | Startup_error error -> error
+  | State_locked { project_root; state_dir } ->
+    Error.of_string (String.concat ~sep:"\n" (state_lock_lines ~project_root ~state_dir))
+;;
+
 let start_endpoint ~standalone ~endpoint ~project_root ~state_dir =
   match standalone, endpoint, project_root with
   | true, None, Some project_root ->
-    Monitor.try_with_or_error (fun () ->
-      let%map url = Server_host.start_standalone ~project_root ~state_dir in
-      Some url)
+    let%map result =
+      Monitor.try_with_or_error (fun () ->
+        let project_root = Filename_unix.realpath project_root in
+        let%map result = Server_host.try_start_standalone ~project_root ~state_dir in
+        match result with
+        | Ok url -> Ok (Some url)
+        | Error { state_dir } -> Error (State_locked { project_root; state_dir }))
+    in
+    (match result with
+     | Ok result -> result
+     | Error error -> Error (Startup_error error))
   | _ when Option.is_some state_dir ->
-    return (Or_error.error_string "--standalone-state-dir requires standalone local mode")
+    return
+      (Error
+         (Startup_error
+            (Error.of_string "--standalone-state-dir requires standalone local mode")))
   | _ -> return (Ok endpoint)
 ;;
 
@@ -12287,15 +12347,15 @@ let local_workspace
   let endpoints = String.Table.create () in
   let bind_new root =
     match parse_environment environment with
-    | Error error -> return (Error error)
+    | Error error -> return (Error (Startup_error error))
     | Ok (environment_selection, environment_label) ->
       let project_root = Some root in
       let first = Hashtbl.is_empty endpoints in
-      let%bind.Deferred.Or_error endpoint =
+      let%bind.Deferred.Result endpoint =
         match Hashtbl.find endpoints root with
         | Some endpoint -> return (Ok endpoint)
         | None ->
-          let%map.Deferred.Or_error endpoint =
+          let%map.Deferred.Result endpoint =
             start_endpoint ~standalone:true ~endpoint:None ~project_root
               ~state_dir:(if first then state_dir else None)
           in
@@ -12314,7 +12374,7 @@ let local_workspace
           ()
       in
       (match created with
-       | Error msg -> return (Or_error.error_string msg)
+       | Error msg -> return (Error (Startup_error (Error.of_string msg)))
        | Ok session ->
          let%map () =
            initialize_open_workspace
@@ -12327,17 +12387,28 @@ let local_workspace
          Ok session)
   in
   let bind root =
-    Monitor.try_with_or_error (fun () ->
-      let root = Filename_unix.realpath root in
-      match Hashtbl.find sessions root with
-      | Some session -> return (Ok session)
-      | None -> bind_new root)
-    >>| Or_error.join
+    let%map result =
+      Monitor.try_with_or_error (fun () ->
+        let root = Filename_unix.realpath root in
+        match Hashtbl.find sessions root with
+        | Some session -> return (Ok session)
+        | None -> bind_new root)
+    in
+    match result with
+    | Ok result -> result
+    | Error error -> Error (Startup_error error)
   in
   let%bind.Deferred.Or_error initial =
     match initial with
     | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
-    | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
+    | `Open root ->
+      let%map result = bind root in
+      (match result with
+       | Ok session -> Ok (`Bound session)
+       | Error (Startup_error error) -> Error error
+       | Error (State_locked { project_root; state_dir }) ->
+         let screen = Startup_entry.State_in_use (state_lock_lines ~project_root ~state_dir) in
+         Ok (`Entry (Startup_entry.entry ~start:project_root screen, None)))
   in
   let shutting_down = ref false in
   let cleanup () =
@@ -12358,7 +12429,7 @@ let local_workspace
             | None -> Bonsai_term.Effect.Ignore
             | Some original ->
               let start = Filename.dirname original in
-              let screen = match mode with `New -> Startup_entry.Name "" | `Open -> Existing "" in
+              let screen = match mode with `New -> Startup_entry.Preset | `Open -> Existing "" in
               set_page (`Entry (Startup_entry.entry ~original ~start screen, Some s))
         in
         let ~view, ~handler =
@@ -12378,7 +12449,9 @@ let local_workspace
             let open Bonsai_term in
             Effect.bind
               (Effect.of_deferred_thunk (fun () ->
-                 let%bind.Deferred.Or_error session = bind root in
+                 let%bind.Deferred.Or_error session =
+                   Deferred.map (bind root) ~f:(Result.map_error ~f:endpoint_failure)
+                 in
                  let%map.Deferred () =
                    match previous with
                    | Some old when not (phys_equal old session) ->
@@ -12723,14 +12796,18 @@ let command =
                  ~project_root
                  ~state_dir:standalone_state_dir
              with
-             | Error error ->
+             | Error failure ->
+               let error = endpoint_failure failure in
+               let kind : V1.Error.Kind.t =
+                 match failure with State_locked _ -> Conflict | Startup_error _ -> Internal_failure
+               in
                if api
                then
                  printf
                    "%s\n%!"
                    (Sexp.to_string_mach
                       (Workspace.Response.sexp_of_t
-                         (Error (V1.Error.create Internal_failure (error_message error)))));
+                         (Error (V1.Error.create kind (error_message error)))));
                return (Error error)
               | Ok endpoint ->
                 run

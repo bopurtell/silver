@@ -94,12 +94,12 @@ def run(silver, daemon, base):
         try:
             term.capture("ready", ["Overview"])
             yield
-            os.write(term.master, b"q")
+            os.write(term.master, b"Q")
             deadline = time.monotonic() + 15
             while term.process.poll() is None:
                 screen = term.drain(.15, allow_exit=True)
-                assert time.monotonic() < deadline, f"q did not exit:\n{screen}"
-            assert term.process.returncode == 0, "q did not exit cleanly"
+                assert time.monotonic() < deadline, f"Q did not exit:\n{screen}"
+            assert term.process.returncode == 0, "Q did not exit cleanly"
         finally:
             term.close()
 

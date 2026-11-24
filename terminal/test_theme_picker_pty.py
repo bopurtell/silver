@@ -72,7 +72,7 @@ def exercise(client, base):
                 for p in preferences.glob("presentation-*.sexp")}
 
     def quit_client(term):
-        send(term, b"q")
+        send(term, b"Q")
         assert term.process.wait(timeout=5) == 0
 
     def wait_for_save(previous, key):

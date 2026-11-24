@@ -53,6 +53,7 @@ toolchain](../examples/bluespec_classic/README.md) on `PATH`:
 python3 scripts/test-bluespec-frontend.py
 python3 terminal/test_bluespec_pty.py
 python3 test/integration/bluespec_fifo.py
+python3 test/integration/bluespec_ip.py --author "$(command -v silver-author)"
 ```
 
 The first starts with an empty directory, launches project actions and checks
@@ -60,6 +61,8 @@ both correct and mutated RTL through the real daemon, including retained
 waveform data after restart. The second exercises the local terminal, Cobalt,
 Testing, and the waveform viewer. The third builds a separately synthesized
 child backed by BSC's FIFO primitive and checks the FIFO data in the trace.
+The last authors reusable IP, imports it in the design and proves that
+changing only the dependency changes the Verilator result.
 None requires an ASIC toolchain.
 
 ### ASIC flow

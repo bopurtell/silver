@@ -405,6 +405,16 @@
  (name runtest)
  (deps (alias test-ip-authoring-pty)))
 
+(rule
+ (alias test-bluespec-authoring-pty)
+ (deps test_bluespec_authoring_pty.py ../test/support/__init__.py
+   ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_bluespec_authoring_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-bluespec-authoring-pty)))
+
 ; Opt-in palette acceptance with a private structured simulation provider.
 (rule
  (alias test-testing-aliases-pty)

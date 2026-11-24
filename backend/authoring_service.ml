@@ -151,6 +151,73 @@ let store
   Response.Previewed preview
 ;;
 
+let preview_bluespec ~project_identity t (op : Operation.t) =
+  let module B = Authoring_bluespec in
+  if not (is_source_recipe op.recipe)
+  then reject Invalid_operation "This authoring recipe is only supported in Dune projects";
+  let project_identity =
+    Option.value_or_thunk project_identity ~default:(fun () ->
+      reject Invalid_operation "Select an authorized Bluespec project root")
+  in
+  if not (B.valid_name op.name)
+  then
+    reject
+      Invalid_operation
+      "Bluespec source names must match [a-z][a-z0-9_]{0,63} and cannot be prelude";
+  let addition =
+    if String.equal op.recipe module_recipe
+    then (
+      match op.target.object_id with
+      | Some dir ->
+        let parts = D.module_directory dir in
+        if List.exists parts ~f:(String.is_prefix ~prefix:".")
+        then reject Invalid_operation "Select a visible Bazel package directory";
+        D.Bazel_module (parts, op.name)
+      | None -> reject Invalid_operation "Select a Bazel package directory, or . for the root")
+    else (
+      if Option.is_some op.target.object_id
+      then reject Invalid_operation "IP requires a project root";
+      D.Bazel_ip op.name)
+  in
+  let root, components = D.select t.roots op.target.destination in
+  let snapshot = D.visit ~addition root components (fun _ snapshot -> snapshot) in
+  if not (D.matches_project snapshot project_identity)
+  then reject Destination_denied "The open project directory was replaced";
+  let files, registration =
+    match addition with
+    | Bazel_ip name -> B.library ~sample:(String.equal op.recipe ip_sample_recipe) name, None
+    | Bazel_module (parts, name) ->
+      let path, text = D.bazel_library snapshot parts in
+      let file = B.file ~sample:false parts name in
+      ( [ file ]
+      , Option.some_if
+          (not (String.equal text B.build_file))
+          { Registration.path
+          ; manual = true
+          ; snippet =
+              sprintf
+                "Include %S in the consuming Bazel target's srcs if it is not already \
+                 matched by a glob."
+                (B.filename name)
+          } )
+    | Ip _ | Module _ | Flow _ -> assert false
+  in
+  store
+    t
+    ~root
+    ~components
+    ~snapshot
+    ~addition:(Some addition)
+    ~recheck:ignore
+    ~library:None
+    ~catalog_contents:None
+    ~op
+    ~provider:B.provider
+    ~version:B.version
+    ~files
+    ~registration
+;;
+
 let preview ?chip ?project_identity t (op : Operation.t) =
   let controlled = String.equal controlled_recipe op.recipe in
   let existing = existing_name op in
@@ -227,7 +294,7 @@ let preview ?chip ?project_identity t (op : Operation.t) =
       try
         let command, arguments =
           match addition with
-          | Some (Flow _) -> assert false
+           | Some (Flow _ | Bazel_ip _ | Bazel_module _) -> assert false
           | Some (Ip _) ->
             ( "render-ip"
             , [ "--template"
@@ -254,7 +321,7 @@ let preview ?chip ?project_identity t (op : Operation.t) =
         in
         let files, registration, catalog_contents =
           match addition with
-          | Some (Flow _) -> assert false
+           | Some (Flow _ | Bazel_ip _ | Bazel_module _) -> assert false
           | Some (Ip name) ->
             let prefix = "ip/" ^ name ^ "/" in
             if not
@@ -317,7 +384,7 @@ let take t id =
     plan
 ;;
 
-let handle_locked ?project_identity t request =
+let handle_locked ?project_identity ~bazel_project t request =
   let created = ref [] in
   let first_dir = ref None in
   let failed kind message =
@@ -344,6 +411,9 @@ let handle_locked ?project_identity t request =
   in
   try
     match request with
+    | (Preview_chip _ | Describe_owner _ | New_flow _ | Duplicate_profile _)
+      when bazel_project ->
+      reject Invalid_operation "This authoring recipe is only supported in Dune projects"
     | Bind_owner_project { destination } ->
       (* Headless authoring does not open a launch workspace: normal open-project may
          enqueue driver discovery and evaluate the project's Dune rules. *)
@@ -387,7 +457,21 @@ let handle_locked ?project_identity t request =
            ~version
            ~files
            ~registration:(Some registration))
-    | Preview op -> preview t op
+    | Preview op ->
+      let project_identity, bazel_project =
+        if Option.is_none op.target.project && is_source_recipe op.recipe
+        then (
+          let root, parts = D.select t.roots op.target.destination in
+          let observed, bazel = D.source_project root parts in
+          Option.iter project_identity ~f:(fun expected ->
+            if not (Poly.equal expected observed)
+            then reject Destination_denied "The project directory was replaced");
+          Some observed, bazel)
+        else project_identity, bazel_project
+      in
+      if bazel_project
+      then preview_bluespec ~project_identity t op
+      else preview ?project_identity t op
     | Preview_chip chip ->
       preview
         ~chip
@@ -434,12 +518,17 @@ let handle_locked ?project_identity t request =
   with
   | Rejected (kind, message) -> failed kind message
   | Authoring_flow.Invalid_operation message -> failed Invalid_operation message
+  | D.Unsupported_bluespec_project ->
+    failed
+      (match request with Apply _ -> Stale_preview | _ -> Invalid_operation)
+      "Bluespec authoring requires language \"bluespec-classic\" in .silver/project.json \
+       or an existing Silver Bluespec starter"
   | D.Invalid message | D.Changed message -> failed location_error message
   | Core_unix.Unix_error ((ENOENT | EEXIST | ENOTDIR | ELOOP), _, _) ->
     failed location_error "Destination unavailable or changed"
   | exn -> failed Provider_failure (Exn.to_string exn)
 ;;
 
-let handle ?project_identity t request =
-  Lock.protect t.mutex (fun () -> handle_locked ?project_identity t request)
+let handle ?project_identity ?(bazel_project = false) t request =
+  Lock.protect t.mutex (fun () -> handle_locked ?project_identity ~bazel_project t request)
 ;;

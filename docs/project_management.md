@@ -5,6 +5,10 @@ palette (**Space c c**). The browser opens over the workspace you're inspecting.
 At 80 columns, Objects appears above Actions; on wider terminals the lists sit
 side by side.
 
+For a Classic Bluespec starter, see [Add reusable IP inside the
+project](bluespec_classic.md#add-reusable-ip-inside-the-project). You do not
+need to create a second Silver project to author another block.
+
 To copy a profile, select it under its chip and flow, then choose **Duplicate
 Profile…**. For a chip other than your current launch target, **Browse flows
 and profiles…** reads that chip's catalog. Browsing and authoring neither

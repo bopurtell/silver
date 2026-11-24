@@ -3,9 +3,14 @@ load(":simulation.bzl", "bench_test", "bluespec_rtl")
 TOP = "mkCounter"
 TOP_SOURCE = "Counter.bs"
 
+# Add each imported IP library's Bazel label here, not its directory or files.
+IP_SOURCES = [
+    # "//ip/sample_ip:sources",
+]
+
 bluespec_rtl(
     name = "rtl",
-    srcs = glob(["*.bs", "*.bsv"], allow_empty = True),
+    srcs = glob(["*.bs", "*.bsv"], allow_empty = True) + IP_SOURCES,
     top = TOP,
     top_source = TOP_SOURCE,
 )

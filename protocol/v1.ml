@@ -101,6 +101,22 @@ module Dune_workspace = struct
       ; items : Item.t list
       }
     [@@deriving bin_io, compare, equal, sexp]
+
+    (* A service-authored project feature in the existing open-ended item list. Keep the
+       v1 payload shape unchanged; absence (including older servers) means the client must
+       not offer Classic Bluespec authoring. *)
+    let bluespec_authoring_kind = "silver.authoring.bluespec-classic"
+
+    let advertise_bluespec_authoring t =
+      let feature : Item.t =
+        { kind = bluespec_authoring_kind; names = []; source_path = None }
+      in
+      { t with items = feature :: t.items }
+    ;;
+
+    let supports_bluespec_authoring t =
+      List.exists t.items ~f:(fun item -> String.equal item.kind bluespec_authoring_kind)
+    ;;
   end
 end
 
@@ -142,7 +158,7 @@ module Open_project = struct
       { project : Project.t
       ; environment : Environment_summary.t
       ; workspace : Dune_workspace.Inspection.t
-      (** Empty when the project does not use Dune. *)
+      (** For non-Dune projects, only service-advertised project features. *)
       }
     [@@deriving bin_io, compare, equal, sexp]
   end

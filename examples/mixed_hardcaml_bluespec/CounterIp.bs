@@ -1,0 +1,14 @@
+package CounterIp (CounterIp(..), mkCounterIp) where
+
+interface CounterIp =
+  step :: Bool -> Action {-# arg_names = [clear] #-}
+  count :: Bit 8
+
+{-# properties mkCounterIp = { synthesize, alwaysReady } #-}
+mkCounterIp :: Module CounterIp
+mkCounterIp = module
+  value :: Reg (Bit 8) <- mkReg 0
+
+  interface
+    step clear = if clear then value := 0 else value := value + 1
+    count = value

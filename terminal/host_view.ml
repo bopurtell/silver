@@ -4370,7 +4370,8 @@ let palette_controls host (p : H.palette) =
   | Some (Starter_result (_, select)) ->
     [ input "Done" Enter ]
     @ (if current && Option.is_some select then [ input "Select target" (Character 's') ] else [])
-  | Some (Chip_directory | Module_directory) -> submit "Next" (nonblank && not (Filename.is_absolute p.query))
+  | Some (Chip_directory | Module_directory _) ->
+    submit "Next" (nonblank && not (Filename.is_absolute p.query))
   | Some (Chip_mapping _) -> submit "Next" (String.equal p.query "ui_in:uo_out:comb8")
   | Some Design_executable -> submit "Import" nonblank
   | Some (Editor_file _) -> submit "Open" nonblank
@@ -4480,11 +4481,19 @@ let palette_page host dimensions =
       | Some H.Chip_directory -> "FROM IP LIBRARY — enter project-relative library directory"
       | Some (H.Chip_mapping _) -> "FROM IP LIBRARY — enter explicit pin mapping"
       | Some (H.Starter_name (Empty_ip | Sample_ip)) -> "NEW IP LIBRARY — enter library name"
-      | Some H.Module_directory -> "NEW MODULE — enter project-relative library directory"
+      | Some (H.Starter_name Bluespec_ip) -> "NEW BLUESPEC IP LIBRARY — enter library name"
+      | Some (H.Module_directory Dune) -> "NEW MODULE — enter project-relative library directory"
+      | Some (H.Module_directory Bazel) -> "NEW BLUESPEC MODULE — enter library directory"
       | Some (H.Starter_name (Module_in _)) -> "NEW MODULE — enter module name"
+      | Some (H.Starter_name (Bluespec_module_in _)) ->
+        "NEW BLUESPEC MODULE — enter module name"
       | Some (H.Starter_wait _) -> "Waiting for authoring service · Esc dismisses"
       | Some (H.Starter_preview (_, Chip _)) ->
         "CHIP TARGET PREVIEW · r toggles registration · Enter applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_preview (_, Bluespec_ip)) ->
+        "NEW BLUESPEC IP LIBRARY PREVIEW · Enter applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_preview (_, Bluespec_module_in _)) ->
+        "NEW BLUESPEC MODULE PREVIEW · Enter applies · Esc cancels · ↑/↓ scroll"
       | Some (H.Starter_preview (p, _)) ->
         (if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.add_to_project_recipe
          then "ASIC STARTER PREVIEW · a applies"
@@ -4527,7 +4536,7 @@ let palette_page host dimensions =
     in
     let query =
       match p.argument with
-       | Some (H.Simulation_selection _ | H.Catalog_configuration _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
+       | Some (H.Simulation_selection _ | H.Catalog_configuration _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory _ | H.Chip_mapping _ | H.Chip_directory) ->
         let input =
           "> "
           ^ p.query
@@ -4566,13 +4575,26 @@ let palette_page host dimensions =
       | Some (H.Starter_name starter) ->
         (match starter with
          | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
+         | Bluespec_module_in dir ->
+           [ "Library: " ^ Artifact_view.safe dir
+           ; "Use a lowercase name without .bs (e.g. pipeline creates Pipeline.bs)."
+           ]
+         | Bluespec_ip ->
+           [ "Use a lowercase name (e.g. widget creates ip/widget/Widget.bs)."
+           ; "The new library does not change the starter's top-level design."
+           ]
          | Flow_entry draft -> [ "Owner chip: " ^ Flow_authoring.owner draft ]
          | Sample_ip -> [ "Template: sample behavior" ]
           | Empty_ip -> [ "Template: empty" ]
           | Chip (source, _) -> H.chip_assumptions source
          | Asic_starter -> [])
         @ [ "Enter previews new files in the open project. Esc cancels." ]
-      | Some H.Module_directory -> [ "Enter the directory containing the library's dune file." ]
+      | Some (H.Module_directory Dune) ->
+        [ "Enter the directory containing the library's dune file." ]
+      | Some (H.Module_directory Bazel) ->
+        [ "Enter the Bazel package directory relative to the project (e.g. ip/widget)."
+        ; "Use . for the root package."
+        ]
       | Some H.Chip_directory -> [ "Enter the directory containing the library's dune file." ]
       | Some (H.Chip_mapping dir) ->
         [ "Library: " ^ Artifact_view.safe dir
@@ -4586,6 +4608,13 @@ let palette_page host dimensions =
           | Some (H.Starter_preview (preview, Chip (source, _))) -> H.starter_preview_lines ~source preview
           | Some (H.Starter_preview (preview, Flow_entry draft)) ->
             H.starter_preview_lines preview @ Flow_authoring.summary draft
+          | Some (H.Starter_preview (preview, Bluespec_ip)) ->
+            H.starter_preview_lines ~build_tool:Bazel preview
+            @ [ "Library source label: //ip/" ^ preview.operation.name ^ ":sources"
+              ; "Add the label to the consuming target's sources and import the package."
+              ]
+          | Some (H.Starter_preview (preview, Bluespec_module_in _)) ->
+            H.starter_preview_lines ~build_tool:Bazel preview
           | Some (H.Starter_preview (preview, _)) -> H.starter_preview_lines preview
           | Some (H.Starter_result (rows, _)) -> rows
           | _ -> assert false

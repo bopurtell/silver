@@ -41,7 +41,10 @@ val contains : geometry -> x:int -> y:int -> bool
 
 (** [project_root] is the absolute local working directory, not a run endpoint.
     [None] selects the project's most recent number (initially 1); toggling the
-    selected number hides it. Invalid numbers leave the overlay unchanged.
+    selected number hides it. Selecting a hidden or different number starts a
+    fresh shell if that number exited or failed. A visible exit screen is
+    retained until the next explicit reopen or restart, never auto-respawned.
+    Invalid numbers leave the overlay unchanged.
     [dimensions] is the full viewport. The caller owns workspace/tile focus. *)
 val toggle
   :  t

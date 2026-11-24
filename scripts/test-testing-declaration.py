@@ -102,11 +102,11 @@ class Tty(Terminal):
         return Caret(self, source_line, column)
 
     def quit_silver(self):
-        os.write(self.master, b"q")
+        os.write(self.master, b"Q")
         deadline = time.monotonic() + 12
         while self.process.poll() is None:
             self.drain(.15, allow_exit=True)
-            assert time.monotonic() < deadline, "Silver's quit key did not work after Back"
+            assert time.monotonic() < deadline, "Silver's force-quit key did not work after Back"
         assert self.process.returncode == 0, self.process.returncode
 
 

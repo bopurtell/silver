@@ -44,8 +44,9 @@ def pointer(term, button, pos):
 
 
 def quit_client(term):
-    # Dashboard q exits normally; retain at-exit DECRST bytes for the mode oracle.
-    os.write(term.master, b'q')
+    # Force quit skips the dashboard confirmation; retain at-exit DECRST bytes
+    # for the terminal mode restoration oracle.
+    os.write(term.master, b'Q')
     assert term.process.wait(timeout=10) == 0
     while True:
         try:

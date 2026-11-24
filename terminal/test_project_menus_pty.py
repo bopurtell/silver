@@ -312,6 +312,9 @@ def local_projects(s, base, renderer, simulation):
                 send(t, b"\r")
             else:
                 click(t, screen, NEW)
+            t.capture(name + "-preset", ["Choose a preset", "Hardcaml · Dune · OCaml",
+                                         "Bluespec Classic · Bazel · Rust"])
+            send(t, b"h")
             t.capture(name + "-name", ["Project name"], absent=["enter target name"])
             send(t, (name + "\r").encode())
             t.capture(name + "-destination", ["Destination"])

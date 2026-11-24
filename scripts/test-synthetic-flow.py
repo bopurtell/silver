@@ -421,7 +421,7 @@ def pty_check(base, client_path, http):
             new_run=run, selection=selected, provider_launch=new_launches[0], context_before=context_before,
             context_after=context_after, transitions=transitions, launches_before=len(launches_before),
             launches_after=len(launches())))
-        keys(b'q')
+        keys(b'Q')
         process.wait(timeout=5)
         require(process.returncode == 0, 'PTY client exit')
     finally:

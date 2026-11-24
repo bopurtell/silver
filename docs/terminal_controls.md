@@ -51,6 +51,7 @@ Choices are client-local and preserve workspace/run/pin state.
 | Input | Action |
 | --- | --- |
 | `Space c c` | Searchable command palette; click a result to invoke it, or browse with arrows and press `Enter`. `Esc` closes. |
+| `Space c h` | Hide or show main-window control hints. This preference is saved per project. |
 | `F2` / `Project ▾` | Open project actions without switching workspaces. In a local session choose **New Project…** or **Open Project…** to work in another Dune root; **New IP Library…** adds to the current one. |
 | Right-click a run / `F3` | Open actions for the run under the pointer or, with `F3`, the highlighted run. Arrow keys or `j`/`k` move, a count repeats movement, `/` filters, and `Enter` invokes the highlighted action. `Esc` exits filtering, then dismisses the menu. |
 | `1`, `2` | Overview, Timing |
@@ -63,7 +64,8 @@ Choices are client-local and preserve workspace/run/pin state.
 | `b` / `t` | Build / project-scoped generic test |
 | `c` | Cancel the focused tile's browsed job, if cancellable |
 | `i` | Refresh hardware integration |
-| `q` | Exit outside text-entry/modal capture |
+| `q` | From the workbench, ask to quit. `Enter` accepts the selected answer (initially **Yes**); `Esc` returns to work. |
+| `Q` | Quit directly from the workbench, bypassing the confirmation. Inside editors, shells and text fields, input still belongs to that view. |
 | `Space /` or `F10` | Show or hide the most recently selected terminal in this local project (starts at 1) |
 | `Alt+1`–`Alt+9` | Toggle a numbered terminal, or switch to that number if a different terminal is visible. Use the command palette for numbered access from the focused Cobalt editor. |
 | `F12` | Show the current terminal and restart it if it exited or failed. Use the palette when Cobalt has focus. |
@@ -94,7 +96,9 @@ directory, regardless of the selected run environment. The numbered shells are
 separate from each other and shared across that project's workspaces. Hiding
 the shell returns input to the previous tile without stopping the shell. Clicking
 a visible workspace tab hides the overlay and restores the destination workspace's
-focus. A shell's final screen and exit status remain until you restart it.
+focus. A shell's final screen and exit status remain visible after exit. Reopen
+that terminal (or select its number from another terminal) to start a fresh
+shell in the project directory. Exit never triggers a background respawn.
 From the shell, type `Space c c` as a chord to open Silver's command palette.
 `Esc` dismisses it and returns input to the shell. Search **close term** to hide
 the terminal without ending the shell, or **restart term** to restart an exited

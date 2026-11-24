@@ -115,8 +115,10 @@ With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
 
 ### Open a project
 
-Starting from an empty directory? Run `silver init --bluespec` there first
-to create an editable [Classic Bluespec design with Rust verification](docs/bluespec_classic.md).
+Starting from an empty directory? Launch `silver` and choose **New Project…**
+to select a starter and destination. For headless creation of a [Classic
+Bluespec design with Rust verification](docs/bluespec_classic.md), run
+`silver init --bluespec`.
 
 1. Add the default install directory to `PATH` and check the installed command.
    Keep the `export` line in your shell configuration if you want it in new terminals.
@@ -132,8 +134,9 @@ to create an editable [Classic Bluespec design with Rust verification](docs/blue
    silver
    ```
 
-3. Press **Space c c** to open the command palette. Press **q** from the
-   workbench to quit. For jobs that should survive quitting, use
+3. Press **Space c c** to open the command palette. To quit from the
+   workbench, press **q**, then **Enter** to confirm the default **Yes**.
+   For jobs that should survive quitting, use
    [a persistent daemon](docs/project_workflows.md#attach-to-a-persistent-daemon).
 
 ## Try the ASIC example

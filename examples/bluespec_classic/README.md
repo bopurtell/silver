@@ -61,3 +61,37 @@ fails.
 To see the checker catch a real hardware bug, copy the workspace and change
 `value + 1` to `value + 2` in its `Counter.bs`. Then `bazel test //:simulation`
 should fail at cycle 2 with `expected 1, got 2`.
+
+## Wire in an IP library
+
+An IP library in `ip/<name>/` has its own Bazel package. Its `BUILD.bazel`
+exports its authored sources with a filegroup visible to the top's package:
+
+```python
+filegroup(
+    name = "sources",
+    srcs = glob(["*.bs"], allow_empty = False),
+    visibility = ["//:__pkg__"],
+)
+```
+
+For example, add `"//ip/sample_ip:sources"` to `IP_SOURCES` in the root
+`BUILD.bazel`, then use `import Sample_ip` in the `.bs` file that uses
+Silver's generated `Sample_ip.bs`. The Bazel directory name and the Classic
+`package` name are separate. Match each filename to its package name exactly
+and give each package a distinct name across the design. Files added under
+the same IP owner are picked up by its filegroup; dependencies in other Bazel
+packages must also be declared, either in `IP_SOURCES` or through a filegroup
+that exports them and has the appropriate visibility.
+
+The rule stages only the declared source files for BSC, plus access to
+BSC's installed libraries. A Bazel glob does not cross a package boundary.
+Run `bazel build //:rtl` and `bazel test //:simulation` after wiring in the
+IP; an import alone doesn't instantiate any hardware.
+
+From the Silver repository root, run `python3 test/integration/bluespec_ip.py`
+for an opt-in regression. It uses a disposable copy, checks that an undeclared
+IP is rejected, then imports and simulates the separately synthesized child.
+Mutating only the IP helper must regenerate the child Verilog and fail the
+unchanged checker. Pass `--author /path/to/silver-author` to use the actual
+Classic authoring commands instead of a fixture with the same package layout.

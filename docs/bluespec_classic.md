@@ -6,6 +6,10 @@ Hardcaml wrapper, an ASIC provider, or a PDK.
 
 ## Start in an empty directory
 
+For interactive creation, launch `silver`, choose **New Project…**, select
+the **Bluespec Classic / Bazel / Rust** starter, and choose the destination.
+From an open local project use **Project → New Project…**. For scripts:
+
 ```sh
 mkdir fifo-lab && cd fifo-lab
 silver init --bluespec
@@ -34,6 +38,25 @@ check that `provider_executable` names Python 3 on that host.
 
 See the [editable starter](../examples/bluespec_classic/README.md) for tool
 prerequisites, source layout and the bench interface.
+
+## Add reusable IP inside the project
+
+| To create… | Choose | Example |
+| --- | --- | --- |
+| A `.bs` file next to the top | **Project → New Module…** | Enter `.` for the package directory and `helper` for the name. Preview and apply to create `Helper.bs`. |
+| A reusable IP library | **Project → New IP Library…** | Enter `widget` to create `ip/widget/Widget.bs` and `ip/widget/BUILD.bazel`. |
+| Another `.bs` file in that library | **Project → New Module…** | Enter `ip/widget` and `pipeline` to create `ip/widget/Pipeline.bs`. The generated library's filegroup already includes it. |
+
+Use lowercase names starting with a letter; digits and underscores are also
+allowed after the first letter. The wizard capitalizes the first letter for the
+Classic package name. Review the proposed paths before applying. Creating a
+library does not instantiate the block or change the top.
+
+A consuming design needs **both** a Bazel dependency on the library's
+sources and a Classic `import` for the package it uses. The build dependency
+gets the files into the BSC action's sandbox; the import makes their symbols
+available to the design. For a project made with an older starter, see
+[updating an existing Bluespec project](bluespec_existing_projects.md).
 
 ## Open an existing Bazel workspace
 

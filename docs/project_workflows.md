@@ -2,8 +2,12 @@
 
 ## Open or set up a project
 
-For a new Classic Bluespec design, run `silver init --bluespec` in an empty
-directory. See [Build and simulate Classic Bluespec](bluespec_classic.md).
+For a new design, start `silver` outside a project and choose **New Project…**.
+From an open local project use **Project → New Project…**. Choose a starter
+and destination. The choice sets up the initial files and tools; it does not
+restrict the languages you can use inside the design. To script creation of
+the Classic Bluespec starter, use `silver init --bluespec` instead. See
+[Build and simulate Classic Bluespec](bluespec_classic.md).
 
 1. Run `silver` inside a configured Silver or Dune project to open the nearest project root. To
    specify another root, use `silver --project-root /path/to/project`.
@@ -26,6 +30,35 @@ standalone session can own the same project state at a time. If `TMPDIR` is
 unset, Silver creates private per-session scratch space under
 `${XDG_CACHE_HOME:-$HOME/.cache}/silver-runtime` and removes it on clean
 shutdown. The project's Dune build and configured results paths are separate.
+
+If opening a project reports that its state is in use, return to the other
+Silver terminal, save any edits, and press **q** from the workbench. Then
+reopen the project. This can happen even after deleting and recreating the
+project directory: the state belongs to the canonical project **path**.
+On Linux, `lslocks -o PID,COMMAND,PATH` shows which process holds the
+`lifetime.lock` shown in the error; `ps -p PID -o tty,args` identifies its
+terminal. The kernel releases the lock when that process exits. Don't delete
+the lock file: its presence alone doesn't mean it's locked.
+
+## Mixed-language designs
+
+Choose the starter for the **top-level workflow**, not for every IP block.
+The [mixed Hardcaml/Bluespec example](../examples/mixed_hardcaml_bluespec/README.md)
+exercises this path from Silver's ordinary Build and Test actions.
+For example, a Dune project can run BSC on a Classic Bluespec block and
+instantiate the emitted Verilog module from a Hardcaml top using
+`Hardcaml.Instantiation.create`. Match the emitted port names, widths,
+clock/reset polarity and any method ready/enable signals. The build rule
+for a whole-chip simulation must supply *both* the Hardcaml-generated RTL
+and the child RTL (plus any BSC primitives) to Verilator.
+
+One build system can own that dependency graph; a Bluespec file does not
+require a second Silver project or even a Bazel workspace. Conversely,
+instantiating an external module does not give Cyclesim a behavioral model
+or add its HDL to an ASIC implementation bundle. A verification suite may
+use a different host language from the design. SystemVerilog sources can
+participate where the project's toolchain accepts them; this wizard does
+not currently generate a standalone SystemVerilog starter.
 
 ## Edit project files
 

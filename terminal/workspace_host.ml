@@ -59,7 +59,9 @@ type starter =
   | Asic_starter
   | Empty_ip
   | Sample_ip
+  | Bluespec_ip
   | Module_in of string
+  | Bluespec_module_in of string
   | Chip of Authoring.Chip_source.t * bool
 
 let starter_recipe = function
@@ -68,7 +70,9 @@ let starter_recipe = function
   | Asic_starter -> Authoring.add_to_project_recipe
   | Empty_ip -> Authoring.ip_empty_recipe
   | Sample_ip -> Authoring.ip_sample_recipe
+  | Bluespec_ip -> Authoring.ip_empty_recipe
   | Module_in _ -> Authoring.module_recipe
+  | Bluespec_module_in _ -> Authoring.module_recipe
   | Chip _ -> Authoring.chip_recipe
 ;;
 
@@ -268,7 +272,7 @@ type argument =
   | Editor_file of Project_id.t
   | Design_executable
   | Starter_name of starter
-  | Module_directory
+  | Module_directory of Presentation.Build_tool.t
   | Chip_directory
   | Chip_mapping of string
   | Starter_wait of unit ref
@@ -1429,7 +1433,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-       | Some { argument = Some (Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
+       | Some { argument = Some (Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -2654,7 +2658,8 @@ let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrang
 ;;
 
 let project_entry_commands =
-  [ command "project.new" "New Project…" "create local dune project" (Project_entry `New)
+  [ command "project.new" "New Project…" "create local project Hardcaml Dune Bluespec Bazel"
+      (Project_entry `New)
   ; command
       "project.open"
       "Open Project…"
@@ -2663,12 +2668,21 @@ let project_entry_commands =
   ]
 ;;
 
-let library_authoring_commands dir =
+let library_authoring_commands ?(build_tool = Presentation.Build_tool.Dune) dir =
+  let starter =
+    match build_tool with
+    | Dune -> Module_in dir
+    | Bazel -> Bluespec_module_in dir
+  in
   [ command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
-      "new module" (Name_starter (Module_in dir))
-  ; command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
-      "from IP library" (Map_chip dir)
+      "new module" (Name_starter starter)
   ]
+  @ (match build_tool with
+     | Dune ->
+       [ command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
+           "from IP library" (Map_chip dir)
+       ]
+     | Bazel -> [])
 ;;
 
 let chip_commands (s : Asic.Snapshot.t) =
@@ -5603,20 +5617,34 @@ let chip_assumptions (source : Authoring.Chip_source.t) =
        ])
 ;;
 
-let starter_preview_lines ?source (p : Authoring.Preview.t) =
+let starter_preview_lines
+  ?source
+  ?(build_tool = Presentation.Build_tool.Dune)
+  (p : Authoring.Preview.t)
+  =
   let flow = List.mem [ Authoring.new_flow_recipe; Authoring.duplicate_profile_recipe ]
       p.operation.recipe ~equal:String.equal in
+  let recipe =
+    match build_tool with
+    | Dune -> p.operation.recipe
+    | Bazel ->
+      if String.equal p.operation.recipe Authoring.module_recipe
+      then "Bluespec Classic module"
+      else "Bluespec Classic IP library"
+  in
   (if flow then [ "Owner chip: " ^ Option.value p.operation.target.object_id ~default:"unknown"
                 ; (if Option.exists p.registration ~f:(fun edit -> edit.manual)
                    then "Manual registration required; no source will be written."
                    else "This module registers on successful build.") ] else [])
-  @ [ "Recipe: " ^ p.operation.recipe
+   @ [ "Recipe: " ^ recipe
   ; "Provider: " ^ p.provider ^ " " ^ p.version
   ; "Name: " ^ p.operation.name
   ; "Destination: " ^ p.operation.target.destination
   ]
   @ Option.value_map p.operation.target.object_id ~default:[] ~f:(fun dir ->
-    if flow then [] else [ "Library: " ^ dir ])
+     if flow
+     then []
+     else [ (match build_tool with Dune -> "Library: " | Bazel -> "Bazel package: ") ^ dir ])
   @ Option.value_map source ~default:[] ~f:chip_assumptions
   @ (if String.equal p.operation.recipe Authoring.chip_recipe
      then [ if Option.is_some p.registration then "Catalog registration: on"
@@ -5627,8 +5655,11 @@ let starter_preview_lines ?source (p : Authoring.Preview.t) =
   @ Option.value_map p.registration ~default:[] ~f:(fun edit ->
     let label =
       if String.equal p.operation.recipe Authoring.module_recipe
-      then "Manual Dune edit: "
-      else if edit.manual then "Manual catalog entry (paste into): "
+       then
+         (match build_tool with
+          | Dune -> "Manual Dune edit: "
+          | Bazel -> if edit.manual then "Manual Bazel edit: " else "Proposed Bazel edit: ")
+       else if edit.manual then "Manual catalog entry (paste into): "
       else if flow then "Build registration: "
       else "Proposed registration: "
     in
@@ -5807,7 +5838,7 @@ let finalization_form t =
         | Design_executable
         | Starter_name _
         | Flow_field _
-        | Chip_directory | Chip_mapping _ | Module_directory
+        | Chip_directory | Chip_mapping _ | Module_directory _
         | Workload_path
         | Workload_bundle _
         | Acceptance _
@@ -6608,7 +6639,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                    ( Finalization_attempt _
                     | Resource_path _
                     | Editor_file _
-                    | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                     | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
@@ -6651,7 +6682,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                           | Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
+                            | Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ -> true
                          | _ -> false))
           then
             ( { t with
@@ -6666,7 +6697,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                       ( Finalization_attempt _
                        | Resource_path _
                        | Editor_file _
-                        | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                         | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
@@ -6700,10 +6731,13 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                     if not (String.equal p.query "ui_in:uo_out:comb8")
                     then failwith "Enter the supported mapping explicitly: ui_in:uo_out:comb8";
                     Name_starter (Chip (Ip { library_directory = directory; mapping = p.query }, true))
-                  | Module_directory ->
+                   | Module_directory tool ->
                     if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
                     then failwith "Enter a project-relative library directory";
-                    Name_starter (Module_in p.query)
+                     Name_starter
+                       (match tool with
+                        | Dune -> Module_in p.query
+                        | Bazel -> Bluespec_module_in p.query)
                  | Design_executable ->
                    if String.is_empty (String.strip p.query)
                    then failwith "Enter an existing ASIC design executable";

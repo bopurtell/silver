@@ -297,10 +297,26 @@ let test_bazel_project ~simulation_fixture ~directory =
          && List.is_empty opened.workspace.items)
         "Explicit Bazel project exposed Dune metadata";
       let%bind repeated = open_root (Filename.concat root ".") in
-      require
-        (Project_id.equal (ok repeated).project.id project)
-        "Canonical Bazel root did not reuse its session";
-      let%bind () =
+       require
+         (Project_id.equal (ok repeated).project.id project)
+         "Canonical Bazel root did not reuse its session";
+       Out_channel.write_all
+         manifest
+         ~data:{|{"schema_version":1,"name":"Bazel demo","language":"bluespec-classic","build_label":"//:rtl","test_label":"//:simulation"}|};
+       let%bind enabled = open_root root in
+       let enabled = ok enabled in
+       require
+         (Project_id.equal enabled.project.id project
+          && V1.Dune_workspace.Inspection.supports_bluespec_authoring enabled.workspace)
+         "Explicit Bluespec language was not advertised by the existing session";
+       Out_channel.write_all
+         manifest
+         ~data:{|{"schema_version":1,"name":"Bazel demo","build_label":"//:rtl","test_label":"//:simulation"}|};
+       let%bind disabled = open_root root in
+       require
+         (not (V1.Dune_workspace.Inspection.supports_bluespec_authoring (ok disabled).workspace))
+         "Generic Bazel project still advertised Classic authoring after removing the language";
+       let%bind () =
         Deferred.List.iter
           [ V1.Dune_action.Build, "build", "//:rtl", Job.State.Complete, 0
           ; Test, "test", "//:simulation", Failed, 7

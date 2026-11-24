@@ -1,0 +1,40 @@
+(executable
+ (name emit_top)
+ (libraries hardcaml))
+
+(rule
+ (target mixed_top.v)
+ (action
+  (with-stdout-to %{target} (run ./emit_top.exe))))
+
+(rule
+ (target mkCounterIp.v)
+ (deps (:source CounterIp.bs))
+ (action
+  (bash
+   "work=$(mktemp -d)
+    trap 'rm -rf \"$work\"' EXIT
+    bsc -u -verilog -g mkCounterIp -no-show-timestamps \
+      -bdir \"$work\" -vdir \"$work\" -info-dir \"$work\" %{source}
+    cp \"$work/mkCounterIp.v\" %{target}")))
+
+(alias
+ (name rtl)
+ (deps mixed_top.v mkCounterIp.v))
+
+(rule
+ (target mixed_bench.exe)
+ (deps mixed_top.v mkCounterIp.v bench.cpp)
+ (action
+  (bash
+   "work=$(mktemp -d)
+    trap 'rm -rf \"$work\"' EXIT
+    verilator --cc --exe --build -j 2 --trace --top-module mixed_top \
+      --Mdir \"$work\" -o mixed_bench \
+      \"$PWD/mixed_top.v\" \"$PWD/mkCounterIp.v\" \"$PWD/bench.cpp\"
+    cp \"$work/mixed_bench\" %{target}")))
+
+(rule
+ (alias runtest)
+ (target mixed.vcd)
+ (action (run ./mixed_bench.exe %{target})))

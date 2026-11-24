@@ -4,10 +4,27 @@ type t =
   { name : string
   ; build_label : string
   ; test_label : string
+  ; language : string option
   }
 
 let version = 1
 let relative_path = ".silver/project.json"
+let bluespec_classic = "bluespec-classic"
+
+let bluespec_starter_files =
+  [ "BUILD.bazel"
+  ; "MODULE.bazel"
+  ; "Counter.bs"
+  ; "simulation.bzl"
+  ; "simulation_provider.py"
+  ]
+;;
+
+let is_bluespec_classic t ~has_starter_layout =
+  match t.language with
+  | Some language -> String.equal language bluespec_classic
+  | None -> has_starter_layout ()
+;;
 
 let valid_label label =
   let valid_component component =
@@ -44,7 +61,7 @@ let parse_string contents =
         List.find fields ~f:(fun (key, _) ->
           not
             (List.mem
-               [ "schema_version"; "name"; "build_label"; "test_label" ]
+               [ "schema_version"; "name"; "build_label"; "test_label"; "language" ]
                key
                ~equal:String.equal))
       with
@@ -82,8 +99,21 @@ let parse_string contents =
         ~expectation:"a nonempty project name without control characters"
     in
     let%bind build_label = label "build_label" in
-    let%map test_label = label "test_label" in
-    { name; build_label; test_label }
+    let%bind test_label = label "test_label" in
+    let%map language =
+      match List.Assoc.find fields "language" ~equal:String.equal with
+      | None -> Ok None
+      | Some _ ->
+        string
+          "language"
+          ~valid:(fun s ->
+            String.length s > 0
+            && String.length s <= 64
+            && String.for_all s ~f:(fun c -> Char.is_alphanum c || Char.equal c '-'))
+          ~expectation:"a language identifier of 1 to 64 letters, digits or hyphens"
+        |> Result.map ~f:Option.some
+    in
+    { name; build_label; test_label; language }
   | _ -> Error "Expected a JSON object"
   | exception Yojson.Json_error message -> Error (String.prefix message 512)
 ;;
@@ -97,4 +127,22 @@ let load ~root =
       (match parse_string contents with
        | Ok manifest -> Ok (Some manifest)
        | Error reason -> Or_error.error_string (path ^ ": " ^ reason)))
+;;
+
+(* Service-side UI hint. The authoring host repeats the layout check against
+   the pinned project directory at Preview and Apply. *)
+let supports_bluespec_authoring ~root =
+  let result =
+    Or_error.try_with (fun () ->
+      let root = Filename_unix.realpath root in
+      let manifest = load ~root |> Or_error.ok_exn in
+      Option.exists manifest ~f:(fun manifest ->
+        is_bluespec_classic manifest ~has_starter_layout:(fun () ->
+          List.for_all bluespec_starter_files ~f:(fun file ->
+            match (Core_unix.lstat (Filename.concat root file)).st_kind with
+            | S_REG -> true
+            | _ -> false
+            | exception Core_unix.Unix_error (ENOENT, _, _) -> false))))
+  in
+  Result.ok result |> Option.value ~default:false
 ;;

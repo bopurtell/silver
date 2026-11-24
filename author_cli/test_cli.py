@@ -2,6 +2,7 @@
 import os
 import json
 from pathlib import Path
+import re
 import selectors
 import shutil
 import subprocess
@@ -13,6 +14,9 @@ def exercise(root, endpoint=None):
     root.mkdir()
     marker = root / "dune-project"
     marker.write_text("(lang dune 3.10)\n(name consumer)\n")
+    # Headless source and flow authoring must not probe Dune or start discovery.
+    guard = root / "no-dune-while-authoring"
+    guard.touch()
     flags = ["--root", str(root), "--endpoint", endpoint] if endpoint else []
 
     def invoke(command, *args, ok=True):
@@ -22,7 +26,7 @@ def exercise(root, endpoint=None):
         return result.stdout + result.stderr
 
     assert "Preview only" in invoke("new-ip", "accum", "--template", "sample")
-    assert list(root.iterdir()) == [marker]
+    assert set(root.iterdir()) == {marker, guard}
     invoke("new-ip", "accum", "--template", "sample", "--apply")
     library = root / "ip/accum"
     assert (library / "dune").is_file()
@@ -64,9 +68,6 @@ def exercise(root, endpoint=None):
     stanza.write_text("; hardcaml-asic flow collection v1\n")
     entry = flows / "flow_standard.ml"
     entry.write_text("(* hardcaml-asic profile directory v1 *)\n")
-    # Normal workspace opening can start driver discovery. A flow-authoring root
-    # binding and the actual preview/apply must work without invoking Dune at all.
-    (root / "no-dune-while-authoring").touch()
     args = ["trial", "--chip", "second"]
     assert "Owner chip: second" in invoke("new-flow", *args)
     assert not (flows / "flow_trial.ml").exists()
@@ -91,7 +92,89 @@ def exercise(root, endpoint=None):
     assert not (dst.parent / "manual.ml").exists()
 
 
-cli, daemon, fixture = (Path(arg).resolve() for arg in sys.argv[1:])
+def exercise_bluespec(root, endpoint=None, *, legacy=False):
+    shutil.copytree(bluespec_starter, root)
+    (root / ".silver").mkdir()
+    manifest = dict(schema_version=1, name=root.name, build_label="//:rtl",
+                    test_label="//:simulation")
+    if not legacy:
+        manifest["language"] = "bluespec-classic"
+    (root / ".silver/project.json").write_text(json.dumps(manifest))
+
+    # Write no fixtures after this snapshot: preview should be read-only.
+    def snapshot():
+        return {p.relative_to(root).as_posix(): p.read_bytes()
+                for p in root.rglob("*") if p.is_file()}
+
+    original = snapshot()
+    flags = ["--root", str(root), "--endpoint", endpoint] if endpoint else []
+    working = root.parent if endpoint else root
+
+    def invoke(command, *args, ok=True):
+        result = subprocess.run([cli, command, *args, *flags], cwd=working, env=env,
+                                text=True, capture_output=True, timeout=30)
+        assert (result.returncode == 0) == ok, (args, result)
+        return result.stdout + result.stderr
+
+    root_args = ["top_helper", "--library", "."]
+    manual = invoke("new-module", *root_args)
+    assert "Manual registration: BUILD.bazel" in manual and "Top_helper.bs" in manual, manual
+    assert snapshot() == original
+    invoke("new-module", *root_args, "--apply")
+    assert "package Top_helper " in (root / "Top_helper.bs").read_text()
+
+    for name, template in [("accum", "sample"), ("blank", "empty")]:
+        preview = invoke("new-ip", name, "--template", template)
+        assert "Preview only" in preview and f"ip/{name}/BUILD.bazel" in preview, preview
+        assert "silver-bluespec-classic" in preview, preview
+        assert re.search(rf"ip/{name}/\w+\.bs", preview), preview
+        assert not (root / "ip" / name).exists()
+        invoke("new-ip", name, "--template", template, "--apply")
+        library = root / "ip" / name
+        assert 'name = "sources"' in (library / "BUILD.bazel").read_text()
+        classic_packages = list(library.glob("*.bs"))
+        assert classic_packages
+        assert not (library / "dune").exists() and not list(library.glob("*.ml"))
+        for package in classic_packages:
+            assert re.search(rf"\bpackage\s+{package.stem}\b", package.read_text())
+        if name == "accum":
+            original_library = snapshot()
+            args = ["helper", "--library", "ip/accum"]
+            preview = invoke("new-module", *args)
+            path = re.search(r"ip/accum/\w+\.bs", preview)
+            assert path and "Preview only" in preview, preview
+            source = root / path[0]
+            assert not source.exists() and snapshot() == original_library
+            invoke("new-module", *args, "--apply")
+            module_contents = source.read_bytes()
+            assert re.search(rf"\bpackage\s+{source.stem}\b", module_contents.decode())
+            source.write_text("-- user edited this package\n")
+            invoke("new-module", *args, "--apply", ok=False)
+            invoke("new-ip", name, "--apply", ok=False)
+            assert source.read_text() == "-- user edited this package\n"
+            invoke("new-module", "escape", "--library", "../ip/accum", "--apply", ok=False)
+    current = snapshot()
+    assert all(current[path] == content for path, content in original.items())
+    additions = current.keys() - original.keys()
+    assert additions == {"Top_helper.bs", "ip/accum/Accum.bs", "ip/accum/BUILD.bazel", "ip/accum/Helper.bs",
+                         "ip/blank/Blank.bs", "ip/blank/BUILD.bazel"}, additions
+    return {**{path: current[path] for path in additions}, "ip/accum/Helper.bs": module_contents}
+
+
+def reject_unknown_bazel(root, endpoint=None):
+    (root / ".silver").mkdir(parents=True)
+    manifest = root / ".silver/project.json"
+    manifest.write_text(json.dumps(dict(
+        schema_version=1, name="unclassified", build_label="//:rtl", test_label="//:simulation",
+    )))
+    flags = ["--root", str(root), "--endpoint", endpoint] if endpoint else []
+    result = subprocess.run([cli, "new-ip", "would_clobber", "--apply", *flags],
+                            cwd=root, env=env, text=True, capture_output=True, timeout=30)
+    assert result.returncode != 0 and "bluespec-classic" in result.stderr, result
+    assert not (root / "ip").exists()
+
+
+cli, daemon, fixture, bluespec_starter = (Path(arg).resolve() for arg in sys.argv[1:])
 with tempfile.TemporaryDirectory(prefix="silver-author-") as tmp:
     base = Path(tmp)
     renderer = base / "hardcaml-asic-starter"
@@ -106,6 +189,8 @@ with tempfile.TemporaryDirectory(prefix="silver-author-") as tmp:
     dune.chmod(0o755)
     env = {**os.environ, "PATH": str(base) + ":" + os.environ["PATH"]}
     exercise(base / "local")
+    local_classic = exercise_bluespec(base / "local-classic")
+    reject_unknown_bazel(base / "local-bazel")
     permitted = base / "permitted"
     permitted.mkdir()
     with subprocess.Popen([daemon, "--authoring-root", permitted, "--state-dir", base / "state"],
@@ -117,5 +202,8 @@ with tempfile.TemporaryDirectory(prefix="silver-author-") as tmp:
             line = proc.stdout.readline().strip()
             assert line.startswith("silver-daemon listening on "), line
             exercise(permitted / "consumer", line.split()[-1])
+            remote_classic = exercise_bluespec(permitted / "classic", line.split()[-1], legacy=True)
+            assert remote_classic == local_classic
+            reject_unknown_bazel(permitted / "unknown-bazel", line.split()[-1])
         finally:
             proc.terminate()

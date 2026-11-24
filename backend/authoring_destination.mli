@@ -2,6 +2,7 @@ open! Core
 
 exception Invalid of string
 exception Changed of string
+exception Unsupported_bluespec_project
 
 type root
 type dir
@@ -9,10 +10,13 @@ type snapshot [@@deriving equal, sexp_of]
 
 val root : string -> root
 val select : root list -> string -> root * string list
+val source_project : root -> string list -> (int * int) * bool
 
 type addition =
   | Ip of string
   | Module of string list * string
+  | Bazel_ip of string
+  | Bazel_module of string list * string
   | Flow of
       { inputs : string list list
       ; output : string list option
@@ -21,6 +25,7 @@ type addition =
 val input_text : snapshot -> string list -> string option
 val module_directory : string -> string list
 val manual_modules : snapshot -> bool
+val bazel_library : snapshot -> string list -> string * string
 
 val visit
   :  ?existing:string
