@@ -3,7 +3,7 @@ id: WB-095
 title: Launch Silver flows and stages from standalone Cobalt
 category: integrations
 feature_sets: [FS2, FS4]
-status: delivered
+status: closed
 kind: feature
 priority: P2
 severity: n/a
@@ -19,6 +19,9 @@ related: [WB-083, WB-093]
 ---
 
 # WB-095 — Companion flow launch
+
+**Closed at the owner's request** with Cobalt C8 (Stage Checklist and aliases)
+and C9 (Flow Runner). The two-window acceptance evidence is recorded below.
 
 This ticket owns cross-repo acceptance for the stage checklist and aliases
 formerly in WB-093 slice 2, plus a tile for kicking off a named flow. WB-093's
@@ -98,7 +101,7 @@ C8 or sharing enabled.
   not cross-repo acceptance: record the real two-window result separately for
   each slice.
 
-## Recorded acceptance (2026-11-22; ticket remains open)
+## Recorded acceptance (2026-11-22)
 
 `scripts/test-companion-flow-launch.py --slice c8|c9` runs the built Silver
 daemon, native Silver terminal, and actual standalone Cobalt in a newly made
