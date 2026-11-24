@@ -166,8 +166,8 @@
 
 (library
  (name silver_editor)
- (modules editor_config editor_theme)
- (libraries core core_unix cobalt.hosted terminal_presentation)
+ (modules editor_config editor_theme editor_clipboard)
+ (libraries core core_unix async bonsai_term cobalt.hosted terminal_presentation)
  (preprocess (pps ppx_jane))
  (inline_tests))
 
@@ -236,6 +236,16 @@
 (alias
  (name runtest)
  (deps (alias test-editor-config-pty)))
+
+(rule
+ (alias test-editor-clipboard-pty)
+ (deps (sandbox always) test_editor_clipboard_pty.py ../test/support/__init__.py
+   ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_editor_clipboard_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-editor-clipboard-pty)))
 
 (rule
  (alias test-shared-terminal-pty)
@@ -414,6 +424,16 @@
 (alias
  (name runtest)
  (deps (alias test-bluespec-authoring-pty)))
+
+(rule
+ (alias test-quit-confirmation-pty)
+ (deps test_quit_confirmation_pty.py ../test/support/__init__.py
+    ../test/support/screen.py ../test/support/terminal.py)
+ (action (run python3 -B %{dep:test_quit_confirmation_pty.py} %{exe:main.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias test-quit-confirmation-pty)))
 
 ; Opt-in palette acceptance with a private structured simulation provider.
 (rule

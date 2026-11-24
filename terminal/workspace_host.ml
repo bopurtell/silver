@@ -213,7 +213,10 @@ type action =
   | Synthesis_sort of Synthesis.Sort.t
   | Synthesis_cycle_sort
   | Synthesis_clear_filter
+  | Set_quit_confirm of bool
+  | Set_quit_default_yes of bool
   | Exit
+  | Force_exit
   | Simulation of W.Tile_id.t * Simulation.Operation.t
   | Simulation_form of W.Tile_id.t * string * Simulation.Suite.t * string
   | Simulation_edit of W.Tile_id.t * string * string * Simulation_view.Form.t
@@ -335,6 +338,11 @@ type fresh_launch_origin =
   ; chip_target : Asic.Chip_target.t option
   }
 
+type quit_choice =
+  | Yes
+  | No
+[@@deriving equal]
+
 type t =
   { registry : W.Snapshot.t option
   ; active : W.Workspace_id.t option
@@ -352,6 +360,9 @@ type t =
   ; main_hints : bool
   ; browser_hints : bool
   ; palette_hints : bool
+  ; quit_confirm : bool
+  ; quit_default_yes : bool
+  ; quit_selection : quit_choice option
   ; timing_preload : bool
   ; timing_preload_details : int
   ; quick_launch_view : bool
@@ -395,6 +406,9 @@ let empty =
   ; main_hints = true
   ; browser_hints = false
   ; palette_hints = true
+  ; quit_confirm = true
+  ; quit_default_yes = true
+  ; quit_selection = None
   ; timing_preload = true
   ; timing_preload_details = Timing_preload.default_details
   ; quick_launch_view = true
@@ -4443,7 +4457,28 @@ let catalog
         "Layout: Requested tile sizes"
         "shelf preferred geometry"
         (Set_layout_mode Preferred)
-    ; command "host.exit" "Exit client" "quit" Exit
+    ; command "host.exit" "Exit client (q)" "quit" Exit
+    ; command "host.exit.force" "Exit client immediately (Q)" "force quit" Force_exit
+    ; command
+        "host.quit.confirm"
+        ("Quit: Confirm with dialog (q)" ^ if t.quit_confirm then " (selected)" else "")
+        "exit confirmation settings preference"
+        (Set_quit_confirm true)
+    ; command
+        "host.quit.immediate"
+        ("Quit: Immediately on q" ^ if t.quit_confirm then "" else " (selected)")
+        "exit confirmation off settings preference"
+        (Set_quit_confirm false)
+    ; command
+        "host.quit.default-yes"
+        ("Quit: Initially select Yes" ^ if t.quit_default_yes then " (selected)" else "")
+        "exit confirmation default choice settings preference"
+        (Set_quit_default_yes true)
+    ; command
+        "host.quit.default-no"
+        ("Quit: Initially select No" ^ if t.quit_default_yes then "" else " (selected)")
+        "exit confirmation default choice settings preference"
+        (Set_quit_default_yes false)
     ]
     @ List.init (Timing_preload.max_details + 1) ~f:(fun count ->
       command
@@ -5327,7 +5362,9 @@ let global_palette_aliases =
   ; "verify evidence", verify_evidence_command_id
   ; "cancel all", cancel_all_flows_command_id
   ; "stop all", cancel_all_flows_command_id
-  ; "theme", choose_theme_id
+   ; "theme", choose_theme_id
+   ; "quit", "host.exit"
+   ; "force quit", "host.exit.force"
   ; "close term", "terminal.close"
   ; "restart term", "terminal.restart"
   ; "term center", "terminal.center"
@@ -5529,6 +5566,18 @@ let ranked_matches p =
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
 
+let%test_unit "exact quit aliases select exit before quit preference commands" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "quit-alias") in
+  let host = receive empty registry in
+  let commands = catalog host ~project:None ~jobs:[] in
+  let palette = capture_global_palette host ~commands |> Option.value_exn in
+  let choices query = matches { palette with query } in
+  let quit = choices "quit" in
+  assert (String.equal (List.hd_exn quit).id "host.exit");
+  assert (List.exists quit ~f:(fun c -> String.equal c.id "host.quit.immediate"));
+  assert (String.equal (List.hd_exn (choices "force quit")).id "host.exit.force")
+;;
+
 let theme_picker (p : palette) =
   match p.argument with
   | Some (Theme_picker picker) -> Some picker
@@ -5694,6 +5743,64 @@ type input =
   | Focus_previous
   | Paste_start
   | Paste_end
+
+let begin_quit t =
+  if t.quit_confirm
+  then { t with quit_selection = Some (if t.quit_default_yes then Yes else No) }, false
+  else t, true
+;;
+
+let quit_input t input =
+  match t.quit_selection with
+  | None -> t, false
+  | Some selection ->
+    let select choice = { t with quit_selection = Some choice }, false in
+    let finish choice =
+      { t with quit_selection = None; paste = false }, equal_quit_choice choice Yes
+    in
+    (match input with
+     | Paste_start -> { t with paste = true }, false
+     | Paste_end -> { t with paste = false }, false
+     | _ when t.paste -> t, false
+     | Enter -> finish selection
+     | Escape | Character ('n' | 'N') -> finish No
+     | Character ('y' | 'Y') -> finish Yes
+     | Previous | Character ('h' | 'k') -> select Yes
+     | Next | Character ('l' | 'j') -> select No
+     | Focus | Focus_previous ->
+       select (if equal_quit_choice selection Yes then No else Yes)
+     | _ -> t, false)
+;;
+
+let%test_unit "quit selection is modal, defaults to yes and never confirms paste" =
+  let t, should_exit = begin_quit empty in
+  assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some Yes));
+  let select t input choice =
+    let t, should_exit = quit_input t input in
+    assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some choice));
+    t
+  in
+  let no = select t Next No in
+  let yes = select no Focus Yes in
+  let yes = select yes (Character 'q') Yes in
+  let yes = select yes (Character 'Q') Yes in
+  let dismissed, should_exit = quit_input no Enter in
+  assert (not should_exit && Option.is_none dismissed.quit_selection);
+  let dismissed, should_exit = quit_input yes Escape in
+  assert (not should_exit && Option.is_none dismissed.quit_selection);
+  let _, should_exit = quit_input yes Enter in
+  assert should_exit;
+  let pasted, _ = quit_input t Paste_start in
+  let pasted = select pasted (Character 'y') Yes in
+  let pasted = select pasted Enter Yes in
+  let pasted, _ = quit_input pasted Paste_end in
+  let _, should_exit = quit_input pasted (Character 'y') in
+  assert should_exit;
+  let t, should_exit = begin_quit { empty with quit_default_yes = false } in
+  assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some No));
+  let t, should_exit = begin_quit { empty with quit_confirm = false } in
+  assert (should_exit && Option.is_none t.quit_selection)
+;;
 
 type effect =
   | Execute of capture * action

@@ -52,8 +52,11 @@ def exercise(client, base):
     launcher.symlink_to(client)
     project = base / "project"
     project.mkdir()
-    (project / "dune-project").write_text("(lang dune 3.22)\n(name shared_terminal_pty)\n")
+    (project / "dune-project").write_text("(lang dune 3.22)\n(name shared_terminal)\n")
     (project / "subdir").mkdir()
+    other_project = base / "other-project"
+    other_project.mkdir()
+    (other_project / "dune-project").write_text("(lang dune 3.22)\n(name other_project)\n")
     home = base / "home"
     home.mkdir()
     audit = base / "audit"
@@ -139,6 +142,12 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         send(query.encode())
         see("query-" + label, PALETTE, "> " + query + "▏", "│ > " + title)
         send(b"\r")
+
+    def switch_project(root, name):
+        term.palette("Open Project…")
+        see("project-picker-" + name, "Existing project directory")
+        command(str(root))
+        see("project-" + name, "Project: " + name, absent=(OVERLAY,))
 
     def resize(width, height):
         term.width, term.height = width, height
@@ -341,7 +350,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         shown("two-exited-before-palette-restart", 2, "WB_PALETTE_EXIT_two", EXITED)
         palette_command("restart term", "Restart Exited Terminal (F12)")
         shown("palette-restart", 2, PROMPT, absent=(PALETTE, EXITED, "WB_PALETTE_EXIT_two"))
-        new_two, = started() - {one, two, f12_two}
+        new_two, = started() - {one, two, reopened_two, f12_two}
         assert not live(f12_two), "Palette restart left the old shell alive"
         command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_PALETTE_RESTART_%s\\n' clean""")
         shown("palette-restart-has-fresh-state", 2, "WB_PALETTE_RESTART_clean")
@@ -394,16 +403,50 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         three, = started() - before - {first_failure, second_failure}
         command("printf 'WB_RECOVERED_%s\\n' three")
         shown("recovered-shell-accepts-input", 3, "WB_RECOVERED_three")
+        # Cobalt's hosted normal-mode chord must reopen the same Silver pool,
+        # including replacement of a shell which exited in another workspace.
+        command("exit 23")
+        shown("exited-before-editor-focus", 3, EXITED)
+        switch_workspace("Editor", "Cobalt focus", absent=(OVERLAY,))
+        chord(TOGGLE_KEYS)
+        shown("editor-toggle-restarts-recent-shell", 3, PROMPT, absent=(EXITED,))
+        editor_three, = started() - before - {first_failure, second_failure, three}
+        command("printf 'WB_EDITOR_SHELL_%s\\n' three")
+        shown("editor-reopened-shell-accepts-input", 3, "WB_EDITOR_SHELL_three")
+        # A deliberate pointer refocus is another way to recover without
+        # requiring a function key or losing the embedded editor context.
+        command("exit 23")
+        exited_screen = shown("exited-before-pointer-focus", 3, EXITED)
+        click(exited_screen, "Terminal 3 (local)")
+        shown("pointer-focus-restarts-shell", 3, PROMPT, absent=(EXITED, "WB_EDITOR_SHELL_three"))
+        focused_three, = started() - before - {first_failure, second_failure, three, editor_three}
+        command("printf 'WB_POINTER_SHELL_%s\\n' three")
+        shown("pointer-reopened-shell-accepts-input", 3, "WB_POINTER_SHELL_three")
         switch_workspace("Testing", "╭ simulation-catalog ", absent=(OVERLAY,))
         toggle(1)
         shown("one-survived-visible-workspace-switch", 1, "WB_ONE=<number_one>")
         toggle()
         see("hide-before-quit", re.compile(r"\[\d+ Testing\]"), "R run checked cases",
             absent=(OVERLAY,))
+        switch_project(other_project, "other_project")
+        before_other = started()
+        toggle(1)
+        shown("other-project-number-one", 1, PROMPT, absent=("WB_ONE=<number_one>",))
+        other_one, = started() - before_other
+        command(f"""[ "$(pwd -P)" = '{other_project}' ] && [ -z "${{WB_VALUE+x}}" ] && printf 'WB_OTHER_%s\\n' clean""")
+        shown("other-project-has-distinct-shell", 1, "WB_OTHER_clean")
+        toggle()
+        see("hide-other-project-terminal", absent=(OVERLAY,))
+        switch_project(project, "shared_terminal")
+        toggle(1)
+        shown("original-project-terminal-retained", 1, "WB_ONE=<number_one>")
+        assert started() == before_other | {other_one}, "Project switch replaced a numbered shell"
+        toggle()
+        see("hide-original-project-terminal", absent=(OVERLAY,))
         send(b"\x03")  # Silver Ctrl-C, not input to the numbered shell.
         await_condition("Silver did not exit", lambda: term.process.poll() is not None)
         assert term.process.returncode == 0, term.process.returncode
-        assert not any(live(shell) for shell in (one, final_two, three)), "Silver exited without reaping its shells"
+        assert not any(live(shell) for shell in (one, final_two, focused_three, other_one)), "Silver exited without reaping its shells"
         await_condition("Silver left a shell's background child running",
                         lambda: not any(live(child, require_running=True)
                                         for child in (child_one, child_two)))

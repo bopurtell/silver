@@ -115,11 +115,14 @@ def run(silver, daemon, base):
     with tui():
         conflict = client("--api", "--workspace-operation", "Get", "--project-root", alias, ok=False)
         assert len(conflict.splitlines()) == 1 and conflict.startswith("(Error("), conflict
-        assert "(kind " in conflict and "lock" in conflict.lower(), conflict
+        # State contention now uses an actionable public diagnostic instead of
+        # leaking the underlying lifetime-lock exception.
+        assert "(kind Conflict)" in conflict and "Another Silver session" in conflict, conflict
+        assert str(inner) in conflict and "State directory:" in conflict, conflict
         other = client("--plain", "--project-root", outer)
         assert f"root={outer}\n" in other, other
 
-    # A fresh process can acquire the lock after q. Mutate the real registry
+    # A fresh process can acquire the lock after Q. Mutate the real registry
     # and read it across another restart via the checkout's symlink.
     state = workspace("Get")
     revision = re.search(r"\(revision (\d+)\)", state)[1]
@@ -140,7 +143,7 @@ def run(silver, daemon, base):
     server = base / "server"
     server_env = isolated(server)
     remote = project(server / "remote-project")
-    # Hold a real build across the attached client's q, then allow it to
+    # Hold a real build across the attached client's Q, then allow it to
     # finish. This distinguishes preserving the listener from preserving work.
     release = server / "release"
     (remote / "dune").write_text(
@@ -171,13 +174,13 @@ def run(silver, daemon, base):
             with tui(*args, cwd=base):
                 submitted = client("--plain", *args, "--action", "build", cwd=base)
                 assert "Submitted build job " in submitted, submitted
-            assert process.poll() is None, "attached q stopped the persistent daemon"
+            assert process.poll() is None, "attached Q stopped the persistent daemon"
             release.touch()
             output = remote / "_build/default/survived"
             deadline = time.monotonic() + 20
             while not output.exists() and time.monotonic() < deadline:
                 time.sleep(.05)
-            assert output.read_text() == "done", "remote job did not survive attached q"
+            assert output.read_text() == "done", "remote job did not survive attached Q"
             status = client("--plain", *args, cwd=base)
             assert f"Instance: {instance}\n" in status and f"root={remote}\n" in status, status
         finally:

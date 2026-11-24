@@ -102,11 +102,15 @@ class Tty(Terminal):
         return Caret(self, source_line, column)
 
     def quit_silver(self):
-        os.write(self.master, b"Q")
+        # Exercise the ordinary dashboard quit route after Back, rather than
+        # bypassing it: the editor/return destination must yield input to Silver.
+        os.write(self.master, b"q")
+        self.capture("quit-confirmation", ["Quit Silver?", ">[Yes]", "[No]"])
+        os.write(self.master, b"\r")
         deadline = time.monotonic() + 12
         while self.process.poll() is None:
             self.drain(.15, allow_exit=True)
-            assert time.monotonic() < deadline, "Silver's force-quit key did not work after Back"
+            assert time.monotonic() < deadline, "Silver's confirmed quit did not work after Back"
         assert self.process.returncode == 0, self.process.returncode
 
 

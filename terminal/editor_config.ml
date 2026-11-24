@@ -8,12 +8,14 @@ type fields =
   { schema_version : int [@sexp.default 1]
   ; layout : Layout.t [@sexp.default default_layout]
   ; theme : string [@sexp.default "inherit"]
+  ; clipboard : string [@sexp.default "auto"]
   }
 [@@deriving of_sexp]
 
 type t =
   { layout : Layout.t
   ; theme_override : Theme.t option
+  ; clipboard : Editor_clipboard.mode
   }
 
 let default_text =
@@ -21,9 +23,11 @@ let default_text =
 ; The source pane is always present. Band puts Problems below it.
 ; Use (layout ((views ()))) to start with the source pane alone.
 ; Use inherit for Silver's theme, or a Cobalt theme ID (for example abyss).
+; Clipboard: auto (desktop helper or OSC 52), osc52, or disabled.
 ((schema_version 1)
  (layout ((views ((Problems Band)))))
- (theme inherit))
+ (theme inherit)
+ (clipboard auto))
 |}
 ;;
 
@@ -32,7 +36,7 @@ let max_bytes = 16 * 1024
 let decode contents =
   Or_error.try_with (fun () ->
     if String.length contents > max_bytes then failwith "File exceeds 16 KiB";
-    let { schema_version; layout; theme } = fields_of_sexp (Sexp.of_string contents) in
+    let { schema_version; layout; theme; clipboard } = fields_of_sexp (Sexp.of_string contents) in
     if schema_version <> 1 then failwith "Unsupported editor configuration schema";
     let theme_override =
       if String.Caseless.equal (String.strip theme) "inherit"
@@ -42,7 +46,7 @@ let decode contents =
         | Some theme -> Some theme
         | None -> failwithf "Unknown embedded Cobalt theme %S" theme ())
     in
-    { layout; theme_override })
+    { layout; theme_override; clipboard = Editor_clipboard.mode_of_string clipboard })
 ;;
 
 let default = Or_error.ok_exn (decode default_text)
@@ -127,9 +131,19 @@ let%test_unit "embedded editor config is strict and defaults to source and botto
   =
   assert (Layout.equal default.layout default_layout);
   assert (Option.is_none default.theme_override);
+  assert (Poly.equal default.clipboard Editor_clipboard.Auto);
   let sparse = Or_error.ok_exn (decode "()") in
   assert (Layout.equal sparse.layout default_layout);
   assert (Option.is_none sparse.theme_override);
+  assert (Poly.equal sparse.clipboard Editor_clipboard.Auto);
+  assert (
+    Poly.equal
+      (Or_error.ok_exn (decode "((clipboard osc52))")).clipboard
+      Editor_clipboard.Osc52);
+  assert (
+    Poly.equal
+      (Or_error.ok_exn (decode "((clipboard disabled))")).clipboard
+      Editor_clipboard.Disabled);
   let custom = Or_error.ok_exn (decode "((layout ((views ()))) (theme abyss))") in
   assert (Layout.equal custom.layout (Or_error.ok_exn (Layout.create ~views:[] ())));
   assert (String.equal "abyss" (Theme.id (Option.value_exn custom.theme_override)));
@@ -140,6 +154,7 @@ let%test_unit "embedded editor config is strict and defaults to source and botto
     ; "((layout ((views ((History Split) (Vcs Split))))))"
     ; "((theme silver-does-not-exist))"
     ; "((theme abyss) (theme inherit))"
+    ; "((clipboard bogus))"
     ; "((unknown field))"
     ; "() ((theme abyss))"
     ; "("

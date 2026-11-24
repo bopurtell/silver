@@ -71,6 +71,11 @@ Choices are client-local and preserve workspace/run/pin state.
 | `F12` | Show the current terminal and restart it if it exited or failed. Use the palette when Cobalt has focus. |
 | Ctrl-C | Interrupt the foreground command when the shell has focus. Otherwise exit the client, including from filters, palette and incomplete paste; daemon work continues. |
 
+To customize `q`, open **Space c c** and search **Quit:**. Pick **Confirm with
+dialog (q)** or **Immediately on q**, independently of **Initially select Yes**
+or **Initially select No**. These choices are saved per project. A pane that
+uses `q` for a local action, such as closing a waveform, keeps that action.
+
 The palette includes add/hide/restore/move/resize/reorder-to-end/zoom/unzoom,
 pin-run/follow, independent/relink-Main, header/chrome toggles, resume-log-follow,
 explicit job cancellation, and existing RTL/hierarchy inspection commands.
@@ -97,8 +102,9 @@ separate from each other and shared across that project's workspaces. Hiding
 the shell returns input to the previous tile without stopping the shell. Clicking
 a visible workspace tab hides the overlay and restores the destination workspace's
 focus. A shell's final screen and exit status remain visible after exit. Reopen
-that terminal (or select its number from another terminal) to start a fresh
-shell in the project directory. Exit never triggers a background respawn.
+that terminal, select its number from another terminal, or click the exited
+terminal to start a fresh shell in the project directory. Exit never triggers a
+background respawn.
 From the shell, type `Space c c` as a chord to open Silver's command palette.
 `Esc` dismisses it and returns input to the shell. Search **close term** to hide
 the terminal without ending the shell, or **restart term** to restart an exited

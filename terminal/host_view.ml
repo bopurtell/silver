@@ -4334,6 +4334,65 @@ let render_workspace
     |> box ~width:dimensions.width ~height:dimensions.height
 ;;
 
+let quit_geometry ~hints ({ Dimensions.width; height } : Dimensions.t) =
+  let rows = if hints then 3 else 2 in
+  let w = Int.min width (if hints then 44 else 30)
+  and h = Int.min height (rows + 4) in
+  let geometry =
+    Panel.geometry ~framed:(w >= 18 && h >= 4) ~width:w ~height:h
+      ~horizontal_padding:(if w >= 17 then 1 else 0)
+      ~vertical_padding:(if h >= rows + 4 then 1 else 0)
+  in
+  (width - w) / 2, (height - h) / 2, w, h, geometry
+;;
+
+let quit_button_origin (g : Panel.geometry) =
+  if g.content_width >= 13 && g.content_height >= 2
+  then Some ((g.content_width - 13) / 2, 1)
+  else None
+;;
+
+let quit_hit ~hints dimensions ~x ~y =
+  let left, top, _, _, g = quit_geometry ~hints dimensions in
+  Option.bind (quit_button_origin g) ~f:(fun (button_x, button_y) ->
+    let x = x - left - g.border - g.horizontal_padding - button_x in
+    let y = y - top - g.border - g.vertical_padding - button_y in
+    if y <> 0 then None
+    else if x >= 0 && x < 6 then Some H.Yes
+    else if x >= 8 && x < 13 then Some H.No
+    else None)
+;;
+
+let render_quit ~appearance ~hints (selection : H.quit_choice) dimensions background =
+  let x, y, width, height, g = quit_geometry ~hints dimensions in
+  let text role value = View.text ~attrs:(Role.attrs appearance role) value in
+  let button choice label =
+    let selected = H.equal_quit_choice selection choice in
+    text (if selected then Focus else Foreground) ((if selected then ">" else " ") ^ label)
+  in
+  let buttons =
+    let compact = if H.equal_quit_choice selection Yes then "> Yes" else "> No" in
+    Option.value_map (quit_button_origin g) ~default:(text Focus compact) ~f:(fun (x, _) ->
+      View.hcat [ button Yes "[Yes]"; text Surface "  "; button No "[No]" ]
+      |> View.pad ~l:x)
+  in
+  let body =
+    let centered role label =
+      let row = text role label in
+      View.pad ~l:(Int.max 0 ((g.content_width - View.width row) / 2)) row
+    in
+    View.vcat
+      ([ centered Heading "Quit Silver?"; buttons ]
+       @ if hints then [ centered Muted "Left/Right Tab · y/n · Enter/Esc" ] else [])
+  in
+  let modal =
+    Panel.render appearance ~title:View.none ~geometry:g
+      ~width ~height ~attrs:(Role.attrs appearance Border) body
+    |> colored appearance Surface
+  in
+  View.zcat [ View.pad ~l:x ~t:y modal; background ]
+;;
+
 let palette_controls host (p : H.palette) =
   let current = H.current host p.capture in
   let nonblank = not (String.is_empty (String.strip p.query)) in
@@ -4981,6 +5040,28 @@ let plain_text view =
     (View.width view, View.height view)
     (View.Private.notty_image view);
   Buffer.contents buffer
+;;
+
+let%test_unit "quit overlay uses the same button geometry for keyboard and pointer" =
+  List.iter [ true; false ] ~f:(fun hints ->
+  List.iter [ 80, 24; 17, 5; 13, 2 ] ~f:(fun (width, height) ->
+    let dimensions = { Dimensions.width; height } in
+    let background = View.rectangle ~width ~height () in
+    List.iter [ H.Yes, ">[Yes]"; H.No, ">[No]" ] ~f:(fun (selection, selected) ->
+      let image = render_quit ~appearance:Appearance.default ~hints selection dimensions background in
+      let text = plain_text image in
+      if width = 80 then assert (Bool.equal hints (String.is_substring text ~substring:"Left/Right Tab"));
+      assert (String.is_substring text ~substring:selected);
+      List.iter [ "[Yes]", H.Yes; "[No]", H.No ] ~f:(fun (label, choice) ->
+        let x, y =
+          List.find_map (List.mapi (String.split_lines text) ~f:(fun y line -> y, line))
+            ~f:(fun (y, line) ->
+              Option.map (String.substr_index line ~pattern:label) ~f:(fun x ->
+                cell_width (String.prefix line x), y))
+          |> Option.value_exn
+        in
+        assert (Option.equal H.equal_quit_choice (quit_hit ~hints dimensions ~x ~y) (Some choice)))));
+  assert (Option.is_none (quit_hit ~hints { width = 80; height = 24 } ~x:0 ~y:0)))
 ;;
 
 let ansi_cell view ~x ~y =

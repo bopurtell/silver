@@ -63,6 +63,10 @@ val resize : t -> dimensions:Bonsai_term.Dimensions.t -> unit
 (** Start the selected number again only after exit or failure. *)
 val restart : t -> unit
 
+(** A selected shell is restartable only after exit or startup failure.
+    A launch in progress is not restartable. *)
+val restartable : t -> bool
+
 (** Forward keyboard and paste events to the selected live shell; the caller
     handles overlay and frontend shortcuts before calling this, except while
     [is_pasting] is true: route every event here until the paste ends. *)

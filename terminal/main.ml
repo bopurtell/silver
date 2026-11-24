@@ -183,6 +183,7 @@ type session =
   ; mutable reconnect_delay_ms : int
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
   ; mutable painted_palette : Host.t option
+  ; mutable painted_quit : Host.quit_choice option
   ; mutable browser : Browser.t option
   ; sharing : Project_sharing.t
   ; mutable share_wizard : (unit ref * int * Share_wizard.t) option
@@ -421,7 +422,8 @@ let create_session
       ; navigation_focus_touched = []
       ; reconnect_delay_ms = 250
       ; last_dimensions = None
-      ; painted_palette = None
+       ; painted_palette = None
+       ; painted_quit = None
       ; browser = None
       ; sharing =
           Project_sharing.create
@@ -992,6 +994,8 @@ let load_presentation_preferences session =
              ; main_hints = true
              ; browser_hints = false
              ; palette_hints = true
+             ; quit_confirm = true
+             ; quit_default_yes = true
               ; timing_preload = true
               ; timing_preload_details = Terminal_presentation.Timing_preload.default_details
              ; quick_launch_view = true
@@ -5469,6 +5473,7 @@ let render
   ignore (retire_stale_browser session : bool);
   session.host <- Host.dismiss_stale_theme_picker session.host;
   session.painted_palette <- None;
+  session.painted_quit <- None;
   session.painted_browser <- None;
   let remember_palette (host : Host.t) =
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
@@ -5559,11 +5564,16 @@ let render
       session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
       Host_view.render_palette host dimensions window
   in
-  match share_wizard session with
-  | None -> background
-  | Some (_, _, wizard) ->
-    Share_wizard.render wizard ~sharing:(Project_sharing.is_sharing session.sharing)
-      appearance dimensions background
+  let background =
+    match share_wizard session with
+    | None -> background
+    | Some (_, _, wizard) ->
+      Share_wizard.render wizard ~sharing:(Project_sharing.is_sharing session.sharing)
+        appearance dimensions background
+  in
+  session.painted_quit <- session.host.quit_selection;
+  Option.value_map session.painted_quit ~default:background ~f:(fun selection ->
+    Host_view.render_quit ~appearance ~hints:session.host.main_hints selection dimensions background)
 ;;
 
 (* Baseline capture.
@@ -5619,7 +5629,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; navigation_focus_touched = []
     ; reconnect_delay_ms = 250
     ; last_dimensions = None
-    ; painted_palette = None
+     ; painted_palette = None
+     ; painted_quit = None
     ; browser = None
     ; sharing = Project_sharing.create Attached
     ; share_wizard = None
@@ -7107,6 +7118,18 @@ let import_workload session ~current result digest =
     in
     session.host <- Host.set_local session.host tile.id { local with workloads };
     Option.value_map operation ~default:(return ()) ~f:(workload_request session tile)
+;;
+
+let request_quit session ~exit =
+  let host, should_exit = Host.begin_quit session.host in
+  session.host <- host;
+  if should_exit then exit () else Bonsai_term.Effect.Ignore
+;;
+
+let quit_input session input ~exit =
+  let host, should_exit = Host.quit_input session.host input in
+  session.host <- host;
+  if should_exit then exit () else Bonsai_term.Effect.Ignore
 ;;
 
 let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit =
@@ -9405,7 +9428,23 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Unavailable reason ->
       session.host <- { session.host with notice = reason };
       Effect.Ignore
-    | Exit -> exit ())
+     | Set_quit_confirm quit_confirm ->
+       session.host <-
+         { session.host with
+           quit_confirm
+         ; notice = if quit_confirm then "q asks for quit confirmation" else "q quits immediately"
+         };
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+     | Set_quit_default_yes quit_default_yes ->
+       session.host <-
+         { session.host with
+           quit_default_yes
+         ; notice =
+             "Quit confirmation initially selects " ^ if quit_default_yes then "Yes" else "No"
+         };
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+     | Exit -> request_quit session ~exit
+     | Force_exit -> exit ())
 ;;
 
 let scroll_host session delta =
@@ -10488,7 +10527,18 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
     |> Option.value ~default:Effect.Ignore
   in
   match session.last_dimensions with
-  | _ when Option.is_some (share_wizard session) -> Effect.Ignore
+   | Some dimensions
+     when Option.is_some session.host.quit_selection || Option.is_some session.painted_quit ->
+     (match (kind : Event.mouse_kind), mods, session.host.quit_selection with
+      | Left, [], Some choice
+        when not session.host.paste
+             && Option.equal Host.equal_quit_choice (Some choice) session.painted_quit ->
+        (match Host_view.quit_hit ~hints:session.host.main_hints dimensions ~x ~y with
+         | Some Yes -> quit_input session (Host.Character 'y') ~exit
+         | Some No -> quit_input session (Host.Character 'n') ~exit
+         | None -> Effect.Ignore)
+      | _ -> Effect.Ignore)
+   | _ when Option.is_some (share_wizard session) -> Effect.Ignore
   | None -> Effect.Ignore
   | Some _ when retire_stale_browser session -> Effect.Ignore
   | Some dimensions
@@ -10657,7 +10707,8 @@ let tui
   in
   let host_modal session =
     let host = session.host in
-    Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
+    Option.is_some host.quit_selection
+    || Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
     || Option.is_some (share_wizard session)
     || host.editing_filter || host.paste || Option.is_some host.inspection_paste
   in
@@ -10970,6 +11021,16 @@ let tui
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if Option.is_some session.host.quit_selection
+    then
+      let input =
+        match event with
+        | Key_press { key = Arrow `Left; mods = [] } -> Some Host.Previous
+        | Key_press { key = Arrow `Right; mods = [] } -> Some Host.Next
+        | _ -> Host.decode_event event
+      in
+      Option.value_map input ~default:Effect.Ignore ~f:(fun input ->
+        quit_input session input ~exit)
     else if Option.is_some (share_wizard session)
     then share_wizard_key session event
     else if Option.is_none session.host.registry
@@ -11024,7 +11085,10 @@ let tui
       | Some effect -> effect
       | None ->
         (match event with
-         | Key_press { key; mods = [] } when key_is 'q' key -> exit ()
+          | Key_press { key; mods = [] } when key_is 'q' key -> request_quit session ~exit
+          | Key_press { key; mods = [] } when key_is 'Q' key -> exit ()
+          | Key_press { key; mods = [ Shift ] } when key_is 'q' key || key_is 'Q' key ->
+            exit ()
          | Key_press { key; mods = [ Ctrl ] } when key_is 'c' key || key_is 'C' key ->
            exit ()
          | Key_press { key; mods = [] } when key_is 'b' key ->
@@ -11159,6 +11223,13 @@ let tui
         && Option.exists (placement session dimensions (companion session)) ~f:(fun pane ->
           pane.focused && pane.key = entry.key)
       in
+      entry.clipboard_notice <- (fun notice ->
+        Effect.lazy_ (lazy (
+          if not (still_focused ())
+          then Effect.Ignore
+          else (
+            session.host <- { session.host with notice };
+            invalidate update_revision))));
       (* Cobalt owns recognizing this chord in the focused editor, so typing
          and paste are interpreted by its mode, not by a second Silver parser. *)
       entry.toggle_terminal <- (fun number ->
@@ -11375,11 +11446,17 @@ let tui
       in
       let terminal_pointer ~x ~y =
         let geometry = Shared_terminal.geometry terminal ~dimensions in
-        if Shared_terminal.contains geometry ~x ~y
-           || Option.is_some session.painted_palette
+        if Option.is_some session.painted_palette
            || not (workspace_layer session)
            || not (Option.equal Dimensions.equal session.last_dimensions (Some dimensions))
         then Effect.Ignore
+        else if Shared_terminal.contains geometry ~x ~y
+        then
+          (* A click explicitly refocuses the shell. A dead shell starts a
+             fresh process; a live shell is left untouched. *)
+          if Shared_terminal.restartable terminal
+          then terminal_command `Restart
+          else Effect.Ignore
         else (
           let host = displayed_host session in
           match Host_view.pointer_geometry ?editor_companion:origin host dimensions ~x ~y with

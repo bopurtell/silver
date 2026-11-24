@@ -267,6 +267,8 @@ let restart t =
       changed t))
 ;;
 
+let restartable t = Option.exists t.selected ~f:(fun shell -> not (live shell))
+
 let key (key : Event.Key.t) mods : Model.key =
   let has modifier = List.mem mods modifier ~equal:Event.Modifier.equal in
   let code : Model.key_code =
