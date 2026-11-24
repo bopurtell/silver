@@ -312,7 +312,7 @@ def exercise(args, base, mode):
     runtime = dirs["XDG_RUNTIME_DIR"] / "hardcaml-workbench"
     state = base / "deliberately-nondefault-state"
     cobalt_argv = [args.cobalt, "--no-lsp", code]
-    silver_exe = base / "silver"
+    silver_exe = base / "ag"
     silver_exe.symlink_to(args.silver)
     with ExitStack() as stack:
         if mode == "attached":

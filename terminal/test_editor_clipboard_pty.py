@@ -55,7 +55,7 @@ def exercise(client, base, *, mode="auto", failure="", slow="", remote=False,
         clipboard_stub(tools / name)
     project = base / "project"
     project.mkdir()
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     clipboard = base / "selection"
     clipboard.write_bytes(b"old stale clipboard\n")

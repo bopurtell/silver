@@ -18,7 +18,7 @@ Start with [the ownership guide and source map](../docs/testing.md).
 | `@test-api` | daemon/test | Native local HTTP/RPC server integration |
 | `@test-support` | test/support | Shared PTY/screen helper contracts and compatibility imports |
 | `@test-native-smoke` | terminal waveform handoff | Opt-in synthetic daemon/client HTTP/PTY integration |
-| `@test-native-standalone` | installed `silver` and persistent daemon | Opt-in project discovery, locking, retained state and PTY quit/reattach lifecycle |
+| `@test-native-standalone` | installed `ag` and persistent daemon | Opt-in project discovery, locking, retained state and PTY quit/reattach lifecycle |
 | `@test-local` | contracts + presentation + backend + setup + support | Aggregate; **excludes API, native smoke and real EDA** |
 
 Shared-support tests participate in `@runtest`; native smoke is opt-in.

@@ -175,7 +175,7 @@
  (name main)
  (modules main startup_entry editor_workspace shared_terminal shared_terminal_view
   project_sharing share_wizard)
- (public_name silver)
+ (public_name ag)
  (package hardcaml_workbench)
  (libraries
   server_host
@@ -200,7 +200,7 @@
  (lint
   (pps ppx_js_style)))
 
-; PTY drives the actual silver argv[0] launch path with a controlled renderer.
+; PTY drives the actual ag argv[0] launch path with a controlled renderer.
 (rule
  (alias runtest)
  (deps test_startup_entry_pty.py ip_starter_fixture.py ../test/support/__init__.py

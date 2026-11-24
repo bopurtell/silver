@@ -22,7 +22,7 @@ local investigation without applying stale responses.
 ## Install
 
 Follow [Install and open Silver](../README.md#install-and-open-silver). The
-commands below use the installed `silver`, `silver-init`, and `silver-workspace`. The former
+commands below use the installed `ag`, `silver-init`, and `silver-workspace`. The former
 `hardcaml-workbench-init` and `hardcaml-workbench-workspace` names remain available
 for existing scripts.
 
@@ -32,8 +32,8 @@ From a checkout with `dune-project`, open its absolute root and use the daemon's
 existing execution environment:
 
 ```sh
-silver --plain --project-root /absolute/path/to/project --environment inherited
-silver --project-root /absolute/path/to/project --environment inherited
+ag --plain --project-root /absolute/path/to/project --environment inherited
+ag --project-root /absolute/path/to/project --environment inherited
 ```
 
 The plain command reports the selected root, environment, and generic Dune
@@ -82,7 +82,7 @@ hardcaml-workbench --connect http://127.0.0.1:18080 \
 
 ## Initialize an existing project
 
-Open the Dune project locally with `silver`. Press **Space c c** and choose
+Open the Dune project locally with `ag`. Press **Space c c** and choose
 **Set up project…**. To start a design, choose **Add ASIC starter…**, name it,
 and review the proposed files before applying. To connect a design that already
 exists, choose **Import existing ASIC design…** and enter the path to its already-built
@@ -121,7 +121,7 @@ If the project is already open, opening it again reuses the daemon session. Use
 explicit integration refresh to reload the manifest:
 
 ```sh
-silver --plain --project-root /absolute/path/to/project \
+ag --plain --project-root /absolute/path/to/project \
   --environment inherited --refresh-integration --wait
 ```
 

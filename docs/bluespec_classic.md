@@ -6,16 +6,16 @@ Hardcaml wrapper, an ASIC provider, or a PDK.
 
 ## Start in an empty directory
 
-For interactive creation, launch `silver`, choose **New Project…**, select
+For interactive creation, launch `ag`, choose **New Project…**, select
 the **Bluespec Classic / Bazel / Rust** starter, and choose the destination.
 From an open local project use **Project → New Project…**. For scripts:
 
 ```sh
 mkdir fifo-lab && cd fifo-lab
-silver init --bluespec
+ag init --bluespec
 bazel build //:rtl          # Classic Bluespec → Verilog
 bazel test //:simulation   # Rust checks the Verilated design
-silver
+ag
 ```
 
 Use **Space c c → Open project file…** and enter `Counter.bs` to edit the
@@ -72,7 +72,7 @@ test labels. For instance:
 }
 ```
 
-Run `silver` there. The build and test actions do not require a simulation
+Run `ag` there. The build and test actions do not require a simulation
 provider; the Testing catalog does. To expose structured verification, adapt
 the starter's provider to launch your bench and publish its outcome and
 trace using the [simulation provider contract](simulation_provider_contract.md).

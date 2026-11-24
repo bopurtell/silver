@@ -125,7 +125,7 @@ workspaces in a reusable startup layout:
 silver-workspace export -endpoint "$URL" -project "$PROJECT_ID" "$WORKSPACE_ID" > hierarchy.sexp
 silver-workspace config add-workspace -key hierarchy-desk hierarchy.sexp > my-desk.sexp
 silver-workspace config validate my-desk.sexp
-silver --project-root /path/to/project --workspace-config my-desk.sexp
+ag --project-root /path/to/project --workspace-config my-desk.sexp
 ```
 
 `add-workspace` starts from stock unless you pass `-base existing.sexp`. It

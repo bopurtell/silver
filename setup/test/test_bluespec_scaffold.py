@@ -23,7 +23,7 @@ class ScaffoldTests(unittest.TestCase):
         self.base = Path(temporary.name).resolve()
         self.tools = self.base / "tool bin"
         self.tools.mkdir()
-        self.silver = self.tools / "silver"
+        self.silver = self.tools / "ag"
         self.silver.symlink_to(BINARY)
         self.python = self.tools / "python3"
         self.python.write_text("#!/bin/sh\nexit 97\n")
@@ -36,7 +36,7 @@ class ScaffoldTests(unittest.TestCase):
 
     def invoke(self, *args, cwd=None, success=True):
         result = subprocess.run(
-            ["silver", "init", *args], cwd=cwd or self.base, env=self.env,
+            ["ag", "init", *args], cwd=cwd or self.base, env=self.env,
             text=True, capture_output=True, timeout=10,
         )
         self.assertEqual(result.returncode == 0, success, result)
@@ -82,7 +82,7 @@ class ScaffoldTests(unittest.TestCase):
         nested = root / "some" / "subdir"
         nested.mkdir(parents=True)
         result = subprocess.run(
-            ["silver", "--plain", "--standalone-state-dir", self.base / "state"],
+            ["ag", "--plain", "--standalone-state-dir", self.base / "state"],
             cwd=nested, env=self.env, text=True, capture_output=True, timeout=25,
         )
         self.assertEqual(result.returncode, 0, result)
@@ -132,7 +132,7 @@ class ScaffoldTests(unittest.TestCase):
         root = self.base / "project"
         self.python.unlink()
         self.assertIn("Python 3 is required", self.invoke("--bluespec", root, success=False).stderr)
-        self.assertIn("--bluespec", self.invoke(root, success=False).stderr)
+        self.assertIn("Usage: ag init --bluespec", self.invoke(root, success=False).stderr)
         self.assertIn("--bluespec", self.invoke("--help").stdout)
         self.assertFalse(root.exists())
 

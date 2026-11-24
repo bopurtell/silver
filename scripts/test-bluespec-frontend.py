@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in Classic Bluespec acceptance against an installed Silver toolchain.
 
-Requires silver, silver-daemon, Bazel, BSC, Verilator, Rust, and a C++ toolchain
+Requires ag, silver-daemon, Bazel, BSC, Verilator, Rust, and a C++ toolchain
 on PATH. No installs, source-tree builds, ASIC provider, or PDK. Retains the
 generated workspaces, daemon RPCs, logs and VCDs under /tmp/opencode.
 """
@@ -253,7 +253,7 @@ def exercise(session):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--silver", default="silver", help="installed Silver executable (default: PATH)")
+    parser.add_argument("--silver", default="ag", help="installed Silver executable ag (default: PATH)")
     parser.add_argument("--daemon", default="silver-daemon", help="installed daemon (default: PATH)")
     parser.add_argument("--timeout", type=int, default=240, help="per command or job, in seconds")
     args = parser.parse_args()

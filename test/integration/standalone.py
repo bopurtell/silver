@@ -49,9 +49,12 @@ def isolated(base):
 
 def run(silver, daemon, base):
     env = isolated(base / "client")
+    assert silver.name == "ag", silver
+    assert daemon.name == "silver-daemon", daemon
+    assert not os.path.lexists(silver.with_name("silver")), "install tree still publishes the retired launcher"
     for prefix in ("silver", "hardcaml-workbench"):
         for suffix in ("", "-daemon", "-init", "-simulation-setup", "-workspace"):
-            name = prefix + suffix
+            name = "ag" if prefix == "silver" and not suffix else prefix + suffix
             help_text = subprocess.check_output([silver.with_name(name), "--help"],
                                                 env=env, text=True, timeout=15)
             assert name in help_text, (name, help_text)
@@ -59,13 +62,14 @@ def run(silver, daemon, base):
                 summary = help_text.splitlines()[0]
                 if prefix == "silver":
                     assert "nearest Silver Bazel or Dune project" in summary, summary
+                    assert "ag init --bluespec" in help_text, help_text
                 else:
                     assert summary == "Connect to Silver", summary
     # Run the lifecycle with only the primary command on the client side.
     client_bin = base / "client-bin"
     client_bin.mkdir()
-    (client_bin / "silver").symlink_to(silver)
-    silver = client_bin / "silver"
+    (client_bin / "ag").symlink_to(silver)
+    silver = client_bin / "ag"
     outer = project(base / "outer")
     inner = project(outer / "inner")
     nested = inner / "src"
@@ -199,4 +203,4 @@ if __name__ == "__main__":
     # Preserve the installed command name when Dune uses symlinks.
     with tempfile.TemporaryDirectory(prefix="silver-lifecycle-") as tmp:
         run(*(Path(p).absolute() for p in sys.argv[1:]), Path(tmp).resolve())
-    print("Installed silver standalone and persistent attach lifecycle passed")
+    print("Installed ag standalone and persistent attach lifecycle passed")

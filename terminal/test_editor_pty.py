@@ -16,7 +16,7 @@ from support.terminal import Terminal
 
 
 def exercise(client, base):
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     roots = [base / name for name in ("alpha", "beta")]
     for root in roots:

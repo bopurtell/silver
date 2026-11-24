@@ -63,7 +63,7 @@ let contents ~bound = function
     ( "Local project"
     , [ "[c] New Project… (Create project here)", Some (Host.Character 'c')
       ; "[o] Open existing project", Some (Host.Character 'o')
-      ; "CLI alternative: `silver init --bluespec`", None
+      ; "CLI alternative: `ag init --bluespec`", None
       ]
     , (if bound then [ dismiss ] else [ share; dismiss ]) )
   | Preset ->

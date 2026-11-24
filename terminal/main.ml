@@ -12578,14 +12578,14 @@ let local_workspace
 
 let command =
   let program = Filename.basename (Sys.get_argv ()).(0) in
-  let local_by_default = String.equal program "silver" in
+  let local_by_default = String.equal program "ag" in
   Command.async_or_error
     ~summary:
       (if local_by_default
          then
            "Open the nearest Silver Bazel or Dune project, choose a project interactively, \
             or attach to a Silver daemon.\n\
-            Create a Bluespec Classic project with silver init --bluespec [DIR]."
+            Create a Bluespec Classic project with ag init --bluespec [DIR]."
        else "Connect to Silver")
     (let%map_open.Command endpoint =
         flag
@@ -12924,13 +12924,13 @@ let init_command =
            fun () ->
              if not bluespec
              then (
-               Core.eprintf "Usage: silver init --bluespec [DIR]\n%!";
+               Core.eprintf "Usage: ag init --bluespec [DIR]\n%!";
                Stdlib.exit 2);
              match Hardcaml_workbench_setup.Bluespec_scaffold.create ~destination with
              | Ok root ->
                Core.printf "Initialized Bluespec Classic project in %s\n%!" root
              | Error message ->
-               Core.eprintf "silver init: %s\n%!" message;
+               Core.eprintf "ag init: %s\n%!" message;
                Stdlib.exit 1) )
     ]
 ;;

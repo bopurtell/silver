@@ -47,7 +47,7 @@ def exercise(silver, base, run_timeout):
     nested.mkdir(parents=True)
 
     session = SimpleNamespace(env=env, evidence=base)
-    # Bare installed silver from a child directory: no --project-root, no
+    # Bare installed ag from a child directory: no --project-root, no
     # --connect, and no substitute launcher or fake toolchain.
     with closing(KeyboardTerminal(session, argv=[silver], cwd=nested,
                                   width=200, height=50)) as term:
@@ -94,7 +94,7 @@ def exercise(silver, base, run_timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--silver", default="silver", help="installed silver launcher (default: PATH)")
+    parser.add_argument("--silver", default="ag", help="installed Silver launcher ag (default: PATH)")
     parser.add_argument("--evidence", type=Path, help="new directory to retain project and PTY captures")
     parser.add_argument("--run-timeout", type=int, default=180, help="seconds to wait for verification")
     args = parser.parse_args()

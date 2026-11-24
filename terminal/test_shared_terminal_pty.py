@@ -48,7 +48,7 @@ def live(identity, *, require_running=False):
 
 
 def exercise(client, base):
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     project = base / "project"
     project.mkdir()

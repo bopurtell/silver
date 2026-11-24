@@ -54,8 +54,13 @@ To install a specific version manually:
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
+
+   `ag` is also the executable name of The Silver Searcher. If the shell
+   resolves that program instead of Silver, launch Silver by its absolute
+   path (`$HOME/.local/bin/ag` for the default prefix) or intentionally
+   adjust your `PATH` ordering.
 
 ## Build from source
 
@@ -99,7 +104,7 @@ To install a specific version manually:
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
 
 ### Download the source tarball

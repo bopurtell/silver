@@ -16,7 +16,7 @@ class Unavailable(Exception):
 
 def prerequisites(tools, evidence, env):
     binaries = {}
-    for name in ("silver", "hardcaml-asic-starter", "hardcaml-asic-targets",
+    for name in ("ag", "hardcaml-asic-starter", "hardcaml-asic-targets",
                  "hardcaml-asic-flow", "dune", "git"):
         path = shutil.which(name, path=env["PATH"])
         if not path:

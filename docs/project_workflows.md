@@ -2,15 +2,15 @@
 
 ## Open or set up a project
 
-For a new design, start `silver` outside a project and choose **New Project…**.
+For a new design, start `ag` outside a project and choose **New Project…**.
 From an open local project use **Project → New Project…**. Choose a starter
 and destination. The choice sets up the initial files and tools; it does not
 restrict the languages you can use inside the design. To script creation of
-the Classic Bluespec starter, use `silver init --bluespec` instead. See
+the Classic Bluespec starter, use `ag init --bluespec` instead. See
 [Build and simulate Classic Bluespec](bluespec_classic.md).
 
-1. Run `silver` inside a configured Silver or Dune project to open the nearest project root. To
-   specify another root, use `silver --project-root /path/to/project`.
+1. Run `ag` inside a configured Silver or Dune project to open the nearest project root. To
+   specify another root, use `ag --project-root /path/to/project`.
 2. For an unconfigured project, open the command palette with **Space c c**
    and choose **Set up project…**. Choose **Add ASIC starter…** to add design
    files without replacing existing sources, or **Import existing ASIC design…**
@@ -114,7 +114,7 @@ silver-author new-module helper --library ip/accum --apply
 2. In a checkout of [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example),
    run `./bootstrap.sh` in that environment. It provisions the flow tools and
    configures the example's ASIC and simulation providers.
-3. Run `silver`. Open **Testing** and select the **Controlled FIFO** or
+3. Run `ag`. Open **Testing** and select the **Controlled FIFO** or
    **Memory workloads** suite when discovery completes. See the
    [Testing workspace guide](testing_workspace.md) for running and inspecting
    individual cases.
@@ -133,7 +133,7 @@ silver-author new-module helper --library ip/accum --apply
    appears on the daemon host:
 
    ```sh
-   silver --connect http://127.0.0.1:8080 --project-root /path/on/host
+   ag --connect http://127.0.0.1:8080 --project-root /path/on/host
    ```
 
 Quitting the attached client leaves the daemon and its jobs running.

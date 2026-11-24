@@ -115,23 +115,26 @@ With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
 
 ### Open a project
 
-Starting from an empty directory? Launch `silver` and choose **New Project…**
+Starting from an empty directory? Launch Silver with `ag` and choose **New Project…**
 to select a starter and destination. For headless creation of a [Classic
 Bluespec design with Rust verification](docs/bluespec_classic.md), run
-`silver init --bluespec`.
+`ag init --bluespec`.
 
 1. Add the default install directory to `PATH` and check the installed command.
    Keep the `export` line in your shell configuration if you want it in new terminals.
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
+
+   If that resolves to The Silver Searcher instead of this workbench, use the
+   installed absolute path (`$HOME/.local/bin/ag`) or adjust `PATH`.
 
 2. In your project's normal build environment, open a terminal in the project directory:
 
    ```sh
-   silver
+   ag
    ```
 
 3. Press **Space c c** to open the command palette. To quit from the
@@ -173,7 +176,7 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
 4. Launch Silver from the example directory, then open **Overview**.
 
    ```sh
-   silver
+   ag
    ```
 
 5. In **Planned Run**, check **Launch chip**. The example's default is

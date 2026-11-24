@@ -117,7 +117,7 @@ To check the aliases against installed binaries, run from the repository root:
 
 ```sh
 python3 -B terminal/test_testing_aliases_pty.py \
-  --client "$(command -v silver)" --daemon "$(command -v silver-daemon)"
+  --client "$(command -v ag)" --daemon "$(command -v silver-daemon)"
 ```
 
 The check uses a private project, daemon state and simulation fixture.

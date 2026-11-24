@@ -169,7 +169,7 @@ implicit EDA actions.
 External viewing is disabled by default. Configure the **client**, for example:
 
 ```sh
-silver --artifact-viewer /absolute/path/to/text-viewer
+ag --artifact-viewer /absolute/path/to/text-viewer
 ```
 
 `--artifact-viewer` takes one absolute executable filename, not a shell command

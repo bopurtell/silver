@@ -1,8 +1,8 @@
 # Update an existing Classic Bluespec project for reusable IP
 
-If your project was created with an older `silver init --bluespec`, keep the
+If your project was created with an older Classic Bluespec starter, keep the
 project and update its Bazel rules in place. Installing a newer Silver does
-not change those rules. Do not run `silver init` again in your project or copy
+not change those rules. Do not run `ag init` again in your project or copy
 a fresh starter over it.
 
 ## Update the compile rule once
@@ -12,7 +12,7 @@ reference that matches your upgraded Silver, generate a **separate** starter:
 
 ```sh
 reference="$(mktemp -d)"
-silver init --bluespec "$reference/classic"
+ag init --bluespec "$reference/classic"
 diff -u simulation.bzl "$reference/classic/simulation.bzl"
 ```
 

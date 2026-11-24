@@ -18,7 +18,7 @@ from support.terminal import Terminal
 
 
 def exercise(client, base, real_renderer=None):
-    silver = base / "silver"
+    silver = base / "ag"
     silver.symlink_to(client)
     start = base / "start"
     start.mkdir()
@@ -204,18 +204,20 @@ def exercise(client, base, real_renderer=None):
             assert term.process.wait(timeout=5) != 0 and unbound.encode() not in term.data
     untouched()
 
-    # Bare silver-client still takes the daemon-attach path. Hold the private
+    # The legacy client and retired launcher basename still take the ordinary
+    # daemon-attach path rather than ag's default standalone path. Hold the private
     # lock so the test neither needs nor auto-spawns a shared user daemon.
     assert not runtime.exists()
     lock_dir = runtime / "hardcaml-workbench"
     lock_dir.mkdir(parents=True)
     with (lock_dir / "lifetime.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        generic = base / "silver-client"
-        generic.symlink_to(client)
-        with launch(program=generic) as term:
-            see(term, "default daemon holds its lifetime lock")
-            assert term.process.wait(timeout=5) != 0 and unbound.encode() not in term.data
+        for name in ("hardcaml-workbench", "silver", "silver-client"):
+            generic = base / name
+            generic.symlink_to(client)
+            with launch(program=generic) as term:
+                see(term, "default daemon holds its lifetime lock")
+                assert term.process.wait(timeout=5) != 0 and unbound.encode() not in term.data
     untouched()
 
     if os.geteuid() != 0:
@@ -415,6 +417,7 @@ def exercise(client, base, real_renderer=None):
     bazel.chmod(0o755)
     help_text = subprocess.check_output([silver, "--help"], env=env, text=True, timeout=15)
     assert "Silver Bazel" in help_text and ".silver/project.json" in help_text
+    assert "ag init --bluespec" in help_text and "silver init --bluespec" not in help_text
     opened = subprocess.run([silver, "--plain"], cwd=sources, env=env,
                             capture_output=True, check=True, text=True, timeout=15)
     assert "Project: classic_example" in opened.stdout
