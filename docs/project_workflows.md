@@ -2,7 +2,10 @@
 
 ## Open or set up a project
 
-1. Run `silver` inside a Dune project to open the nearest project root. To
+For a new Classic Bluespec design, run `silver init --bluespec` in an empty
+directory. See [Build and simulate Classic Bluespec](bluespec_classic.md).
+
+1. Run `silver` inside a configured Silver or Dune project to open the nearest project root. To
    specify another root, use `silver --project-root /path/to/project`.
 2. For an unconfigured project, open the command palette with **Space c c**
    and choose **Set up project…**. Choose **Add ASIC starter…** to add design
@@ -10,7 +13,7 @@
    to connect a built design executable by reference.
 3. Review the preview before applying. Neither action launches an ASIC run.
 
-Outside a Dune project, Silver opens a project setup dialog. It can open an
+Outside a recognized project, Silver opens a project setup dialog. It can open an
 existing Dune project or create a project with its first chip target. Press
 **Esc** to dismiss it or **p** to reopen it. Creating an ASIC starter requires
 `hardcaml-asic-starter` on `PATH`; importing an existing design does not.

@@ -367,6 +367,7 @@ let%test_unit "generic RTL fallback is bounded to latest exact selected project 
       ~snapshot:None
       ~jobs
       ~project:(Some project.id)
+      ~build_tool:Dune
       ~rtl_scope:scope
       ~cursor:None
       ~detail:false
@@ -535,29 +536,33 @@ let%test_unit "preparation tile keyboard inspection and history preserve stage l
 let%test_unit "generic verification process completion and generic RTL cannot publish \
                bundle evidence"
   =
-  let job =
-    { (Option.value_exn (Preparation_view.fixture_attempt "test" Completed).build_job) with
-      kind = { namespace = "dune"; name = "test" }
-    }
-  in
-  let rows =
-    Preparation_view.rows
-      ~snapshot:None
-      ~jobs:[ job ]
-      ~project:(Some job.project)
-      ~rtl_scope:None
-      ~cursor:None
-      ~detail:false
-      ~log_lines:(fun _ -> [])
-  in
-  let emission = List.nth_exn rows 2
-  and verification = List.nth_exn rows 3 in
-  assert (Option.equal O.Status.equal emission.status (Some Unsupported));
-  assert (String.equal emission.value "unavailable");
-  assert (String.equal verification.value "process succeeded");
-  assert (
-    List.exists verification.details ~f:(fun s ->
-      String.is_substring s ~substring:"not semantic test pass"));
+  List.iter [ Presentation.Build_tool.Dune, "dune"; Bazel, "bazel" ] ~f:(fun (build_tool, namespace) ->
+    let job =
+      { (Option.value_exn (Preparation_view.fixture_attempt "test" Completed).build_job) with
+        kind = { namespace; name = "test" }
+      }
+    in
+    let rows =
+      Preparation_view.rows
+        ~snapshot:None
+        ~jobs:[ job ]
+        ~project:(Some job.project)
+        ~build_tool
+        ~rtl_scope:None
+        ~cursor:None
+        ~detail:false
+        ~log_lines:(fun _ -> [])
+    in
+    let build = List.nth_exn rows 1
+    and emission = List.nth_exn rows 2
+    and verification = List.nth_exn rows 3 in
+    assert (String.equal build.label (sprintf "Build (generic %s.build)" namespace));
+    assert (Option.equal O.Status.equal emission.status (Some Unsupported));
+    assert (String.equal emission.value "unavailable");
+    assert (String.equal verification.value "process succeeded");
+    assert (
+      List.exists verification.details ~f:(fun s ->
+        String.is_substring s ~substring:"not semantic test pass")));
   let unsupported =
     Preparation_view.rows
       ~snapshot:
@@ -569,6 +574,7 @@ let%test_unit "generic verification process completion and generic RTL cannot pu
            })
       ~jobs:[]
       ~project:None
+      ~build_tool:Dune
       ~rtl_scope:None
       ~cursor:None
       ~detail:false

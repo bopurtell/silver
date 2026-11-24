@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import shlex
 import subprocess
 import sys
@@ -78,11 +79,11 @@ def exercise(client, base, real_renderer=None):
     choices = ["Create project here", "Open existing project"]
 
     def menu(term):
-        term.capture("entry-modal", [unbound, *choices])
+        term.capture("entry-modal", [unbound, *choices, "silver init --bluespec"])
 
     def dismiss(term, *fields):
         send(term, "\x1b")
-        term.capture("entry-dismissed", [unbound], absent=[*choices, *fields])
+        term.capture("entry-dismissed", [unbound, "No project is open."], absent=[*choices, *fields])
 
     def form(term, destination="", name="demo"):
         menu(term)
@@ -244,7 +245,7 @@ def exercise(client, base, real_renderer=None):
         term.capture("open", ["Existing project directory"])
         send(term, ".\r")
         # A long sandbox root can wrap the prose mid-word.
-        term.capture("open-error", ["Project error", "dune-project file"])
+        term.capture("open-error", ["Project error", "dune-project", ".silver/project.json"])
         dismiss(term, "Project error")
         send(term, "p")
         menu(term)
@@ -305,6 +306,46 @@ def exercise(client, base, real_renderer=None):
         assert [entry["id"] for entry in catalog["targets"]] == (
             ["demo", "second"] if destination == "new" else ["demo"])
     assert not eda.exists(), eda.read_text() if eda.exists() else ""
+
+    # A manifest is sufficient to discover a Bazel project without Dune;
+    # opening must not run the tool. Exercise the user-facing Build/Test actions
+    # with distinct targets, not a real Bazel install or an ASIC provider.
+    classic = base / "classic"
+    (classic / ".silver").mkdir(parents=True)
+    sources = classic / "src"
+    sources.mkdir()
+    (classic / ".silver/project.json").write_text(json.dumps({
+        "schema_version": 1, "name": "classic_example",
+        "build_label": "//:rtl", "test_label": "//:simulation",
+    }))
+    bazel = tools / "bazel"
+    bazel.write_text("#!/bin/sh\n"
+                     'test "$#" -eq 2 || exit 1\n'
+                     'printf "%s %s\\n" "$1" "$2" >> bazel-invocations\n')
+    bazel.chmod(0o755)
+    help_text = subprocess.check_output([silver, "--help"], env=env, text=True, timeout=15)
+    assert "Silver Bazel" in help_text and ".silver/project.json" in help_text
+    opened = subprocess.run([silver, "--plain"], cwd=sources, env=env,
+                            capture_output=True, check=True, text=True, timeout=15)
+    assert "Project: classic_example" in opened.stdout
+    assert "Build tool: Bazel" in opened.stdout
+    assert "Dune" not in opened.stdout and "dune=" not in opened.stdout
+    invocation_log = classic / "bazel-invocations"
+    assert not invocation_log.exists(), "opening should not probe Bazel"
+    with launch(cwd=sources, width=180, height=55) as term:
+        dashboard(term, "classic_example")
+        send(term, "\x1b[19~")  # F8: connection details
+        term.capture("classic-details", ["Build tool:", "Bazel"],
+                     absent=["Dune version:", "DUNE ITEMS"])
+        send(term, "\x1b[19~")  # F8: return to workspace
+        term.palette("Build project")
+        term.palette("Run project tests")
+        term.palette("Switch to Testing")
+        term.capture("classic-testing", [
+            "Testing", "simulation-catalog",
+            re.compile(r"Complete\s+bazel build"), re.compile(r"Complete\s+bazel test"),
+        ])
+    assert sorted(invocation_log.read_text().splitlines()) == ["build //:rtl", "test //:simulation"]
 
     with launch("--no-mouse") as term:
         point(term, "New Project")

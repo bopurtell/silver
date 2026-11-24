@@ -51,6 +51,7 @@ let contents ~bound = function
     ( "Local project"
     , [ "[c] New Project… (Create project here)", Some (Host.Character 'c')
       ; "[o] Open existing project", Some (Host.Character 'o')
+      ; "Classic Bluespec starter: run `silver init --bluespec` in an empty directory.", None
       ]
     , (if bound then [ dismiss ] else [ share; dismiss ]) )
   | Name s -> "Project name", plain [ s ^ "▏" ], [ "Enter continue", Host.Enter; dismiss ]
@@ -142,7 +143,7 @@ let rec render ~start ~original screen scroll ({ Dimensions.width; height } as d
           | None ->
             [ text Heading "Silver  /  Unbound workspace"
             ; text Muted ("Directory: " ^ start)
-            ; text Foreground "No Dune project is open."
+            ; text Foreground "No project is open."
             ; text Focus (controls_text [ reopen; share; quit ])
             ]
           | Some root ->

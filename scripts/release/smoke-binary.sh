@@ -32,6 +32,22 @@ while read -r name alias; do
 done < "$work/commands.txt"
 [[ ! -e $prefix/lib ]]
 
+# A usable installation must carry its editable template after archive detachment.
+# A stand-in is sufficient here: initialization records Python's path but does
+# not execute it or require a project toolchain.
+mkdir tools
+cat >tools/python3 <<'EOF'
+#!/bin/sh
+exit 97
+EOF
+chmod +x tools/python3
+env -i PATH="$prefix/bin:$work/tools:/usr/bin:/bin" HOME="$work/home" LC_ALL=C.UTF-8 \
+  silver init --bluespec 'classic project'
+test -s 'classic project/.silver/project.json'
+test -s 'classic project/.workbench/hardcaml-workbench-simulation.sexp'
+test -s 'classic project/Counter.bs'
+test -s 'classic project/simulation_provider.py'
+
 # Discovery metadata is published only after the daemon's internal HTTP hello succeeds.
 env -i PATH=/usr/bin:/bin HOME="$work/home" LC_ALL=C.UTF-8 \
   "$prefix/bin/silver-daemon" --discovery-dir "$work/discovery" >"$work/daemon.log" 2>&1 &

@@ -126,6 +126,33 @@ let%test_unit "shared config ceiling applies even when caller requests more" =
       assert (Result.is_error (resolve (Int.max_value - 1)))))
 ;;
 
+let%test_unit "explicit Silver manifest is bounded and rejects symlinked paths" =
+  with_root (fun root ->
+    let manifest = Filename.concat root Silver_manifest.relative_path in
+    let dir = Filename.dirname manifest in
+    let load () = Silver_manifest.load ~root in
+    assert (Option.is_none (Or_error.ok_exn (load ())));
+    Core_unix.mkdir dir;
+    Out_channel.write_all
+      manifest
+      ~data:(String.make (Config_location.max_config_bytes + 1) 'x');
+    assert (Result.is_error (load ()));
+    Out_channel.write_all
+      manifest
+      ~data:{|{"schema_version":1,"name":"demo","build_label":"//:rtl","test_label":"//:sim"}|};
+    assert (Option.is_some (Or_error.ok_exn (load ())));
+    let other = dir ^ "-other" in
+    Core_unix.rename ~src:dir ~dst:other;
+    Core_unix.symlink ~target:other ~link_name:dir;
+    assert (Result.is_error (load ()));
+    Core_unix.unlink dir;
+    Core_unix.mkdir dir;
+    Core_unix.symlink
+      ~target:(Filename.concat other (Filename.basename manifest))
+      ~link_name:manifest;
+    assert (Result.is_error (load ())))
+;;
+
 let%test_unit "all schemas select old, new, and identical bytes; differing bytes conflict" =
   List.iter filenames ~f:(fun filename ->
     with_root (fun root ->

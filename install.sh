@@ -76,7 +76,8 @@ fi
 [[ $prefix == /* ]] || prefix=$PWD/$prefix
 
 finish() {
-  printf 'Installed Silver. From a Dune project, run: %q\n' "$prefix/bin/silver"
+  printf 'Installed Silver. From a project directory, run: %q\n' "$prefix/bin/silver"
+  printf 'To create a Bluespec Classic starter (requires python3): %q init --bluespec DIR\n' "$prefix/bin/silver"
   if [[ $(type -P silver || :) != "$prefix/bin/silver" ]]; then
     printf 'To launch this installation by name, put its bin directory first on PATH:\n  export PATH=%q:"$PATH"\n' "$prefix/bin"
   fi

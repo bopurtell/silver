@@ -4,6 +4,7 @@ open Hardcaml_workbench_protocol
 module Http = Hardcaml_workbench_native_http
 module Baseline_fixture = Terminal_presentation.Baseline_fixture
 module Presentation = Terminal_presentation.Presentation
+module Build_tool = Presentation.Build_tool
 module State = Terminal_presentation.State
 module Host = Terminal_presentation.Workspace_host
 module Flow_authoring = Terminal_presentation.Flow_authoring
@@ -510,6 +511,10 @@ let adoption_complete =
 
 let current_project session =
   State.current_project ~opened:session.opened session.snapshot
+;;
+
+let project_build_tool session =
+  Option.map session.opened ~f:(fun opened -> Build_tool.of_environment opened.environment)
 ;;
 
 let sharing_binding session : Project_sharing.binding option =
@@ -2960,8 +2965,7 @@ let preparation_request
           let jobs =
             jobs
             @ List.filter (project_jobs session) ~f:(fun j ->
-              String.equal j.kind.namespace "dune"
-              && List.mem [ "test"; "build" ] j.kind.name ~equal:String.equal)
+              Build_tool.is_job "test" j || Build_tool.is_job "build" j)
           in
           Deferred.List.iter jobs ~how:`Sequential ~f:(fun j ->
             read_job_log_id session (Some j.id))))
@@ -4444,7 +4448,17 @@ let environment_lines session =
   | None ->
     [ "Project: none (use --project-root ROOT)"
     ; "Environment request: " ^ session.environment_label
-    ; "Generic Dune workspace: no project opened"
+    ]
+  | Some opened when not (V1.Environment_summary.uses_dune opened.environment) ->
+    [ sprintf
+        "Project: %s  root=%s"
+        opened.project.name
+        (Project_root.to_absolute_path opened.project.root)
+    ; sprintf
+        "Environment request: %s  resolved=%s"
+        session.environment_label
+        opened.environment.provenance
+    ; "Build tool: Bazel"
     ]
   | Some opened ->
     let environment = opened.environment in
@@ -4479,27 +4493,28 @@ let project_lines session ~width =
   match session.opened, current_project session with
   | None, _ ->
     [ "Project: none"
-     ; "Restart client: --project-root ROOT or --discover-project"
-    ; "Generic Dune workspace: unavailable"
+    ; "Restart client: --project-root ROOT or --discover-project"
     ]
   | Some opened, Some project ->
-    let contexts =
-      match opened.workspace.contexts with
-      | [] -> "none reported"
-      | contexts -> String.concat contexts ~sep:", "
-    in
     let root_label = "Root: " in
     [ "Project: " ^ project.name
     ; root_label
       ^ Presentation.middle_truncate
           ~width:(width - String.length root_label)
           (Project_root.to_absolute_path opened.project.root)
-    ; sprintf
-        "Environment: %s (Dune %s)"
-        session.environment_label
-        opened.environment.dune_version
-    ; "Contexts: " ^ contexts
     ]
+    @ (if V1.Environment_summary.uses_dune opened.environment
+       then
+         [ sprintf
+             "Environment: %s (Dune %s)"
+             session.environment_label
+             opened.environment.dune_version
+         ; "Contexts: "
+           ^ (match opened.workspace.contexts with
+              | [] -> "none reported"
+              | contexts -> String.concat contexts ~sep:", ")
+         ]
+       else [ "Environment: " ^ session.environment_label; "Build tool: Bazel" ])
   | Some _, None -> [ "Project state unavailable; reconnect to resync" ]
 ;;
 
@@ -4800,7 +4815,9 @@ let connection_detail_lines session ~width =
        @ root (Project_root.to_absolute_path opened.project.root)
        @ field "Requested environment:" session.environment_label
        @ field "Resolved environment:" opened.environment.provenance
-       @ field "Dune version:" opened.environment.dune_version
+       @ (if V1.Environment_summary.uses_dune opened.environment
+          then field "Dune version:" opened.environment.dune_version
+          else field "Build tool:" "Bazel")
        @ field "Manifest integration:" (component project.integration.manifest)
        @ field "Driver integration:" (component project.integration.driver))
   @ guidance
@@ -4814,8 +4831,8 @@ let connection_detail_lines session ~width =
           specific loopback endpoint without automatic startup.")
   @ guidance
       "Root / environment:"
-      "Restart the client with --project-root ROOT (directory containing dune-project) \
-       or --discover-project (nearest ancestor from the client's current directory). \
+      "Restart the client with --project-root ROOT or --discover-project (nearest \
+       project from the client's current directory). \
        For a remote daemon, an absolute root on the daemon host is safest; discovery \
        searches the client host, not the daemon host. \
        --environment inherited uses the daemon's environment, not this client's shell; \
@@ -4887,20 +4904,22 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
       in
       let workspace_rows =
         match session.opened with
-        | None -> [ "  (no project opened)" ]
-        | Some opened ->
-          if List.is_empty opened.workspace.items
-          then [ "  (no local items reported)" ]
-          else
-            List.map opened.workspace.items ~f:(fun item ->
-              sprintf
-                "  %-12s %s%s"
-                item.kind
-                (if List.is_empty item.names
-                 then "(unnamed)"
-                 else String.concat item.names ~sep:",")
-                (Option.value_map item.source_path ~default:"" ~f:(fun path ->
-                   "  " ^ path)))
+        | None -> []
+        | Some opened when V1.Environment_summary.uses_dune opened.environment ->
+          [ ""; "DUNE ITEMS" ]
+          @ (if List.is_empty opened.workspace.items
+             then [ "  (no local items reported)" ]
+             else
+               List.map opened.workspace.items ~f:(fun item ->
+                 sprintf
+                   "  %-12s %s%s"
+                   item.kind
+                   (if List.is_empty item.names
+                    then "(unnamed)"
+                    else String.concat item.names ~sep:",")
+                   (Option.value_map item.source_path ~default:"" ~f:(fun path ->
+                      "  " ^ path))))
+        | Some _ -> []
       in
       let job_rows =
         if List.is_empty jobs
@@ -4968,7 +4987,11 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
             match session.hierarchy_view with
             | Some view -> hierarchy_view_lines session view ~height:top_height
             | None ->
-              [ "PROJECT / GENERIC DUNE WORKSPACE" ]
+              [ (match project_build_tool session with
+                 | Some Dune -> "PROJECT / GENERIC DUNE WORKSPACE"
+                 | Some Bazel -> "PROJECT / BAZEL"
+                 | None -> "PROJECT")
+              ]
               @ project_lines session ~width:left_width
               @ [ ""; "WORKBENCH INTEGRATION" ]
               @ integration_lines session
@@ -4976,7 +4999,6 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
               @ hierarchy_status_lines session
               @ [ "" ]
               @ artifact_lines session
-              @ [ ""; "DUNE ITEMS" ]
               @ workspace_rows)
         in
         pane ~width:left_width ~height:top_height lines
@@ -5138,6 +5160,7 @@ let host_data session : Host_view.data =
             Run_ref.equal summary.Asic.Summary.run run)))
   ; status = session.status
   ; environment = session.environment_label
+  ; build_tool = Option.value (project_build_tool session) ~default:Dune
   ; asic_lines
   ; asic = session.asic
   }
@@ -5878,6 +5901,7 @@ let host_catalog_base session =
      ]
    else [])
   @ Host.catalog
+    ?build_tool:(project_build_tool session)
     session.host
     ~project:(current_project session)
     ~jobs:(project_jobs session)
@@ -9436,9 +9460,7 @@ let browse_host session delta =
         , Host_view.run_cursor ~data session.host tile ))
       else
         ( project_jobs session
-          |> List.filter ~f:(fun job ->
-            (not (String.equal tile.kind "project-tests"))
-            || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
+          |> Host_view.execution_jobs ~kind:tile.kind
           |> List.map ~f:(fun job -> Job_id.to_string job.id)
         , local.cursor )
     in
@@ -12410,7 +12432,10 @@ let command =
   Command.async_or_error
     ~summary:
       (if local_by_default
-        then "Open the nearest Dune project, choose a project interactively, or attach to a Silver daemon"
+         then
+           "Open the nearest Silver Bazel or Dune project, choose a project interactively, \
+            or attach to a Silver daemon.\n\
+            Create a Bluespec Classic project with silver init --bluespec [DIR]."
        else "Connect to Silver")
     (let%map_open.Command endpoint =
         flag
@@ -12430,9 +12455,10 @@ let command =
           "--project-root"
           (optional string)
           ~doc:
-            "ROOT open a directory containing dune-project; explicit path is resolved \
+            "ROOT open a Silver Bazel (.silver/project.json) or Dune (dune-project) \
+             project; explicit path is resolved \
              on the daemon host (remote: use an absolute path); standalone mode \
-             defaults to the nearest enclosing Dune project"
+             defaults to the nearest enclosing project"
      and workspace_config =
        flag
          "--workspace-config"
@@ -12462,8 +12488,8 @@ let command =
          "--discover-project"
          no_arg
          ~doc:
-           " open the nearest ancestor of the current directory (symlinks resolved \
-            first) containing a regular dune-project; reports the root; not with \
+           " open the nearest Silver Bazel or Dune project from the current \
+            directory (symlinks resolved first); reports the root; not with \
             --project-root"
      and environment =
        flag
@@ -12732,4 +12758,33 @@ let command =
                  ())))
 ;;
 
-let () = Command_unix.run command
+let init_command =
+  Command.group
+    ~summary:"Create a Silver project"
+    [ ( "init"
+      , Command.basic
+          ~summary:"Create an editable Bluespec Classic project"
+          (let%map_open.Command bluespec =
+             flag "--bluespec" no_arg ~doc:" create a Bluespec Classic project"
+           and destination = anon (maybe_with_default "." ("DIR" %: string)) in
+           fun () ->
+             if not bluespec
+             then (
+               Core.eprintf "Usage: silver init --bluespec [DIR]\n%!";
+               Stdlib.exit 2);
+             match Hardcaml_workbench_setup.Bluespec_scaffold.create ~destination with
+             | Ok root ->
+               Core.printf "Initialized Bluespec Classic project in %s\n%!" root
+             | Error message ->
+               Core.eprintf "silver init: %s\n%!" message;
+               Stdlib.exit 1) )
+    ]
+;;
+
+let () =
+  match Array.to_list (Sys.get_argv ()) with
+  | program :: "init" :: _
+    when not (String.equal (Filename.basename program) "hardcaml-workbench") ->
+    Command_unix.run init_command
+  | _ -> Command_unix.run command
+;;

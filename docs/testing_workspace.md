@@ -69,7 +69,7 @@ there does not change the simulation attempt you are investigating.
   lines up artifact names, their owning case (or `suite`), and availability so
   you can compare rows down each column.
 - **Project Tests** is an optional filtered view of jobs from **Run project tests**
-  (the project's Dune test alias). Those jobs are already visible in Execution;
+  (the project's Dune test alias or configured Bazel test label). Those jobs are already visible in Execution;
   use **Space c c → Add project-tests tile** if you want a dedicated view, or
   **Restore project-tests …** if the old tile is hidden.
 
@@ -81,7 +81,7 @@ there does not change the simulation attempt you are investigating.
   identifies its owning case when supplied. Attempt changes invalidate old detail.
 - Same-session reconnect preserves appropriate browsing while fencing pending
   responses. Replacement sessions/workspace identities do not inherit stale state.
-- Generic Dune tests remain process results, not structured case counts or ASIC
+- Generic project tests remain process results, not structured case counts or ASIC
   acceptance. The legacy standalone **simulation** tile still works independently.
 
 ## Controls

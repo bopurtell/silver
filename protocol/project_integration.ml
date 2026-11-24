@@ -4,8 +4,9 @@
 
     - a generic Dune project is detected from [dune-project] and exposes ordinary build
       and test actions without any Workbench-specific file;
-    - a versioned manifest ([hardcaml-workbench.sexp]) declares integration points that
-      workspace inspection cannot infer safely;
+    - a versioned manifest ([hardcaml-workbench.sexp] for Dune,
+      [.silver/project.json] for Bazel) declares integration points that workspace
+      inspection cannot infer safely;
     - a project-side driver, built and run through the project's own Dune, discovers
       targets, elaborates circuits, and performs other typed project operations.
 

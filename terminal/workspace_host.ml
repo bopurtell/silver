@@ -2655,7 +2655,11 @@ let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrang
 
 let project_entry_commands =
   [ command "project.new" "New Project…" "create local dune project" (Project_entry `New)
-  ; command "project.open" "Open Project…" "open existing local dune root" (Project_entry `Open)
+  ; command
+      "project.open"
+      "Open Project…"
+      "open existing local project root Dune Silver Bazel"
+      (Project_entry `Open)
   ]
 ;;
 
@@ -4285,7 +4289,12 @@ let presentation_commands t (tile : W.Tile.t) =
       { o with decimal_places = Some places })
 ;;
 
-let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
+let catalog
+  ?(build_tool = Presentation.Build_tool.Dune)
+  t
+  ~(project : Project.t option)
+  ~(jobs : Job.t list)
+  =
   let needs_project =
     if Option.is_none project
     then Some "Restart client with --project-root ROOT or --discover-project"
@@ -4325,13 +4334,13 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ?unavailable:needs_project
         "project.build"
         "Build project"
-        "dune build"
+        (Presentation.Build_tool.namespace build_tool ^ " build")
         Build
     ; command
          ?unavailable:needs_project
          "project.test"
          "Run project tests"
-         "generic dune test"
+         ("generic " ^ Presentation.Build_tool.namespace build_tool ^ " test")
          Test
     ; command
         ?unavailable:needs_project

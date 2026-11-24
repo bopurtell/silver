@@ -325,7 +325,7 @@ let attempt_details (a : Preparation.Attempt.t) =
       "Artifact (palette opens exact handle): " ^ Artifact_id.to_string id))
 ;;
 
-let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
+let rows ~snapshot ~jobs ~project ~build_tool ~rtl_scope ~cursor ~detail ~log_lines =
   let row ?cursor_id status label value details =
     O.row ?cursor_id ~status ~role:(O.status_role status) ~details label value
   in
@@ -353,16 +353,14 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
   let verification =
     List.filter jobs ~f:(fun (j : Job.t) ->
       Option.exists project ~f:(Project_id.equal j.project)
-      && String.equal j.kind.namespace "dune"
-      && String.equal j.kind.name "test")
+      && Presentation.Build_tool.is_job "test" j)
     |> List.max_elt ~compare:(fun a b -> Timestamp.compare a.created_at b.created_at)
   in
   let all = attempts snapshot in
   let generic_build =
     List.filter jobs ~f:(fun (j : Job.t) ->
       Option.exists project ~f:(Project_id.equal j.project)
-      && String.equal j.kind.namespace "dune"
-      && String.equal j.kind.name "build")
+      && Presentation.Build_tool.is_job "build" j)
     |> List.max_elt ~compare:(fun a b -> Timestamp.compare a.created_at b.created_at)
   in
   let current = if detail then selected snapshot cursor else List.hd all in
@@ -379,7 +377,9 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
     match current with
     | None ->
       [ O.row ~role:Muted "Preparation" availability
-      ; stage "Build (generic dune.build)" generic_build
+      ; stage
+          (sprintf "Build (generic %s.build)" (Presentation.Build_tool.namespace build_tool))
+          generic_build
       ; row
           (unrequested_status snapshot)
           "Elaboration-bundle emission"
@@ -499,8 +499,7 @@ let rows ~snapshot ~jobs ~project ~rtl_scope ~cursor ~detail ~log_lines =
       row ~cursor_id:a.id (outcome a.outcome) "History" a.id (attempt_details a))
     @ (List.filter jobs ~f:(fun (j : Job.t) ->
          Option.exists project ~f:(Project_id.equal j.project)
-         && String.equal j.kind.namespace "dune"
-         && String.equal j.kind.name "test")
+         && Presentation.Build_tool.is_job "test" j)
        |> List.map ~f:(fun j -> stage "Verification process history" (Some j)))
 ;;
 
@@ -620,6 +619,7 @@ let%test_unit "preparation preserves failed headline, completed build, exact log
       ~snapshot
       ~jobs:[]
       ~project:None
+      ~build_tool:Dune
       ~rtl_scope:None
       ~cursor:None
       ~detail:false
@@ -681,6 +681,7 @@ let%test_unit "preparation guards capability, availability, activity and capture
       ~snapshot:(Some { s with latest = None; history = [] })
       ~jobs:[]
       ~project:None
+      ~build_tool:Dune
       ~rtl_scope:None
       ~cursor:None
       ~detail:false

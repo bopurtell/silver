@@ -4,6 +4,31 @@ open Hardcaml_workbench_project_integration
 
 let manifest body = Manifest.parse_string body
 
+let%test_unit "Silver manifest accepts absolute Bazel labels" =
+  let parsed =
+    Silver_manifest.parse_string
+      {|{"schema_version":1,"name":"Classic counter","build_label":"//rtl:generated","test_label":"@@repo+version//simulation:test"}|}
+    |> Result.ok_or_failwith
+  in
+  [%test_eq: string] parsed.name "Classic counter";
+  [%test_eq: string] parsed.build_label "//rtl:generated";
+  [%test_eq: string] parsed.test_label "@@repo+version//simulation:test"
+;;
+
+let%test_unit "Silver manifest rejects incompatible, incomplete, and ambiguous declarations" =
+  List.iter
+    [ "[]"
+    ; {|{"schema_version":2,"name":"demo","build_label":"//:rtl","test_label":"//:sim"}|}
+    ; {|{"schema_version":1,"name":"demo","build_label":"//:rtl"}|}
+    ; {|{"schema_version":1,"name":"demo","build_label":"//:rtl","test_label":"//:sim","test_label":"//:other"}|}
+    ; {|{"schema_version":1,"name":" ","build_label":"//:rtl","test_label":"//:sim"}|}
+    ; {|{"schema_version":1,"name":"demo","build_label":"//rtl/...","test_label":"//:sim"}|}
+    ; {|{"schema_version":1,"name":"demo","build_label":"//rtl:../rtl","test_label":"//:sim"}|}
+    ; {|{"schema_version":1,"name":"demo","build_label":"//:rtl","test_label":"--flag"}|}
+    ]
+    ~f:(fun contents -> assert (Result.is_error (Silver_manifest.parse_string contents)))
+;;
+
 let%test_unit "ASIC discovery applies only to a missing provider field" =
   let parse provider =
     Asic_config.parse_project (sprintf

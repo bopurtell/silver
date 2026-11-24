@@ -77,9 +77,12 @@ module Environment_summary = struct
     { selection : Environment_selection.t
     ; provenance : string
     ; dune_version : string
+    (** Empty for an explicitly configured Bazel project. Opening one does not probe Bazel. *)
     ; command_prefix : string list
     }
   [@@deriving bin_io, compare, equal, sexp]
+
+  let uses_dune t = not (String.is_empty t.dune_version)
 end
 
 module Dune_workspace = struct
@@ -102,6 +105,7 @@ module Dune_workspace = struct
 end
 
 module Dune_action = struct
+  (* Historical wire name: Build and Test dispatch to the opened project's build tool. *)
   type t =
     | Build
     | Test
@@ -138,6 +142,7 @@ module Open_project = struct
       { project : Project.t
       ; environment : Environment_summary.t
       ; workspace : Dune_workspace.Inspection.t
+      (** Empty when the project does not use Dune. *)
       }
     [@@deriving bin_io, compare, equal, sexp]
   end

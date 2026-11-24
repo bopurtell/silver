@@ -1,0 +1,2 @@
+# Use the local toolchain (including BSC wrappers that locate the install via HOME).
+build --action_env=PATH --action_env=HOME --action_env=BLUESPECDIR

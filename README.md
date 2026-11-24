@@ -1,6 +1,6 @@
 # Silver
 
-Silver is a terminal workbench for Hardcaml projects. It runs Dune builds and
+Silver is a terminal workbench for hardware projects. It runs project builds and
 simulation suites, launches configured ASIC flows, and lets you inspect
 waveforms, synthesis results, timing paths, and other run evidence without
 leaving the terminal.
@@ -22,8 +22,9 @@ and stop if a block reports an error.
 - **Silver:** The prebuilt release targets Ubuntu 26.04 LTS on x86-64. A source
   build uses a compatible OxCaml opam switch and Silver's native dependencies,
   including Cobalt. See the [installation guide](docs/install.md).
-- **Projects:** The machine running the Silver service needs Dune and the
-  project's usual build environment. Simulation needs the project's configured
+- **Projects:** The machine running the Silver service needs the project's build
+  environment: Dune for Hardcaml, or Bazel and the Classic Bluespec toolchain
+  for the [Bluespec starter](docs/bluespec_classic.md). Simulation needs the project's configured
   simulation provider and any tools it invokes.
 - **ASIC flows:** The service host also needs a compatible
   [hardcaml_asic provider](https://github.com/LeEmperor/hardcaml_asic#install-the-provider).
@@ -113,6 +114,9 @@ With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
    ```
 
 ### Open a project
+
+Starting from an empty directory? Run `silver init --bluespec` there first
+to create an editable [Classic Bluespec design with Rust verification](docs/bluespec_classic.md).
 
 1. Add the default install directory to `PATH` and check the installed command.
    Keep the `export` line in your shell configuration if you want it in new terminals.

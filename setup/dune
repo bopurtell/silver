@@ -1,7 +1,9 @@
 (library
  (name hardcaml_workbench_setup)
  (modules
-  asic_adoption
+   asic_adoption
+   bluespec_scaffold
+   bluespec_template
   config_migration
   initialization
   no_clobber
@@ -15,11 +17,36 @@
   core_unix.sys_unix
   hardcaml_workbench_adapters
   hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+   hardcaml_workbench_protocol
+   yojson)
  (preprocess
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
+
+(executable
+ (name embed_bluespec_template)
+ (modules embed_bluespec_template))
+
+; Keep source and binary installations in sync by compiling the editable example
+; into the native CLI. Do not include Bazel's generated outputs.
+(rule
+ (targets bluespec_template.ml)
+ (deps
+  (:template
+   ../examples/bluespec_classic/.bazelrc
+   ../examples/bluespec_classic/.gitignore
+   ../examples/bluespec_classic/BUILD.bazel
+   ../examples/bluespec_classic/Counter.bs
+   ../examples/bluespec_classic/MODULE.bazel
+   ../examples/bluespec_classic/README.md
+   ../examples/bluespec_classic/bench.cpp
+   ../examples/bluespec_classic/checker.rs
+   ../examples/bluespec_classic/simulation.bzl
+   ../examples/bluespec_classic/simulation_provider.py))
+ (action
+  (with-stdout-to %{targets}
+   (run %{exe:embed_bluespec_template.exe} %{template}))))
 
 (executable
  (name main)

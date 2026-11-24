@@ -358,6 +358,29 @@ let wrap_value ~width ~indent value =
     |> List.map ~f:(fun chars -> indent ^ String.of_char_list chars)
 ;;
 
+module Build_tool = struct
+  type t =
+    | Dune
+    | Bazel
+
+  let of_environment environment =
+    if V1.Environment_summary.uses_dune environment then Dune else Bazel
+  ;;
+
+  let namespace = function
+    | Dune -> "dune"
+    | Bazel -> "bazel"
+  ;;
+
+  let name tool = String.capitalize (namespace tool)
+
+  let is_job action (job : Job.t) =
+    String.equal job.kind.name action
+    && (String.equal job.kind.namespace (namespace Dune)
+        || String.equal job.kind.namespace (namespace Bazel))
+  ;;
+end
+
 (** Presentation only: protocol kinds remain exact, open-ended identifiers. Context
     is joined by job identity, never by the currently selected simulation attempt. *)
 let execution_job_label ?simulation (job : Job.t) =
@@ -380,6 +403,8 @@ let execution_job_label ?simulation (job : Job.t) =
     "sim run" ^ Option.value_map context ~default:"" ~f:(fun context -> " " ^ context)
   | "dune", "build" -> "dune build"
   | "dune", "test" -> "dune test"
+  | "bazel", "build" -> "bazel build"
+  | "bazel", "test" -> "bazel test"
   | "project-driver", "generate-rtl" -> "RTL generate"
   | "project-driver", "describe" -> "project describe"
   | _ -> Job.Kind.to_string job.kind
@@ -391,6 +416,8 @@ let%test_unit "execution labels map exact known kinds and preserve extensions" =
     ; "simulation", "run", "sim run"
     ; "dune", "build", "dune build"
     ; "dune", "test", "dune test"
+    ; "bazel", "build", "bazel build"
+    ; "bazel", "test", "bazel test"
     ; "project-driver", "generate-rtl", "RTL generate"
     ; "project-driver", "describe", "project describe"
     ; "simulation", "provider-run", "simulation.provider-run"

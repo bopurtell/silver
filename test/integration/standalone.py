@@ -58,7 +58,7 @@ def run(silver, daemon, base):
             if not suffix:
                 summary = help_text.splitlines()[0]
                 if prefix == "silver":
-                    assert "nearest Dune project" in summary, summary
+                    assert "nearest Silver Bazel or Dune project" in summary, summary
                 else:
                     assert summary == "Connect to Silver", summary
     # Run the lifecycle with only the primary command on the client side.

@@ -44,6 +44,26 @@ flock /tmp/opencode/workbench-build.lock \
 
 ## Opt-in real fresh-prefix tests
 
+### Classic Bluespec front end
+
+With the worktree's Silver installed and the [Bluespec starter
+toolchain](../examples/bluespec_classic/README.md) on `PATH`:
+
+```sh
+python3 scripts/test-bluespec-frontend.py
+python3 terminal/test_bluespec_pty.py
+python3 test/integration/bluespec_fifo.py
+```
+
+The first starts with an empty directory, launches project actions and checks
+both correct and mutated RTL through the real daemon, including retained
+waveform data after restart. The second exercises the local terminal, Cobalt,
+Testing, and the waveform viewer. The third builds a separately synthesized
+child backed by BSC's FIFO primitive and checks the FIFO data in the trace.
+None requires an ASIC toolchain.
+
+### ASIC flow
+
 For the real FIFO 64 MiB export and retained ASIC GDS handoff, use the
 [streaming export acceptance runner](../docs/streaming_export_acceptance.md).
 It lives at `test/integration/streaming_export.py`, takes explicit prebuilt and
