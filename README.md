@@ -14,6 +14,9 @@ leaving the terminal.
 
 ## Install and open Silver
 
+Pick one install route. Paste its command blocks in order in the same terminal,
+and stop if a block reports an error.
+
 ### Prerequisites
 
 - **Silver:** The prebuilt release targets Ubuntu 26.04 LTS on x86-64. A source
@@ -30,30 +33,98 @@ leaving the terminal.
 
 ### Install the Ubuntu binary
 
-1. Download the Ubuntu 26.04 x86-64 archive and `SHA256SUMS` from
-   [GitHub Releases](https://github.com/bopurtell/silver/releases).
-2. Verify, extract, and install the archive as shown in the
-   [binary installation instructions](docs/install.md#install-the-ubuntu-binary).
+This route requires a published [GitHub Release](https://github.com/bopurtell/silver/releases).
+If there isn't one yet, [build from source](#build-from-source) instead.
+
+1. Install the Ubuntu runtime libraries and download tools:
+
+   ```sh
+   sudo apt update && sudo apt install -y curl jq libgmp10 zlib1g
+   ```
+
+2. Download and verify the latest binary archive, then enter the extracted directory:
+
+   ```sh
+   repo=https://github.com/bopurtell/silver
+   tag=$(curl -fsSL https://api.github.com/repos/bopurtell/silver/releases/latest | jq -er '.tag_name') &&
+     workdir=$(mktemp -d) && cd "$workdir" &&
+     archive="silver-${tag}-linux-x86_64-ubuntu-26.04.tar.gz" &&
+     curl -fsSLO "$repo/releases/download/$tag/$archive" &&
+     curl -fsSLO "$repo/releases/download/$tag/SHA256SUMS" &&
+     sha256sum --ignore-missing --check SHA256SUMS &&
+     tar -xzf "$archive" && cd "${archive%.tar.gz}"
+   ```
+
+3. Install Silver for your user:
+
+   ```sh
+   ./install.sh --without-asic
+   ```
+
+   This skips the install-time ASIC provider check; you can still configure
+   ASIC projects later.
+
+### Set up OxCaml
+
+You need this for a source build or to build the ASIC example, but not just
+to install the prebuilt app. If your project already has a compatible opam
+switch, activate that switch instead.
+
+1. On Ubuntu, install the build tools and initialize opam:
+
+   ```sh
+   sudo apt update &&
+     sudo apt install -y autoconf build-essential ca-certificates curl git libgmp-dev \
+       libsqlite3-dev opam pkg-config python3 rsync unzip zlib1g-dev &&
+     opam init --yes --no-setup
+   ```
+
+2. Create the OxCaml switch if it doesn't exist, then activate it:
+
+   ```sh
+   (opam switch list --short | grep -Fxq '5.2.0+ox' ||
+     opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default) &&
+     eval "$(opam env --switch=5.2.0+ox --set-switch)"
+   ```
 
 ### Build from source
 
-1. Download and extract the source tarball from
-   [GitHub Releases](https://github.com/bopurtell/silver/releases), or clone this
-   repository and enter the checkout.
-2. Prepare the switch and dependencies under
-   [Build from source](docs/install.md#build-from-source).
-3. Run `./install.sh` from the source directory. Use `./install.sh --without-asic`
-   if you don't need to check for an ASIC provider at install time.
+With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
+
+1. Clone and enter the repository. To build a published version instead, use
+   the [source tarball download commands](docs/install.md#download-the-source-tarball)
+   in place of this step.
+
+   ```sh
+   git clone https://github.com/bopurtell/silver.git && cd silver
+   ```
+
+2. Install Cobalt and the remaining Silver dependencies:
+
+   ```sh
+   opam pin add --yes cobalt 'git+https://github.com/bopurtell/cobalt.git#649485d702304babcf3554cd4c6eca0d352d503d' &&
+     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
+   ```
+
+3. Build and install Silver:
+
+   ```sh
+   ./install.sh --without-asic
+   ```
 
 ### Open a project
 
-1. Ensure the install prefix's `bin` directory is on `PATH`. For the default
-   user install, run `export PATH="$HOME/.local/bin:$PATH"` and put that line in
-   your shell configuration if needed.
-2. In your project's normal build environment, open the Dune project:
+1. Add the default install directory to `PATH` and check the installed command.
+   Keep the `export` line in your shell configuration if you want it in new terminals.
 
    ```sh
-   cd /path/to/your/project
+   export PATH="$HOME/.local/bin:$PATH"
+   command -v silver
+   ```
+
+2. In your project's normal build environment, open a terminal in the project directory:
+
+   ```sh
    silver
    ```
 
@@ -67,27 +138,40 @@ The [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example)
 repository contains a FIFO design with a `standard` flow and a `balanced` profile.
 This walkthrough runs synthesis on that design; it does not require any saved runs.
 
-1. In the example's OCaml environment, install `hardcaml_asic`. Clone and enter
-   the example:
+1. In the example's [OxCaml environment](#set-up-oxcaml), install
+   `hardcaml_asic` if you don't already have a compatible provider:
 
    ```sh
-   git clone https://github.com/LeEmperor/hardcaml_asic_example.git
-   cd hardcaml_asic_example
+   git clone https://github.com/LeEmperor/hardcaml_asic.git &&
+     (cd hardcaml_asic && ./install.sh)
    ```
 
-2. Provision the tools and configure the project for synthesis:
+2. Clone and enter the example:
 
    ```sh
-   hardcaml-asic-flow provision --toolchain "$PWD/_flow_tools"
-   python3 -B scripts/configure-synthesis.py
+   git clone https://github.com/LeEmperor/hardcaml_asic_example.git && cd hardcaml_asic_example
+   ```
+
+3. Provision the tools and configure the project for synthesis. The
+   [provider's bootstrap guide](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/bootstrap.md)
+   covers host requirements for the flow, including Docker and Nix.
+
+   ```sh
+   hardcaml-asic-flow provision --toolchain "$PWD/_flow_tools" &&
+     python3 -B scripts/configure-synthesis.py
    ```
 
    To configure the example's simulation suites as well, see the
    [full example setup](docs/project_workflows.md#configure-the-asic-example-simulation-suites).
-3. Run `silver` and open **Overview**.
-4. In **Planned Run**, check **Launch chip**. The example's default is
+4. Launch Silver from the example directory, then open **Overview**.
+
+   ```sh
+   silver
+   ```
+
+5. In **Planned Run**, check **Launch chip**. The example's default is
    `controlled_fifo / default`; select it if another chip is active.
-5. In the **Stage Checklist**, highlight **Synthesis** and press **Shift+R**
+6. In the **Stage Checklist**, highlight **Synthesis** and press **Shift+R**
    to stage and launch it. To review the plan before starting, press **r**
    instead and follow the [stage checklist guide](docs/checklist_launch_workflow.md).
 

@@ -25,6 +25,10 @@ The archive targets Ubuntu 26.04 LTS on x86-64. It does not need opam to
 install the app. Ubuntu supplies `libc6`; the other runtime packages are
 `zlib1g` and `libgmp10`.
 
+For copy-and-paste commands that download the latest release, see the
+[README binary walkthrough](../README.md#install-the-ubuntu-binary).
+To install a specific version manually:
+
 1. Download `silver-vX.Y.Z-linux-x86_64-ubuntu-26.04.tar.gz` and `SHA256SUMS` from
    [GitHub Releases](https://github.com/bopurtell/silver/releases).
 2. In the download directory, verify the archive. Check that your archive is
@@ -41,51 +45,82 @@ install the app. Ubuntu supplies `libc6`; the other runtime packages are
 3. To check for an ASIC provider during installation, run `./install.sh`
    without `--without-asic`; the check needs Python 3. Use `--prefix DIR` to
    select a prefix other than `~/.local`.
-4. Add the prefix's `bin` directory to `PATH` if needed. Run
-   `command -v silver` to check which installation the shell will use.
+4. Add the default prefix to `PATH` and check which installation the shell
+   will use:
+
+   ```sh
+   export PATH="$HOME/.local/bin:$PATH"
+   command -v silver
+   ```
 
 ## Build from source
 
-1. Download `silver-vX.Y.Z-source.tar.gz` and `SHA256SUMS` from
-   [GitHub Releases](https://github.com/bopurtell/silver/releases). From the
-   download directory, verify it with
-   `sha256sum --ignore-missing --check SHA256SUMS`, check that the source
-   archive is reported as `OK`, then extract it. For a development build,
-   clone the repository instead.
-2. Activate a compatible OxCaml opam switch. If you don't already have one,
-   install and initialize opam, then follow the
-   [OxCaml switch setup](https://github.com/oxcaml/opam-repository#installation):
+1. Follow [Set up OxCaml](../README.md#set-up-oxcaml) if you don't already
+   have a compatible switch. If the switch already exists, activate it:
 
    ```sh
-   opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default
-   eval "$(opam env --switch=5.2.0+ox)"
+   eval "$(opam env --switch=5.2.0+ox --set-switch)"
    ```
 
-   If the switch already exists, run only the `eval` command. To reproduce
-   the release build environment, see the exact versions and repository
+   To reproduce the release build environment, see the exact versions and repository
    revisions in [`scripts/release/toolchain.env`](../scripts/release/toolchain.env).
+2. [Download the source tarball](#download-the-source-tarball) or clone
+   the development checkout:
+
+   ```sh
+   git clone https://github.com/bopurtell/silver.git && cd silver
+   ```
+
 3. Make a compatible [Cobalt](https://github.com/bopurtell/cobalt) build available
    to Dune in that switch. Silver embeds `cobalt.hosted` and `cobalt.terminal`;
    a standalone Cobalt executable does not provide those libraries. For
-   example, install Cobalt in the selected switch with:
+   example, install Cobalt and the remaining Silver dependencies with:
 
    ```sh
-   opam pin add cobalt git+https://github.com/bopurtell/cobalt.git#649485d702304babcf3554cd4c6eca0d352d503d
+   opam pin add --yes cobalt 'git+https://github.com/bopurtell/cobalt.git#649485d702304babcf3554cd4c6eca0d352d503d' &&
+     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
    ```
-4. From the extracted Silver source directory, install the remaining OCaml
-   dependencies and build:
+4. Build and install from the source directory:
 
    ```sh
-   opam install --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
-   ./install.sh
+   ./install.sh --without-asic
    ```
 
-   Use `./install.sh --without-asic` if you do not want to check for an ASIC
-   provider at install time. Use `--switch NAME` to select an existing switch,
+   Omit `--without-asic` to check for a compatible ASIC provider at install
+   time. Use `--switch NAME` to select an existing switch,
    `--prefix DIR` for a different install location, or `--jobs N` to set
-   build parallelism. The default user install is `~/.local`; no `sudo` is needed.
-5. Add the prefix's `bin` directory to `PATH` if needed. Run
-   `command -v silver` to confirm the installation you will use.
+   build parallelism. Installing Silver into the default user prefix (`~/.local`)
+   does not require `sudo`.
+5. Add the default prefix to `PATH` and verify the installed command:
+
+   ```sh
+   export PATH="$HOME/.local/bin:$PATH"
+   command -v silver
+   ```
+
+### Download the source tarball
+
+Use this in place of `git clone` once there is a published release. The
+commands leave you in the extracted source directory.
+
+1. Install the download tools on Ubuntu if needed:
+
+   ```sh
+   sudo apt update && sudo apt install -y curl jq
+   ```
+
+2. Download, verify, and extract the latest source archive:
+
+   ```sh
+   repo=https://github.com/bopurtell/silver
+   tag=$(curl -fsSL https://api.github.com/repos/bopurtell/silver/releases/latest | jq -er '.tag_name') &&
+     workdir=$(mktemp -d) && cd "$workdir" &&
+     archive="silver-${tag}-source.tar.gz" &&
+     curl -fsSLO "$repo/releases/download/$tag/$archive" &&
+     curl -fsSLO "$repo/releases/download/$tag/SHA256SUMS" &&
+     sha256sum --ignore-missing --check SHA256SUMS &&
+     tar -xzf "$archive" && cd "${archive%.tar.gz}"
+   ```
 
 ## ASIC provider selection
 
