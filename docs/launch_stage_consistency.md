@@ -1,8 +1,7 @@
 # Plan/launch lifecycle and real stage observations
 
-Fixed and verified2026-10-17 after the owner launched real synthesis runs and saw
-both `Plan ready; ... no job allocated` and an entirely unreported checklist.
-The implementation plan is [launch_stage_consistency_plan.md](archive/delivery/launch_stage_consistency_plan.md).
+Plan readiness and execution status are independent. The checklist describes
+the exact selected run, not what the current plan could launch.
 
 ## What was wrong
 

@@ -176,7 +176,7 @@ class Terminal(fifo.TestingTerminal):
                 if width != self.width:
                     self.archive.extend(self.data)
                     self.data.clear()
-        return native.fs0.terminal_screen(bytes(self.data), self.width, self.height)
+        return native.native_execution.terminal_screen(bytes(self.data), self.width, self.height)
 
     def close(self):
         (self.session.evidence / ('client-all-' + str(time.time_ns()) + '.ansi')).write_bytes(self.archive + self.data)
@@ -378,7 +378,7 @@ def run(args):
                 ['elaboration_only', 'false'], ['expected_plan_identity', []]])
             report['untested'].remove('source build and elaboration-only emission (optional separate check)')
 
-    def workloads_handoff(pt8, references):
+    def workloads_handoff(memory_attempt, references):
         for case, side in [('flops256', 'A left'), ('exact256', 'B right')]:
             terminal.palette('Simulation: Select case ' + case)
             terminal.palette('Inspect workload result (selected Testing case)')
@@ -457,51 +457,51 @@ def run(args):
             terminal.save('fifo-waveform-blocker', terminal.drain(.1))
             report['blockers'] = ['FIFO embedded waveform admission/action unavailable; see fifo-waveform-blocker.txt']
             terminal.key(b'\x1b')
-        pt8 = launch_form(memory_suite, ['flops256', 'exact256'], '34097')
+        memory_attempt = launch_form(memory_suite, ['flops256', 'exact256'], '34097')
         references = {}
-        for artifact in field(pt8, 'artifacts'):
-            raw = artifact_bytes(pt8, artifact)
+        for artifact in field(memory_attempt, 'artifacts'):
+            raw = artifact_bytes(memory_attempt, artifact)
             if field(artifact, 'media_type') == 'application/json':
                 reference = json.loads(raw)
                 check(isinstance(reference, dict) and 'result' in reference,
-                      'PT8 actual retained JSON result reference ' + field(artifact, 'id'))
+                      'Memory workload actual retained JSON result reference ' + field(artifact, 'id'))
                 references[field(artifact, 'case_id')[0]] = reference
             else:
                 check(b'$enddefinitions' in raw and b'#13070000' in raw,
-                      'PT8 same-execution VCD retained full 13.07us')
+                      'Memory workload same-execution VCD retained full 13.07us')
         simulation_ids = {
             verify_result(
-                Path(reference['result']), field(pt8, 'id'), case,
+                Path(reference['result']), field(memory_attempt, 'id'), case,
                 Path(manifest['inputs']['asic_generation']))
             for case, reference in references.items()
         }
         check(len(simulation_ids) == 2, 'distinct simulator attempts, raw traces and 1RW oracle agree')
-        workloads_handoff(pt8, references)
-        wave, text = open_wave(pt8, 'exact256')
-        check('tb.clk' in text and ('80 ns' in text or '80000' in text), 'PT8 useful ~eight-period default')
+        workloads_handoff(memory_attempt, references)
+        wave, text = open_wave(memory_attempt, 'exact256')
+        check('tb.clk' in text and ('80 ns' in text or '80000' in text), 'Memory workload useful ~eight-period default')
         terminal.key(b'f')
-        terminal.capture('pt8-fit-full-trace', ['13070000', 'window 0..'])
+        terminal.capture('memory-fit-full-trace', ['13070000', 'window 0..'])
         for width, height in [(180, 55), (80, 24), (120, 40)]:
             terminal.resize_wave(width, height)
-            text = terminal.capture('pt8-fit-resize-%dx%d' % (width, height), ['window 0..13070000', 'Fit full trace'])
+            text = terminal.capture('memory-fit-resize-%dx%d' % (width, height), ['window 0..13070000', 'Fit full trace'])
             bounds = re.findall(r'window (\d+)\.\.(\d+)', text)
             check(bool(bounds) and all(bound == ('0', '13070000') for bound in bounds),
-                  'actual PT8 Fit resize %dx%d preserves exact inclusive requested range' % (width, height))
+                  'actual Memory workload Fit resize %dx%d preserves exact inclusive requested range' % (width, height))
         terminal.key(b':2595000\r/tb.q\r')
-        text = terminal.capture('pt8-exact-cursor', ['Cursor 2595000 ticks', '0001001111000110'])
-        check('Graph unavailable' not in text, 'PT8 exact 13C6 response at original tick 2595000')
+        text = terminal.capture('memory-exact-cursor', ['Cursor 2595000 ticks', '0001001111000110'])
+        check('Graph unavailable' not in text, 'Memory workload exact 13C6 response at original tick 2595000')
         terminal.key(b'l')
-        terminal.capture('pt8-one-tick', ['Cursor 2595001 ticks'])
+        terminal.capture('memory-one-tick', ['Cursor 2595001 ticks'])
         terminal.palette('Waveform: Signal values: Stacked')
-        terminal.capture('pt8-stacked-preference', ['Cursor 2595001 ticks', '0001001111000110'])
+        terminal.capture('memory-stacked-preference', ['Cursor 2595001 ticks', '0001001111000110'])
         terminal.key(b'q')
         if fifo_wave_ready:
             terminal.palette('Simulation: Reopen ' + field(passed, 'id') + ' controlled-fifo')
             terminal.palette('Simulation: Select case seeded')
             terminal.palette('Simulation: Open embedded waveform ' + field(next(a for a in field(passed, 'artifacts')
                 if field(a, 'media_type') in ('text/vcd', 'text/x-vcd') and field(a, 'case_id') == ['seeded']), 'label'))
-            terminal.capture('fifo-pin-preserved-after-pt8', ['Cursor 40 ticks', 'outputs.occupancy'], absent=['tb.q'])
-            check(True, 'FIFO investigation pins preserved without PT8 cross-case contamination')
+            terminal.capture('fifo-pin-preserved-after-memory-workload', ['Cursor 40 ticks', 'outputs.occupancy'], absent=['tb.q'])
+            check(True, 'FIFO investigation pins preserved without Memory workload cross-case contamination')
             terminal.key(b'q')
         terminal.close(); terminal = None
         before_ids = {field(a, 'id') for a in field(session.api(), 'attempts')}
@@ -575,7 +575,7 @@ def run(args):
         save(evidence / 'client-preference-restoration.json', dict(preserved=preferences_preserved,
              exact_same_case_enrichments=enrichments))
         check(preferences_preserved, 'restart retained client navigation/pair/display preferences with verified same-case hydration')
-        terminal.palette('Simulation: Reopen ' + field(pt8, 'id') + ' ' + memory_suite)
+        terminal.palette('Simulation: Reopen ' + field(memory_attempt, 'id') + ' ' + memory_suite)
         terminal.palette('Simulation: Select case exact256')
         terminal.palette('Simulation: Open embedded waveform ' + field(wave, 'label'))
         terminal.capture('restarted-wave-default', ['Cursor 0 ticks', '80000'])

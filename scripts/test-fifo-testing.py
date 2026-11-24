@@ -2,7 +2,7 @@
 """Real sibling FIFO acceptance. Prebuilt binaries only; private daemon/PTY state.
 
 --standalone needs only --simulator. Native modes use the actual example root's
-already installed FS2 config. No builds, config edits, ASIC operations or live
+already installed simulation config. No builds, config edits, ASIC operations or live
 daemon access. --skip-pty permits independent HTTP verification during UI work.
 """
 import argparse
@@ -61,7 +61,7 @@ def standalone(args, evidence):
     result = subprocess.run(command + ['discover', '--protocol-version', '1'], cwd=isolated,
                             env=env, capture_output=True, check=True, timeout=10)
     (isolated / 'catalog.sexp').write_bytes(result.stdout)
-    require(field(parse(result.stdout.decode()), 'protocol_version') == '1', 'standalone FS2 catalog')
+    require(field(parse(result.stdout.decode()), 'protocol_version') == '1', 'standalone simulation catalog')
     runs = {}
 
     def run(label, selected, valid=True):
@@ -157,7 +157,7 @@ class TestingTerminal(native.Terminal):
 
     def drain(self, seconds=.3):
         super().drain(seconds)
-        return native.fs0.terminal_screen(bytes(self.data), self.width, self.height)
+        return native.native_execution.terminal_screen(bytes(self.data), self.width, self.height)
 
     def resize(self, width, height):
         self.width, self.height = width, height

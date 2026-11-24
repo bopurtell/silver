@@ -237,6 +237,7 @@ let reference text =
       | _ -> failwith ("Invalid reference " ^ k)
     in
     (* The contract is part of retained bytes and does not follow the catalog suite ID. *)
+    (* Retained workload artifacts advertise this exact version-1 contract. *)
     if (not (String.equal (string "contract") "hardcaml-workbench.pt8-result-reference"))
        || not (Poly.equal (field "schema_version") (`Int 1))
     then failwith "Unsupported result reference schema";

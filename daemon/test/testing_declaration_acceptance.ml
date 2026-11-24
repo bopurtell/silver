@@ -50,7 +50,7 @@ let expected_location ~project ~source case_id =
 let main provider example_root () =
   let provider = Filename_unix.realpath provider in
   let source = In_channel.read_all (Filename.concat example_root relative_path) in
-  let directory = Filename_unix.temp_dir "wb088-declaration-" "" in
+  let directory = Filename_unix.temp_dir "testing-declaration-" "" in
   let root = Filename.concat directory "project" in
   let config_path = Filename.concat root Config.filename in
   let write_config provider_executable =
@@ -83,10 +83,10 @@ let main provider example_root () =
           Out_channel.write_all (Filename.concat root relative_path) ~data:source;
           Out_channel.write_all
             (Filename.concat root "dune-project")
-            ~data:"(lang dune 3.22)\n(name wb088_fifo_fixture)\n";
+            ~data:"(lang dune 3.22)\n(name fifo_declaration_fixture)\n";
           write_config provider)
       in
-      let instance_id = "wb088-testing" in
+      let instance_id = "testing-declaration" in
       let%bind srv =
         Service.create
           ~instance_id
@@ -96,7 +96,7 @@ let main provider example_root () =
         >>| Or_error.ok_exn
       in
       service := Some srv;
-      let rpc = Rpc.create ~application_version:"wb088-test" ~instance_id ~service:srv in
+      let rpc = Rpc.create ~application_version:"testing-declaration-test" ~instance_id ~service:srv in
       let%bind http =
         Cohttp_async.Server.create
           ~on_handler_error:`Ignore
@@ -217,13 +217,13 @@ let main provider example_root () =
       require
         (Option.is_some stale.discovery && List.is_empty stale.declarations)
         "Stale discovery coordinates remained available after a configuration change";
-      printf "WB-088: real FIFO registrations resolved through HTTP and Module_jump\n%!")
+      printf "Real FIFO registrations resolved through HTTP and Module_jump\n%!")
 ;;
 
 let () =
   let open Command.Let_syntax in
   Command.async
-    ~summary:"Headless WB-088 acceptance with the real FIFO provider (no test runs)"
+    ~summary:"Headless testing declaration acceptance with the real FIFO provider (no test runs)"
     (let%map_open provider =
        flag "--provider" (required string) ~doc:"PATH FIFO test_provider.exe"
      and root =

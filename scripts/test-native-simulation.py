@@ -35,11 +35,11 @@ def load_module(name, filename):
     return module
 
 
-fs0 = load_module('fs0', 'test-native-execution.py')
-field, require = fs0.field, fs0.require
+native_execution = load_module('native_execution', 'test-native-execution.py')
+field, require = native_execution.field, native_execution.require
 
 
-class Session(fs0.Session):
+class Session(native_execution.Session):
     def raw(self, path, data=None):
         request = urllib.request.Request(self.url + path, data=None if data is None else sexp(data).encode(),
             headers={'Content-Type': 'application/sexp', 'X-Workbench-Protocol': '1'})
@@ -127,7 +127,7 @@ class Terminal(SharedTerminal):
 def run(args):
     evidence = args.evidence
     root = evidence / 'project'; root.mkdir()
-    (root / 'dune-project').write_text('(lang dune 3.22)\n(name fs2_native_acceptance)\n')
+    (root / 'dune-project').write_text('(lang dune 3.22)\n(name native_simulation_acceptance)\n')
     (evidence / 'state').mkdir()
     for name in ('home', 'config', 'tmp'):
         (evidence / name).mkdir()
@@ -351,7 +351,7 @@ def pty_acceptance(session, real, rerun, wave, raw, check):
                 edges[i] += 1
 
     ws = session.api(domain='workspace')
-    ws = mutate(['Create_workspace', ['window', field(field(ws, 'windows')[0], 'id')], ['name', 'FS2 acceptance'], ['context', field(ws, 'main_context')]])
+    ws = mutate(['Create_workspace', ['window', field(field(ws, 'windows')[0], 'id')], ['name', 'Simulation acceptance'], ['context', field(ws, 'main_context')]])
     workspace = field(ws, 'workspaces')[-1]
     wid = field(workspace, 'id')
     tiles = []
@@ -373,7 +373,7 @@ def pty_acceptance(session, real, rerun, wave, raw, check):
     session.args.client = old_client
     try:
         terminal.capture('pty-startup', ['Overview'])
-        terminal.palette('Switch to FS2 acceptance')
+        terminal.palette('Switch to Simulation acceptance')
         terminal.capture('pty-simulation', ['Structured simulation'])
         known = {field(a, 'id') for a in field(session.api(), 'attempts')}
         terminal.palette('Simulation: Launch form counter')
@@ -439,17 +439,18 @@ def pty_acceptance(session, real, rerun, wave, raw, check):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    build = Path('/tmp/opencode/fs2-build-provider')
-    p.add_argument('--daemon', type=Path, default=build / 'native/default/daemon/main.exe')
-    p.add_argument('--client', type=Path, default=build / 'native/default/terminal/main.exe')
-    p.add_argument('--counter', type=Path, default=build / 'default/counter.exe')
+    build = HERE.parent / '_build/default'
+    p.add_argument('--daemon', type=Path, default=build / 'daemon/main.exe')
+    p.add_argument('--client', type=Path, default=build / 'terminal/main.exe')
+    p.add_argument('--counter', type=Path,
+                   default=HERE.parent / 'examples/cyclesim_counter/_build/default/counter.exe')
     p.add_argument('--skip-pty', action='store_true', help='HTTP-only diagnostic; full acceptance requires PTY')
     args = p.parse_args()
     for name in ('daemon', 'client', 'counter'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
     os.umask(0o077)
     args.outer_timeout = 30
-    args.evidence = Path(tempfile.mkdtemp(prefix='fs2-native-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='native-simulation-', dir='/tmp/opencode'))
     print('Evidence: ' + str(args.evidence), flush=True)
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('acceptance budget exhausted')))
     signal.alarm(300)
@@ -457,7 +458,7 @@ def main():
         run(args)
     finally:
         signal.alarm(0)
-    print('PASS FS2 native HTTP' + ('' if args.skip_pty else ' + PTY'), flush=True)
+    print('PASS native simulation HTTP' + ('' if args.skip_pty else ' + PTY'), flush=True)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,8 @@
 # dune
 _build/
 _build_workbench/
-_build_pt8_workbench/
+# Includes private Dune build roots from older verification runs.
+_build_*/
 *.install
 
 # ocaml

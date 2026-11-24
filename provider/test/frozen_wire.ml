@@ -1,4 +1,4 @@
-(** Independent snapshot of provider-visible FS2v1 representations before WB-066.
+(** Independent snapshot of provider-visible simulation-provider v1 wire representations, predating the provider library.
     Intentionally do not alias production types: detects encoding/constructor drift. *)
 open! Core
 

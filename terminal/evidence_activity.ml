@@ -349,7 +349,7 @@ module Test = struct
   let running t = Option.equal Overview_tiles.Status.equal (row t).status (Some Running)
 end
 
-let%test_unit "WB-003 #1: a delayed explicit refresh shows activity until its result" =
+let%test_unit "a delayed explicit refresh shows activity until its result" =
   let open Test in
   (* Validated evidence is on screen; the user asks for an explicit refresh. *)
   let shown =
@@ -393,7 +393,7 @@ let%test_unit "WB-003 #1: a delayed explicit refresh shows activity until its re
   [%test_result: string] (text done_) ~expect:"Evidence: idle"
 ;;
 
-let%test_unit "WB-003 #2: a cache-only reopen shows no provider operation" =
+let%test_unit "a cache-only reopen shows no provider operation" =
   let open Test in
   let reopened = view () in
   let lookup =
@@ -430,7 +430,7 @@ let%test_unit "WB-003 #2: a cache-only reopen shows no provider operation" =
             ])))
 ;;
 
-let%test_unit "WB-003 #3: failure and cancellation clear activity and keep a useful \
+let%test_unit "failure and cancellation clear activity and keep a useful \
                error and prior freshness"
   =
   let open Test in
@@ -466,7 +466,7 @@ let%test_unit "WB-003 #3: failure and cancellation clear activity and keep a use
           ~f:(String.is_substring ~substring:error)))
 ;;
 
-let%test_unit "WB-003 #4: a late response cannot restore activity or evidence for an \
+let%test_unit "a late response cannot restore activity or evidence for an \
                obsolete selection"
   =
   let open Test in
@@ -496,7 +496,7 @@ let%test_unit "WB-003 #4: a late response cannot restore activity or evidence fo
   assert (is_idle (summarize [] late))
 ;;
 
-let%test_unit "WB-003 #5: overlapping reads are summarized and never reported idle" =
+let%test_unit "overlapping reads are summarized and never reported idle" =
   let open Test in
   let routing = view () in
   let signoff = view ~stage:"signoff" () in
@@ -573,7 +573,7 @@ let%test_unit "WB-003 #5: overlapping reads are summarized and never reported id
   assert (List.exists (row failing).details ~f:(String.is_substring ~substring:"bad row"))
 ;;
 
-let%test_unit "WB-003: ASCII and Off modes keep a static text label" =
+let%test_unit "ASCII and Off modes keep a static text label" =
   let open Test in
   let t =
     summarize [ view () ] (snapshot [ op ~key:(key ()) ~kind:"inspection" "executing" ])
@@ -588,7 +588,7 @@ let%test_unit "WB-003: ASCII and Off modes keep a static text label" =
   assert (String.is_prefix (text ~icons:None_ t) ~prefix:"updating evidence")
 ;;
 
-let%test_unit "WB-003: cache lookup retains concurrent failure and freshness" =
+let%test_unit "cache lookup retains concurrent failure and freshness" =
   let open Test in
   let failed =
     Inspection_view.reconcile

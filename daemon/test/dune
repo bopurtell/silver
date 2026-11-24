@@ -47,7 +47,7 @@
  (alias runtest)
  (action (run python3 %{dep:test_runtime_temp.py} %{exe:../main.exe})))
 
-; Uses the real sibling FIFO provider, built independently. See WB-088 for invocation.
+; Uses the real sibling FIFO provider, built independently.
 (executable
  (name testing_declaration_acceptance)
  (modules testing_declaration_acceptance)

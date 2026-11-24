@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FS1/F06 cached real synthesis inspector acceptance (stdlib + strace, no build).
+"""Cached real synthesis inspector acceptance (stdlib + strace, no build).
 
 Copies saved Workbench state, runs private existing binaries, retains RPC stdout,
 commands, PTY ANSI/screens and syscall evidence. Never requests provider work.
@@ -19,8 +19,8 @@ import traceback
 spec = importlib.util.spec_from_file_location('dashboard', Path(__file__).with_name('test-retained-asic-dashboard.py'))
 dashboard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dashboard)
-fs0 = dashboard.fs0
-field, record, require = fs0.field, fs0.record, fs0.require
+native_execution = dashboard.native_execution
+field, record, require = native_execution.field, native_execution.record, native_execution.require
 
 
 class Terminal(dashboard.Terminal):
@@ -41,7 +41,7 @@ class Terminal(dashboard.Terminal):
 def exercise(args):
     source = args.source_state.resolve()
     config = args.example_root / 'hardcaml-workbench-asic.sexp'
-    cfg = record(fs0.parse(config.read_text()))
+    cfg = record(native_execution.parse(config.read_text()))
     watched = [source, config, Path(cfg['results_root']), Path(cfg['provider_executable'])]
     before = dashboard.inventory(watched)
     (args.evidence / 'files-before.json').write_text(json.dumps(before, indent=2))
@@ -59,7 +59,7 @@ def exercise(args):
         '-e', 'trace=%file,%process', '-o', str(trace), str(daemon)]) + ' "$@"\n')
     wrapper.chmod(0o700)
     args.daemon = wrapper
-    session = fs0.Session(args, args.evidence, args.example_root)
+    session = native_execution.Session(args, args.evidence, args.example_root)
     terminal = None
     result = dict(status='failed', checks=[], evidence=str(args.evidence))
 
@@ -74,7 +74,7 @@ def exercise(args):
         ws = session.rpc('workspace')
         context = next(c for c in field(ws, 'contexts') if field(c, 'id') == field(workspace, 'context'))
         return session.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run (%s)))' % (
-            field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), fs0.sexp(run)))
+            field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), native_execution.sexp(run)))
 
     def ordinary(text, summary):
         check(field(summary, 'execution_file') not in text and
@@ -94,7 +94,7 @@ def exercise(args):
         session.start()
         initial = session.rpc('workspace')
         for run in field(session.rpc('asic'), 'runs'):
-            session.rpc('asic', '(Load_summary ' + fs0.sexp(field(run, 'run')) + ')', wait=True)
+            session.rpc('asic', '(Load_summary ' + native_execution.sexp(field(run, 'run')) + ')', wait=True)
         baseline = session.rpc('asic')
         summaries = {int(field(s, 'cell_count')[0]): s for s in field(baseline, 'summaries')}
         check(set(summaries) == {673, 685}, 'Real cached totals are 673 and 685')
@@ -216,7 +216,7 @@ def exercise(args):
         terminal.key(b'\r')
         terminal.capture('17-independent-sort', ['Cells | Count descending', 'Cells | Cell type ascending'])
         terminal.key(b'\t')
-        mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (field(tiles[0], 'id'), fs0.sexp(ra)))
+        mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (field(tiles[0], 'id'), native_execution.sexp(ra)))
         terminal.palette('Synthesis: Clear cell filter')
         terminal.palette('Synthesis: Summary')
         terminal.key(b'\t')
@@ -266,7 +266,7 @@ def main():
     args.evidence = Path(tempfile.mkdtemp(prefix='workbench-synthesis-inspector-', dir='/tmp/opencode'))
     print('Evidence: ' + str(args.evidence), flush=True)
     exercise(args)
-    print('PASS: FS1/F06 cached synthesis inspector', flush=True)
+    print('PASS: cached synthesis inspector', flush=True)
 
 
 if __name__ == '__main__':

@@ -419,7 +419,7 @@ let type_query host commands query =
     next)
 ;;
 
-let%test_unit "WB-096 exact stop and cancel dispatch the same captured flow despite fuzzy rivals" =
+let%test_unit "exact stop and cancel dispatch the same captured flow despite fuzzy rivals" =
   let host, _, snapshot, selection = fixture () in
   let chip : Asic.Chip_target.t = { chip = "fifo"; variant = "deep" } in
   let project = Project_id.of_string "stop-palette" in
@@ -478,7 +478,7 @@ let%test_unit "WB-096 exact stop and cancel dispatch the same captured flow desp
     | _ -> assert false)
 ;;
 
-let%test_unit "WB-076 exact launch aliases dispatch by identity against stronger fuzzy matches" =
+let%test_unit "exact launch aliases dispatch by identity against stronger fuzzy matches" =
   let host, _, snapshot, historical = fixture () in
   let selection = { historical with endpoint = "cts"; assignments = [ "X=2" ] } in
   let preview = { (Option.value_exn snapshot.preview) with selection } in

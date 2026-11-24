@@ -225,7 +225,7 @@ type action =
   | Testing_browse_suites
   | Testing_select_suite of W.Tile_id.t * unit ref * string
   | Testing_accept of W.Tile_id.t
-  (* WB-054: close the focused tile's inspector; replay one existing inspector key; or
+  (* Close the focused tile's inspector; replay one existing inspector key; or
      explain why a contextual action that exists is unavailable right now. *)
   | Close_inspector
   | Inspector_input of W.Tile_id.t * Inspection_view.input
@@ -4867,7 +4867,7 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
   | _ -> base
 ;;
 
-(* WB-054: contextual actions, explicit inspector close and breadcrumbs. Everything here
+(* Contextual actions, explicit inspector close and breadcrumbs. Everything here
    is derived from the focused tile's typed host state; nothing creates new routing. *)
 
 type inspector =
@@ -6875,7 +6875,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                  ( capture
                  , if Char.equal key 'h' then Toggle_main_hints else Toggle_palette_hints
                  ) ))
-        (* WB-054: explicit inspector close; also reachable over the explorer, whose key
+        (* Explicit inspector close; also reachable over the explorer, whose key
            routing lets the Space prefix through. *)
         | Character 'x', 2 ->
           let t = { t with prefix = 0 } in

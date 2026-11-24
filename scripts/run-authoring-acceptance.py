@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-084: run the installed Silver starter journey and its clean CLI handoff."""
+"""Run the installed Silver starter journey and its clean CLI handoff."""
 import argparse
 import json
 import os
@@ -112,10 +112,10 @@ def main():
         evidence = args.evidence.resolve()
         evidence.mkdir(parents=True, exist_ok=False)
     else:
-        evidence = Path(tempfile.mkdtemp(prefix="silver-wb084-")).resolve()
+        evidence = Path(tempfile.mkdtemp(prefix="silver-authoring-acceptance-")).resolve()
     tools = args.toolchain.resolve() if args.toolchain else None
-    print(f"WB-084 evidence: {evidence}", flush=True)
-    report = {"ticket": "WB-084", "toolchain": str(tools) if tools else None,
+    print(f"Authoring acceptance evidence: {evidence}", flush=True)
+    report = {"scenario": "starter-authoring", "toolchain": str(tools) if tools else None,
               "status": "running"}
 
     def record(step):

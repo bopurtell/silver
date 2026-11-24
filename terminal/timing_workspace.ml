@@ -1044,7 +1044,7 @@ let%test_unit "cooperating panes select actual paths; browsing is local and deta
         .error)
 ;;
 
-let%test_unit "WB-006: evidence times keep their meanings through refresh, cache and \
+let%test_unit "evidence times keep their meanings through refresh, cache and \
                carry-forward"
   =
   let now = Time_ns.of_string_with_utc_offset "2026-10-19 15:30:00Z" in

@@ -46,9 +46,9 @@ def main():
         path = args.evidence / (name + '.vcd')
         path.write_text(text)
         env = dict(os.environ)
-        env.pop('WB028_VIEW', None)
+        env.pop('WAVEFORM_PROBE_VIEW', None)
         if views:
-            env['WB028_VIEW'] = '1'
+            env['WAVEFORM_PROBE_VIEW'] = '1'
         argv = [str(args.probe), str(path), str(start), str(stop), *map(str, times)]
         result = subprocess.run(argv, env=env, capture_output=True, timeout=30)
         (args.evidence / (name + '.stdout')).write_bytes(result.stdout)

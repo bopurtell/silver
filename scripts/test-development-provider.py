@@ -134,13 +134,13 @@ def main():
             check(proc.returncode == 27 and observed['pid'] == proc.pid and observed['pgid'] == os.getpgrp(),
                   suite + ': exec preserves PID/PGID/child exit')
             check(observed['argv'] == tail and observed['request_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest(),
-                  suite + ': untouched FS2 argv and request bytes')
+                  suite + ': untouched simulation-provider argv and request bytes')
         current.write_text(json.dumps(manifest))
         invalid = [('unknown-suite', dict(suite='unknown')),
             ('fifo-invalid-uint64', dict(seed='18446744073709551616')),
             ('fifo-duplicate-case', dict(cases=['directed', 'directed'])),
-            ('pt8-invalid-seed', dict(suite=memory_suite, seed='42', cases=['exact256'], parameters=[])),
-            ('pt8-unknown-case', dict(suite=memory_suite, seed='34097', cases=['unknown'], parameters=[]))]
+            ('memory-invalid-seed', dict(suite=memory_suite, seed='42', cases=['exact256'], parameters=[])),
+            ('memory-unknown-case', dict(suite=memory_suite, seed='34097', cases=['unknown'], parameters=[]))]
         for label, values in invalid:
             path, events, artifacts, tail = request(label, **values)
             result = invoke(router + ['--manifest', str(current), *tail])

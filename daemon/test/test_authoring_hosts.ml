@@ -63,7 +63,7 @@ let exercise ~endpoint ~root ~outside =
   | other -> raise_s [%sexp (other : V1.Authoring_call.Response.t)]
 ;;
 
-(* This path exercises the separately installed provider. Run with WB082_REAL_STARTER=1
+(* This path exercises the separately installed provider. Run with WORKBENCH_TEST_REAL_CHIP_STARTER=1
    and the matching hardcaml-asic-starter on PATH. *)
 let chip_integration ~endpoint ~parent =
   let root = Filename.concat parent "chips" in
@@ -334,7 +334,7 @@ let run daemon () =
               String.chop_prefix_exn line ~prefix:"silver-daemon listening on "
             in
             let%bind () = exercise ~endpoint ~root:connected ~outside:root in
-            if Option.is_some (Sys.getenv "WB082_REAL_STARTER")
+            if Option.is_some (Sys.getenv "WORKBENCH_TEST_REAL_CHIP_STARTER")
             then chip_integration ~endpoint ~parent:connected
             else return ()))
 ;;

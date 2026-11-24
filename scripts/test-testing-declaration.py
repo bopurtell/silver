@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-088/WB-087 real FIFO discovery -> standalone Silver -> hosted Cobalt PTY.
+"""Real FIFO discovery -> standalone Silver -> hosted Cobalt PTY.
 
 Fixture mode uses prebuilt Silver and FIFO binaries with a private source copy
 and deterministic LSP peer. --live uses the installed Silver, the example
@@ -30,7 +30,7 @@ from fixtures.testing_layout import focus_pane
 CASE = "seeded"
 SUITE = "controlled-fifo"
 DECLARATION_FILE = "ip/controlled_fifo/verif/simulation/test_provider.ml"
-MARKER = "WB088_DIRTY_"
+MARKER = "TEST_DECLARATION_DIRTY_"
 SELECTED = re.compile(rf"(?m)(?:^|[│|]) *> +\[ \] {CASE}\b")
 FOCUS_PANE = b"\x1b[17~"  # F6
 ALT_LEFT = b"\x1b[1;3D"  # xterm Alt+Left
@@ -140,7 +140,7 @@ def project(args):
         path = base / key
         path.mkdir(mode=0o700)
         env[key] = str(path)
-    env.update(LC_ALL="C.UTF-8", WB088_LSP_LOG=str(base / "lsp.jsonl"))
+    env.update(LC_ALL="C.UTF-8", TEST_DECLARATION_LSP_LOG=str(base / "lsp.jsonl"))
     bin_dir = base / "bin"
     bin_dir.mkdir()
     script(bin_dir / "ocamllsp",
@@ -179,7 +179,7 @@ def discover(args, root, env, provider):
 
 def await_declaration(tty, source, line, column):
     """Require an actual Cobalt LSP declaration request at the opened location."""
-    log = Path(tty.session.env["WB088_LSP_LOG"])
+    log = Path(tty.session.env["TEST_DECLARATION_LSP_LOG"])
 
     def messages():
         if not log.exists():
@@ -250,11 +250,11 @@ def run(args):
         tty.capture("silver-sibling-handles-navigation", [re.compile(r">\s+\[x\] directed\b")])
         tty.key(b"j")
         tty.capture("silver-sibling-restores-selection", [SELECTED])
-        tty.key(b"iWB088_WRONG_PANE\x1b")
+        tty.key(b"iTEST_DECLARATION_WRONG_PANE\x1b")
         tty.key(FOCUS_PANE)
         tty.accept("focus-returns-to-unmodified-cobalt",
                    ["Cobalt focus", declaration.strip(), tty.caret(declaration, column)],
-                   ["WB088_WRONG_PANE", "INSERT"])
+                   ["TEST_DECLARATION_WRONG_PANE", "INSERT"])
         await_declaration(tty, source, line, column)
         tty.key(b"i" + MARKER.encode() + b"\x1b")
         tty.accept("dirty-at-declaration", [dirty.strip()])

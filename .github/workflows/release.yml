@@ -1,0 +1,52 @@
+name: Stage Silver release assets
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      UBUNTU_IMAGE: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the tag
+        shell: bash
+        run: |
+          if [[ ! $GITHUB_REF_NAME =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Expected a version tag in vMAJOR.MINOR.PATCH format"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")"
+      - name: Build and verify source installation and package both archives
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/silver-dist"
+          docker run --rm --platform linux/amd64 \
+            --volume "$PWD:/checkout:ro" --workdir /checkout \
+            --volume "$RUNNER_TEMP/silver-dist:/dist" \
+            "$UBUNTU_IMAGE" bash scripts/release/build-ci.sh "$GITHUB_REF_NAME" /dist
+      - name: Verify checksums and binary installation without a build toolchain
+        shell: bash
+        run: |
+          docker run --rm --interactive --network none --platform linux/amd64 \
+            --volume "$RUNNER_TEMP/silver-dist:/assets:ro" \
+            "$UBUNTU_IMAGE" bash -s -- "$GITHUB_REF_NAME" < scripts/release/smoke-binary.sh
+      - name: Upload staging artifacts (does not publish a GitHub Release)
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: silver-${{ github.ref_name }}-release-assets
+          path: |
+            ${{ runner.temp }}/silver-dist/*.tar.gz
+            ${{ runner.temp }}/silver-dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0

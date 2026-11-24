@@ -44,7 +44,7 @@ def setup_help(root):
 
 
 def read_current(path, max_bytes=64 * 1024):
-    """WB049 lookup inputs: bounded regular files, no symlink path components."""
+    """Config lookup inputs: bounded regular files, no symlink path components."""
     for part in reversed((path, *path.parents)):
         try:
             info = part.lstat()
@@ -139,7 +139,7 @@ def derive(example_root, evidence_root, flow, profile, outer_build_lock=None, cu
     preparation, asic = companion("preparation"), companion("asic")
     if current_common:
         # Main install is the only authority for generation selection. Never scan
-        # historical installs or reuse an earlier pyramid JSON. WB049's selected
+        # historical installs or reuse an earlier pyramid JSON. The selected
         # current configs must describe that exact prepared selection.
         for kind in ("preparation", "asic", "simulation"):
             installed = companion(kind)

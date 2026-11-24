@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project WB-095 HTTP captures into compact, deterministic fake-peer fixtures."""
+"""Project companion flow HTTP captures into compact, deterministic fake-peer fixtures."""
 import argparse
 import json
 from pathlib import Path
@@ -20,7 +20,7 @@ def export(path, action):
     assert all(row['status'] == 200 for row in rows)
     exchanges = []
     remaining = (['Get', 'Discover', 'Get', 'Describe', 'Get', 'Describe', 'Get'] +
-                 (['Stage_fresh', 'Get', 'Launch_fresh'] if action == 'c8' else ['Plan', 'Get', 'Run']))
+                 (['Stage_fresh', 'Get', 'Launch_fresh'] if action == 'stage-checklist' else ['Plan', 'Get', 'Run']))
     for row in rows:
         if not remaining:
             break
@@ -84,10 +84,10 @@ def export(path, action):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('slice', choices=('c8', 'c9'))
+    parser.add_argument('scenario', choices=('stage-checklist', 'flow-review'))
     parser.add_argument('trace', type=Path)
     args = parser.parse_args()
-    print('(\n' + '\n'.join('  ' + sexp(row) for row in export(args.trace, args.slice)) + '\n)')
+    print('(\n' + '\n'.join('  ' + sexp(row) for row in export(args.trace, args.scenario)) + '\n)')
 
 
 if __name__ == '__main__':

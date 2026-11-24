@@ -270,10 +270,10 @@ def exercise(session, fixture):
             planned = session.rpc('asic', f'(Plan ((flow standard) (profile {profile}) (endpoint synthesis) (assignments ())))', wait=True)
             preview = field(planned, 'preview')[0]
             # This client exits immediately; subsequent clients reconnect to daemon-owned work.
-            launched = session.rpc('asic', f'(Run (key fs0-{profile}) (preview {sexp(preview)}))')
+            launched = session.rpc('asic', f'(Run (key native-execution-{profile}) (preview {sexp(preview)}))')
             deadline = time.monotonic() + min(60, session.args.outer_timeout)
             while True:
-                operation = next(o for o in field(launched, 'operations') if field(o, 'key') == f'run:fs0-{profile}')
+                operation = next(o for o in field(launched, 'operations') if field(o, 'key') == f'run:native-execution-{profile}')
                 require(field(operation, 'state') not in ('failed', 'detached'),
                         f'{profile} launch failed: {sexp(operation)}')
                 allocated = [r for r in field(launched, 'runs')
@@ -287,7 +287,7 @@ def exercise(session, fixture):
             (session.evidence / f'{profile}-early-allocation.json').write_text(json.dumps(progress, indent=2))
             print(f'{session.evidence.name}/{profile}: allocation={bool(allocated)}, launcher={field(operation, "state")}', flush=True)
             launched = session.rpc('asic', 'Get', wait=True)
-            operation = next(o for o in field(launched, 'operations') if field(o, 'key') == f'run:fs0-{profile}')
+            operation = next(o for o in field(launched, 'operations') if field(o, 'key') == f'run:native-execution-{profile}')
             require(field(operation, 'state') == 'completed', f'Launch did not complete: {sexp(operation)}')
             matched = [r for r in field(launched, 'runs') if field(field(r, 'selection')[0], 'profile') == profile]
             require(len(matched) == 1, 'Expected one allocated run per profile')
@@ -302,7 +302,7 @@ def exercise(session, fixture):
                         'Incorrect fixture profile count')
             runs.append(run)
             summaries.append(summary)
-            duplicate = session.rpc('asic', f'(Run (key fs0-{profile}) (preview {sexp(preview)}))', wait=True)
+            duplicate = session.rpc('asic', f'(Run (key native-execution-{profile}) (preview {sexp(preview)}))', wait=True)
             require(len(field(duplicate, 'runs')) == len(runs), 'Duplicate launch allocated another run')
         ws = session.rpc('workspace')
         overview = next(w for w in field(ws, 'workspaces') if field(w, 'preset') == ['overview'])
@@ -381,7 +381,7 @@ def reopen_real(args):
                     {k: v for k, v in original.items() if k != 'freshness'}, 'Cached identity/data changed')
         ws = session.rpc('workspace')
         main = field(ws, 'main_context')
-        title = 'FS0 Real Demo ' + str(time.time_ns())
+        title = 'ASIC Execution Demo ' + str(time.time_ns())
         ws = session.mutate(ws, f'(Create_workspace (window {field(field(ws, "windows")[0], "id")}) (name {sexp(title)}) (context {main}))')
         demo = field(field(ws, 'workspaces')[-1], 'id')
         ws = session.mutate(ws, f'(Create_tile (workspace {demo}) (kind synthesis) (geometry ((x 0) (y 0) (width 56) (height 14))))')
@@ -480,7 +480,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--client', type=Path, default=repo / '_build/default/terminal/main.exe')
     parser.add_argument('--daemon', type=Path, default=repo / '_build/default/daemon/main.exe')
-    parser.add_argument('--evidence', type=Path, help='New directory; default unique /tmp/opencode/workbench-fs0-*')
+    parser.add_argument('--evidence', type=Path, help='New directory; default unique /tmp/opencode/workbench-native-execution-*')
     parser.add_argument('--real', action='store_true', help='After fixtures, run both real synthesis profiles serially')
     parser.add_argument('--reopen-real', type=Path, metavar='ACCEPTANCE_ROOT',
                         help='Reopen accepted real/state and verify cached real counts in PTY; no EDA or fixture build')
@@ -499,7 +499,7 @@ def main():
     if args.evidence:
         args.evidence.mkdir(parents=False, exist_ok=False)
     else:
-        args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs0-', dir='/tmp/opencode'))
+        args.evidence = Path(tempfile.mkdtemp(prefix='workbench-native-execution-', dir='/tmp/opencode'))
     print('Evidence: ' + str(args.evidence), flush=True)
     outcome = {}
     try:
@@ -510,8 +510,8 @@ def main():
         fixture.mkdir()
         root = fixture / 'project'
         root.mkdir()
-        (root / 'dune-project').write_text('(lang dune 3.17)\n(name fs0_acceptance)\n')
-        (root / 'dune').write_text('(rule (alias runtest) (action (progn (echo "FS0 generic fixture passed") (with-stdout-to generic-passed (echo passed)))))\n')
+        (root / 'dune-project').write_text('(lang dune 3.17)\n(name native_execution_acceptance)\n')
+        (root / 'dune').write_text('(rule (alias runtest) (action (progn (echo "Generic execution fixture passed") (with-stdout-to generic-passed (echo passed)))))\n')
         provider_fixture = repo / 'backend/test/asic'
         provider = root / 'fake-provider'
         provider.write_bytes((provider_fixture / 'fake_provider.py').read_bytes())

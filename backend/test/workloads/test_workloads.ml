@@ -309,11 +309,11 @@ let integration () =
   Service.shutdown restarted
 ;;
 let retained_payloads () =
-  Option.iter (Sys.getenv "PT8_WORKLOAD_INSPECTION_JSON") ~f:(fun filename ->
+  Option.iter (Sys.getenv "WORKBENCH_TEST_WORKLOAD_INSPECTION_JSON") ~f:(fun filename ->
     let bytes=In_channel.read_all filename in
     let response=S.validate_response (inspect "/explicit/retained-result.json") bytes in
     check (String.equal response.json bytes) "Actual retained inspection bytes changed");
-  Option.iter (Sys.getenv "PT8_WORKLOAD_COMPARISON_JSON") ~f:(fun filename ->
+  Option.iter (Sys.getenv "WORKBENCH_TEST_WORKLOAD_COMPARISON_JSON") ~f:(fun filename ->
     let bytes=In_channel.read_all filename in
     let j=Yojson.Safe.from_string bytes in
     let module P=Hardcaml_workbench_backend.Asic_public in
@@ -341,7 +341,7 @@ let main () =
   retained_payloads ();
   let%bind ()=cache () in
   let%map ()=integration () in
-  printf "PT8 workload backend: %d checks passed\n%!" !checks
+  printf "Workload backend: %d checks passed\n%!" !checks
 let () =
   don't_wait_for (Monitor.try_with main >>= function
     | Ok () -> Shutdown.exit 0

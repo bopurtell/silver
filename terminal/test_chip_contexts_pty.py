@@ -1,4 +1,4 @@
-"""WB-081: real terminal, durable contexts and an instrumented fresh-build provider."""
+"""Chip contexts: real terminal, durable contexts and an instrumented fresh-build provider."""
 from contextlib import closing, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory

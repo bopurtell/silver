@@ -90,10 +90,10 @@ def main():
 
     for number in (signal.SIGINT, signal.SIGTERM):
         signal.signal(number, on_signal)
-    root = Path(tempfile.mkdtemp(prefix='workbench-fs1-physical-', dir='/tmp/opencode'))
+    root = Path(tempfile.mkdtemp(prefix='workbench-asic-physical-', dir='/tmp/opencode'))
     print(root, flush=True)
     summary = {
-        'contract': 'workbench.fs1-physical-evidence', 'schema_version': 1,
+        'contract': 'workbench.asic-physical-evidence', 'schema_version': 1,
         'started_at': now(), 'evidence': str(root), 'status': 'running',
         'project': str(project), 'provider': str(provider),
         'stage_timeout_seconds': args.stage_timeout,

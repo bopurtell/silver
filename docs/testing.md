@@ -1,22 +1,11 @@
-# Testing Workbench: ownership, suite selection and integration boundaries
+# Testing Silver: ownership and integration boundaries
 
-**Current addition:** [real fresh-prefix pyramid tests](real_prefix_pyramid.md)
-provide individually selectable real endpoints and one explicit serial aggregate.
-They never enter default/local test execution; only their controlled harness tests
-do. Elaboration and Synthesis have actually passed; later physical rungs remain
-unrun in this new runner. The earlier developer synthesis pause described below
-is historical; see [its completed acceptance](developer_workflow_refactored_closeout.md).
+This guide is about **tests of the software tool**. The
+[Testing workspace](testing_workspace.md) executes a separate thing: a
+project's declared verification suites. A deliberate DUT failure can be a
+passing Silver test if Silver reports and retains that failure correctly.
 
-2026-11-10. This guide is about **tests of the software tool**. Workbench's Testing
-workspace executes project-defined tests and hardware verification; see
-[Testing controls](testing_workspace.md) for that separate user workflow.
-
-The next-session continuation plan is
-[cached under migration guides](migration_guides/workbench-test-refactor.md).
-The [session checkpoint](session_checkpoint.md) preserves the earlier example
-refactor and acceptance context; it is not a current test queue.
-
-## The hardware analogy is useful
+## Where tests belong
 
 Treat a software subsystem like an IP for test ownership: the subsystem owns its
 behavioral contracts and tests, while the application owns composition contracts.
@@ -33,9 +22,9 @@ being asserted**. The number of modules it imports is not the deciding factor.
 | Backend service + its provider adapter | `backend/test/` if the backend owns the composition contract |
 | HTTP server request/response handling | `daemon/test/` even though it uses backend/protocol libraries |
 | Terminal input/state/rendering + catalog behavior | `terminal/` inline/focused tests, or terminal-owned integration |
-| Whole setup→daemon→client→provider scenario | Repository-wide integration/acceptance, currently often `scripts/`; future `test/integration/` |
+| Whole setup→daemon→client→provider scenario | Repository-wide integration/acceptance in `test/integration/` and `scripts/` |
 | DUT stimulus/model/assertions/scoreboards | Project-owned verification/provider, not Workbench's generic tool tests |
-| Shared fake provider/PTY/HTTP helpers | Test-only reusable support; future `test/support/`, not production imports from test entrypoints |
+| Shared fake provider/PTY/HTTP helpers | Test-only reusable support such as `test/support/`, not production imports from test entrypoints |
 
 For example, a cache/provider test does not move to root just because it composes
 two modules. A test of the complete installed client/daemon/provider workflow does
@@ -43,8 +32,6 @@ belong at the application-integration level. Keep responsibility visible rather
 than sorting every two-module test into a global folder.
 
 ## Current layout
-
-Continuation delivered: [bounded execution and support/smoke verification](test_refactor_verification.md).
 
 ```text
 protocol/                  production code and some inline contracts
@@ -61,6 +48,7 @@ terminal/                  presentation code, inline tests and focused test modu
 scripts/                   many opt-in HTTP/PTY/installed/real-provider/EDA harnesses
 test/
   dune                     index/selectors over existing subsystem tests
+  integration/             app-wide fresh-prefix and streaming export runners
   support/                 shared PTY/screen helpers and controlled regression tests
   fixtures/                DATA ONLY, including miniature projects
   baselines/               DATA ONLY, expected terminal captures
@@ -71,10 +59,7 @@ inline-test libraries. They need not have filenames starting with `test_` or be
 inside root `test/`. Conversely, an executable named `test_provider` or a Python
 file named `test-*` is not automatically a registered test.
 
-Previously root `test/` was wholly data-only. This first restructuring makes it a
-useful suite index while retaining data-only boundaries around its existing
-children. Nested fixture Dune projects still cannot become Workbench targets.
-No source/file reorganization or golden-output regeneration was performed.
+Nested projects in `test/fixtures/` are specimens, not Silver build targets.
 
 ## Runnable selection groups
 
@@ -89,23 +74,17 @@ See [root test README](../test/README.md) for commands and explicit constraints.
 | `@test-api` | daemon HTTP/RPC tests, selected separately |
 | `@test-support` | shared test helpers, compatibility imports and failure/cleanup controls |
 | `@test-native-smoke` | opt-in synthetic terminal waveform handoff with real daemon/client |
+| `@test-native-standalone` | opt-in installed command, discovery, locking, and reattachment |
 | `@test-local` | contracts + backend + presentation + setup + support; API and native smoke are NOT included |
 
 These are mixed unit/contract/local-integration groups. They do not imply complete
 API or frontend coverage. Shared helper tests now join `@runtest`; native smoke
 remains opt-in and no real EDA is added to the default closure.
 
-Contracts/presentation/API passed together at `-j2`; backend and setup passed
-separately at `-j1`. RPC fixtures now explicitly select nested `-j1`. The owner
-permits disposable Git fixture authoring. Setup deliberately launches twelve
-initializers, so run it separately under the shared lock. The combined local
-aggregate has not been executed or bounded as a concurrent group. **An outer
-Dune limit still does not override subprocess budgets.**
-
-Native PTY scripts, actual hardware providers, retained external evidence and EDA
-need their own explicit input/budget/registration policy. No EDA was activated by
-the test restructuring. The [separate workflow closeout](developer_workflow_refactored_closeout.md)
-records the accepted developer synthesis and restart checks.
+Local tests can start subprocesses, create disposable Git fixtures, or run
+nested builds. Some RPC fixtures select nested `-j1`; an outer Dune limit
+does not override subprocess budgets. On constrained machines run setup
+separately: it deliberately starts twelve initializers.
 
 ## Integration is about contracts, not a complete N×M product
 
@@ -122,38 +101,12 @@ EDA behavior. Running all real physical endpoints after a styling edit is not a
 reasonable default. Conversely, avoiding an expensive run does not make its old
 measurements valid for newly changed hardware or backend inputs.
 
-## Shared support and future migrations
+## Opt-in external inputs
 
-The current HTTP/PTY support is scattered, with some tests importing other test
-entrypoints using path-relative dynamic imports. Those imports should eventually
-become small test-only libraries/helpers (process ownership, isolated state,
-typed HTTP client, PTY driver, assertion/receipt utilities). Production modules
-must not depend on that support. Subsystem-specific builders can remain local.
-
-Safe next steps, in separate small migrations:
-
-1. Fix nested job budgets and fixture Git-write assumptions for affected suites.
-2. Extract one shared helper at a time without changing test semantics or golden
-   outputs; declare its Python/OCaml dependencies and preserve invocation paths.
-3. Register a representative Workbench-only native integration smoke explicitly.
-4. Move genuinely app-wide drivers to `test/integration/` with compatibility
-   entrypoints where needed; keep owned integration with its subsystem.
-5. After the example refactor, adapt its real-provider integration tests against
-   the new explicit interface/version. Do not make all local tool tests depend on
-   its evolving DUT suite. Keep actual verification outcomes separate from tool
-   correctness assertions and retain historical producer/evidence identities.
-
-Steps 1–3 have an initial delivered slice: explicit RPC budgets, shared screen/PTY
-support with ten controlled tests, and the terminal-owned native waveform smoke.
-HTTP/session support extraction and broader app-wide migration remain pending;
-`test/integration/` is still proposed. A universal scheduler,
-automatic change-impact oracle and full external-input fingerprint system are
-outside this first slice.
-
-## References and current acceptance
-
-- [Representative source inventory and registration evidence](testing_inventory.md)
-- [Selector execution and fixture-boundary verification](test_suite_selection_verification.md)
-- [Tool tests versus hardware verification; Dune/external-input limits](testing_strategy_status.md)
-- [Bounded restructuring plan](test_organization_plan.md)
-- [Construction queue](construction_phase_plan.md)
+The [real fresh-prefix tests](real_prefix_pyramid.md) have individually
+selectable endpoints and an explicit serial aggregate. Only the controlled
+harness tests run in the default or local selection. Similarly, the
+[streaming export runner](streaming_export_acceptance.md) needs explicit
+prebuilt and retained-evidence inputs. Do not point these runners at an
+owner's mutable project or reuse retained hardware measurements as proof of a
+new execution.

@@ -6178,7 +6178,7 @@ let host_catalog_base session =
         ])))
 ;;
 
-(* WB-054: contextual actions for the focused view lead the palette and key dispatch. *)
+(* Contextual actions for the focused view lead the palette and key dispatch. *)
 let host_catalog session =
   let resource_commands =
     Option.value_map session.asic ~default:[] ~f:(fun asic ->
@@ -6769,7 +6769,7 @@ let open_waveform_workspace session artifact =
     return ()
 ;;
 
-(* One explorer/Timing inspector input step. The key handler and the WB-054 contextual
+(* One explorer/Timing inspector input step. The key handler and the contextual
    palette actions share it, so both reach exactly the same routing. *)
 let inspection_step session tile view action =
   let operation =

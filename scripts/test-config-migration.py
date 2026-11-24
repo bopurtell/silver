@@ -21,7 +21,7 @@ NAMES = ('hardcaml-workbench.sexp', 'hardcaml-workbench-asic.sexp',
 
 class MigrationCLI(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='wb049-cli-', dir='/tmp/opencode')
+        self.temp = tempfile.TemporaryDirectory(prefix='config-migration-cli-', dir='/tmp/opencode')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / 'dune-project').write_text('(lang dune 3.22)\n(name fixture)\n')

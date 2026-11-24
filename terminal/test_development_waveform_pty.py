@@ -66,7 +66,7 @@ def main():
 
         def drain(self, seconds=.3):
             super().drain(seconds)
-            return native.fs0.terminal_screen(bytes(self.data), width=self.width, height=self.height)
+            return native.native_execution.terminal_screen(bytes(self.data), width=self.width, height=self.height)
 
         def palette(self, title):
             for key in (b' ', b'c', b'c'):

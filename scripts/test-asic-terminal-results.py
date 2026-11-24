@@ -26,8 +26,8 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('metrics', Path(__file__).with_name('test-retained-asic-metrics.py'))
 metrics = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(metrics)
-fs0, dashboard = metrics.fs0, metrics.dashboard
-field, record, require = fs0.field, fs0.record, fs0.require
+native_execution, dashboard = metrics.native_execution, metrics.dashboard
+field, record, require = native_execution.field, native_execution.record, native_execution.require
 
 
 def load(path):
@@ -42,7 +42,7 @@ def sha256(path):
     return h.hexdigest()
 
 
-class Session(fs0.Session):
+class Session(native_execution.Session):
     def start(self):
         # The shared helper starts a directly owned daemon; give it its own
         # process group as well, so interrupted report children are owned too.
@@ -78,7 +78,7 @@ def private_project(args, receipt, inputs):
     root = args.evidence / 'project'
     root.mkdir()
     (args.evidence / 'state').mkdir()
-    (root / 'dune-project').write_text('(lang dune 3.17)\n(name fs1_terminal_results_acceptance)\n')
+    (root / 'dune-project').write_text('(lang dune 3.17)\n(name terminal_results_acceptance)\n')
     config = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
     allocation = receipt['allocation']
     provider = receipt.get('config', {}).get('provider', field(config, 'provider_executable'))
@@ -96,7 +96,7 @@ def private_project(args, receipt, inputs):
         'ok = ok or (len(a) == 8 and a[:3] == ["observation", "read-updates", ' + repr(allocation['attempt']) + '] and a[3:6] == ["--stream-id", ' + repr(allocation['stream_id']) + ', "--after"] and a[6].isdigit() and a[7:] == ["--json"])\n' +
         'ok = ok or a == ["finalization-inspect", ' + repr(attempt) + ', "--json"]\n' +
         'with (base / "provider-calls.jsonl").open("a") as f: f.write(json.dumps(dict(argv=a, allowed=ok, time=time.time())) + "\\n")\n' +
-        'if not ok: sys.exit("FS1 read-only guard rejected command")\n' +
+        'if not ok: sys.exit("ASIC read-only guard rejected command")\n' +
         'p = subprocess.run([' + repr(provider) + '] + a, capture_output=True)\n' +
         'name = "query-" + str(time.time_ns())\n' +
         '(base / (name + ".stdout")).write_bytes(p.stdout)\n' +
@@ -109,12 +109,12 @@ def private_project(args, receipt, inputs):
     # No project flow command is needed to adopt an existing allocation. Fail
     # closed even if a future UI regression tries to launch through the project.
     deny = args.evidence / 'no-project-execution'
-    deny.write_text('#!' + sys.executable + '\nimport sys\nsys.exit("FS1 acceptance forbids project execution")\n')
+    deny.write_text('#!' + sys.executable + '\nimport sys\nsys.exit("Retained ASIC acceptance forbids project execution")\n')
     deny.chmod(0o700)
     config = metrics.put(config, 'provider_executable', str(guard))
     config = metrics.put(config, 'project_executable', str(deny))
     config = metrics.put(config, 'results_root', receipt['config']['results_root'])
-    (root / 'hardcaml-workbench-asic.sexp').write_text(fs0.sexp(config) + '\n')
+    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(config) + '\n')
     return root, Path(provider)
 
 
@@ -336,7 +336,7 @@ def exercise(args):
         context = next(c for c in field(ws, 'contexts') if field(c, 'id') == field(demo, 'context'))
         return session.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run %s))' % (
             field(demo, 'id'), field(context, 'id'), field(context, 'selection_revision'),
-            '()' if selected is None else '(' + fs0.sexp(selected) + ')'))
+            '()' if selected is None else '(' + native_execution.sexp(selected) + ')'))
 
     def scroll_pages(label, limit=200):
         pages = [terminal.capture(label + '-000')]
@@ -364,7 +364,7 @@ def exercise(args):
         metrics.no_generic_jobs(session, 'initial daemon')
         check(field(session.rpc('asic'), 'runs') == [], 'Private daemon starts without canonical registered runs')
         reference = [['attempt', allocation['attempt']], ['stream_id', allocation['stream_id']]]
-        snap = session.rpc('asic', '(Register %s)' % fs0.sexp(reference), wait=True)
+        snap = session.rpc('asic', '(Register %s)' % native_execution.sexp(reference), wait=True)
         registered = field(snap, 'runs')
         check(len(registered) == 1 and field(registered[0], 'reference') == reference, 'Register adopts exact original allocation, not a new execution')
         run = field(registered[0], 'run')
@@ -372,9 +372,9 @@ def exercise(args):
             operation = load(inputs['operation'])
             normalized = load(inputs['results']['path'])
             check(sha256(inputs['results']['path']) == inputs['results']['sha256'] == operation['results']['sha256'], 'Parent input normalized-results hash verified')
-            snap = session.rpc('asic', '(Inspect_finalization (run %s) (attempt %s))' % (fs0.sexp(run), fs0.sexp(inputs['operation_attempt'])), wait=True)
+            snap = session.rpc('asic', '(Inspect_finalization (run %s) (attempt %s))' % (native_execution.sexp(run), native_execution.sexp(inputs['operation_attempt'])), wait=True)
         else:
-            snap = session.rpc('asic', '(Load_summary %s)' % fs0.sexp(run), wait=True)
+            snap = session.rpc('asic', '(Load_summary %s)' % native_execution.sexp(run), wait=True)
         summary = find_summary(snap)
         report = load(args.evidence / 'actual-stage-report.json')
         check(field(summary, 'execution_file') == receipt['execution_file'], 'Exact original execution file adopted')
@@ -402,7 +402,7 @@ def exercise(args):
                   not any(c['reference']['boundary'] == 'signoff' for c in report['checkpoints']), 'Earlier synthesis retained; no completed signoff checkpoint')
             check(bool(projected), 'Earlier accumulated synthesis resource/diagnostic metrics remain available')
         ws = session.rpc('workspace')
-        ws = session.mutate(ws, '(Create_workspace (window %s) (name "FS1 Terminal Results Private") (context %s))' % (
+        ws = session.mutate(ws, '(Create_workspace (window %s) (name "Private ASIC Terminal Results") (context %s))' % (
             field(field(ws, 'windows')[0], 'id'), field(ws, 'main_context')))
         demo = field(ws, 'workspaces')[-1]
         kinds = ['timing', 'timing', 'placement', 'checks', 'cts', 'routing', 'finalization'] if inputs else ['synthesis', 'synthesis', 'finalization']
@@ -413,7 +413,7 @@ def exercise(args):
         select(run)
         mutate('(Set_zoom (workspace %s) (tile (%s)))' % (field(demo, 'id'), tiles[0]))
         terminal = metrics.Terminal(session)
-        terminal.palette('Switch to FS1 Terminal Results Private')
+        terminal.palette('Switch to Private ASIC Terminal Results')
         if inputs:
             acceptance_line = 'Acceptance (reported): ' + operation['acceptance']
             timing_lines = [metric_text(m) for m in field(imported, 'metrics') if field(m, 'key') in ('setup_slack', 'hold_slack')]
@@ -469,7 +469,7 @@ def exercise(args):
         if inputs:
             terminal.key(b'e')
             terminal.capture('06-pinned-detail-state', ['Finalization attempt (exact):'])
-        mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (tiles[0], fs0.sexp(run)))
+        mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (tiles[0], native_execution.sexp(run)))
         terminal.palette('Unzoom workspace')
         terminal.key(b'\t')
         terminal.palette('Zoom focused tile')
@@ -546,13 +546,13 @@ def exercise(args):
         session.start()
         check(session.metadata['instance_id'] != old_instance, 'Daemon restart creates a new instance')
         check(session.rpc('workspace') == final_ws, 'Private layout, selection and pin persist exactly')
-        restored = find_summary(session.rpc('asic', '(Load_summary %s)' % fs0.sexp(run), wait=True))
+        restored = find_summary(session.rpc('asic', '(Load_summary %s)' % native_execution.sexp(run), wait=True))
         check(field(restored, 'freshness') == 'Cached_unverified', 'Restarted L2 is explicitly cached/unverified')
         check({k: v for k, v in restored if k != 'freshness'} == {k: v for k, v in summary if k != 'freshness'}, 'L2 preserves all terminal/synthesis fields except freshness')
         check(calls() == warm, 'Restart and L2 load make no provider queries')
         # Reopen an actual PTY after restart to verify displayed freshness too.
         terminal = metrics.Terminal(session, cache_only=True)
-        terminal.palette('Switch to FS1 Terminal Results Private')
+        terminal.palette('Switch to Private ASIC Terminal Results')
         mutate('(Set_zoom (workspace %s) (tile (%s)))' % (field(demo, 'id'), tiles[0]))
         terminal.capture('11-restarted-cache', ['Cached_unverified', 'Terminal timing (aggregate)' if inputs else 'Cell count:'])
         check(calls() == warm, 'Restarted PTY remains provider-free')
@@ -603,7 +603,7 @@ def main():
             setattr(args, key, getattr(args, key).resolve())
     require(0 < args.outer_timeout <= 300, 'Timeout must be 1..300 seconds')
     require(args.client.is_file() and args.daemon.is_file(), 'Existing client and daemon binaries required')
-    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs1-terminal-results-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-terminal-results-', dir='/tmp/opencode'))
     (args.evidence / 'commands.json').write_text(json.dumps(dict(argv=sys.argv, options={k: str(v) for k, v in vars(args).items()}, pty=dict(width=120, height=40)), indent=2))
     print('Evidence: ' + str(args.evidence), flush=True)
 
@@ -617,7 +617,7 @@ def main():
         if not (args.evidence / 'result.json').exists():
             (args.evidence / 'result.json').write_text(json.dumps(dict(status='failed', error=traceback.format_exc()), indent=2))
         raise
-    print('PASS: private FS1 terminal-results HTTP / PTY / L2', flush=True)
+    print('PASS: private ASIC terminal results HTTP / PTY / L2', flush=True)
 
 
 if __name__ == '__main__':

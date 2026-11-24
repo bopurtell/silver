@@ -1,4 +1,4 @@
-"""WB-086: permanent project window, real PTY and compiled mutable starter targets.
+"""Permanent project window, real PTY and compiled mutable starter targets.
 
 Run in the Silver opam switch with hardcaml-asic-starter on PATH. --evidence must
 name a new directory on disk; set TMPDIR to a disk-backed directory for Dune.

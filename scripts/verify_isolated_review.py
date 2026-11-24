@@ -30,7 +30,7 @@ def main():
                              'ip/controlled_fifo/verif/simulation/provider.py')
     parser.add_argument('--parent', type=Path, default=Path('/tmp/opencode'))
     args = parser.parse_args()
-    base = Path(tempfile.mkdtemp(prefix='wb052-', dir=args.parent))
+    base = Path(tempfile.mkdtemp(prefix='isolated-adoption-review-', dir=args.parent))
     print('Disposable verification directory: ' + str(base), flush=True)
     generation = args.generation.resolve(strict=True)
     switch = args.switch_prefix.resolve(strict=True)

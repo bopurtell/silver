@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SYNTHETIC FS2 demonstration, not hardware simulation or EDA evidence.
+"""SYNTHETIC simulation demonstration, not hardware simulation or EDA evidence.
 
 Only Python's standard library and the adjacent copied simulation_wire are used.
 Semantic failures intentionally exit zero after a complete Failed event stream.
@@ -19,7 +19,7 @@ SUITE = 'synthetic-checks'
 CASES = ('reset-sequence', 'seeded-pattern', 'injected-mismatch')
 PARAMETERS = {'steps': ('8', ['8', '16', '32']),
               'pattern': ('walking', ['walking', 'alternating'])}
-LABEL = 'SYNTHETIC FS2 demo - no hardware simulation'
+LABEL = 'SYNTHETIC simulation demo - no hardware simulation'
 
 
 def catalog():
@@ -45,7 +45,7 @@ def selection(failed=False):
 def validate(request):
     req = dict(request)
     if set(req) != {'protocol_version', 'attempt_id', 'selection'} or req['protocol_version'] != '1':
-        raise ValueError('Expected FS2 v1 request')
+        raise ValueError('Expected simulation-provider v1 request')
     sel = dict(req['selection'])
     if set(sel) != {'suite', 'cases', 'seed', 'parameters', 'asic_inputs'}:
         raise ValueError('Unexpected selection fields')

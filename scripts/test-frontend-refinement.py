@@ -321,25 +321,25 @@ def acceptance(t, check, http, runs, presets):
     check(producers() == producers_before, 'All Timing browsing/filter/sort/detail/open/run changes invoke no EDA/finalization producer')
     check(len(plans()) == len(plans_before) + 1, 'Timing browsing invokes no additional planner')
 
-    # FS1 non-timing overlays remain available above the workspace.
+    # Non-timing ASIC overlays remain available above the workspace.
     for domain, title in [('clocks', 'Inspect clocks'), ('routing', 'Inspect routing')]:
         t.command(title + ' ' + field(runs[0], 'id'))
-        t.capture('fs1-' + domain + '-overlay', ['INSPECT ' + domain])
+        t.capture('asic-' + domain + '-overlay', ['INSPECT ' + domain])
         t.key(b'\x1b')
-        t.capture('fs1-' + domain + '-restored', ['Timing · Paths', 'Timing · Provenance'], ['INSPECT ' + domain])
+        t.capture('asic-' + domain + '-restored', ['Timing · Paths', 'Timing · Provenance'], ['INSPECT ' + domain])
 
-    # WB-054: closing an explorer returns to the retained Timing reader below it.
+    # Closing an explorer returns to the retained Timing reader below it.
     # Establish that reader explicitly; closing the overlay must not close both.
     t.focus_view('timing paths')
     t.key(b'\r')
-    retained_detail = t.capture('wb054-retained-timing-precondition',
+    retained_detail = t.capture('retained-timing-precondition',
         ['Timing · Selected path', 'No tool report or binary layout is claimed.'])
     retained_path = pane_body(retained_detail, 'Timing · Selected path')[0]
     before_close = snapshot()
     t.command('Inspect clocks ' + field(runs[0], 'id'))
-    t.capture('wb054-explorer-help', ['INSPECT clocks', 'Space c x close'])
+    t.capture('explorer-help', ['INSPECT clocks', 'Space c x close'])
     t.key(b' '); t.key(b'c'); t.key(b'x')
-    restored_detail = t.capture('wb054-explorer-closed',
+    restored_detail = t.capture('explorer-closed',
         ['Timing · Paths', 'Timing · Provenance', 'No tool report or binary layout is claimed.'],
         ['INSPECT clocks'])
     check(snapshot() == before_close, 'Space c x closes the explorer without changing selection, bindings or registry')
@@ -348,7 +348,7 @@ def acceptance(t, check, http, runs, presets):
     # Close the retained reader as a separate contextual action. Only then is the
     # disabled reason valid; merely returning from an overlay keeps detail open.
     t.command('Close inspector (Space c x)')
-    closed_detail = t.capture('wb054-timing-reader-closed',
+    closed_detail = t.capture('timing-reader-closed',
         ['Closed path detail; focus returned to timing · paths (selection kept)',
          'Enter to load selected path detail (read-only)'])
     check(snapshot() == before_close and
@@ -357,7 +357,7 @@ def acceptance(t, check, http, runs, presets):
                   for line in pane_body(closed_detail, 'Timing · Selected path')),
           'Closing the retained Timing reader preserves selected row, pins, contexts and registry')
     t.open_palette('Close inspector')
-    t.capture('wb054-close-unavailable', ['Close inspector (Space c x)', 'no inspector open on the focused tile'])
+    t.capture('close-unavailable', ['Close inspector (Space c x)', 'no inspector open on the focused tile'])
     t.key(b'\x1b')
     t.command('Switch to Overview')
     t.resize(180, 55)

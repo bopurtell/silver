@@ -2,7 +2,7 @@ open! Core
 open Hardcaml_workbench_project_integration
 
 let with_root f =
-  let root = Filename_unix.temp_dir "wb049-" "" |> Filename_unix.realpath in
+  let root = Filename_unix.temp_dir "config-location-" "" |> Filename_unix.realpath in
   let rec remove path =
     if Poly.equal (Core_unix.lstat path).st_kind S_DIR
     then (

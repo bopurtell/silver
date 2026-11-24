@@ -1,0 +1,6 @@
+silver hardcaml-workbench
+silver-author
+silver-daemon hardcaml-workbench-daemon
+silver-init hardcaml-workbench-init
+silver-simulation-setup hardcaml-workbench-simulation-setup
+silver-workspace hardcaml-workbench-workspace

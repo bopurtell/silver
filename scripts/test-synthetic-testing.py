@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private synthetic FS2 provider + real native HTTP/PTY acceptance; never builds.
+"""Private synthetic simulation provider + real native HTTP/PTY acceptance; never builds.
 
 No actual EDA, hardware simulator, root fixtures or live demo state are used.
 Explicit --daemon/--client/--preset-export select already built native executables.
@@ -71,7 +71,7 @@ def standalone(base):
         lines = events.read_text().splitlines()
         decoded = [parse(line) for line in lines]
         require([int(field(e, 'sequence')) for e in decoded] == list(range(len(decoded))),
-                'strict contiguous FS2 events')
+                'strict contiguous simulation events')
         require(field(decoded[0], 'payload') == 'Started' and
                 field(decoded[-1], 'payload') == ['Finished', 'Failed'], 'strict complete failed stream')
         outputs.append((events.read_bytes(), {p.name: p.read_bytes() for p in artifacts.iterdir()}))
@@ -96,6 +96,12 @@ def upgrade_checks(base):
         (root / name).unlink()
     demo.install_simulation(legacy)
     require(sentinel.read_bytes().endswith(b'\x00\xff'), 'legacy additive upgrade preserves evidence')
+    manifest = provider.load(legacy / 'manifest.json')
+    manifest['simulation_install']['owner'] = demo.LEGACY_SIMULATION_INSTALL_OWNER
+    provider.save(legacy / 'manifest.json', manifest)
+    upgraded = demo.install_simulation(legacy)['simulation_install']
+    require(upgraded['owner'] == demo.SIMULATION_INSTALL_OWNER and upgraded['sha256'] == owned['sha256'],
+            'legacy ownership marker upgrades without changing the installed files')
     before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
     config = root / 'hardcaml-workbench-simulation.sexp'
     original = config.read_bytes()
@@ -147,7 +153,7 @@ class Terminal:
                 if data:
                     self.data.extend(data)
         require(self.process.poll() is None, 'native PTY client remains running')
-        return flow.fs0_screen.terminal_screen(bytes(self.data), width=self.width, height=self.height)
+        return flow.screen_oracle.terminal_screen(bytes(self.data), width=self.width, height=self.height)
 
     def key(self, value):
         os.write(self.master, value)
@@ -310,7 +316,8 @@ def native(base, args):
             pass
         finally:
             demo.simulation_poll = original_poll
-        receipt = provider.load(base / 'simulation-seed.json')['submissions']['synthetic-fs2-v1-pass']
+        pass_key = demo.SIMULATION_SUBMISSION_PREFIX + 'pass'
+        receipt = provider.load(base / 'simulation-seed.json')['submissions'][pass_key]
         first = details(client, receipt['attempt_id'])
         retry = field(client.rpc(receipt['operation'], domain='simulation', wait=False), 'detail')[0]
         check(field(first, 'id') == field(retry, 'id') and field(first, 'job') == field(retry, 'job') and
@@ -326,10 +333,12 @@ def native(base, args):
         config.write_text(config.read_text().replace('"20"', '"19"'))
         source.write_text(source.read_text().replace("('label', LABEL)", "('label', LABEL + ' revised catalog')"))
         pending = provider.load(base / 'simulation-seed.json')
-        pending['submissions']['synthetic-fs2-v1-failure'] = dict(
+        # An existing legacy key must be retried rather than replaced by a new one.
+        failure_key = demo.LEGACY_SIMULATION_SUBMISSION_PREFIX + 'failure'
+        pending['submissions'][failure_key] = dict(
             label='SYNTHETIC unreserved stale receipt', operation=
-            '(Launch (submission_key synthetic-fs2-v1-failure) (discovery_digest %s) (selection %s))' %
-            (sexp('0' * 64), sexp(simulation.selection(True))))
+            '(Launch (submission_key %s) (discovery_digest %s) (selection %s))' %
+            (sexp(failure_key), sexp('0' * 64), sexp(simulation.selection(True))))
         provider.save(base / 'simulation-seed.json', pending)
         demo.seed_simulation(base, client)
         check(len(attempts(client)) == 2 and len(runs()) == 2, 'config/catalog revision retries retained keys without duplication')
@@ -398,8 +407,9 @@ def native(base, args):
               field(next(w for w in field(legacy_layout, 'workspaces') if field(w, 'preset') == ['testing']), 'name') != 'Testing',
               'missing Testing installed without adopting/overwriting custom name collision')
         receipts = provider.load(base / 'simulation-seed.json')['submissions']
-        pass_id = receipts['synthetic-fs2-v1-pass']['attempt_id']
-        fail_id = receipts['synthetic-fs2-v1-failure']['attempt_id']
+        pass_id = receipts[pass_key]['attempt_id']
+        fail_id = receipts[failure_key]['attempt_id']
+        check(set(receipts) == {pass_key, failure_key}, 'Seed upgrade does not replace retained submission keys')
         for aid, outcome in ((pass_id, 'Passed'), (fail_id, 'Failed')):
             detail = details(client, aid)
             check(field(detail, 'outcome') == outcome and field(detail, 'exit_code') == ['0'],

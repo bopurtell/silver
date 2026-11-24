@@ -66,7 +66,7 @@ def main():
     parser.add_argument('--outer-timeout', type=int, default=60)
     args = parser.parse_args()
     args.client, args.daemon = args.client.resolve(), args.daemon.resolve()
-    base = Path(tempfile.mkdtemp(prefix='pt8-workloads-ui-', dir='/tmp/opencode'))
+    base = Path(tempfile.mkdtemp(prefix='memory-workloads-ui-', dir='/tmp/opencode'))
     args.evidence = base
     args.stage_timeout_seconds = None
     args.example_root = base
@@ -75,13 +75,13 @@ def main():
     provider.chmod(0o700)
     for name in ('workload-inspect', 'compare'):
         (base / ('hardcaml-asic-experimental-' + name)).write_text('synthetic companion identity')
-    resources = module('pt8_ui_resources', ROOT / 'scripts/test-resource-inspector.py')
-    dashboard = module('pt8_ui_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
-    fs0, session = resources.native_setup(args, base, provider)
+    resources = module('workloads_ui_resources', ROOT / 'scripts/test-resource-inspector.py')
+    dashboard = module('workloads_ui_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
+    native_execution, session = resources.native_setup(args, base, provider)
     checks = []
 
     def check(value, label):
-        fs0.require(value, label)
+        native_execution.require(value, label)
         checks.append(label)
 
     def reads():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in WB-040 real FIFO/retained ASIC HTTP + PTY export acceptance.
+"""Opt-in real FIFO/retained ASIC HTTP + PTY export acceptance.
 
 Requires prebuilt applications and example FIFO executables, plus the real-demo
 ASIC manifest. Uses a private project/state; only reads the retained ASIC inputs.
@@ -113,7 +113,7 @@ def run(args, evidence):
         "if not ok: sys.exit('unexpected non-read-only ASIC command')\n"
         "sys.exit(subprocess.run([p['provider']]+a,timeout=60).returncode)\n")
     deny = executable(evidence / 'no-project-build', "raise SystemExit('no build/EDA in export test')\n")
-    native.fs0.write_config(root, deny, relay, evidence / 'results')
+    native.native_execution.write_config(root, deny, relay, evidence / 'results')
 
     receipt = evidence / 'viewer.json'
     viewer = executable(evidence / 'record-viewer',
@@ -185,7 +185,7 @@ def run(args, evidence):
         session.start()
         if args.case in ('all', 'simulation'):
             catalog = session.discover()
-            snap = session.api(operation=['Launch', ['submission_key', 'wb040-64mib'],
+            snap = session.api(operation=['Launch', ['submission_key', 'streaming-export-64mib'],
                 ['discovery_digest', field(catalog, 'discovery_digest')[0]], ['selection', [
                     ('suite', 'controlled-fifo'), ('cases', ['export-stress']), ('seed', '42'),
                     ('parameters', [('checker', 'normal'), ('cycles', '4096'), ('trace_mib', '64')]),
@@ -223,12 +223,12 @@ def run(args, evidence):
         # Adopt existing ASIC evidence into this private session, then use the
         # actual Reports/Artifacts b key, not a separate test exporter.
         reference = [[key, manifest['allocation'][key]] for key in ('attempt', 'stream_id')]
-        snap = session.rpc('asic', '(Register ' + native.fs0.sexp(reference) + ')', wait=True)
+        snap = session.rpc('asic', '(Register ' + native.native_execution.sexp(reference) + ')', wait=True)
         run_ref = field(field(snap, 'runs')[0], 'run')
-        run_sexp = native.fs0.sexp(run_ref)
+        run_sexp = native.native_execution.sexp(run_ref)
         session.rpc('asic', '(Load_summary ' + run_sexp + ')', wait=True)
         session.rpc('asic', '(Inspect_finalization (run ' + run_sexp + ') (attempt ' +
-                    native.fs0.sexp(manifest['finalization']) + '))', wait=True)
+                    native.native_execution.sexp(manifest['finalization']) + '))', wait=True)
         snap = session.rpc('asic', '(List_artifacts ' + run_sexp + ')', wait=True)
         artifacts = field(snap, 'artifacts')
         save(evidence / 'asic-artifacts.json', artifacts)
@@ -277,10 +277,10 @@ def main():
             setattr(args, key, value.resolve(strict=True))
     args.outer_timeout = 90
     os.umask(0o077)
-    evidence = Path(tempfile.mkdtemp(prefix='wb040-real-export-', dir='/tmp/opencode'))
+    evidence = Path(tempfile.mkdtemp(prefix='streaming-export-', dir='/tmp/opencode'))
     print('Evidence: ' + str(evidence), flush=True)
     def deadline(*_):
-        raise TimeoutError('WB-040 acceptance exceeded 600-second budget')
+        raise TimeoutError('Streaming export acceptance exceeded 600-second budget')
     previous = signal.signal(signal.SIGALRM, deadline)
     signal.alarm(600)
     try:

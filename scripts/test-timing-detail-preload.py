@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-097 acceptance against prebuilt native daemon, terminal and preset exporter.
+"""Timing detail preload acceptance against prebuilt native daemon, terminal and preset exporter.
 
 Run with --daemon, --client, --preset-export and a new private --evidence directory.
 The fixture uses private synthetic provider data; keyboard
@@ -142,12 +142,12 @@ def fixture_provider(base, argv):
                 time.sleep(.02)
         if number == cfg['missing']:
             event('missing')
-            raise ValueError(f'WB-097 fixture missing path detail {case}/{number}')
+            raise ValueError(f'Timing preload fixture missing path detail {case}/{number}')
         result = dict(contract='hardcaml-asic.inspection', schema_version=1,
                       execution_file=str(path), execution_sha256=p.digest(path),
                       attempt_id=a['attempt_id'], domain=domain, stage=stage,
                       analysis_id=a['analysis_id'], analysis_digest=a['source_digest'],
-                      source_digest=digest, diagnostics=['WB-097 synthetic STA'], truncated=False,
+                      source_digest=digest, diagnostics=['Synthetic STA for detail preload'], truncated=False,
                        rows=[dict(id=row_id(n), category='timing_path', producer='OpenROAD.STAPostPNR',
                                  corner='slow', group='setup', name=row_name(case, n), value=(n - 7) / 10,
                                  unit='ns', status='violated', source='{}',
@@ -334,7 +334,7 @@ def completed_flow(j):
     staged = j.native(f'(Stage_fresh (selection {selected})(elaboration_only false)(expected_plan_identity ()))')
     intent = field(field(staged, 'fresh_intent')[0], 'id')
     previous_runs = [field(r, 'run') for r in field(j.native(), 'runs')]
-    key = 'wb097-idle-overview-completion'
+    key = 'idle-overview-completion'
     j.native('(Launch_fresh (key %s)(intent_id %s))' % (sexp(key), sexp(intent)))
 
     def allocated():
@@ -409,7 +409,7 @@ def acceptance(t, check, http, _runs, _presets):
     t.resize(180, 55)
 
     # Never set the count before exercising the real flow transition on Overview.
-    j.palette_selected('Timing preload: Top 2 path details', 'wb097-default-count')
+    j.palette_selected('Timing preload: Top 2 path details', 'default-count')
     completed_flow(j)
 
     t.command('Timing preload: Top 0 path details')
@@ -419,15 +419,15 @@ def acceptance(t, check, http, _runs, _presets):
     t.drain(2)
     check(j.starts('zero') == [0] and len(j.argv_calls('zero')) == 1 and not j.published('zero'),
           'Explicit 0 on Overview: exactly one exact index request; no detail requests or publications')
-    j.palette_selected('Timing preload: Top 0 path details', 'wb097-zero-count')
+    j.palette_selected('Timing preload: Top 0 path details', 'zero-count')
 
     t.command('Timing preload: Top 5 path details')
     j.add('warm', hold=(6,))
     j.select('warm')
-    t.capture('wb097-overview-before-navigation', ['Overview', 'planned-run'], ['timing · selected path'])
+    t.capture('overview-before-navigation', ['Overview', 'planned-run'], ['timing · selected path'])
     j.await_details('warm', range(1, 6))
     t.drain(1)
-    t.capture('wb097-overview-after-warmup', ['[1 Overview]', 'planned-run'], ['timing · selected path'])
+    t.capture('overview-after-warmup', ['[1 Overview]', 'planned-run'], ['timing · selected path'])
     check([(e['state'], e['number']) for e in j.events('warm')] ==
           [(state, n) for n in range(6) for state in ('start', 'returned')],
           'Overview makes one index request and exactly five serial detail reads in Timing Paths order')
@@ -466,8 +466,8 @@ def acceptance(t, check, http, _runs, _presets):
     j.overview()
 
     t.command('Timing preload: Explicit only')
-    j.palette_selected('Timing preload: Explicit only', 'wb097-explicit-only-policy')
-    j.palette_selected('Timing preload: Top 5 path details', 'wb097-explicit-only-count-unchanged')
+    j.palette_selected('Timing preload: Explicit only', 'explicit-only-policy')
+    j.palette_selected('Timing preload: Top 5 path details', 'explicit-only-count-unchanged')
     j.add('explicit')
     j.select('explicit')
     t.drain(2)
@@ -555,15 +555,15 @@ def acceptance(t, check, http, _runs, _presets):
 def flow_acceptance(t, check, http, _runs, _presets):
     j = Journey(t, check, http)
     t.resize(180, 55)
-    j.palette_selected('Timing preload: Top 2 path details', 'wb097-default-count')
+    j.palette_selected('Timing preload: Top 2 path details', 'default-count')
     completed_flow(j)
     return 'Overview'
 
 
 def restart_acceptance(t, check, http, _runs, _presets):
     j = Journey(t, check, http)
-    t.capture('wb097-restarted-overview', ['Overview', 'planned-run'])
-    j.palette_selected('Timing preload: Top 5 path details', 'wb097-restored-count')
+    t.capture('restarted-overview', ['Overview', 'planned-run'])
+    j.palette_selected('Timing preload: Top 5 path details', 'restored-count')
     j.add('restart', count=2)
     j.select('restart')
     j.await_details('restart', (1, 2))
@@ -582,7 +582,7 @@ def main():
     if args.evidence.exists() or args.evidence.is_symlink():
         parser.error('use a new private evidence directory')
     args.palette_only = False
-    args.harness = 'WB-097 Timing path detail preload'
+    args.harness = 'Timing path detail preload'
     C.demo.provider.STAGES = C.demo.provider.STAGES[:-1] + ['timing', 'signoff']
     C.demo.provider.EXECUTABLE_TIMING = True
     prepare = C.demo.prepare
@@ -598,7 +598,7 @@ def main():
         command = [sys.executable, str(fresh), 'emit', str(root)]
         publisher.write_text(f'#!{sys.executable}\nimport os,sys\nos.execv(sys.executable, {command!r} + sys.argv[1:])\n')
         publisher.chmod(0o700)
-        (root / 'generation').write_text('wb097')
+        (root / 'generation').write_text('timing-preload')
         (root / 'build-trigger').write_text('0')
         (root / 'dune').write_text('(rule (target publisher.exe) (deps publisher-source build-trigger) '
                                   '(action (run ' + sexp(sys.executable) + ' ' + sexp(str(fresh)) +
@@ -624,7 +624,7 @@ def main():
     C.demo.prepare = prepare_timing
     C.demo.switch_command = lambda argv: list(map(str, argv))
     os.umask(0o077)
-    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('WB-097 wall-clock budget exhausted')))
+    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Timing detail preload wall-clock budget exhausted')))
     signal.alarm(240)
     try:
         C.run(args, acceptance=flow_acceptance if args.flow_only else acceptance,

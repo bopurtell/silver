@@ -3,7 +3,7 @@ open Hardcaml_workbench_protocol
 module H = Workspace_host
 module P = Hardcaml_workbench_workspaces
 
-let%test_unit "WB-065 late inspection receipts cannot retarget selection or reconnect \
+let%test_unit "late inspection receipts cannot retarget selection or reconnect \
                notices"
   =
   let host, _, find = Host_view.refinement_fixture P.Timing.definition in
@@ -91,7 +91,7 @@ let%test_unit "WB-065 late inspection receipts cannot retarget selection or reco
   assert_ignored failed before_reconnect
 ;;
 
-let%test_unit "WB-065 reused tile and request counters cannot accept an old receipt" =
+let%test_unit "reused tile and request counters cannot accept an old receipt" =
   let host, _, find = Host_view.refinement_fixture P.Timing.definition in
   let paths = find "timing-paths" in
   let host = H.set_local host paths.id (H.local host paths.id) in
@@ -142,7 +142,7 @@ let%test_unit "WB-065 reused tile and request counters cannot accept an old rece
   assert (String.equal failed.notice "ASIC: new pane failed")
 ;;
 
-(* WB-003 through the actual Session tile renderer: an inspector's active read appears on
+(* Through the actual Session tile renderer: an inspector's active read appears on
    the Session line of the workspace that shows it, with its static text in every icon
    mode, and disappears once the read reaches a terminal state. *)
 let%test_unit "Session line projects scoped evidence reads through the real renderer" =

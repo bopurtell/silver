@@ -8,7 +8,7 @@ Usage (only after matching normal binaries are ready):
     --workspace-cli _build/default/workspace_cli/main.exe \
     --setup _build/default/setup/main.exe
 
-No builds. Uses FS3's strict metadata-only Dune fixture, S-expression/HTTP helpers
+No builds. Uses the project adoption fixture’s strict metadata-only Dune fixture, S-expression/HTTP helpers
 and PTY screen decoder. Everything, including HOME/preferences, is private under
 /tmp/opencode. A loopback observing proxy records actual client CAS receipts and
 can delay their delivery; no live endpoint, state, provider or job is used.
@@ -34,10 +34,10 @@ import urllib.error
 import urllib.request
 
 sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location('fs3', Path(__file__).with_name('test-project-adoption.py'))
-fs3 = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fs3)
-field, require, sexp, parse = fs3.field, fs3.require, fs3.sexp, fs3.parse
+spec = importlib.util.spec_from_file_location('adoption', Path(__file__).with_name('test-project-adoption.py'))
+adoption = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(adoption)
+field, require, sexp, parse = adoption.field, adoption.require, adoption.sexp, adoption.parse
 from fixtures.testing_layout import assert_stock_layout
 
 
@@ -183,11 +183,11 @@ class ReceiptProxy:
         self.thread.join(timeout=5)
 
 
-class Terminal(fs3.Terminal):
+class Terminal(adoption.Terminal):
     width, height = 120, 40
 
     def __init__(self, test, label, proxy):
-        # FS3's subprocess helper uses test.url; only the TUI uses the observer.
+        # The adoption fixture’s subprocess helper uses test.url; only the TUI uses the observer.
         actual = test.url
         test.url = proxy.url
         try:
@@ -197,7 +197,7 @@ class Terminal(fs3.Terminal):
 
     def drain(self, seconds=.15):
         super().drain(seconds)
-        return fs3.fs0.terminal_screen(bytes(self.data), self.width, self.height)
+        return adoption.native_execution.terminal_screen(bytes(self.data), self.width, self.height)
 
     def resize(self, width, height):
         self.width, self.height = width, height
@@ -285,7 +285,7 @@ def preferences(test, terminal, mode, appearance=None):
 
 
 def preserved_preferences(test, before, after, label):
-    test.check(fs3.replace_field(before, 'layout_mode', field(after, 'layout_mode')) == after,
+    test.check(adoption.replace_field(before, 'layout_mode', field(after, 'layout_mode')) == after,
                label + ': all appearance, chrome and exact tile-header choices preserved')
 
 
@@ -310,9 +310,9 @@ def assert_restore(test, before, after, wid, template):
     for tile in field(before, 'tiles'):
         if field(tile, 'workspace') == wid:
             view = claimed.get(field(tile, 'id'))
-            tile = fs3.replace_field(tile, 'hidden', 'false' if view is not None else 'true')
+            tile = adoption.replace_field(tile, 'hidden', 'false' if view is not None else 'true')
             if view is not None:
-                tile = fs3.replace_field(tile, 'requested_geometry', field(view, 'geometry'))
+                tile = adoption.replace_field(tile, 'requested_geometry', field(view, 'geometry'))
         expected_tiles.append(tile)
     actual_tiles = field(after, 'tiles')
     test.check(actual_tiles[:len(expected_tiles)] == expected_tiles,
@@ -326,24 +326,24 @@ def assert_restore(test, before, after, wid, template):
         len({field(t, 'id') for t in actual_tiles}) == len(actual_tiles),
         'Only missing default occurrences allocated as fresh visible Follow tiles')
     ws = workspace(expected, wid)
-    ws = fs3.replace_field(ws, 'preset', field(template, 'preset'))
-    ws = fs3.replace_field(ws, 'zoomed_tile', [])
-    expected = fs3.replace_field(expected, 'workspaces',
+    ws = adoption.replace_field(ws, 'preset', field(template, 'preset'))
+    ws = adoption.replace_field(ws, 'zoomed_tile', [])
+    expected = adoption.replace_field(expected, 'workspaces',
         [ws if field(w, 'id') == wid else w for w in field(expected, 'workspaces')])
-    expected = fs3.replace_field(expected, 'tiles', actual_tiles)
-    expected = fs3.replace_field(expected, 'revision', str(int(field(before, 'revision')) + 1))
-    expected = fs3.replace_field(expected, 'next_id', str(int(field(before, 'next_id')) + len(missing)))
+    expected = adoption.replace_field(expected, 'tiles', actual_tiles)
+    expected = adoption.replace_field(expected, 'revision', str(int(field(before, 'revision')) + 1))
+    expected = adoption.replace_field(expected, 'next_id', str(int(field(before, 'next_id')) + len(missing)))
     old_provenance = field(before, 'config_workspaces')
     require(sum(field(p, 'workspace') == wid for p in old_provenance) <= 1,
             'Restore fixture must have at most one provenance record per workspace')
     expected_provenance = [
-        fs3.replace_field(p, 'policy_detached', 'true')
+        adoption.replace_field(p, 'policy_detached', 'true')
         if field(p, 'workspace') == wid else copy.deepcopy(p)
         for p in old_provenance]
     test.check(field(after, 'config_workspaces') == expected_provenance,
                'Restore detaches only target frozen policy; config keys, definitions, tile mappings, '
                'record order and all non-target provenance remain exact unchanged')
-    expected = fs3.replace_field(expected, 'config_workspaces', expected_provenance)
+    expected = adoption.replace_field(expected, 'config_workspaces', expected_provenance)
     test.check(after == expected,
                'Exactly one CAS revision restores target preset, clears zoom and detaches its config policy; '
                'all other snapshot fields are exact unchanged')
@@ -382,7 +382,7 @@ def fixture(test, templates):
     other_context = next(c for c in field(snapshot, 'contexts') if field(c, 'id') == other_cid)
     mutate(['Select_run', ['workspace', other], ['context', other_cid],
             ['expected_selection_revision', field(other_context, 'selection_revision')],
-            ['run', [fs3.replace_field(run, 'id', 'selected-witness-run')]]])
+            ['run', [adoption.replace_field(run, 'id', 'selected-witness-run')]]])
     moved = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == 'finalization')
     mutate(['Move_tile', ['tile', field(moved, 'id')], ['workspace', other]])
     mutate(['Set_zoom', ['workspace', other], ['tile', [field(moved, 'id')]]])
@@ -404,7 +404,7 @@ def fixture(test, templates):
     mutate(['Set_tile_hidden', ['tile', field(resources, 'id')], ['hidden', 'true']])
     for kind in ('synthesis', 'simulation-catalog'):
         tile = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == kind)
-        pin = fs3.replace_field(run, 'id', 'pinned-' + kind)
+        pin = adoption.replace_field(run, 'id', 'pinned-' + kind)
         mutate(['Set_tile_binding', ['tile', field(tile, 'id')], ['binding', ['Pin_run', pin]]])
     zoom = next(t for t in tiles(snapshot, wid) if field(t, 'kind') == 'simulation-catalog')
     mutate(['Set_zoom', ['workspace', wid], ['tile', [field(zoom, 'id')]]])
@@ -417,7 +417,7 @@ def fixture(test, templates):
 def exercise(test):
     (test.root / 'dune-project').write_text('(lang dune 3.22)\n(name restore_acceptance)\n')
     (test.root / 'dune').write_text('(dirs)\n')
-    test.command(test.args.setup, ['--root', test.root, '--project-name', 'FS3 acceptance'], 'setup')
+    test.command(test.args.setup, ['--root', test.root, '--project-name', 'Project adoption acceptance'], 'setup')
     templates = {name: parse(test.command(test.args.workspace_cli, ['starter', name], 'preset-' + name))
                  for name in ('overview', 'timing', 'testing', 'resources')}
     test.start()
@@ -550,7 +550,7 @@ def exercise(test):
             assert_restore(test, before, after, wid, templates[name])
             if name == 'testing':
                 test.check(next(t for t in tiles(after, wid) if field(t, 'id') == optional_id) ==
-                           fs3.replace_field(optional, 'hidden', 'true'),
+                           adoption.replace_field(optional, 'hidden', 'true'),
                            'Testing restore hides the optional Project Tests tile without deleting or rewriting it')
                 preferences(test, terminal, 'Fit')
                 assert_stock_layout(terminal, 'testing-restored-180x55', test.evidence)
@@ -567,14 +567,14 @@ def exercise(test):
             destination = test.cli('import', ['-window', field(workspace(after, wid), 'window'),
                                             '-name', 'Roundtrip ' + name, path], 'import-restored-' + name).strip()
             roundtrip = parse(test.cli('export', [destination], 'export-roundtrip-' + name))
-            test.check(roundtrip == fs3.replace_field(exported, 'name', 'Roundtrip ' + name),
+            test.check(roundtrip == adoption.replace_field(exported, 'name', 'Roundtrip ' + name),
                        name + ': HTTP CLI import/export roundtrip retains stable ID and all hidden/default views')
         preferences(test, terminal, 'Fit')
         terminal.composed('overview-final')
 
         # Unknown/custom current identity must be visibly disabled, and Enter must
         # not silently choose a named fallback or change presentation mode.
-        unknown = fs3.replace_field(templates['testing'], 'preset', ['future-restore-preset'])
+        unknown = adoption.replace_field(templates['testing'], 'preset', ['future-restore-preset'])
         path = test.evidence / 'unknown.sexp'
         path.write_text(sexp(unknown))
         destination = test.cli('import', ['-window', field(workspace(after, wid), 'window'),
@@ -652,7 +652,7 @@ def main():
     else:
         args.evidence = Path(tempfile.mkdtemp(prefix='default-layout-restore-', dir=base))
     print('Evidence:', args.evidence, flush=True)
-    test = fs3.Acceptance(args)
+    test = adoption.Acceptance(args)
     try:
         exercise(test)
     except BaseException:

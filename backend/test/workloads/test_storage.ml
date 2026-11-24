@@ -269,7 +269,7 @@ let main () =
   let%bind ()=bundle_locator_separation () in
   let%bind ()=comparison_restore () in
   let%map ()=service_race () in
-  printf "PT8 storage corrections: %d checks passed\n%!" !checks
+  printf "Workload storage: %d checks passed\n%!" !checks
 let () =
   don't_wait_for (Monitor.try_with main >>= function
     | Ok () -> Shutdown.exit 0

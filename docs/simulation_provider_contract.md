@@ -19,7 +19,7 @@ verification environment. In UVM terms, sequences/items cover the traffic portio
 FS2v1 exposes suites/cases and execution events, **not** an arbitrary workload graph
 or N-workload selection API. PT.8's project-owned cases execute one fixed memory
 workload each through this same runner and publish a separately verified result
-contract. See [workload terminology](../../hardcaml_asic/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
+contract. See [workload terminology](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
 This clarification changes no frozen wire schema or execution behavior.
 
 ## Configuration and process invocation
@@ -31,7 +31,9 @@ language-neutral contract. Only the project-owned `test_provider.exe` links it;
 standalone test executables, arguments, reports and checkers remain project-owned.
 The daemon consumes the same wire types and pure validators. Frozen sexp/bin_io
 conformance tests guard the extraction; the FS2v1 interface is unchanged.
-See [public API](../provider/README.md) and [migration evidence](native_provider_plan.md).
+See the [public API and local SDK build instructions](../provider/README.md).
+To preview, write or check a project's configuration, see
+[Set up a simulation provider](simulation_setup.md).
 
 For a native adapter, `provider_executable` names its absolute installed executable
 and `provider_args` may be empty. The Python configuration below remains valid.

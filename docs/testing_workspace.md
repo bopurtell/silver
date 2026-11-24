@@ -1,27 +1,17 @@
 # Testing catalog and cooperative investigation
 
-Implemented and automatically verified 2026-10-17 for WB-032, WB-034 and WB-063.
-Native provider migration (WB-066) delivered 2026-10-18; see
-[adapter boundary and verification](native_provider_plan.md).
-Owner confirmed the native-provider workflow works on 2026-10-19; WB-066 is
-complete and accepted.
-The actual `hardcaml_asic_example` now has a genuine project-owned FIFO Cyclesim
-provider. The Testing workspace exposes catalog, attempts, cases, result detail,
-artifacts and logs as coordinated panes. The original FS2 milestone remains closed;
-this is an adoption/investigation extension using its existing contract.
-
-[Shared implementation plan and evidence](archive/delivery/testing_cluster_plan.md).
-Owner visual review of the new composition remains separate from automated acceptance.
+The Testing workspace exposes catalog, attempts, cases, result detail, artifacts
+and logs as coordinated panes. It runs the project's tests through its configured
+provider. To connect your own project, see
+[simulation provider setup](simulation_setup.md).
 
 ## Open it in the real example
 
-For fresh runs, use the example's
-[checkout-backed launcher](../../hardcaml_asic_example/docs/workbench_main.md).
+For fresh runs, see
+[Configure the ASIC example simulation suites](project_workflows.md#configure-the-asic-example-simulation-suites).
 The current catalog includes `controlled-fifo` and **Memory workloads**
 (`memory-workloads`). For the fixed memory cases and seed, see
 [Run the example workload](workloads.md#run-the-example-workload).
-The [earlier real-demo setup](real_asic_example_demo.md) remains available as
-historical context for retained FIFO acceptance.
 
 1. Open **Space c c → Switch to Testing**.
 2. Tab to **simulation-catalog**. Silver loads the configured project's suites
@@ -145,7 +135,6 @@ transfer is unavailable. The exported file itself remains on the client host.
 
 ### Embedded waveform viewer
 
-Implemented 2026-10-18 under [WB-028](features/verification/WB-028-waveform-viewer.md).
 Select a retained VCD in Artifacts and press **w**, or choose **Simulation: Open
 embedded waveform …** from the palette. No GTKWave installation, display forwarding
 or viewer flag is needed. This opens a full-area view rather than adding another

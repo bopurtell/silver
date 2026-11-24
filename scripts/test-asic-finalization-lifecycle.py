@@ -29,8 +29,8 @@ spec = importlib.util.spec_from_file_location(
     'terminal_results', Path(__file__).with_name('test-asic-terminal-results.py'))
 terminal_results = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(terminal_results)
-metrics, fs0, dashboard = terminal_results.metrics, terminal_results.fs0, terminal_results.dashboard
-field, record, require = fs0.field, fs0.record, fs0.require
+metrics, native_execution, dashboard = terminal_results.metrics, terminal_results.native_execution, terminal_results.dashboard
+field, record, require = native_execution.field, native_execution.record, native_execution.require
 load, sha256 = terminal_results.load, terminal_results.sha256
 
 
@@ -124,7 +124,7 @@ class Terminal(metrics.Terminal):
                 raise AssertionError('%s: expected %r, absent %r\n%s' % (label, expected, absent, text))
 
     def close(self):
-        self.save('pty-final-' + str(time.time_ns()), fs0.terminal_screen(
+        self.save('pty-final-' + str(time.time_ns()), native_execution.terminal_screen(
             bytes(self.data), width=120, height=self.height))
         super().close()
 
@@ -173,7 +173,7 @@ def prepare(args, receipt, inputs, acceptance):
     results.mkdir()
     store = results / 'finalizations'
     store.mkdir()
-    (root / 'dune-project').write_text('(lang dune 3.17)\n(name fs1_lifecycle_acceptance)\n')
+    (root / 'dune-project').write_text('(lang dune 3.17)\n(name finalization_lifecycle_acceptance)\n')
     cfg = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
     provider = receipt['config']['provider']
     require(Path(provider).is_absolute() and Path(provider).is_file(), 'Exact adopted provider unavailable')
@@ -218,7 +218,7 @@ with (base / "provider-calls.jsonl").open("a+") as f:
                            path=os.environ.get("PATH"))) + "\\n")
     f.flush()
 if not ok:
-    sys.exit("FS1 lifecycle relay rejected non-allowlisted or duplicate command")
+    sys.exit("Finalization lifecycle relay rejected non-allowlisted or duplicate command")
 os.execv(PROVIDER, [PROVIDER] + a)
 '''.replace('BASE', repr(str(args.evidence))).replace('ALLOCATION', repr(allocation))
         .replace('EXECUTION', repr(execution)).replace('STORE', repr(str(store)))
@@ -230,7 +230,7 @@ os.execv(PROVIDER, [PROVIDER] + a)
     for key, value in (('provider_executable', str(relay)), ('project_executable', str(deny)),
                        ('results_root', str(results))):
         cfg = metrics.put(cfg, key, value)
-    (root / 'hardcaml-workbench-asic.sexp').write_text(fs0.sexp(cfg) + '\n')
+    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
     save(args.evidence / 'relay-policy.json', dict(provider=provider, sha256=sha256(provider), producer=producer))
     return root, store
 
@@ -333,7 +333,7 @@ def export_text(session, terminal, chosen, check, calls):
 
 def artifacts(session, terminal, run, attempt, check, calls):
     warm = calls()
-    response = session.command(['--api', '--asic-operation', '(List_artifacts %s)' % fs0.sexp(run),
+    response = session.command(['--api', '--asic-operation', '(List_artifacts %s)' % native_execution.sexp(run),
                                 '--wait', '--wait-timeout-seconds', str(session.args.outer_timeout)],
                                'list-real-artifacts', success=False)
     parsed = metrics.parse(response.stdout.decode())
@@ -355,7 +355,7 @@ def artifacts(session, terminal, run, attempt, check, calls):
 
     def page(a, offset):
         snap = session.rpc('asic', '(Read_artifact (run %s) (artifact_id %s) (offset %d) (limit 4096))' % (
-            fs0.sexp(run), fs0.sexp(field(a, 'id')), offset), wait=True)
+            native_execution.sexp(run), native_execution.sexp(field(a, 'id')), offset), wait=True)
         matches = [p for p in field(snap, 'artifact_pages') if field(p, 'run') == run
                    and field(p, 'artifact_id') == field(a, 'id') and int(field(p, 'offset')) == offset
                    and int(field(p, 'limit')) == 4096]
@@ -528,31 +528,31 @@ def exercise(args):
         original_containers = container_inventory('containers-before')
         check(field(session.rpc('asic'), 'runs') == [], 'Private daemon has no preexisting allocation')
         ref = [[k, inputs['allocation'][k]] for k in ('attempt', 'stream_id')]
-        snap = session.rpc('asic', '(Register %s)' % fs0.sexp(ref), wait=True)
+        snap = session.rpc('asic', '(Register %s)' % native_execution.sexp(ref), wait=True)
         check(len(field(snap, 'runs')) == 1 and field(field(snap, 'runs')[0], 'reference') == ref,
               'Register adopts exact original public allocation')
         run = field(field(snap, 'runs')[0], 'run')
-        snap = session.rpc('asic', '(Load_summary %s)' % fs0.sexp(run), wait=True)
+        snap = session.rpc('asic', '(Load_summary %s)' % native_execution.sexp(run), wait=True)
         summary = next(s for s in field(snap, 'summaries') if field(s, 'run') == run)
         check(field(summary, 'execution_file') == inputs['execution_file'] and field(summary, 'completion') == 'completed'
               and field(summary, 'terminal') == [], 'Load original completed stage summary before Finalize')
         ws = session.rpc('workspace')
-        ws = session.mutate(ws, '(Create_workspace (window %s) (name "FS1 Lifecycle Private") (context %s))' % (
+        ws = session.mutate(ws, '(Create_workspace (window %s) (name "Private Finalization Lifecycle") (context %s))' % (
             field(field(ws, 'windows')[0], 'id'), field(ws, 'main_context')))
         workspace = field(ws, 'workspaces')[-1]
         ws = session.mutate(ws, '(Create_tile (workspace %s) (kind finalization) (geometry ((x 0) (y 0) (width 110) (height 34))))' % field(workspace, 'id'))
         tile = field(field(ws, 'tiles')[-1], 'id')
         context = next(c for c in field(ws, 'contexts') if field(c, 'id') == field(workspace, 'context'))
         ws = session.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run (%s)))' % (
-            field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), fs0.sexp(run)))
+            field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), native_execution.sexp(run)))
         session.mutate(ws, '(Set_zoom (workspace %s) (tile (%s)))' % (field(workspace, 'id'), tile))
         terminal = Terminal(session)
-        terminal.palette('Switch to FS1 Lifecycle Private')
+        terminal.palette('Switch to Private Finalization Lifecycle')
         check(producer_count() == 0, 'Summary/layout/selection launch no producer')
         if acceptance:
             terminal.palette('Finalize and accept asic/' + field(run, 'id'))
             terminal.capture('acceptance-form', ['FINALIZE AND ACCEPT', 'All five values are explicit strings'])
-            terminal.key(b'\x1b[200~' + fs0.sexp([[k, v] for k, v in acceptance.items()]).encode() + b'\x1b[201~')
+            terminal.key(b'\x1b[200~' + native_execution.sexp([[k, v] for k, v in acceptance.items()]).encode() + b'\x1b[201~')
             terminal.capture('acceptance-collateral', ['FINALIZE AND ACCEPT', 'replay_trace'])
             terminal.key(b'\r')
         else:
@@ -568,11 +568,11 @@ def exercise(args):
         terminal = None
         # Identical retries are genuine API submissions, never palette commands with new keys.
         request = '(Finalize (key %s) (run %s) (execution_file %s) (acceptance %s))' % (
-            fs0.sexp(key), fs0.sexp(run), fs0.sexp(inputs['execution_file']),
-            fs0.sexp([] if acceptance is None else [[[k, v] for k, v in acceptance.items()]]))
+            native_execution.sexp(key), native_execution.sexp(run), native_execution.sexp(inputs['execution_file']),
+            native_execution.sexp([] if acceptance is None else [[[k, v] for k, v in acceptance.items()]]))
         retry(request, 'same-key-in-flight')
-        bad = request.replace('(execution_file ' + fs0.sexp(inputs['execution_file']) + ')',
-                              '(execution_file ' + fs0.sexp(str(args.evidence / 'different-execution.json')) + ')')
+        bad = request.replace('(execution_file ' + native_execution.sexp(inputs['execution_file']) + ')',
+                              '(execution_file ' + native_execution.sexp(str(args.evidence / 'different-execution.json')) + ')')
         response = session.command(['--api', '--asic-operation', bad], 'mismatched-key', success=False)
         parsed = metrics.parse(response.stdout.decode())
         check(parsed[0] == 'Error' and 'different inputs' in response.stdout.decode(),
@@ -585,7 +585,7 @@ def exercise(args):
             save(args.evidence / 'cancel-progress.json', record(f))
             tracker.sample()
             check(field(f, 'owned') == 'true', 'Cancellation targets only this daemon-owned finalization')
-            session.rpc('asic', '(Cancel %s)' % fs0.sexp(key))
+            session.rpc('asic', '(Cancel %s)' % native_execution.sexp(key))
         f, snap = poll(lambda f, s: field(f, 'owned') == 'false' and
                        any(field(o, 'key') == 'finalize:' + key and field(o, 'state') in ('completed', 'failed', 'cancelled')
                            for o in field(s, 'operations')), 'producer completion after client detach')
@@ -636,7 +636,7 @@ def exercise(args):
               'No producer transport containers remain and original container owners are unchanged')
         metrics.no_generic_jobs(session, 'completed lifecycle')
         terminal = Terminal(session)
-        terminal.palette('Switch to FS1 Lifecycle Private')
+        terminal.palette('Switch to Private Finalization Lifecycle')
         if not args.cancel:
             outcome['artifact_export'] = artifacts(session, terminal, run, attempt, check, calls)
         terminal.close()
@@ -654,7 +654,7 @@ def exercise(args):
         check(calls() == warm, 'Restart never replays producer or queries provider')
         retry(request, 'same-key-restarted')
         check(calls() == warm, 'Persisted same-key retry never replays producer')
-        observed = retry('(Observe_finalization %s)' % fs0.sexp(key), 'observe-restarted', wait=True)
+        observed = retry('(Observe_finalization %s)' % native_execution.sexp(key), 'observe-restarted', wait=True)
         check(field(finalization(observed), 'owned') == 'false' and producer_count() == 1,
               'Observe_finalization remains read-only and cannot reacquire ownership')
         new_calls = [json.loads(line) for line in calls()[len(warm):].splitlines()]
@@ -670,7 +670,7 @@ def exercise(args):
         outcome['error'] = traceback.format_exc()
         if terminal:
             try:
-                terminal.save('assertion-failure', fs0.terminal_screen(bytes(terminal.data), width=120, height=terminal.height))
+                terminal.save('assertion-failure', native_execution.terminal_screen(bytes(terminal.data), width=120, height=terminal.height))
             except BaseException:
                 pass
         raise
@@ -687,7 +687,7 @@ def exercise(args):
                     values = field(snap, 'finalizations')
                     if any(field(f, 'key') == owned_key and field(f, 'owned') == 'true' for f in values):
                         session.deadline = min(args.deadline - 5, time.monotonic() + 20)
-                        retry('(Cancel %s)' % fs0.sexp(owned_key), 'failure-owned-cancel', wait=True)
+                        retry('(Cancel %s)' % native_execution.sexp(owned_key), 'failure-owned-cancel', wait=True)
                 except BaseException:
                     save(args.evidence / 'cleanup-error.json', dict(error=traceback.format_exc()))
             if tracker:
@@ -721,7 +721,7 @@ def main():
     for key in ('inputs', 'acceptance_evidence', 'example_root', 'client', 'daemon'):
         setattr(args, key, getattr(args, key).resolve())
     require(args.client.is_file() and args.daemon.is_file(), 'Existing binaries required; parent alone builds/runs')
-    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs1-lifecycle-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-finalization-lifecycle-', dir='/tmp/opencode'))
     args.deadline = time.monotonic() + args.budget
     save(args.evidence / 'commands.json', dict(argv=sys.argv, options={k: str(v) for k, v in vars(args).items()},
                                              pty=dict(width=120, height=40)))
@@ -742,7 +742,7 @@ def main():
         raise
     finally:
         signal.alarm(0)
-    print('PASS: private FS1 lifecycle / PTY / artifacts / restart', flush=True)
+    print('PASS: private finalization lifecycle / PTY / artifacts / restart', flush=True)
 
 
 if __name__ == '__main__':

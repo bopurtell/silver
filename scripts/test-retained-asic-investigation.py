@@ -27,7 +27,7 @@ spec = importlib.util.spec_from_file_location(
     'lifecycle', Path(__file__).with_name('test-asic-finalization-lifecycle.py'))
 life = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(life)
-metrics, fs0, dashboard = life.metrics, life.fs0, life.dashboard
+metrics, native_execution, dashboard = life.metrics, life.native_execution, life.dashboard
 field, record, require = life.field, life.record, life.require
 load, sha256, save = life.load, life.sha256, life.save
 DEFAULTS = dict(timing='signoff', clocks='signoff', physical='placement', routing='routing')
@@ -95,7 +95,7 @@ def prepare(args, inputs, receipt, operation):
     root.mkdir()
     for name in ('state', 'results', 'daemon-tmp', 'client-tmp', 'config', 'home'):
         (args.evidence / name).mkdir(mode=0o700)
-    (root / 'dune-project').write_text('(lang dune 3.17)\n(name fs1_investigation)\n')
+    (root / 'dune-project').write_text('(lang dune 3.17)\n(name retained_asic_investigation)\n')
     cfg = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
     policy = dict(provider=str(args.provider), execution=inputs['execution_file'],
                   allocation=inputs['allocation'], attempt=str(Path(operation['results']['path']).parent),
@@ -135,10 +135,10 @@ with (base / 'provider-calls.jsonl').open('a') as out:
     fcntl.flock(out, fcntl.LOCK_EX)
     out.write(json.dumps(dict(argv=a, allowed=bool(ok), time=time.time(), pid=os.getpid())) + '\n')
 if not ok:
-    sys.exit('FS1 investigation: non-allowlisted provider command')
+    sys.exit('ASIC investigation: non-allowlisted provider command')
 remaining = p['deadline'] - time.monotonic()
 if remaining <= 0:
-    sys.exit('FS1 investigation query budget exhausted')
+    sys.exit('ASIC investigation query budget exhausted')
 stem = base / ('query-' + str(time.time_ns()))
 try:
     result = subprocess.run([p['provider']] + a, capture_output=True,
@@ -146,7 +146,7 @@ try:
 except subprocess.TimeoutExpired as e:
     stem.with_suffix('.stdout').write_bytes(e.stdout or b'')
     stem.with_suffix('.stderr').write_bytes(e.stderr or b'')
-    sys.exit('FS1 investigation provider query timed out')
+    sys.exit('ASIC investigation provider query timed out')
 stem.with_suffix('.stdout').write_bytes(result.stdout)
 stem.with_suffix('.stderr').write_bytes(result.stderr)
 stem.with_suffix('.json').write_text(json.dumps(dict(argv=a, returncode=result.returncode)))
@@ -156,12 +156,12 @@ sys.exit(result.returncode)
 ''')
     relay.chmod(0o700)
     deny = args.evidence / 'no-project-execution'
-    deny.write_text('#!' + sys.executable + '\nimport sys\nsys.exit("No project execution in FS1 investigation")\n')
+    deny.write_text('#!' + sys.executable + '\nimport sys\nsys.exit("No project execution in ASIC investigation")\n')
     deny.chmod(0o700)
     for key, value in (('provider_executable', str(relay)), ('project_executable', str(deny)),
                        ('results_root', str(args.evidence / 'results'))):
         cfg = metrics.put(cfg, key, value)
-    (root / 'hardcaml-workbench-asic.sexp').write_text(fs0.sexp(cfg) + '\n')
+    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
     return root
 
 
@@ -391,7 +391,7 @@ def exercise(args):
     def inspect(domain, stage=None):
         stage = stage or DEFAULTS[domain]
         snap = session.rpc('asic', '(Inspect (run %s) (domain %s) (stage %s) (refresh false))' %
-                           (fs0.sexp(run), domain, stage), wait=True)
+                           (native_execution.sexp(run), domain, stage), wait=True)
         return next(i for i in field(snap, 'inspections') if field(i, 'domain') == domain and field(i, 'stage') == stage)
 
     def palette(domain):
@@ -405,7 +405,7 @@ def exercise(args):
         c = next(c for c in field(ws, 'contexts') if field(c, 'id') == field(workspace, 'context'))
         return session.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run %s))' % (
             field(workspace, 'id'), field(c, 'id'), field(c, 'selection_revision'),
-            '()' if value is None else '(' + fs0.sexp(value) + ')'))
+            '()' if value is None else '(' + native_execution.sexp(value) + ')'))
 
     def pages(label, expected):
         captured = []
@@ -431,17 +431,17 @@ def exercise(args):
         metrics.guard_generic_builds(session)
         session.start()
         reference = [[k, inputs['allocation'][k]] for k in ('attempt', 'stream_id')]
-        snap = session.rpc('asic', '(Register %s)' % fs0.sexp(reference), wait=True)
+        snap = session.rpc('asic', '(Register %s)' % native_execution.sexp(reference), wait=True)
         check(len(field(snap, 'runs')) == 1 and field(field(snap, 'runs')[0], 'reference') == reference,
               'Register adopts only the exact original public allocation')
         run = field(field(snap, 'runs')[0], 'run')
-        session.rpc('asic', '(Load_summary %s)' % fs0.sexp(run), wait=True)
+        session.rpc('asic', '(Load_summary %s)' % native_execution.sexp(run), wait=True)
         indexes = {d: inspect(d) for d in args.domains}
         for d, index in indexes.items():
             verify_index(args, check, index, d, inputs['execution_file'])
         save(args.evidence / 'validated-indexes.json', indexes)
         ws = session.rpc('workspace')
-        ws = session.mutate(ws, '(Create_workspace (window %s) (name "FS1 Investigation") (context %s))' % (
+        ws = session.mutate(ws, '(Create_workspace (window %s) (name "ASIC Investigation") (context %s))' % (
             field(field(ws, 'windows')[0], 'id'), field(ws, 'main_context')))
         workspace = field(ws, 'workspaces')[-1]
         tiles = []
@@ -453,7 +453,7 @@ def exercise(args):
         mutate('(Set_zoom (workspace %s) (tile (%s)))' % (field(workspace, 'id'), tiles[0]))
         session.env['TMPDIR'] = str(args.evidence / 'client-tmp')
         terminal = Terminal(session)
-        terminal.palette('Switch to FS1 Investigation')
+        terminal.palette('Switch to ASIC Investigation')
         for domain in args.domains:
             palette(domain)
             index = indexes[domain]
@@ -495,7 +495,7 @@ def exercise(args):
                 terminal.key(b'\r')
                 terminal.count('paste-filter-finished', len(rr), absent=['EDIT filter='])
                 check(calls() == warm, 'Bracketed filter paste keeps r/t/j/p literal and launches no provider read')
-                text = 'FS1_NO_SUCH_ENDPOINT_9f47'
+                text = 'FIXTURE_NO_SUCH_ENDPOINT_9f47'
                 terminal.filter('filter-no-match', text, '', 0)
                 terminal.filter('filter-cleared', '', text, len(rr))
                 check(calls() == warm, 'c/g/p/s/v/filter/j/k are warm provider-free local controls')
@@ -561,7 +561,7 @@ def exercise(args):
             tile_warm = calls()
             palette('timing')
             terminal.key(b'v')
-            mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (tiles[0], fs0.sexp(run)))
+            mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (tiles[0], native_execution.sexp(run)))
             terminal.palette('Unzoom workspace')
             terminal.key(b'\t')
             terminal.palette('Zoom focused tile')
@@ -596,7 +596,7 @@ def exercise(args):
                   domain + ': L2 cached_unverified preserves complete original index')
         session.env['TMPDIR'] = str(args.evidence / 'client-tmp')
         terminal = Terminal(session)
-        terminal.palette('Switch to FS1 Investigation')
+        terminal.palette('Switch to ASIC Investigation')
         for domain in args.domains:
             palette(domain)
             terminal.capture('restarted-' + domain, ['CACHED UNVERIFIED'])
@@ -608,7 +608,7 @@ def exercise(args):
         check(len(field(snap, 'runs')) == 1 and field(field(snap, 'runs')[0], 'reference') == reference,
               'Original registered allocation remains exact')
         check(all(json.loads(line)['allowed'] for line in calls().splitlines()), 'Every provider invocation satisfies read-only exact-reference policy')
-        metrics.no_generic_jobs(session, 'finished FS1 investigation')
+        metrics.no_generic_jobs(session, 'finished ASIC investigation')
         outcome.update(status='passed', run=run, provider_calls=len(calls().splitlines()), domains=args.domains)
     except BaseException:
         outcome['error'] = traceback.format_exc()
@@ -631,9 +631,9 @@ def exercise(args):
 
 def binary(args, session, terminal, run, operation, check, calls):
     attempt = str(Path(operation['results']['path']).parent)
-    session.rpc('asic', '(Inspect_finalization (run %s) (attempt %s))' % (fs0.sexp(run), fs0.sexp(attempt)), wait=True)
+    session.rpc('asic', '(Inspect_finalization (run %s) (attempt %s))' % (native_execution.sexp(run), native_execution.sexp(attempt)), wait=True)
     warm = calls()
-    snap = session.rpc('asic', '(List_artifacts %s)' % fs0.sexp(run), wait=True)
+    snap = session.rpc('asic', '(List_artifacts %s)' % native_execution.sexp(run), wait=True)
     catalog = field(snap, 'artifacts')
     save(args.evidence / 'artifact-catalog.json', [record(a) for a in catalog])
     index, chosen = next((i, a) for i, a in enumerate(catalog) if field(a, 'path').endswith('.gds'))
@@ -721,14 +721,14 @@ def main():
     os.umask(0o077)
     os.sched_setaffinity(0, sorted(os.sched_getaffinity(0))[:20])
     args.domains = list(DEFAULTS) if args.domain == 'all' else [args.domain]
-    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs1-investigation-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-retained-investigation-', dir='/tmp/opencode'))
     args.deadline = time.monotonic() + args.budget
     save(args.evidence / 'commands.json', dict(argv=sys.argv, options={k: str(v) for k, v in vars(args).items()},
          affinity=sorted(os.sched_getaffinity(0)), pty=dict(width=120, height=40)))
     print('Evidence: ' + str(args.evidence), flush=True)
 
     def interrupted(signum, _frame):
-        raise KeyboardInterrupt('FS1 investigation interrupted/budget exhausted: %s' % signum)
+        raise KeyboardInterrupt('ASIC investigation interrupted/budget exhausted: %s' % signum)
 
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
         signal.signal(sig, interrupted)
@@ -737,7 +737,7 @@ def main():
         exercise(args)
     finally:
         signal.alarm(0)
-    print('PASS: retained-real FS1 investigation / PTY / cache / binary', flush=True)
+    print('PASS: retained-real ASIC investigation / PTY / cache / binary', flush=True)
 
 
 if __name__ == '__main__':

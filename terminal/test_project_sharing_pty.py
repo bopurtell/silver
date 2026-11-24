@@ -1,4 +1,4 @@
-"""WB-094: scripted keyboard UX and publication lifecycle in real Silver PTYs."""
+"""Editor sharing: scripted keyboard UX and publication lifecycle in real Silver PTYs."""
 from contextlib import ExitStack, closing, contextmanager
 import fcntl
 import os

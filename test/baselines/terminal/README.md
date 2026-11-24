@@ -11,6 +11,6 @@ Generated files. Do not edit them by hand.
 `<scenario>.<width>x<height>.ansi` is the same frame with the terminal escape sequences
 the client would actually emit.
 
-See [archived capture notes](../../../docs/archive/2026-10-12/terminal_baseline_captures.md) for
-the scenarios, what the captures do and do not preserve, and the layout problems they
-record.
+The scenario names and dimensions come from the capture script. These outputs
+check terminal layout and presentation; they do not establish provider behavior
+or ASIC result correctness.

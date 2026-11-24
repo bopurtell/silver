@@ -28,12 +28,12 @@ import time
 import traceback
 
 
-# Reuse the FS0 transport/parser without writing __pycache__ in the checkout.
+# Reuse the native execution transport/parser without writing __pycache__ in the checkout.
 sys.dont_write_bytecode = True
 SPEC = importlib.util.spec_from_file_location(
-    "fs0", Path(__file__).with_name("test-native-execution.py"))
-FS0 = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(FS0)
+    "native_execution", Path(__file__).with_name("test-native-execution.py"))
+native_execution = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(native_execution)
 
 
 def digest(path):
@@ -55,11 +55,11 @@ def terminate(process):
 
 def metadata(session):
     hello = session.raw("/api/hello")
-    assert FS0.field(hello, "instance_id") == session.metadata["instance_id"]
+    assert native_execution.field(hello, "instance_id") == session.metadata["instance_id"]
     snapshot = session.raw("/api/v1/snapshot", [
         ["instance_id", session.metadata["instance_id"]]])
     assert snapshot[0] == "Ok", snapshot
-    payload = FS0.record(snapshot[1])
+    payload = native_execution.record(snapshot[1])
     # Snapshot covers all supervisor jobs, rather than only generic attempts.
     assert payload["jobs"] == [], f"Unexpected jobs: {payload['jobs']}"
     assert payload["artifacts"] == [], "Unexpected job artifacts"
@@ -182,7 +182,7 @@ def main():
     (root / "dune").write_text("; Metadata-only fixture: no executable or build rules.\n")
     for directory in ("home", "runtime", "tmp", "cache", "config"):
         (evidence / directory).mkdir()
-    session = FS0.Session(args, evidence, root)
+    session = native_execution.Session(args, evidence, root)
     session.env.update(HOME=str(evidence / "home"), XDG_RUNTIME_DIR=str(evidence / "runtime"),
                        XDG_CACHE_HOME=str(evidence / "cache"), XDG_CONFIG_HOME=str(evidence / "config"),
                        TMPDIR=str(evidence / "tmp"))

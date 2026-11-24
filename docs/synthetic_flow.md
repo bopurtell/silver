@@ -1,14 +1,11 @@
 # Interactive synthetic flow demo
 
-Implemented and exercised 2026-10-16 in the aesthetics worktree. This is a
-development/demo provider behind the **normal daemon, adapter and terminal**.
-It supplies explicitly synthetic data; it runs no synthesis, physical-design or
-acceptance tools. No PDK or retained real-run directories are required.
+This demo uses the normal Silver daemon, adapter, and terminal with a synthetic
+provider. It runs no synthesis, physical design, or acceptance tools, and needs
+no PDK or retained real-run data.
 
-**Testing is now included:** explicit seed creates Overview, Timing and Testing,
-and runs two bounded synthetic FS2 examples (pass and intentional failure) through
-the normal supervisor. Timing/Testing Session panels are wider. See
-[Testing controls, upgrade instructions and both synthetic/real launch pairs](synthetic_testing.md).
+Explicit seeding creates Overview, Timing and Testing and runs two synthetic
+test attempts: one pass and one intentional failure.
 
 ## Launch in two terminals
 
@@ -21,9 +18,8 @@ use `scripts/with-switch.sh`, respecting `OPAM_SWITCH` (default `5.2.0+ox`).
 ### Terminal 1 — prepare once and start the daemon
 
 ```sh
-# From the Silver checkout.
-flock /tmp/opencode/workbench-build.lock \
-  ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
+# From the Silver checkout with its source build dependencies available.
+./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
 
 mkdir -p "$HOME/.local/state/hardcaml-workbench"
@@ -66,19 +62,10 @@ tiles, pins, hidden state and requested geometry are preserved; explicit **Reset
 arrangement** restores preset requested sizes.
 
 Prepared demos contain copied provider code and retained evidence. Create a fresh
-directory to see updated production-like stage labels; old evidence is not silently
-rewritten. Synthetic identity remains in runs/reports/provenance. See
-[frontend composition](frontend_composition.md) for palette and presentation controls.
-
-The latest [frontend refinement](frontend_refinement.md) adds border titles,
-horizontal stages and compact Overview panels. Timing now uses a composed
-investigation workspace rather than a full-window timing overlay.
-
-The subsequent [sidebar/schemes pass](overview_sidebar.md) is now the current
-Overview: Session, Runs and a wider vertical checklist at left; individual domain
-summaries and planned-run stacked at right. Timing keeps its investigation topology.
-Use a new directory name such as `synthetic-sidebar` to review clean defaults.
-Open the command palette and type `theme` to browse and preview color schemes.
+directory to pick up provider changes; old evidence is not rewritten. Synthetic
+identity remains visible in runs, reports, and provenance. You can also
+[preview themes](appearance_presets.md#live-color-schemes) on the demo without
+running any work.
 
 `q` exits the client while the daemon stays alive. Ctrl-C stops the foreground
 daemon. `--url` permits explicitly connecting to another endpoint; `--daemon` and
@@ -88,12 +75,11 @@ daemon. `--url` permits explicitly connecting to another endpoint; `--daemon` an
 
 ### Testing workspace
 
-Choose **3 Testing** and focus **simulation**. It contains `synthetic-checks` pass
-and intentional-failure attempts with declared cases/seeds/parameters, logs, JSON
-reports and synthetic binary traces. Use j/k to select attempts, n/p for cases,
-`l` for logs, or palette **Simulation: Reopen … / Rerun case …**. Zoom for longer
-details. These are project-scoped illustrative tests, not actual hardware evidence
-or ASIC-run acceptance. See [full Testing guide](synthetic_testing.md).
+Open **Testing**. The seeded `synthetic-checks` pass and intentional-failure
+attempts show declared cases, seeds, parameters, logs, JSON reports, and
+synthetic binary traces. These illustrative tests are not hardware evidence
+or ASIC-run acceptance. See the [Testing workspace guide](testing_workspace.md)
+for browsing attempts and cases, viewing logs, and rerunning failures.
 
 ### Run a simulated prefix from the checklist
 
@@ -176,7 +162,6 @@ sets timed playback between 0.01 and 2 seconds per stage.
 - Stage parsing/persistence: `backend/asic_public.ml` and `backend/asic_service.ml`.
 - Checklist projection/input: existing terminal host, with stable stage IDs and
   exact run/pin scope.
-- Build/ownership plan: [synthetic flow implementation plan](archive/delivery/synthetic_flow_plan.md).
 
 The synthetic provider implements an optional versioned stage-plan extension.
 Other providers that do not supply it continue to show unreported stage state;
@@ -206,34 +191,5 @@ python3 -B scripts/test-synthetic-flow.py --pty \
   --preset-export _build/default/terminal/workspaces/export_presets.exe
 ```
 
-**Current composition integration:** updated same-definition seeding, production-like
-stage labels and bounded palette passed synthetic HTTP/PTY at
-`/tmp/opencode/synthetic-flow-huttcbvv/`; final format/lint/full tests/build passed at
-`-j 2`. Broader frontend and FS2 regression evidence is in
-[frontend composition](frontend_composition.md#verification-and-retained-evidence).
-
-**Latest refinement:** styled panels, compact Overview and composed Timing passed
-synthetic HTTP/PTY at `/tmp/opencode/synthetic-flow-y0hx51su/`. Refinement57,
-two-run12, composition44, FS2 45 and five interrupt cases passed with final normal
-format/lint/full tests/build at `-j 2`; see [current evidence](frontend_refinement.md#verification).
-
-**Current sidebar/schemes/plan pass:** final normal binaries passed106 HTTP/PTY
-checks at `/tmp/opencode/overview-sidebar-835bf5f34f02/`; synthetic launch/cancel
-passed at `/tmp/opencode/synthetic-flow-d0emyda4/`. Full final normal-checkout
-format/lint/tests/build passed serially at2. See [latest evidence](overview_sidebar.md#verification).
-
-Historical first-slice evidence: formatting, lint, full tests and build passed; terminal tests were repeated after
-checklist viewport/preview refinements. Final provider + real HTTP + PTY acceptance
-passed at **`/tmp/opencode/synthetic-flow-8rmfu7xu/`**. This includes:
-
-- Valid source hashes, read-only evidence, all four inspection domains and text artifacts.
-- Automatic timed playback and deterministic manual stage transitions.
-- Distinct runs, idempotent resubmission and exact captured-context launch selection.
-- No producer calls from browsing, details, restyling or planning.
-- Explicit cancelled-state observation after the cancellation lifecycle settles.
-- Full Overview/Timing terminal captures, 12-path sort/filter and exact detail text.
-
-Review `pty-full-overview`, `pty-full-timing`, `pty-path-index`, `pty-path-sorted`,
-`pty-path-filtered`, and `pty-path-detail` in that directory (`.txt` and `.ansi`).
-The harness stops only its own processes and retains its evidence. No actual EDA
-execution, sibling repository changes or Git staging/commit/push were needed.
+The PTY check exercises stage launch and cancellation, exact captured-context
+selection, and read-only evidence inspection without EDA tools.

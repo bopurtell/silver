@@ -1,4 +1,4 @@
-"""WB-089 acceptance through a real Silver frontend PTY (no build required).
+"""Shared terminal acceptance through a real Silver frontend PTY (no build required).
 
 Run from Silver: python3 -B terminal/test_shared_terminal_pty.py _build/default/terminal/main.exe
 """
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "test"))
 from support.terminal import Terminal
 
 
-PROMPT = "wb089$"
+PROMPT = "shared-shell$"
 OVERLAY = re.compile(r" Terminal \d+ \(local\) \|")
 PALETTE = "COMMAND PALETTE"
 PALETTE_KEYS = b" cc"
@@ -52,7 +52,7 @@ def exercise(client, base):
     launcher.symlink_to(client)
     project = base / "project"
     project.mkdir()
-    (project / "dune-project").write_text("(lang dune 3.22)\n(name wb089_pty)\n")
+    (project / "dune-project").write_text("(lang dune 3.22)\n(name shared_terminal_pty)\n")
     (project / "subdir").mkdir()
     home = base / "home"
     home.mkdir()
@@ -62,16 +62,16 @@ def exercise(client, base):
     # A real interactive Bash with deterministic startup, prompt and private history.
     # Disable PTY input echo so output assertions cannot match the typed command.
     shell.write_text("""#!/bin/sh
-cat "/proc/$$/stat" > "$WB089_AUDIT/shell.$$"
+cat "/proc/$$/stat" > "$SHARED_TERMINAL_TEST_AUDIT/shell.$$"
 stty -echo
-export PS1='wb089$ ' HISTFILE=/dev/null HISTSIZE=1000
+export PS1='shared-shell$ ' HISTFILE=/dev/null HISTSIZE=1000
 unset PROMPT_COMMAND HISTCONTROL HISTIGNORE HISTTIMEFORMAT
 exec /bin/bash --noprofile --norc --noediting "$@"
 """)
     shell.chmod(0o700)
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(base / "config"),
                XDG_STATE_HOME=str(base / "state"), XDG_RUNTIME_DIR=str(base / "runtime"),
-               SHELL=str(shell), WB089_AUDIT=str(audit), WB089_PROJECT=str(project))
+               SHELL=str(shell), SHARED_TERMINAL_TEST_AUDIT=str(audit), SHARED_TERMINAL_TEST_PROJECT=str(project))
     for name in ("ENV", "BASH_ENV", "WB_VALUE"):
         env.pop(name, None)
     session = SimpleNamespace(env=env, evidence=base)
@@ -194,7 +194,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         # A child which ignores hangup must still be cleaned up when Silver exits.
         report = audit / f"child.{number}"
         command(f"""(trap '' HUP; exec sleep 120) & cat "/proc/$!/stat" """
-                f"""> "$WB089_AUDIT/{report.name}"; printf 'WB_CHILD_%s\\n' {number}""")
+                f"""> "$SHARED_TERMINAL_TEST_AUDIT/{report.name}"; printf 'WB_CHILD_%s\\n' {number}""")
         shown(f"child-{number}", number, f"WB_CHILD_{number}")
         child, _ = process_stat(report.read_text())
         assert live(child, require_running=True), f"Terminal {number} cleanup probe was not live"
@@ -207,11 +207,11 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         toggle(2)
         shown("two-from-testing", 2, PROMPT)
         two, = started()
-        command("""[ "$(pwd -P)" = "$WB089_PROJECT" ] && printf 'WB_CWD_%s\\n' initial""")
+        command("""[ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_CWD_%s\\n' initial""")
         shown("initial-project-cwd", 2, "WB_CWD_initial")
         command("WB_VALUE=number_two; cd subdir; : history_only_two")
-        command("""(while [ ! -f "$WB089_AUDIT/release" ]; do sleep .05; done; """
-                """printf 'WB_HIDDEN_%s\\n' two; : > "$WB089_AUDIT/emitted") &""")
+        command("""(while [ ! -f "$SHARED_TERMINAL_TEST_AUDIT/release" ]; do sleep .05; done; """
+                """printf 'WB_HIDDEN_%s\\n' two; : > "$SHARED_TERMINAL_TEST_AUDIT/emitted") &""")
         command("printf 'WB_ARMED_%s\\n' two")
         shown("background-writer-armed", 2, "WB_ARMED_two", absent=("WB_HIDDEN_two",))
         toggle()
@@ -224,7 +224,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         toggle(2)
         shown("two-from-timing", 2, "WB_ARMED_two", "WB_HIDDEN_two")
         assert started() == {two}, "Opening #2 in Timing launched an extra shell"
-        command("""[ "$(pwd -P)" = "$WB089_PROJECT/subdir" ] && printf 'WB_TWO=<%s>\\n' "$WB_VALUE" """)
+        command("""[ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT/subdir" ] && printf 'WB_TWO=<%s>\\n' "$WB_VALUE" """)
         shown("two-kept-cwd-and-variable", 2, "WB_TWO=<number_two>")
         command("""history | grep -q 'history_only''_two' && printf 'WB_HISTORY_%s\\n' two""")
         shown("two-kept-history", 2, "WB_HISTORY_two")
@@ -304,7 +304,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         check_bottom(inner_size("returned_bottom"))
         resize(116, 32)
 
-        command("""[ "$(pwd -P)" = "$WB089_PROJECT/subdir" ] && [ "$WB_VALUE" = number_two ] """
+        command("""[ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT/subdir" ] && [ "$WB_VALUE" = number_two ] """
                 """&& history | grep -q 'history_only''_two' && printf 'WB_PLACEMENT_%s\\n' kept""")
         shown("placement-kept-shell-state", 2, "WB_PLACEMENT_kept")
         palette_command("close term", "Close Terminal")
@@ -325,7 +325,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         send(F12)
         shown("explicit-restart", 2, PROMPT, absent=(EXITED, "WB_LAST_two"))
         f12_two, = started() - {one, two}
-        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$WB089_PROJECT" ] && printf 'WB_RESTART_%s\\n' clean""")
+        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_RESTART_%s\\n' clean""")
         shown("restarted-two-has-fresh-state", 2, "WB_RESTART_clean")
         command("WB_VALUE=discard_me; cd subdir; printf 'WB_PALETTE_EXIT_%s\\n' two; exit 23")
         shown("two-exited-before-palette-restart", 2, "WB_PALETTE_EXIT_two", EXITED)
@@ -333,7 +333,7 @@ exec /bin/bash --noprofile --norc --noediting "$@"
         shown("palette-restart", 2, PROMPT, absent=(PALETTE, EXITED, "WB_PALETTE_EXIT_two"))
         new_two, = started() - {one, two, f12_two}
         assert not live(f12_two), "Palette restart left the old shell alive"
-        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$WB089_PROJECT" ] && printf 'WB_PALETTE_RESTART_%s\\n' clean""")
+        command("""[ -z "${WB_VALUE+x}" ] && [ "$(pwd -P)" = "$SHARED_TERMINAL_TEST_PROJECT" ] && printf 'WB_PALETTE_RESTART_%s\\n' clean""")
         shown("palette-restart-has-fresh-state", 2, "WB_PALETTE_RESTART_clean")
         child_two = persistent_child(2)
 
@@ -383,7 +383,7 @@ def main():
         evidence.mkdir()
         exercise(client, evidence)
     else:
-        with tempfile.TemporaryDirectory(prefix="silver-wb089-") as directory:
+        with tempfile.TemporaryDirectory(prefix="silver-shared-terminal-") as directory:
             exercise(client, Path(directory))
 
 

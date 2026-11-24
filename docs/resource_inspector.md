@@ -36,8 +36,7 @@ workspace. Silver remembers the orientation for that workspace. The highlighted
 request stays selected; changing layout does not reload the resource evidence
 or change the run. Custom-authored layouts keep their own layout policy.
 
-These are two presentations of the same Resources module, following the
-[module/tile ownership model](features/modules_and_tiles.md#ownership). The list and reader
+These are two presentations of the same Resources module. The list and reader
 share the workspace's source and selected resource ID. The provider supplies
 the decisions and observations; neither tile independently resolves the request.
 
@@ -213,7 +212,7 @@ descriptors, eight indexes and a bounded detail cache; these are not unlimited a
 
 ## Restart the app
 
-Use the [checkout-backed example launcher](../../hardcaml_asic_example/docs/workbench_main.md)
+Use the [checkout-backed example launcher](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md)
 for the current example environment. Restart the client and daemon when no work
 is active if you need to pick up rebuilt binaries. Only one daemon may own a
 state directory.
@@ -254,7 +253,3 @@ above, not that pointer. New capability `resource_inspection1` is required.
 Provider-scope change can require explicit re-registration of older named runs;
 original result bytes remain intact. The SRAM import above works independently of
 that named-run cache and does not create/execute a physical run.
-
-See [implementation contract](resource_inspector_plan.md),
-[frozen API handoff](archive/delivery/resource_inspector_handoff.md) and
-[native acceptance evidence](resource_inspector_acceptance.md).

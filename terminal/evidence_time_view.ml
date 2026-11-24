@@ -161,7 +161,7 @@ let summary_lines observed_at =
   [ "Produced: unknown · not supplied by the producer"; observed_line observed_at ]
 ;;
 
-module%test Wb006_timestamp_presentation = struct
+module%test Timestamp_presentation = struct
   let at ?(minutes = 0.) base =
     Timestamp.of_time_ns (Time_ns.add base (Time_ns.Span.of_min minutes))
   ;;

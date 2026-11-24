@@ -6,12 +6,8 @@ declared/available evidence.** This includes rich timing paths,
 measured clock reports, stage-attributed physical/routing evidence, and an exact
 external binary handoff. It does not claim completion of every later F06 extension.
 
-This is the followup to [FS1 acceptance](archive/delivery/asic_evidence_initial_acceptance.md) and
-[lifecycle and artifacts](finalization_and_artifacts.md). Their statements that
-these investigation surfaces remain missing describe earlier slices. The original
-[FS1 requirements](feature_sets.md#fs1--asic-evidence-investigation) and
-[F06 requirements](features/hardware_inspection.md) remain accounted for below;
-completion here is scoped to evidence actually supplied by this adoption.
+For the separate collection and acceptance workflow, see
+[Finalization, reports and artifacts](finalization_and_artifacts.md).
 
 ## Evidence and verification status
 
@@ -144,8 +140,8 @@ correction is not a claim that the already-running daemon hot-reloaded it.
 The acceptance harness used its own project configuration and read-only relay.
 The owner subsequently opened the retained timing path in the manual client.
 That observation establishes the viewed workflow, not migration of every saved
-configuration namespace. The [README manual route](real_asic_example_demo.md)
-records the exact registration and launch steps for the current provider.
+configuration namespace. To inspect a run with your own installed provider, see
+[Project workflows](project_workflows.md).
 
 To adopt the new provider in the owner application, `provider_executable` must
 explicitly select the generation above and the project must be reopened so the
@@ -230,9 +226,7 @@ remains available with Space c c, and Ctrl-C exits the client from every mode.
 inspector in one step; an open Timing detail/provenance reader returns focus to
 `timing · paths`, and the selected row, tile bindings and run selection are unchanged.
 Contextual inspector actions lead the palette, with a `[reason]` when unavailable, and
-a `workspace › view › run (stage)` breadcrumb appears on the hint row when it fits
-([WB-054](features/presentation/WB-054-contextual-controls.md)). Less prominent raw
-JSON/full paths remain a [presentation followup](backlog/README.md#inspector-usability-polish).
+a `workspace › view › run (stage)` breadcrumb appears on the hint row when it fits.
 
 The signoff timing index contains **1020 actual timing paths**, plus its recorded
 input-reference row. Every max/min block matches the independently read original

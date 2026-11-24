@@ -1,4 +1,4 @@
-"""Portable, stdlib-only FS2 S-expression codec and flushed event writer.
+"""Portable, stdlib-only simulation-provider S-expression codec and flushed event writer.
 
 The authoritative types and framing rules are protocol/simulation.ml. This module
 is copied alongside the demo provider; it has no Workbench/fixture dependencies.

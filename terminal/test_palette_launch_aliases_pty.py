@@ -1,4 +1,4 @@
-"""WB-076: literal palette aliases through the native client and recorded provider."""
+"""Literal palette aliases through the native client and recorded provider."""
 from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory

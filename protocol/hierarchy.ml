@@ -1,7 +1,7 @@
 (** A structural hierarchy exported by one project-side elaboration.
 
-    This is an instance tree with minimal port metadata, not the Phase 3 signal/operator
-    graph. Structural keys are meaningful only within one hierarchy artifact. *)
+    This is an instance tree with minimal port metadata, not a signal/operator graph.
+    Structural keys are meaningful only within one hierarchy artifact. *)
 
 open! Core
 

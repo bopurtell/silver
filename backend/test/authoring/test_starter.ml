@@ -50,7 +50,7 @@ let () =
   Exn.protect
     ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
     ~f:(fun () ->
-      let real = Sys.getenv "WB051_TEST_RENDERER" in
+      let real = Sys.getenv "WORKBENCH_TEST_STARTER_RENDERER" in
       let exe = root / Starter.program in
       let install script =
         Out_channel.write_all exe ~data:("#!/bin/sh\n" ^ script);

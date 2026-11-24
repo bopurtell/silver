@@ -67,10 +67,10 @@ IDs, bindings, contexts, selections and appearance are retained. Apply/Reset abo
 remain additive. `Definition.restore` uses the same definitions; no separate layout
 table or implicit startup restoration is involved. [Controls](../../docs/default_layout_restore.md).
 
-See [the full source map, customization guide and verification](../../docs/frontend_composition.md)
-for display overrides, migration, palette controls and synthetic startup.
+See [workspace configuration](../../docs/workspace_configuration.md) for custom
+layouts and [terminal controls](../../docs/terminal_controls.md) for palette actions.
 
-The [current sidebar polish](../../docs/real_asic_example_demo.md) makes Overview a
+Overview uses a
 one-third sidebar (Session, Runs, Resources, vertical checklist, planned-run) and
 a right-hand domain-summary stack. Resources previews inventory and evidence status;
 Enter opens the full inspector. `stock.sexp` exposes the width weights
@@ -183,8 +183,7 @@ Compared against merged oxcaml `471419a`, including its compiled workspace defin
 - Hierarchy remains opt-in as delivered in `471419a` and documented in
   `docs/hierarchy_tile.md`. Any user definition can compose the `hierarchy` kind using
   the same template/tile/tree schema; it needs no new preset or authoring format.
-- The duration alignment/cache work (`58f3dfc`, and
-  `docs/timing_cache_and_duration_alignment_plan.md`) changes rendering and demand,
+- The [duration alignment](../../docs/execution_durations.md) changes rendering and demand,
   not preset membership. It introduces no separate duration tile or layout policy.
 - Removed unused hardcoded stock helpers and the obsolete shell from `common.ml`;
   its types and generic tile constructor remain renderer/test compatibility helpers.
@@ -192,6 +191,4 @@ Compared against merged oxcaml `471419a`, including its compiled workspace defin
 
 Regression coverage in `test_workspaces.ml` checks exact starter membership, fresh
 initialization versus legacy preservation, cooperative Testing membership/presentation,
-and stock/user tree parity. Central workspace/terminal tests, native builds, lint,
-configuration and domain/reconnect acceptance passed; see the
-[audit and exact evidence](../../docs/archive/delivery/workspace_post_merge_audit.md).
+and stock/user tree parity.

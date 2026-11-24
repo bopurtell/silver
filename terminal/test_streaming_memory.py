@@ -30,7 +30,7 @@ def expected_digest(size):
 
 def measure(executable, size):
     expected = expected_digest(size)
-    with tempfile.TemporaryDirectory(prefix="wb040-memory-") as directory:
+    with tempfile.TemporaryDirectory(prefix="streaming-export-memory-") as directory:
         root = Path(directory)
         rss_file = root / "rss.txt"
         environment = dict(os.environ, TMPDIR=directory)

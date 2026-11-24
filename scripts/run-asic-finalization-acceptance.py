@@ -109,13 +109,13 @@ def main():
     for number in (signal.SIGINT, signal.SIGTERM):
         signal.signal(number, on_signal)
 
-    root = Path(tempfile.mkdtemp(prefix='workbench-fs1-acceptance-', dir='/tmp/opencode'))
+    root = Path(tempfile.mkdtemp(prefix='workbench-finalization-acceptance-', dir='/tmp/opencode'))
     print(root, flush=True)
     deadline = time.monotonic() + args.timeout
     environment = dict(os.environ, **THREAD_ENV)
     affinity = sorted(os.sched_getaffinity(0))[:20] if hasattr(os, 'sched_getaffinity') else None
     summary = {
-        'contract': 'workbench.fs1-acceptance-evidence', 'schema_version': 1,
+        'contract': 'workbench.asic-finalization-acceptance-evidence', 'schema_version': 1,
         'started_at': now(), 'evidence': str(root), 'status': 'running',
         'physical_evidence': str(args.physical_evidence),
         'trace_exporter': str(args.trace_exporter), 'acceptance_requested': True,

@@ -4079,7 +4079,7 @@ let inspection_viewport (dimensions : Dimensions.t) =
   Int.max 1 dimensions.width, Int.max 1 dimensions.height
 ;;
 
-(* WB-054 breadcrumbs: [workspace › view › run (stage)], built only from the active
+(* Breadcrumbs: [workspace › view › run (stage)], built only from the active
    workspace, the focused tile, its resolved run and its open inspector. A segment that
    has no typed fact (e.g. no run) is omitted rather than guessed. *)
 let breadcrumb_view host (tile : W.Tile.t) =
@@ -5452,7 +5452,7 @@ let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
           (select_body_row clicked data tile ~width ~height:(row + 1) ~row)))
 ;;
 
-let%test_unit "WB002 stock Overview stage cards render typed freshness markers" =
+let%test_unit "stock Overview stage cards render typed freshness markers" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let analysis : Asic.Timing_analysis.t =
     { target =
@@ -6407,7 +6407,7 @@ let%test_unit "Waveforms banner and hints stay scoped with explicit local hint o
       ~substring:"j/k browse")
 ;;
 
-let%test_unit "WB-002 host context labels respect icon policy without duplicating pin \
+let%test_unit "host context labels respect icon policy without duplicating pin \
                badges"
   =
   let host, data, find = refinement_fixture P.Overview.definition in
@@ -6415,7 +6415,7 @@ let%test_unit "WB-002 host context labels respect icon policy without duplicatin
   let workspace = Option.value_exn (H.active host) in
   let context = W.context registry workspace.context in
   let independent =
-    { context with id = W.Context_id.of_string "wb002-independent"; name = "Detached" }
+    { context with id = W.Context_id.of_string "detached-context"; name = "Detached" }
   in
   let detached =
     H.receive
@@ -6458,7 +6458,7 @@ let%test_unit "WB-002 host context labels respect icon policy without duplicatin
       List.length (String.substr_index_all screen ~pattern:label ~may_overlap:false) = 1))
 ;;
 
-let%test_unit "WB-002 host freshness uses typed state and preserves fallback payloads" =
+let%test_unit "host freshness uses typed state and preserves fallback payloads" =
   let host, data, find = refinement_fixture P.Overview.definition in
   let tile = find "timing" in
   let run = Asic_snapshot_fixture.run_a in
@@ -6553,7 +6553,7 @@ let%test_unit "WB-002 host freshness uses typed state and preserves fallback pay
           ~prefix:(indicator_label host.appearance.icons kind "Freshness: ")))
 ;;
 
-let%test_unit "WB-002 inspector frames stop for terminal, cache-only and unavailable \
+let%test_unit "inspector frames stop for terminal, cache-only and unavailable \
                states"
   =
   let host, data, find = refinement_fixture P.Overview.definition in
@@ -11363,10 +11363,10 @@ let%test_unit "custom and unknown presets honor generic Fit without rewriting ge
       Workspace_template.equal template (W.export_template registry workspace.id |> ok)))
 ;;
 
-(* WB-054: contextual actions, breadcrumbs and explicit inspector close. *)
+(* Contextual actions, breadcrumbs and explicit inspector close. *)
 
 (* Built through sexp so optional index fields keep their declared defaults. *)
-let wb054_index rows =
+let contextual_fixture_index rows =
   let field name value = Sexp.List [ Atom name; value ] in
   let index =
     Asic_inspection.Index.t_of_sexp
@@ -11402,9 +11402,9 @@ let wb054_index rows =
 ;;
 
 (* Timing fixture with an opened, reconciled paths index whose row "2" is selected. *)
-let wb054_timing () =
+let contextual_timing_fixture () =
   let host, data, find = refinement_fixture P.Timing.definition in
-  let snapshot = { (Option.value_exn data.asic) with inspections = [ wb054_index 3 ] } in
+  let snapshot = { (Option.value_exn data.asic) with inspections = [ contextual_fixture_index 3 ] } in
   let state =
     Inspection_view.reconcile
       (Timing_workspace.create ~generation:4 ~run:Asic_snapshot_fixture.run_a ~stage:"signoff")
@@ -11415,7 +11415,7 @@ let wb054_timing () =
   { host with notice = "" }, { data with asic = Some snapshot }, find, state
 ;;
 
-let wb054_without_run host =
+let contextual_fixture_without_run host =
   let registry = Option.value_exn host.H.registry in
   let workspace = Option.value_exn (H.active host) in
   let context = W.context registry workspace.context in
@@ -11437,55 +11437,55 @@ let wb054_without_run host =
   |> fun cleared -> { cleared with H.focus = host.H.focus }
 ;;
 
-let wb054_commands host = H.contextual host (H.catalog host ~project:None ~jobs:[])
+let contextual_fixture_commands host = H.contextual host (H.catalog host ~project:None ~jobs:[])
 
 let%test_unit "Timing distinguishes no run, a cold index, loading, and zero paths" =
-  let host, data, find, state = wb054_timing () in
+  let host, data, find, state = contextual_timing_fixture () in
   let tile = find "timing-paths" in
   let render host = tile_view host data tile ~width:96 ~height:12 |> plain_text in
   let show view = render (H.set_timing host tile view) in
   let includes text substring = String.is_substring text ~substring in
   let cold = { state with index = None } in
-  assert (includes (render (wb054_without_run host)) "No run selected for Timing");
+  assert (includes (render (contextual_fixture_without_run host)) "No run selected for Timing");
   assert (includes (show cold) "No loaded index");
   assert (not (includes (show cold) "0 paths"));
   assert (includes (show { cold with index_loading = true }) "Loading timing index");
-  let empty = { state with index = Some (wb054_index 0); cache = None } in
+  let empty = { state with index = Some (contextual_fixture_index 0); cache = None } in
   assert (includes (show empty) "0 paths");
   assert (includes (show empty) "No timing paths reported")
 ;;
 
-let wb054_reason host id =
-  (List.find_exn (wb054_commands host) ~f:(fun c -> String.equal c.H.id id)).unavailable
+let contextual_unavailability host id =
+  (List.find_exn (contextual_fixture_commands host) ~f:(fun c -> String.equal c.H.id id)).unavailable
 ;;
 
-let%test_unit "WB-054 Timing actions stay listed with availability reasons" =
-  let host, _, find, state = wb054_timing () in
+let%test_unit "Timing actions stay listed with availability reasons" =
+  let host, _, find, state = contextual_timing_fixture () in
   let paths = find "timing-paths"
   and detail = find "timing-detail" in
   (* Contextual actions lead the palette; close explains that nothing is open. *)
-  assert (String.equal (List.hd_exn (wb054_commands host)).id "inspector.close");
+  assert (String.equal (List.hd_exn (contextual_fixture_commands host)).id "inspector.close");
   assert (
-    Option.equal String.equal (wb054_reason host "inspector.close") (Some H.no_inspector));
+    Option.equal String.equal (contextual_unavailability host "inspector.close") (Some H.no_inspector));
   (* No paths index opened for the selected run yet. *)
   let unopened = { host with focus = Some detail.id } in
   assert (
     String.is_substring
-      (Option.value_exn (wb054_reason unopened "inspector.open-detail"))
+      (Option.value_exn (contextual_unavailability unopened "inspector.open-detail"))
       ~substring:"no timing paths opened for this run");
-  assert (Option.is_none (wb054_reason unopened "context.inspect-timing"));
+  assert (Option.is_none (contextual_unavailability unopened "context.inspect-timing"));
   (* No run selected: the same actions remain, with the typed reason. *)
-  let cleared = wb054_without_run unopened in
+  let cleared = contextual_fixture_without_run unopened in
   List.iter
     [ "inspector.open-detail"; "inspector.refresh"; "context.inspect-timing" ]
     ~f:(fun id ->
-      assert (Option.equal String.equal (wb054_reason cleared id) (Some "no run selected")));
+      assert (Option.equal String.equal (contextual_unavailability cleared id) (Some "no run selected")));
   (* Selection-appropriate actions on the loaded paths table. *)
   let loaded = H.set_timing host paths { state with selected = Some "2" } in
-  assert (Option.is_none (wb054_reason loaded "inspector.open-detail"));
-  assert (Option.is_none (wb054_reason loaded "inspector.near"));
+  assert (Option.is_none (contextual_unavailability loaded "inspector.open-detail"));
+  assert (Option.is_none (contextual_unavailability loaded "inspector.near"));
   (match
-     (List.find_exn (wb054_commands loaded) ~f:(fun c ->
+     (List.find_exn (contextual_fixture_commands loaded) ~f:(fun c ->
         String.equal c.id "inspector.open-detail"))
        .action
    with
@@ -11495,7 +11495,7 @@ let%test_unit "WB-054 Timing actions stay listed with availability reasons" =
   assert (
     Option.equal
       String.equal
-      (wb054_reason filtered "inspector.open-detail")
+      (contextual_unavailability filtered "inspector.open-detail")
       (Some "no rows match the current filter"));
   let opened =
     H.set_timing
@@ -11503,10 +11503,10 @@ let%test_unit "WB-054 Timing actions stay listed with availability reasons" =
       paths
       { state with selected = Some "2"; requested = Some ("exact-source-digest", "2") }
   in
-  assert (Option.is_none (wb054_reason opened "inspector.close"));
+  assert (Option.is_none (contextual_unavailability opened "inspector.close"));
   assert (
     String.is_substring
-      (Option.value_exn (wb054_reason opened "inspector.open-detail"))
+      (Option.value_exn (contextual_unavailability opened "inspector.open-detail"))
       ~substring:"Space c x");
   (* Help names the explicit close only while it applies, and never claims q exits. *)
   assert (String.is_substring (main_hint_text opened) ~substring:"j/k select");
@@ -11514,7 +11514,7 @@ let%test_unit "WB-054 Timing actions stay listed with availability reasons" =
   assert (String.is_substring (main_hint_text cleared) ~substring:"q exit")
 ;;
 
-let%test_unit "WB-054 Testing panes keep selection actions with reasons" =
+let%test_unit "Testing panes keep selection actions with reasons" =
   let host, _, find = refinement_fixture P.Testing.definition in
   let cases = find "simulation-cases"
   and artifacts = find "simulation-artifacts" in
@@ -11522,12 +11522,12 @@ let%test_unit "WB-054 Testing panes keep selection actions with reasons" =
   assert (
     Option.equal
       String.equal
-      (wb054_reason (on cases) "simulation.rerun-case")
+      (contextual_unavailability (on cases) "simulation.rerun-case")
       (Some "no attempt selected"));
   assert (
     Option.equal
       String.equal
-      (wb054_reason (on artifacts) "testing.artifact.export")
+      (contextual_unavailability (on artifacts) "testing.artifact.export")
       (Some "no attempt selected"));
   let selected =
     H.update_testing (on cases) cases.id (fun state ->
@@ -11536,18 +11536,18 @@ let%test_unit "WB-054 Testing panes keep selection actions with reasons" =
   assert (
     Option.equal
       String.equal
-      (wb054_reason selected "simulation.rerun-failed")
+      (contextual_unavailability selected "simulation.rerun-failed")
       (Some "attempt detail not loaded"));
   (* Project-scoped Testing panes do not advertise run-scoped evidence actions. *)
   assert (
     not
       (List.exists
-         (wb054_commands (on cases))
+         (contextual_fixture_commands (on cases))
          ~f:(fun c -> String.equal c.id "context.inspect-timing")));
   (* Placeholders explain rather than act. *)
   match
     (List.find_exn
-       (wb054_commands (on cases))
+       (contextual_fixture_commands (on cases))
        ~f:(fun c -> String.equal c.id "simulation.rerun-case"))
       .action
   with
@@ -11555,8 +11555,8 @@ let%test_unit "WB-054 Testing panes keep selection actions with reasons" =
   | _ -> assert false
 ;;
 
-let%test_unit "WB-054 close inspector returns focus predictably and keeps selection" =
-  let host, _, find, state = wb054_timing () in
+let%test_unit "close inspector returns focus predictably and keeps selection" =
+  let host, _, find, state = contextual_timing_fixture () in
   let paths = find "timing-paths"
   and detail = find "timing-detail" in
   let registry = Option.value_exn host.registry in
@@ -11614,7 +11614,7 @@ let%test_unit "WB-054 close inspector returns focus predictably and keeps select
   assert (
     Option.equal
       String.equal
-      (wb054_reason explorer "inspector.near")
+      (contextual_unavailability explorer "inspector.near")
       (Some "near/violated applies to timing paths only"));
   let closed, _ = H.close_inspector explorer |> Result.ok |> Option.value_exn in
   assert (Option.is_none (H.local closed tile.id).inspection);
@@ -11633,9 +11633,9 @@ let%test_unit "WB-054 close inspector returns focus predictably and keeps select
   assert (Option.equal W.Tile_id.equal closed.focus (Some tile.id))
 ;;
 
-let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow icon modes"
+let%test_unit "Breadcrumbs use typed context, fit or vanish, and follow icon modes"
   =
-  let host, data, find, state = wb054_timing () in
+  let host, data, find, state = contextual_timing_fixture () in
   let paths = find "timing-paths" in
   let host = H.set_timing host paths { state with selected = Some "2" } in
   let workspace = Option.value_exn (H.active host) in
@@ -11672,7 +11672,7 @@ let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow i
     let narrow = screen 60 in
     assert (not (String.is_substring narrow ~substring:short)));
   (* Never invent context: without a selected run there is no run or stage segment. *)
-  let cleared = wb054_without_run host in
+  let cleared = contextual_fixture_without_run host in
   List.iter (breadcrumbs cleared) ~f:(fun crumb ->
     assert (not (String.is_substring crumb ~substring:"(signoff)"));
     assert (not (String.is_substring crumb ~substring:Asic_snapshot_fixture.run_a.id)));
@@ -11704,7 +11704,7 @@ let%test_unit "WB-054 breadcrumbs use typed context, fit or vanish, and follow i
       ~substring:("inspect clocks › " ^ run ^ " (signoff)"))
 ;;
 
-let%test_unit "WB-054 full-area inspector renders breadcrumbs without losing content" =
+let%test_unit "full-area inspector renders breadcrumbs without losing content" =
   let host, data, _ = refinement_fixture P.Overview.definition in
   let tile =
     List.find_exn (H.tiles host) ~f:(fun tile ->
@@ -11756,8 +11756,8 @@ let%test_unit "WB-054 full-area inspector renders breadcrumbs without losing con
         assert (not (String.is_substring (screen host 60) ~substring:short))))
 ;;
 
-let%test_unit "WB-054 Timing rendered footer follows Paths Detail and Context focus" =
-  let host, data, find, view = wb054_timing () in
+let%test_unit "Timing rendered footer follows Paths Detail and Context focus" =
+  let host, data, find, view = contextual_timing_fixture () in
   let paths = find "timing-paths" in
   let opened =
     { view with selected = Some "1"; requested = Some ("exact-source-digest", "1") }
@@ -11791,7 +11791,7 @@ let%test_unit "WB-054 Timing rendered footer follows Paths Detail and Context fo
           assert (scroll > 0)))
 ;;
 
-let%test_unit "WB-054 artifact keyboard seam dispatches unavailable selection reasons" =
+let%test_unit "artifact keyboard seam dispatches unavailable selection reasons" =
   let host, _, find = refinement_fixture P.Testing.definition in
   let tile = find "simulation-artifacts" in
   let host = { host with focus = Some tile.id } in
@@ -11807,7 +11807,7 @@ let%test_unit "WB-054 artifact keyboard seam dispatches unavailable selection re
         let dispatch =
           match H.decode_event event with
           | Some (Character key) ->
-            H.testing_dispatch host key ~commands:(wb054_commands host)
+            H.testing_dispatch host key ~commands:(contextual_fixture_commands host)
             |> Option.value_exn
           | _ -> assert false
         in
@@ -11819,7 +11819,7 @@ let%test_unit "WB-054 artifact keyboard seam dispatches unavailable selection re
         | _ -> assert false))
 ;;
 
-let%test_unit "WB-054 production selection catalog promotes original runnable identities" =
+let%test_unit "production selection catalog promotes original runnable identities" =
   let host, _, find = refinement_fixture P.Testing.definition in
   let tile = find "simulation-artifacts" in
   let artifact : Simulation.Artifact.t =

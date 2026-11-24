@@ -35,7 +35,7 @@ type detail_cache =
   ; width : int
   ; info : bool
   ; age_bucket : int option
-  (** Ages in [lines] are rebuilt when this minute bucket changes (WB-006). *)
+  (** Ages in [lines] are rebuilt when this minute bucket changes. *)
   ; lines : string array
   }
 

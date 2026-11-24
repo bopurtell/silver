@@ -2,7 +2,7 @@ open! Core
 open Hardcaml
 
 (* This executable knows hardware and checks, not the Workbench protocol. The
-   project-owned provider.py translates its flushed observations into FS2 events. *)
+   project-owned provider.py translates its flushed observations into simulation events. *)
 let () =
   let argv = Sys.get_argv () in
   if Array.length argv <> 7 then failwith "counter CASE SEED CYCLES STEP VCD INJECT";
@@ -19,7 +19,7 @@ let () =
   let enable = input "enable" 1 in
   let spec = Reg_spec.create ~clock ~clear () in
   let count = reg_fb spec ~enable ~width:4 ~f:(fun q -> q +:. step) in
-  let circuit = Circuit.create_exn ~name:"fs2_counter" [ output "count" count ] in
+  let circuit = Circuit.create_exn ~name:"cyclesim_counter" [ output "count" count ] in
   let trace = Out_channel.create argv.(5) in
   let sim = Vcd.wrap trace (Cyclesim.create circuit) in
   let clear = Cyclesim.in_port sim "clear" in

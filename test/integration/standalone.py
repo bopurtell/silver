@@ -56,7 +56,11 @@ def run(silver, daemon, base):
                                                 env=env, text=True, timeout=15)
             assert name in help_text, (name, help_text)
             if not suffix:
-                assert ("Run Silver in the nearest Dune project" in help_text) == (prefix == "silver")
+                summary = help_text.splitlines()[0]
+                if prefix == "silver":
+                    assert "nearest Dune project" in summary, summary
+                else:
+                    assert summary == "Connect to Silver", summary
     # Run the lifecycle with only the primary command on the client side.
     client_bin = base / "client-bin"
     client_bin.mkdir()

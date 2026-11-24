@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-066 independent Python/native equivalence; prebuilt executables only.
+"""Simulation-provider Python/native equivalence; prebuilt executables only.
 
 No build/install, real project config changes, physical tools, or live daemon.
 Pass --daemon to also prove both native adapters through private real HTTP state.

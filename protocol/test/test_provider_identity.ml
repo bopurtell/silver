@@ -12,7 +12,7 @@ let backend (value : W.Backend_id.t) : D.Backend_id.t = value
 let build (value : W.Build_ref.t) : D.Build_ref.t = value
 let run (value : W.Run_ref.t) : D.Run_ref.t = value
 
-let%test_unit "provider aliases retain FS2 identity" =
+let%test_unit "provider aliases retain simulation provider identity" =
   let value : W.Discovery.t = { protocol_version = 1; suites = [] } in
   assert (D.Simulation.Discovery.equal (discovery value) value)
 ;;

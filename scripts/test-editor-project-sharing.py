@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-094: real Silver publisher + unflagged Cobalt restart, with private PTYs/state."""
+"""Editor project sharing: real Silver publisher + unflagged Cobalt restart, with private PTYs/state."""
 import argparse
 from contextlib import contextmanager, ExitStack
 import errno
@@ -132,7 +132,7 @@ def make_project(root):
         data = (REPO / "demo/synthetic_flow" / name).read_text()
         if name == "simulation_provider.py":
             # Hold a real provider after Started, until the test has exercised
-            # the lifecycle change. Its normal FS2 events/results are unchanged.
+            # the lifecycle change. Its normal simulation events/results are unchanged.
             started = "        writer.emit('Started')\n"
             assert data.count(started) == 1
             data = data.replace(started,
@@ -194,7 +194,7 @@ class Backend(Client):
         selection = sexp([["suite", "synthetic-checks"], ["cases", ["seeded-pattern"]],
                           ["seed", "314159"], ["parameters", [["pattern", "walking"], ["steps", "8"]]],
                           ["asic_inputs", []]])
-        detail, = field(self.simulation(f"(Launch (submission_key wb094-retained)"
+        detail, = field(self.simulation(f"(Launch (submission_key sharing-retained-attempt)"
             f" (discovery_digest {sexp(digest)}) (selection {selection}))"), "detail")
         attempt, job = field(detail, "id"), field(detail, "job")
         self.completed(attempt, job, "Passed")
@@ -482,7 +482,7 @@ def exercise(args, base, mode):
             c.see(overview_field("Outcome", "Failed"), overview_field("Attempt", cobalt_run),
                   overview_field("Instance", backend.instance))
             assert state.is_dir()
-    print(f"WB-094 {mode}: unremembered offer {first} survived Cobalt restart; "
+    print(f"Editor sharing {mode}: unremembered offer {first} survived Cobalt restart; "
           f"retained {retained}, Silver job {silver_job}, "
           f"Cobalt acknowledged {cobalt_run}/{cobalt_job}; stale/withdraw left jobs intact")
 
@@ -493,7 +493,7 @@ def main():
         parser.add_argument("--" + name, type=lambda p: Path(p).resolve(strict=True), required=True)
     parser.add_argument("--mode", choices=("embedded", "attached"))
     args = parser.parse_args()
-    with TemporaryDirectory(prefix="silver-cobalt-wb094-") as temp:
+    with TemporaryDirectory(prefix="silver-cobalt-sharing-") as temp:
         for mode in ([args.mode] if args.mode else ["embedded", "attached"]):
             exercise(args, Path(temp).resolve() / mode, mode)
 

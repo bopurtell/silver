@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project-owned FS2 v1 wrapper for a real, prebuilt Hardcaml Cyclesim counter.
+"""Project-owned simulation-provider v1 wrapper for a real, prebuilt Hardcaml Cyclesim counter.
 
 Only stdout from the tiny hardware checker is translated; the Workbench never
 infers outcomes from logs. No builds, shell, ASIC dependencies, or background jobs.

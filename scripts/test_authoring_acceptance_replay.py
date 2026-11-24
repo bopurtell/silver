@@ -1,4 +1,4 @@
-"""Fast WB-084 handoff tests; no provider, PDK, or EDA tools required."""
+"""Fast authoring handoff tests; no provider, PDK, or EDA tools required."""
 
 import copy
 import hashlib
@@ -231,19 +231,19 @@ class ReplayTests(unittest.TestCase):
             bundle.mkdir(parents=True)
             return dict(kind="bundle_emission", reused=False, output_dir=str(bundle), plan=plan, **plan)
 
-        milestones = []
+        steps = []
         with (patch.object(replay, "clone_starter", side_effect=clone),
               patch.object(replay, "run", side_effect=run),
               patch.object(replay, "query", side_effect=query),
               patch.object(replay, "inspect_synthesis", return_value=repeat) as inspect):
             result = replay.replay_synthesis(
                 snapshot, self.clone, provider=self.base / "provider", toolchain=self.base / "tools",
-                selection=SELECTION, baseline=original, receipts=self.receipts, record=milestones.append,
+                selection=SELECTION, baseline=original, receipts=self.receipts, record=steps.append,
                 fixture_commit=commit)
         self.assertEqual(inspect.call_args.kwargs["attempt"], attempt)
         self.assertEqual(inspect.call_args.kwargs["stream_id"], "new")
         self.assertTrue(result["comparison"]["equal"])
-        self.assertEqual(milestones, ["clean source clone", "build", "plan", "emit", "synthesize",
+        self.assertEqual(steps, ["clean source clone", "build", "plan", "emit", "synthesize",
                                       "compare synthesis"])
 
 

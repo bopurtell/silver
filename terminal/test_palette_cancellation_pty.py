@@ -1,4 +1,4 @@
-"""WB-096: native Enter dispatch against a private daemon's real active workflows."""
+"""Cancellation: native Enter dispatch against a private daemon's real active workflows."""
 import argparse
 from contextlib import closing, contextmanager
 from http.client import HTTPConnection

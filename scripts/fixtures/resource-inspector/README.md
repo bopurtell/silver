@@ -19,10 +19,9 @@ Preparation records the 276 historical and 333 augmented file hashes, app config
 existing current-pointer targets/timestamps and the immutable PT5b companion identities.
 It performs no emission, build, provider execution, Git or daemon action.
 
-`provider.py` implements the now-frozen `docs/resource_inspector_handoff.md` API in
-private synthetic roots. `--smoke` checks its failed/corrupt/stale/unsupported/budget
+`provider.py` implements the Resources provider API in private synthetic roots.
+`--smoke` checks its failed/corrupt/stale/unsupported/budget
 and genuinely delayed old-generation behavior without starting Workbench. Its opaque
 artifact IDs and byte oracles are synthetic, not claims about actual run sources.
-Native HTTP, synthetic late-target PTY and retained real bridge HTTP/PTY acceptance
-have now run. See `docs/resource_inspector_acceptance.md` for exact captured versions,
-passing receipts, retained failed attempts and the independent-review boundary.
+For the corresponding terminal behavior and evidence interpretation, see
+[Inspect resources](../../../docs/resource_inspector.md).

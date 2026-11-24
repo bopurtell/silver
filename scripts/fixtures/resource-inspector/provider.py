@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic PT6 bridge, implementing the frozen A handoff (not ASIC parsing).
+"""Synthetic resource-inspection bridge implementing the public contract (not ASIC parsing).
 
 Targets are explicitly seeded diagnostic directories. No named observation, project
 execution, emission or EDA command is implemented. This fixture intentionally emits

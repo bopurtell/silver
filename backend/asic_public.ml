@@ -195,9 +195,10 @@ let validate_sram_selection ~metadata (selection : Asic.Selection.t) plan =
       ; "closure_scope", `String "path_bound"
       ; "named", `Bool true
       ; "named_fresh_only", `Bool true
-      ; "signoff", `Bool false
-      ; "finalization", `Bool false
-      ; "pt7_linked_exceptions", `Bool false
+       ; "signoff", `Bool false
+       ; "finalization", `Bool false
+       (* These exact keys and values are part of the provider's version-1 scope. *)
+       ; "pt7_linked_exceptions", `Bool false
       ; "timing_scope", `String "ordinary_extracted_sta_not_pt7_linked_intent"
       ; "endpoints", `List (List.map (List.take canonical_stages 6) ~f:(fun s -> `String s))
       ]
@@ -225,7 +226,7 @@ let validate_sram_selection ~metadata (selection : Asic.Selection.t) plan =
       (List.for_all
          [ "timing_intent"; "timing_native_coverage"; "timing_physical_qualification" ]
          ~f:(fun key -> Poly.equal (field key manifest) `Null))
-      (unsupported "PT7 linked timing producer is unsupported"))
+      (unsupported "Linked timing-intent producer is unsupported"))
 ;;
 
 let recipe_stages plan =

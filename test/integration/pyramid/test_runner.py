@@ -892,7 +892,7 @@ class AutomaticResolutionTests(unittest.TestCase):
     def prepare_common(self):
         self.prepare()
         # Legacy configure fixtures intentionally retain a different owner root
-        # config. Automatic discovery must instead enforce WB049 dual conflicts.
+        # config. Automatic discovery must instead enforce dual-config conflicts.
         self.owner.unlink()
         manifest = self.store / "simulation/manifest.json"
         simulation = self.runner.sexp([["schema_version", "1"],

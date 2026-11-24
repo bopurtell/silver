@@ -151,7 +151,7 @@ let main () =
             Option.is_none
               (T.workload_artifact (state { detail with artifacts = [ forged ] } case_id)))))
   in
-  (* Capture through the actual FS2 public namespace boundary, then drive the production
+  (* Capture through the actual simulation public namespace boundary, then drive the production
      selectors/catalog with mixed and adversarial observations. *)
   let vcd_text =
     "$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n"
@@ -385,11 +385,11 @@ let main () =
       assert (Or_error.is_ok (Terminal_presentation.Waveform_data.parse bytes)))
   in
   printf
-    "Waveform handoff: real FS2 prefix/read/parse, JSON-only, mixed, exact case/attempt, \
+    "Waveform handoff: real simulation prefix/read/parse, JSON-only, mixed, exact case/attempt, \
      bad metadata, restored digest, late replies and production catalog/shortcuts passed\n\
      %!";
   printf
-    "Memory workload handoff: actual FS2 capture/read, both cases and attempt/case \
+    "Memory workload handoff: actual simulation capture/read, both cases and attempt/case \
      namespace negatives passed\n\
      %!";
   Deferred.unit

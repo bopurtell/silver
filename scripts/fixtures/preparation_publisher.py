@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private WB004 frontend fixture: selected-flow publication only, no EDA."""
+"""Private preparation frontend fixture: selected-flow publication only, no EDA."""
 import hashlib
 import json
 from pathlib import Path
@@ -28,14 +28,14 @@ def main():
     root = Path(arg('--source-root'))
     with (root / 'preparation-calls.jsonl').open('a') as out:
         out.write(json.dumps(args) + '\n')
-    print('WB004 exact emission log', file=sys.stderr, flush=True)
+    print('Exact ASIC emission log', file=sys.stderr, flush=True)
     mode = (root / 'preparation-mode').read_text().strip()
     if mode == 'fail':
-        raise SystemExit('WB004 deliberate emission failure')
+        raise SystemExit('Deliberate ASIC emission failure')
     if mode == 'hold':
         while True:
             time.sleep(.1)
-    config = '{"DESIGN_NAME":"WB004 published config"}\n'
+    config = '{"DESIGN_NAME":"Published ASIC config"}\n'
     payload = dict(schema_version=1, project='frontend-fixture',
                    files=[dict(path='src/config.json', sha256=digest(config))])
     bundle_id = digest(compact(payload))

@@ -116,15 +116,12 @@ Live user processes were not stopped. Restart the client to use the updated cont
 and rendering; the receipt records whether other retained binary bytes changed.
 No physical EDA, repository staging, commits or pushes were performed.
 
-The [implementation/triage plan](timing_triage_identifier_completion_plan.md) records
-scope, ownership and the separate WB-009 resolution.
-
 ## Overview title/detail follow-up
 
 The reported blank Placement/Routing panes were traced to two independent conditions:
 saved header-off preferences suppressed titles, while Enter/detail mode used an
 incorrect generic finalization fallback. Compression did not change header/title
-preferences in the actual-state replay. The reader now preserves typed stage evidence;
-the [regression record](overview_compression_regression_plan.md) gives targeted header
-recovery controls, current refresh receipt and passing native verification. No global
-appearance reset or live preference rewrite was used.
+preferences in the actual-state replay. The reader preserves typed stage
+evidence. For header and tile presentation, see the
+[terminal controls](terminal_controls.md#controls); no global appearance reset
+is needed.

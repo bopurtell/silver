@@ -10,10 +10,6 @@ example: a run selector and two synthesis tiles, with independent presentation a
 layout keys. Existing tile implementations remain compiled application features;
 configurations compose them without writing OCaml.
 
-The [post-merge audit](archive/delivery/workspace_post_merge_audit.md) verifies merged hierarchy,
-Testing/Timing/Overview and reconnect features against this structure, including
-custom mixed workspaces and preservation of authored layouts during investigation.
-
 ## Create a blank workspace from the palette
 
 Open **Space c c**, choose **Create blank workspace**, and press Enter. Workbench
@@ -110,7 +106,7 @@ To select Fit, open the palette with **Space → c → c** and choose **Layout: 
 tiles to window**. This navigation fix requires restarting only the terminal
 client with the updated binary; the daemon can keep running. Launching an older
 installed/demo copy will retain the old behavior even after rebuilding the source
-checkout. See the [implementation and acceptance record](layout_focus_order_plan.md).
+checkout.
 
 ## Export, edit and validate
 
@@ -142,7 +138,7 @@ take ownership of the live scratch workspace you exported.
 
 Export and validation are offline. In a source checkout, use
 `_build_workbench/default/workspace_cli/main.exe` in place of `silver-workspace`
-after [building Silver](../README.md#development).
+after [building Silver](development.md#build-and-check).
 
 To customize a stock definition:
 
@@ -331,5 +327,4 @@ Native evidence (2026-10-21):
 
 Reproduce the new focused acceptance with `python3 scripts/test-workspace-config.py`
 after building matching native binaries. It uses private metadata-only fixtures and
-does not run project builds or provider jobs. See the
-[agent-sized implementation plan](workspace_configuration_plan.md).
+does not run project builds or provider jobs.

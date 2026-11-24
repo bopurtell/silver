@@ -347,7 +347,7 @@ let production_artifact suite =
       }
   in
   expect
-    "real FS2 capture produced an available immutable reference artifact"
+    "real simulation capture produced an available immutable reference artifact"
     (S.Artifact.Availability.equal artifact.availability Available
      && String.equal artifact.id "sim-review-flops256-result-reference");
   let detail = { attempt with artifacts = [ artifact ] } in
@@ -382,7 +382,7 @@ let production_artifact suite =
     }
   in
   expect
-    "production FS2 byte validator accepts the retained reference"
+    "production simulation byte validator accepts the retained reference"
     (Result.is_ok (T.Simulation_export.validate artifact ~offset:0 page));
   List.iter
     [ "attempt", { page with attempt_id = "other" }
@@ -395,7 +395,7 @@ let production_artifact suite =
     ]
     ~f:(fun (label, page) ->
       expect
-        ("FS2 byte control rejects " ^ label)
+        ("Simulation byte control rejects " ^ label)
         (Result.is_error (T.Simulation_export.validate artifact ~offset:0 page)));
   expect
     "reference retains the public inspection digest rather than artifact digest"
@@ -646,7 +646,7 @@ let metadata_and_locator () =
     (Option.is_none (V.reconcile clean impossible).document)
 ;;
 
-let full_fs2_binding () =
+let full_simulation_binding () =
   let root =
     Core_unix.mkdtemp (Filename.concat Filename.temp_dir_name "silver-workload-binding-")
   in
@@ -769,7 +769,7 @@ let () =
   List.iter [ "memory-workloads"; "pt8-memory-workloads" ] ~f:production_artifact;
   state_and_layout ();
   metadata_and_locator ();
-  full_fs2_binding ();
+  full_simulation_binding ();
   if not (List.is_empty !failures)
   then failwith (String.concat ~sep:"\n" (List.rev !failures));
   Core.printf "workload handoff: %d checks passed\n%!" !checks

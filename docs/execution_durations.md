@@ -69,7 +69,5 @@ non-signoff-dependent work in this set. Simulation-attempt duration presentation
 therefore accepted. Clock/timing report review is blocked by the failed signoff run;
 no successful signoff-report validation is implied by that closure.
 
-The later Runs/checklist alignment refinement has automated rendering coverage and
-awaits owner appearance review. See the
-[duration alignment and lazy Timing cache plan](timing_cache_and_duration_alignment_plan.md)
-for shared-column behavior and configurable inspection caching.
+See [Timing workspace settings](timing_workspace_usability.md) for configurable
+background loading and inspection detail caching.

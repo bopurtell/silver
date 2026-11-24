@@ -2,9 +2,7 @@
 
 Recorded 2026-10-15 against the current implementation and retained lifecycle
 evidence. This records the implemented producer lifecycle, bounded terminal-result
-artifact browser, and explicit external text export. It supplements
-[FS1 acceptance](archive/delivery/asic_evidence_initial_acceptance.md): that earlier record's statements that a
-finalization producer and artifact viewer are absent predate this slice.
+artifact browser, and explicit external text export.
 The subsequent [rich investigation delivery](asic_evidence_inspection.md) completes the
 adopted-evidence FS1 scope, including timing paths, measured clock reports,
 physical/routing tables and exact binary handoff. This record preserves the
@@ -270,9 +268,8 @@ collect/accept/cancel specimens above.
 
 ## Implementation map and remaining scope
 
-The subsequent [WB-065 bounded lifecycle matrix](asic_lifecycle_matrix.md) adds
-deterministic allocation/cancellation, late-response, HTTP detach/concurrent-reader
-and reconnect ownership evidence, with verification and explicit remaining gaps.
+Focused lifecycle tests cover allocation and cancellation, late responses, HTTP
+detach and concurrent readers, and reconnect ownership.
 
 - `protocol/asic.ml`, `protocol/asic_artifact.ml`: operations, lifecycle facts,
   collateral record, references/pages, and shared read key.

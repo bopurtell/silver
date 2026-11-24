@@ -6,8 +6,8 @@ Timing is now a real `hardcaml_asic` stage and checkpoint. New recipes execute:
 Synthesis → Floorplan → Placement → CTS → Routing → Timing → Signoff
 ```
 
-This extends [WB-069's original analysis-only delivery](archive/delivery/timing_checklist_overview_plan.md).
-The [follow-on plan](archive/delivery/executable_timing_stage_plan.md) records scope and agent ownership.
+For the difference between full-stage and supplementary analysis results, see
+[Timing in Overview](timing_checklist_overview.md).
 
 ## Use it from Overview
 
@@ -102,7 +102,7 @@ Discovery requires `timing_stage1` plus a declared fresh `timing` endpoint. The
 `timing_analysis1` capability alone does not authorize execution. HTTP consumers
 negotiate `X-Workbench-Asic-Timing-Analysis: 2` for new targets; old readers retain
 compatible historical observations. See the sibling
-[provider contract](../../hardcaml_asic/docs/development/executable-timing.md).
+[provider contract](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/development/executable-timing.md).
 
 ## Refreshed example deployment
 

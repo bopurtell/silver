@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""WB-073 real HTTP/PTY formatting acceptance, using prebuilt binaries only.
+"""Identifier compression via real HTTP/PTY formatting acceptance, using prebuilt binaries only.
 
-Seeds private retained FS2 records with deliberately colliding identities; never
+Seeds private retained simulation records with deliberately colliding identities; never
 launches simulation, EDA or provider discovery. All state is under /tmp/opencode.
 """
 import argparse

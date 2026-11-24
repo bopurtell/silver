@@ -108,7 +108,7 @@ same-UID `/proc/1780/environ`; no active marker was removed on that partial chec
 ## Optional explicit configuration
 
 For a different prepared consumer, including the qualified stock SRAM specimen,
-use `configure_private.py`; see [SRAM tooling qualification](sram_segmented_release.md).
+use `configure_private.py`.
 This optional route does not change the owner's main installation or automatic
 discovery. It supports a single-endpoint journey with same-store reopen checks.
 
@@ -117,7 +117,7 @@ profile or deliberately pinned setup. A nonempty invalid override fails rather
 than falling back to automatic discovery. Historical `real-tests-v2.json` is an
 optional retained setup artifact, not required for ordinary testing.
 
-Prepare the example's [ordinary main installation](../../hardcaml_asic_example/docs/workbench_main.md)
+Prepare the example's [ordinary main installation](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md)
 first. Then use the explicit config helper, choosing a **new output filename**:
 
 ```bash
@@ -188,8 +188,7 @@ the controlled Dune alias at `-j1`. Actual sandboxed preflight in an external bu
 directory resolves main install `6704c0570bac455b9956a67c2b381f51`; a missing explicit
 override fails without fallback. No physical flow was executed for this update.
 The example apps/consumers were refreshed after bounded ASIC standard-suite
-qualification; the source-equivalent ASIC generation was retained. See
-[refresh and crash diagnosis](rebuild_discovery_verification.md).
+qualification; the source-equivalent ASIC generation was retained.
 
 Historical physical-run evidence below predates this discovery update:
 

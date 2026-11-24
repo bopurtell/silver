@@ -16,12 +16,13 @@ from simulation_fixture_wire import parse, record, sexp
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--counter', type=Path, default=Path('/tmp/opencode/fs2-build-provider/default/counter.exe'))
+    example = Path(__file__).resolve().parents[1] / 'examples/cyclesim_counter'
+    p.add_argument('--counter', type=Path, default=example / '_build/default/counter.exe')
     a = p.parse_args()
     a.counter = a.counter.resolve(strict=True)
     os.umask(0o077)
-    evidence = Path(tempfile.mkdtemp(prefix='fs2-provider-', dir='/tmp/opencode'))
-    provider = Path(__file__).resolve().parents[1] / 'examples/cyclesim_counter/provider.py'
+    evidence = Path(tempfile.mkdtemp(prefix='cyclesim-provider-', dir='/tmp/opencode'))
+    provider = example / 'provider.py'
     command = [sys.executable, str(provider), '--counter', str(a.counter)]
     discovery = subprocess.check_output(command + ['discover', '--protocol-version', '1'], timeout=10)
     (evidence / 'discovery.sexp').write_bytes(discovery)

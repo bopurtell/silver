@@ -104,6 +104,12 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
         self.assertIn("opam switch list", r.stderr)
         self.assertFalse(any("build" in cmd for cmd in self.commands()))
 
+    def test_local_switch_is_relative_to_caller(self):
+        r = self.invoke("--switch", "projects/local-switch")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for command in self.commands():
+            self.assertIn(f"--switch={self.root / 'projects/local-switch'}", command)
+
     def test_build_jobs_precedence(self):
         self.env["HCW_BUILD_JOBS"] = "3"
         for silver_jobs, args, expected in [

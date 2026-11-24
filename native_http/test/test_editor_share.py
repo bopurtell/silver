@@ -1,4 +1,4 @@
-"""WB-094 producer contract, driven by independent frontend and reader processes."""
+"""Editor sharing producer contract, driven by independent frontend and reader processes."""
 
 import contextlib
 import fcntl
@@ -335,7 +335,7 @@ def main():
         unsafe_registry(probe, temporary, root, peer)
         preferences(probe, temporary, root, other_root)
         assert set(peer.requests) == {"/api/hello"}
-    print("WB-094 producer contract: PASS")
+    print("Editor sharing producer contract: PASS")
 
 
 if __name__ == "__main__":

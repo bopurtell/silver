@@ -44,11 +44,9 @@ a misleading transient legacy dashboard. See the README dashboard instructions.
 
 ## Controls
 
-Appearance commands now offer five experimental skins plus independent color,
-icon and density settings. Search **appearance** in the palette; see the
-[preset guide](appearance_presets.md). Choices are client-local and preserve
-workspace/run/pin state. Structured/selective/ASCII/compact is the provisional
-startup treatment, not an accepted final aesthetic.
+Search **appearance** for skins, color, icons and density, or **theme** to
+preview a color scheme. See [Themes and appearance](appearance_presets.md).
+Choices are client-local and preserve workspace/run/pin state.
 
 | Input | Action |
 | --- | --- |
@@ -84,6 +82,9 @@ close them with the corresponding inspection key. Palette/filter entry captures
 shortcut characters, and bracketed paste is suppressed rather than dispatched as
 commands.
 
+For source navigation and key ownership inside the **Editor** workspace, see
+[Cobalt editor controls](cobalt_editor.md#terminal-controls).
+
 ### Shared project terminal
 
 In a locally opened project, search **Toggle Terminal**, **Toggle Terminal 2**
@@ -110,10 +111,8 @@ Synthesis views now support the first FS1/F06 inspection slice: Enter opens the
 cell table; `/` filters, `s` cycles sort, Enter opens row details, `e` opens full
 evidence and Esc returns. `j`/`k` selects rows or scrolls details. See
 [synthesis inspection](synthesis_inspection.md) for exact semantics and acceptance.
-That original cell-table slice reused the underlying summary schema. Subsequent
-[FS1 metrics](archive/delivery/asic_evidence_initial_acceptance.md), [lifecycle/artifact](finalization_and_artifacts.md)
-and [rich investigation](asic_evidence_inspection.md) work extends the contracts/caches;
-their records own current compatibility and controls. Rich explorers cover the
+See also [finalization and artifacts](finalization_and_artifacts.md) and
+[ASIC evidence inspection](asic_evidence_inspection.md). Rich explorers cover the
 window while retaining tile-local state: Esc returns detail → table → workspace.
 
 Filter entry is explicitly marked by a persistent footer. Ctrl-U clears the focused
@@ -202,19 +201,6 @@ driven transport and richer capability forms remain refinements. See the
 [owner-confirmed Escape followup](asic_evidence_inspection.md#escape-responsiveness-in-tmux--2026-10-16-followup).
 The endpoint form currently accepts whitespace-separated
 assignments, not quoted values with spaces.
-
-[Installed checks](archive/delivery/initial_installation_checks.md) passed native lifecycle, external fixture
-and legacy baselines, including live discovery/hierarchy and resize coverage.
-[Native acceptance](archive/delivery/native_and_synthesis_acceptance.md) passed actual fixture HTTP+PTY, real serial
-synthesis (673/685, completed, `not_evaluated`), early allocation/detach and full
-workspace/L2 restart identity. The live real reopening check at
-`/tmp/opencode/workbench-fs0-unzwt0kn/` used actual current-screen assertions for
-673→685, pinned 673 and simultaneous PIN 673/FOLLOW 685. These metrics are distinct
-from synthetic capture fixtures. Parent-wide checks for this recorded FS0 slice
-passed, including its HTTP/PTY and installed workflows; subsequent FS1 results
-are recorded separately in the linked delivery records.
-Candidate/evidence inventory is consolidated in the
-[active plan](construction_phase_plan.md#evidence-and-candidate-baseline).
 
 ## Headless typed HTTP controls
 

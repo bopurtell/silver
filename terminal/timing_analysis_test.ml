@@ -595,7 +595,7 @@ let%test_unit "live physical Timing remains visible before any STA observation" 
   assert (String.equal (List.nth_exn rows 1).value "unknown")
 ;;
 
-let%test_unit "WB069 both Overview surfaces share completion/duration and independent \
+let%test_unit "both Overview surfaces share completion/duration and independent \
                failing goal"
   =
   let host, data, find, summary = fixture () in
@@ -675,7 +675,7 @@ let%test_unit "WB069 both Overview surfaces share completion/duration and indepe
   assert (Option.equal String.equal zero.time (Some "0s"))
 ;;
 
-let%test_unit "WB069 projected cursor reaches Timing without physical action inference" =
+let%test_unit "projected cursor reaches Timing without physical action inference" =
   let host, data, find, summary = fixture () in
   let tile = find "stage-checklist" in
   let items = O.checklist_items ~asic:data.asic ~run:summary.run in
@@ -775,7 +775,7 @@ let%test_unit "historical Timing remains supplementary while upgraded catalog pe
   assert (Asic.Summary.equal (Option.value_exn (data.summary summary.run)) summary)
 ;;
 
-let%test_unit "WB069 exact target gates index, refresh, detail, demand and stale receipt" =
+let%test_unit "exact target gates index, refresh, detail, demand and stale receipt" =
   let _, data, _, _ = fixture () in
   let snapshot = Option.value_exn data.asic in
   let view =
@@ -868,7 +868,7 @@ let%test_unit "WB069 exact target gates index, refresh, detail, demand and stale
   assert (changed.generation > opened.generation && Option.is_none changed.requested)
 ;;
 
-let%test_unit "WB069 persisted navigation and reuse retain exact analysis rather than \
+let%test_unit "persisted navigation and reuse retain exact analysis rather than \
                only run"
   =
   let host, data, find =
@@ -903,13 +903,13 @@ let%test_unit "WB069 persisted navigation and reuse retain exact analysis rather
          registry
          ~run:view.run
          ~analysis:(Some { target with stage = "signoff" })));
-  let saved = H.navigation_preferences ~project_key:"wb069" host |> Option.value_exn in
+  let saved = H.navigation_preferences ~project_key:"timing-checklist" host |> Option.value_exn in
   let reopened =
     Navigation_preferences.encode saved
-    |> Navigation_preferences.decode ~project_key:"wb069"
+    |> Navigation_preferences.decode ~project_key:"timing-checklist"
   in
   let restored =
-    H.restore_navigation_selections reopened { host with timing = [] } ~scope:"wb069"
+    H.restore_navigation_selections reopened { host with timing = [] } ~scope:"timing-checklist"
   in
   let view = H.timing restored paths |> Option.value_exn in
   assert (Option.equal Asic_inspection.Analysis_target.equal view.analysis (Some target));

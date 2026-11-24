@@ -1,4 +1,4 @@
-"""Offline checks of WB-084's terminal acceptance oracles."""
+"""Offline checks of starter authoring terminal acceptance oracles."""
 
 import json
 from pathlib import Path

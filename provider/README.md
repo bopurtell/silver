@@ -56,7 +56,7 @@ the `Wire.Discovery` type and launch selection are unchanged.
 No generic seed-to-PRNG mapping is imposed. Projects must preserve their existing
 full uint64 interpretation; do not convert through a signed OCaml int or float.
 
-The [Silver installer](../README.md#install-and-open-silver) installs the provider
+The [Silver source installer](../docs/install.md#build-from-source) installs the provider
 library alongside the application. When building an external adapter, set
 `OCAMLPATH` to include the installation's `lib` directory. The commands below
 also let you build and install just the library into a private prefix, without
@@ -101,8 +101,5 @@ Seed interpretation is deliberately project-local, not imposed by this library.
 Raw child stdout is logged, but only the adapter's explicit typed events establish
 case results. A reported failed case may correctly accompany exit zero.
 
-Combined native/Python standalone and private daemon HTTP/restart acceptance:
-`/tmp/opencode/native-provider-s0e__xh7/result.json`. Installed real FIFO generation
-verification: `/tmp/opencode/native-provider-dk6v5t_n/result.json`. The FIFO proof
-includes byte-identical reports/VCDs; the counter proof excludes its variable VCD
-date stanza. See `../docs/native_provider_plan.md` for final scope and commands.
+Use [simulation provider setup](../docs/simulation_setup.md) to point a project at
+its installed adapter and check discovery without running tests.

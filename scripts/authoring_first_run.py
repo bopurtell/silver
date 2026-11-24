@@ -1,4 +1,4 @@
-"""Drive WB-084's first Silver session through the installed terminal UI."""
+"""Drive an authored starter’s first Silver session through the installed terminal UI."""
 
 import json
 import os

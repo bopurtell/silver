@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production PTY: replay retained real PT8 VCD; no new simulator execution."""
+"""Production PTY: replay retained real memory-workload VCD; no new simulator execution."""
 import argparse
 import hashlib
 import importlib.util
@@ -66,7 +66,7 @@ def main():
     args = p.parse_args()
     for name in ('daemon', 'client', 'vcd'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    evidence = Path(tempfile.mkdtemp(prefix='pt8-mixed-rows-pty-', dir='/tmp/opencode'))
+    evidence = Path(tempfile.mkdtemp(prefix='memory-waveform-mixed-rows-', dir='/tmp/opencode'))
     print('Evidence: ' + str(evidence), flush=True)
     native = load('mixed_native', ROOT / 'scripts/test-native-simulation.py')
     cells = native.load_module('mixed_cells', 'test-frontend-composition.py')
@@ -119,7 +119,7 @@ def main():
                 ('parameters', []), ('asic_inputs', [])]]])
         attempt = session.done(field(field(snap, 'attempts')[0], 'id'))
         artifact = field(attempt, 'artifacts')[0]
-        check(field(artifact, 'sha256') == [original_sha], 'private FS2 capture retains actual VCD bytes/hash')
+        check(field(artifact, 'sha256') == [original_sha], 'private simulation capture retains actual VCD bytes/hash')
         terminal = Terminal(session)
         terminal.capture('startup', ['Overview'])
         terminal.palette('Switch to Testing')

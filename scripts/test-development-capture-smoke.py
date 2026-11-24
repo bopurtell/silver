@@ -2,7 +2,7 @@
 """Current-closure private native Discover/Plan + ordinary test smoke; EDA zero.
 
 Only accepts a separately prepared /tmp/opencode store. Does not launch UI or
-FIFO/PT8 provider simulations; never adopts the stable user's store.
+FIFO and memory-workload simulations; never adopts the stable user's store.
 """
 import argparse
 import importlib.util

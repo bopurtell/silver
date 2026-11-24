@@ -43,7 +43,7 @@ print(json.dumps({'cli_contract':{'version':4,'capabilities':{'namedflow1':True}
     provider.chmod(0o700)
     resources = module('endpoint_resources', ROOT / 'scripts/test-resource-inspector.py')
     dashboard = module('endpoint_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
-    fs0, session = resources.native_setup(args, base, provider)
+    native_execution, session = resources.native_setup(args, base, provider)
     catalog = (ROOT / 'backend/test/asic/production_flow_list.json').read_text()
     driver = base / 'no-project-execution'
     driver.write_text('''#!/usr/bin/python3
@@ -60,31 +60,31 @@ assert (args[3:5]==['--chip','engine'] and args[5]=='--variant' and args[6] in (
 print(''' + repr(catalog) + ''')
 ''')
     preparation = session.root / 'hardcaml-workbench-preparation.sexp'
-    preparation.write_text(fs0.sexp([
+    preparation.write_text(native_execution.sexp([
         ['schema_version', '1'], ['build_target', 'never-built.exe'],
         ['results_root', str(base / 'emission')], ['timeout_seconds', '10']]))
     terminal = None
     checks = []
 
     def check(ok, label):
-        fs0.require(ok, label)
+        native_execution.require(ok, label)
         checks.append(label)
 
     def fresh_selection():
         deadline = time.monotonic() + 12
         while True:
             snapshot = session.rpc('asic')
-            intents = fs0.field(snapshot, 'fresh_intent')
+            intents = native_execution.field(snapshot, 'fresh_intent')
             if intents:
-                return fs0.field(intents[0], 'selection')
-            fs0.require(time.monotonic() < deadline, 'Plan did not stage fresh inputs')
+                return native_execution.field(intents[0], 'selection')
+            native_execution.require(time.monotonic() < deadline, 'Plan did not stage fresh inputs')
             time.sleep(.05)
 
     try:
         session.start()
         snapshot = session.rpc('asic', 'Discover', wait=True)
-        flow = next(f for f in fs0.field(snapshot, 'flows') if fs0.field(f, 'id') == 'standard')
-        check(fs0.field(flow, 'fresh_stage_endpoints') ==
+        flow = next(f for f in native_execution.field(snapshot, 'flows') if native_execution.field(f, 'id') == 'standard')
+        check(native_execution.field(flow, 'fresh_stage_endpoints') ==
               json.loads(catalog)['declaration']['entries'][0]['methodology']['endpoints'],
               'Native API preserves the real standard endpoint catalog')
         terminal = dashboard.Terminal(session)
@@ -99,7 +99,7 @@ print(''' + repr(catalog) + ''')
         check(True, 'Production Plan dispatch visibly prefills synthesis from the real catalog')
         os.write(terminal.master, b'\r')
         selection = fresh_selection()
-        check(fs0.record(selection) == dict(flow='standard', profile='balanced', endpoint='synthesis', assignments=[]),
+        check(native_execution.record(selection) == dict(flow='standard', profile='balanced', endpoint='synthesis', assignments=[]),
               'Accepting Plan without typing stages exact synthesis inputs')
         terminal.capture('staged', ['ready: Fresh input intent', 'endpoint: synthesis'])
         terminal.palette('Preparation inputs: standard / balanced')
@@ -117,7 +117,7 @@ print(''' + repr(catalog) + ''')
         terminal.capture('other-profile', ['PLAN ENDPOINT', '> synthesis'])
         check(True, 'A different profile gets its catalog-derived initial endpoint')
         snapshot = session.rpc('asic')
-        check(not fs0.field(snapshot, 'workflows') and not fs0.field(snapshot, 'runs'),
+        check(not native_execution.field(snapshot, 'workflows') and not native_execution.field(snapshot, 'runs'),
               'Plan stages inputs without launching a workflow or physical run')
         project_calls = [json.loads(line)
                          for line in (session.root / 'project-calls').read_text().splitlines()]
@@ -138,14 +138,14 @@ print(''' + repr(catalog) + ''')
         terminal.capture('switched-behind-form', ['PLAN ENDPOINT', 'engine/large'])
         os.write(terminal.master, b'\r')
         terminal.capture('stale-chip-form', ['Launch target: engine/large'], absent=['PLAN ENDPOINT'])
-        check(not fs0.field(session.rpc('asic'), 'fresh_intent'),
+        check(not native_execution.field(session.rpc('asic'), 'fresh_intent'),
               'Entering the old form after another client switches variants stages nothing')
         terminal.palette('Select launch target: engine / small')
         terminal.capture('picker-switched', ['Launch chip: engine', 'Launch target: engine/small'])
         terminal.palette('Plan ASIC standard / balanced')
         os.write(terminal.master, b'\r')
-        staged = fs0.record(fresh_selection())
-        check(fs0.record(staged['chip_target'][0]) == {'chip': 'engine', 'variant': 'small'}
+        staged = native_execution.record(fresh_selection())
+        check(native_execution.record(staged['chip_target'][0]) == {'chip': 'engine', 'variant': 'small'}
               and staged['endpoint'] == 'synthesis' and not staged['assignments'],
               'Palette-selected chip and variant reach the exact staged selection')
         calls = session.root / 'provider-calls'

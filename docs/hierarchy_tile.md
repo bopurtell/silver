@@ -1,8 +1,6 @@
 # Hierarchy tile — controls and acceptance
 
-WB-007 is implemented and automatically verified on 2026-10-21. The tile is opt-in;
-existing preset layouts remain unchanged. See the
-[implementation plan](hierarchy_tile_plan.md) for ownership and execution policies.
+The tile is opt-in; adding it does not replace a workspace's preset layout.
 
 ## Use
 

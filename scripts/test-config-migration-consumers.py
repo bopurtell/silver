@@ -32,8 +32,8 @@ def load(name, relative):
     return module
 
 
-main_tests = load('wb049_main_tests', 'scripts/test_workbench_main.py')
-installer_tests = load('wb049_installer_tests', 'scripts/test-install-fifo-simulation.py')
+main_tests = load('config_lookup_main_tests', 'scripts/test_workbench_main.py')
+installer_tests = load('config_lookup_installer_tests', 'scripts/test-install-fifo-simulation.py')
 main = main_tests.main
 installer = installer_tests.installer
 temporary_directory = tempfile.TemporaryDirectory
@@ -46,7 +46,7 @@ def private_temp(*args, **kwargs):
 
 class LookupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = private_temp(prefix='wb049-lookup-')
+        self.temp = private_temp(prefix='config-lookup-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
@@ -235,7 +235,7 @@ class InstallerConsumers(unittest.TestCase):
 
 class DevelopmentPublication(unittest.TestCase):
     def setUp(self):
-        self.temp = private_temp(prefix='wb049-dev-')
+        self.temp = private_temp(prefix='config-lookup-dev-')
         self.addCleanup(self.temp.cleanup)
         self.store = Path(self.temp.name)
         self.project = self.store / 'project'

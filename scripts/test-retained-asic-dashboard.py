@@ -18,10 +18,10 @@ import traceback
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'test'))
 from support.terminal import Terminal as PtyTerminal
 
-spec = importlib.util.spec_from_file_location('fs0', Path(__file__).with_name('test-native-execution.py'))
-fs0 = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fs0)
-field, record, require = fs0.field, fs0.record, fs0.require
+spec = importlib.util.spec_from_file_location('native_execution', Path(__file__).with_name('test-native-execution.py'))
+native_execution = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(native_execution)
+field, record, require = native_execution.field, native_execution.record, native_execution.require
 
 
 class Terminal(PtyTerminal):
@@ -50,7 +50,7 @@ def exercise(args):
     source = args.source_state.resolve()
     require(source.is_dir(), 'Missing saved Workbench state')
     config = args.example_root / 'hardcaml-workbench-asic.sexp'
-    cfg = record(fs0.parse(config.read_text()))
+    cfg = record(native_execution.parse(config.read_text()))
     watched = [source, config, Path(cfg['results_root']), Path(cfg['provider_executable'])]
     before_files = inventory(watched)
     (args.evidence / 'files-before.json').write_text(json.dumps(before_files, indent=2))
@@ -63,7 +63,7 @@ def exercise(args):
         shutil.copy2(path, state / path.name)
         copied.append(path.name)
     require(any(n.startswith('workspace-') for n in copied), 'No workspace copied')
-    session = fs0.Session(args, args.evidence, args.example_root)
+    session = native_execution.Session(args, args.evidence, args.example_root)
     session.state_dir = state
     terminal = None
     result = dict(status='failed', source_state=str(source), copied=copied,
@@ -76,7 +76,7 @@ def exercise(args):
         initial = session.rpc('workspace')
         asic_before = session.rpc('asic')
         for run in field(asic_before, 'runs'):
-            session.rpc('asic', '(Load_summary ' + fs0.sexp(field(run, 'run')) + ')', wait=True)
+            session.rpc('asic', '(Load_summary ' + native_execution.sexp(field(run, 'run')) + ')', wait=True)
         asic_before = session.rpc('asic')
         check(sorted(field(s, 'cell_count') for s in field(asic_before, 'summaries')) == [['673'], ['685']],
               'Cached real synthesis summaries contain 673 and 685')
@@ -84,7 +84,8 @@ def exercise(args):
               'Cached replay does not validate provider evidence')
         overview = next(w for w in field(initial, 'workspaces') if field(w, 'name') == 'Overview')
         demo = next(w for w in reversed(field(initial, 'workspaces'))
-                    if field(w, 'name').startswith('FS0 Real Demo') and
+                    # The retained source state may predate the descriptive title.
+                    if field(w, 'name').startswith(('ASIC Execution Demo', 'FS0 Real Demo')) and
                     len([t for t in field(initial, 'tiles') if field(t, 'workspace') == field(w, 'id')]) == 2)
         check(not any(field(t, 'workspace') == field(overview, 'id') for t in field(initial, 'tiles')),
               'Source reproduces empty Overview')
@@ -185,7 +186,7 @@ def main():
     parser.add_argument('--daemon', type=Path, default=repo / '_build/default/daemon/main.exe')
     args = parser.parse_args()
     args.outer_timeout = 60
-    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs0-dashboard-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-retained-dashboard-', dir='/tmp/opencode'))
     print('Evidence: ' + str(args.evidence), flush=True)
     exercise(args)
     print('PASS: cached dashboard PTY regression', flush=True)

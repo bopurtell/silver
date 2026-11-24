@@ -58,7 +58,7 @@ Analysis requires `timing_analysis1`; executable Timing additionally requires
 `timing_stage1` and a declared fresh endpoint. New recipe schema 4 has seven stages
 and Timing-scoped analysis schema 2; historical six-stage recipes and signoff-scoped
 schema-1 analyses remain readable. See the sibling
-[executable provider contract](../../hardcaml_asic/docs/development/executable-timing.md).
+[executable provider contract](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/development/executable-timing.md).
 
 The provider captures an immutable source **at successful Timing completion**, before
 Signoff starts, and can recover proven STA evidence after a failed segment. Historical
@@ -123,6 +123,3 @@ python3 -B scripts/test-timing-checklist.py \
   --preset-export _build/default/terminal/workspaces/export_presets.exe \
   --timeout 300
 ```
-
-The [implementation plan](archive/delivery/timing_checklist_overview_plan.md) records ownership,
-contract decisions, job budgets and agent work packages.

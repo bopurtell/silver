@@ -65,7 +65,7 @@ def main():
                         help='Validate the compact durable record against raw evidence instead of printing JSON')
     args = parser.parse_args()
     report = dict(
-        ticket='WB-068', schema_version=1,
+        scenario='waveform-key-repeat', schema_version=1,
         settings=dict(single_samples_per_direction=8, hold_seconds=2, rates_hz=[30, 120],
                       after_release_tail_limit_ms=50, post_release_observation_min_ms=1000,
                       cursor_stability_required_ms=500, initial_selected_buses=8),
@@ -105,7 +105,7 @@ def main():
             for name, fixture in measured['fixtures'].items():
                 if fixture['sha256'] != record['fixtures'][name]['sha256']:
                     raise ValueError('Durable fixture digest differs: ' + name)
-        print('PASS: durable WB-068 metrics, final positions, release counts, paths and digests match raw evidence')
+        print('PASS: durable waveform key-repeat metrics, final positions, release counts, paths and digests match raw evidence')
         return
     print(json.dumps(report, indent=2))
 

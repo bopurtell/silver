@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-052 production PTY inspector exits; prebuilt binaries, no builds or EDA.
+"""Production PTY inspector exits; prebuilt binaries, no builds or EDA.
 
 Reuses the synthetic demo's completed, on-disk retained evidence fixture. The
 client and daemon are real; fixture inspection reads never advance a run.
@@ -41,7 +41,7 @@ def main():
     native = load('inspector_native', ROOT / 'scripts/test-native-simulation.py')
     demo = load('inspector_demo', ROOT / 'scripts/synthetic-flow-demo.py')
     field = native.field
-    base = demo.prepare(args.evidence_parent.resolve() / ('wb052-inspector-' + secrets.token_hex(6)),
+    base = demo.prepare(args.evidence_parent.resolve() / ('inspector-exits-' + secrets.token_hex(6)),
                         manual=True, delay=.05)
     print('Evidence: ' + str(base), flush=True)
     for name in ('state', 'home', 'config', 'tmp', 'client-state'):

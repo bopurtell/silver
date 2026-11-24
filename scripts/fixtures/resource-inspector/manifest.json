@@ -1,5 +1,5 @@
 {
-  "scope": "PT6 C groundwork ONLY; no HTTP/PTY/bridge acceptance",
+  "scope": "Retained resource input verification only; no HTTP, PTY or bridge acceptance",
   "script_sha256": "de585ed5080468654648d4d4aa1f0c6fb9c15241fde2322cad73780f606a8c2e",
   "fixtures": {
     "original.json": "85b0f0e9f4641f1c2aaadb34ae71ed66c206e263c8e7034750994f5e8ec8f905",

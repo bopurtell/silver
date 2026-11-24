@@ -163,7 +163,7 @@ def run(args):
               and job_ids() == initial_jobs,
               'attaching Testing to an unconfigured project adds no backend jobs or discovery errors')
 
-        # This suite checks exact provenance; compact rendering has its own WB-073 suite.
+        # This suite checks exact provenance; compact rendering has its own identifier compression suite.
         terminal.palette('Strings (global): Show full identifiers')
         terminal.palette('Switch to Testing')
         assert_stock_layout(terminal, 'testing-layout-120x40', evidence)

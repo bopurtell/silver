@@ -37,7 +37,7 @@ def plan():
 
 def lifecycle_gate(name, value):
     """Two FIFO rendezvous: arrival is acknowledged before the parent releases us."""
-    prefix = os.path.join(root, 'wb065-' + name)
+    prefix = os.path.join(root, 'lifecycle-' + name)
     with open(prefix + '.ready', 'w') as out:
         out.write(value)
     with open(prefix + '.release') as src:
@@ -46,7 +46,7 @@ def lifecycle_gate(name, value):
 
 if args == ['lifecycle-exit']:
     sys.exit(0)
-elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malformed'], ['lifecycle-cancel'], ['wb065-unrelated']]:
+elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malformed'], ['lifecycle-cancel'], ['lifecycle-unrelated']]:
     mode = args[0]
 
     def stop_fixture(_signal, _frame):
@@ -65,7 +65,7 @@ elif args[:1] in [['lifecycle-wait'], ['lifecycle-output'], ['lifecycle-malforme
         for _ in range(9):
             sys.stdout.write('x' * (1024 * 1024))
             sys.stdout.flush()
-    if mode == 'wb065-unrelated':
+    if mode == 'lifecycle-unrelated':
         signal.pause()
     else:
         time.sleep(30)
@@ -346,7 +346,7 @@ elif args[:1] == ['report']:
                                [(ref, count if ref['boundary'] == 'synthesis' else count + 1000)
                                 for ref in references]]))
 elif args[:1] == ['finalize']:
-    control_file = os.path.join(root, 'wb065-finalize.json')
+    control_file = os.path.join(root, 'lifecycle-finalize.json')
     control = {}
     if os.path.exists(control_file):
         with open(control_file) as src:
@@ -397,7 +397,7 @@ elif args[:1] == ['finalize']:
     if control.get('before_allocation'):
         lifecycle_gate(control['before_allocation'], attempt)
     if control.get('initial_inspect_gate'):
-        with open(os.path.join(attempt, 'wb065-inspect.json'), 'w') as out:
+        with open(os.path.join(attempt, 'lifecycle-inspect.json'), 'w') as out:
             json.dump(dict(gate=control['initial_inspect_gate']), out)
         receipt['phase'] = 'external_postcheck' if request['accept'] else 'collection'
         save_receipt()
@@ -430,7 +430,7 @@ elif args[:1] == ['finalization-inspect']:
         sys.exit(2)
     with open(os.path.join(args[1], 'operation.json')) as src:
         receipt = json.load(src)
-    gate_file = os.path.join(args[1], 'wb065-inspect.json')
+    gate_file = os.path.join(args[1], 'lifecycle-inspect.json')
     if os.path.exists(gate_file):
         with open(gate_file) as src:
             control = json.load(src)

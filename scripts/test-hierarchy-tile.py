@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-007 real native HTTP/PTY acceptance; existing binaries only, no builds/EDA.
+"""Hierarchy tile real native HTTP/PTY acceptance; existing binaries only, no builds/EDA.
 
 Run with --daemon PATH --client PATH. All state, HOME, Dune/driver stand-ins,
 loopback servers, jobs and transcripts belong to a new /tmp/opencode directory.

@@ -1,4 +1,4 @@
-"""WB-095's synthetic EDA boundary; the daemon and both frontends stay real."""
+"""Companion flow’s synthetic EDA boundary; the daemon and both frontends stay real."""
 import json
 import os
 from pathlib import Path
@@ -57,7 +57,7 @@ if __name__ == '__main__':
     if role != 'pinned':
         gate = root / 'companion-physical-gate'
         if role == 'provider' and args[:1] == ['stages'] and gate.is_dir():
-            os.environ['WB095_PHYSICAL_GATE'] = str(gate)
+            os.environ['COMPANION_FLOW_PHYSICAL_GATE'] = str(gate)
         fresh.main(prepare=prepared)
     else:
         fresh.event(root, 'pinned-call', argv=args)

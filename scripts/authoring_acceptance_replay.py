@@ -1,4 +1,4 @@
-"""WB-084 source handoff and headless synthesis, using public ASIC CLIs only."""
+"""Starter source handoff and headless synthesis, using public ASIC CLIs only."""
 
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -192,7 +192,7 @@ def commit_starter(snapshot, receipts, env=None):
     env.update(GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
     run("fixture-commit", [*GIT, "-c", "user.name=" + FIXTURE_NAME,
                           "-c", "user.email=" + FIXTURE_EMAIL,
-                          "commit", "--quiet", "--no-gpg-sign", "-m", "WB-084 authored starter fixture"],
+                          "commit", "--quiet", "--no-gpg-sign", "-m", "Authored starter fixture"],
         project, receipts, env)
     head = run("fixture-head", [*GIT, "rev-parse", "HEAD"], project, receipts, env)
     return head.read_text().strip()

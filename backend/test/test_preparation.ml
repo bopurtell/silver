@@ -228,7 +228,7 @@ let wait_for service project predicate =
 ;;
 
 let with_service ?(selected = selection) f =
-  let directory = Filename_unix.temp_dir "wb004-test-" "" in
+  let directory = Filename_unix.temp_dir "preparation-test-" "" in
   let root = Filename.concat directory "project" in
   Core_unix.mkdir root;
   Out_channel.write_all
@@ -375,7 +375,7 @@ let with_service ?(selected = selection) f =
 ;;
 
 let config_location_fixture () =
-  let root = Filename_unix.temp_dir "wb049-preparation-" "" in
+  let root = Filename_unix.temp_dir "config-location-preparation-" "" in
   let module Loader = Hardcaml_workbench_backend.Preparation_service in
   let config : Config.t =
     { schema_version = 1
@@ -2094,7 +2094,7 @@ let validate_receipt_file path =
 let () =
   Command_unix.run
     (Command.async
-       ~summary:"WB004 supervised preparation tests"
+       ~summary:"Supervised preparation tests"
        (let%map_open.Command receipt =
           flag
             "-receipt"

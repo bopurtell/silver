@@ -2,7 +2,7 @@
 """Native workspace composition acceptance using prebuilt binaries only.
 
 Run: python3 scripts/test-workspace-config.py [--skip-pty] [--evidence NEW-DIR]
-Reuses FS3's strict metadata-only tool guards, HTTP codec and PTY decoder. No
+Reuses the project adoption fixture’s strict metadata-only tool guards, HTTP codec and PTY decoder. No
 builds, provider actions or Git mutations. All fixtures/state/evidence are private
 under /tmp/opencode. The evidence directory is retained, including on failure.
 """
@@ -24,11 +24,11 @@ import traceback
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location(
-    'fs3', Path(__file__).with_name('test-project-adoption.py'))
-fs3 = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fs3)
-field, require, sexp, parse = fs3.field, fs3.require, fs3.sexp, fs3.parse
-replace = fs3.replace_field
+    'adoption', Path(__file__).with_name('test-project-adoption.py'))
+adoption = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(adoption)
+field, require, sexp, parse = adoption.field, adoption.require, adoption.sexp, adoption.parse
+replace = adoption.replace_field
 
 
 def without_revision(snapshot):
@@ -60,7 +60,7 @@ def custom_config():
             for key in ('one', 'two')]]]
 
 
-class Terminal(fs3.Terminal):
+class Terminal(adoption.Terminal):
     def __init__(self, test, label, config=None):
         self.test, self.label, self.data = test, label, bytearray()
         self.master, slave = pty.openpty()
@@ -102,7 +102,7 @@ class Terminal(fs3.Terminal):
             require(time.monotonic() < deadline, label + ': custom column layout timeout:\n' + text)
 
 
-class Acceptance(fs3.Acceptance):
+class Acceptance(adoption.Acceptance):
     def config_cli(self, action, extra, label, error=None):
         return self.command(self.args.workspace_cli, ['config', action] + extra,
                             label, error=error)
@@ -351,7 +351,7 @@ def terminal_startup(test, config, path):
 def exercise(test):
     (test.root / 'dune-project').write_text('(lang dune 3.22)\n(name workspace_config_acceptance)\n')
     (test.root / 'dune').write_text('(dirs)\n')
-    test.command(test.args.setup, ['--root', test.root, '--project-name', 'FS3 acceptance',
+    test.command(test.args.setup, ['--root', test.root, '--project-name', 'Project adoption acceptance',
         '--build-alias', '@acceptance-build', '--test-alias', '@acceptance-test'], 'metadata-only-initialize')
     config, path = authoring(test)
     registry(test, config, path)
@@ -367,7 +367,7 @@ def main():
     for name, directory in [('setup', 'setup'), ('workspace-cli', 'workspace_cli'),
                             ('daemon', 'daemon'), ('terminal', 'terminal')]:
         parser.add_argument('--' + name, type=Path,
-            default=fs3.REPO / '_build/default' / directory / 'main.exe')
+            default=adoption.REPO / '_build/default' / directory / 'main.exe')
     parser.add_argument('--skip-pty', action='store_true')
     parser.add_argument('--evidence', type=Path, help='New directory under /tmp/opencode')
     args = parser.parse_args()

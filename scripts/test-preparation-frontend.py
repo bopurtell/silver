@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB004 real native HTTP/PTY regression using an isolated EDA-less publisher.
+"""Preparation frontend native HTTP/PTY regression using an isolated EDA-less publisher.
 
 Uses existing binaries; all generated projects/evidence live under /tmp/opencode.
 """
@@ -69,7 +69,7 @@ def acceptance(t, check, http, runs, presets, args):
     (root / 'dune').write_text('(rule (target rtl-driver.exe) (deps rtl-driver.py) '
                              '(action (copy %{deps} %{target})))\n')
     (root / 'hardcaml-workbench.sexp').write_text(
-        '(lang hardcaml-workbench 1)\n(project (name wb004-generic))\n(dune (driver ./rtl-driver.exe))\n')
+        '(lang hardcaml-workbench 1)\n(project (name generic-rtl-preparation))\n(dune (driver ./rtl-driver.exe))\n')
     t.command('Refresh hardware integration')
     def generic_job():
         state = http.raw('/api/v1/snapshot', [['instance_id', http.instance]])
@@ -80,7 +80,7 @@ def acceptance(t, check, http, runs, presets, args):
         return any(field(p, 'targets') for p in field(state, 'projects'))
     wait(driver_ready, 'generic project driver discovery')
     t.drain(1)
-    t.command('Generate RTL: WB004 generic counter / WB004 default')
+    t.command('Generate RTL: Generic RTL counter / Default RTL configuration')
     generic = wait(lambda: j if (j := generic_job()) and field(j, 'state') == 'Complete' else None,
                    'actual generic RTL generation')
     t.capture('generic-rtl-observed', ['Generic RTL (not ASIC bundle)', 'completed'])
@@ -88,9 +88,9 @@ def acceptance(t, check, http, runs, presets, args):
     check('Elaboration-bundle emission: unavailable' in generic_screen,
           'Completed generic RTL cannot turn unavailable ASIC emission into not-requested or completed')
     t.key(b'\r')
-    t.capture('generic-rtl-log', ['WB004 exact generic RTL job log'])
+    t.capture('generic-rtl-log', ['Exact generic RTL job log'])
     t.key(b'a')
-    t.capture('generic-rtl-artifact', ['WB004 generic RTL only; not ASIC publication'])
+    t.capture('generic-rtl-artifact', ['Generic RTL only; not ASIC publication'])
     t.key(b'\x1b'); t.key(b'\x1b')
     check(field(generic_job(), 'id') == field(generic, 'id') and not field(snapshot(), 'latest'),
           'Generic fallback inspection/log/artifact actions do not submit preparation or generation')
@@ -99,7 +99,7 @@ def acceptance(t, check, http, runs, presets, args):
     source.chmod(0o700)
     with (root / 'dune').open('a') as dune:
         dune.write('(rule (target publisher.exe) (deps publisher.py) '
-                             '(action (progn (echo "WB004 exact build log") (copy %{deps} %{target}))))\n')
+                             '(action (progn (echo "Exact preparation build log") (copy %{deps} %{target}))))\n')
     (root / 'hardcaml-workbench-preparation.sexp').write_text(
         sexp([['schema_version', 1], ['build_target', 'publisher.exe'],
               ['results_root', str(t.base / 'publication')], ['timeout_seconds', 90]]))
@@ -186,12 +186,12 @@ def acceptance(t, check, http, runs, presets, args):
     t.capture('completed', ['completed', 'Elaboration-bundle emission'])
     check(len(calls()) == 1 and calls()[0][:2] == ['flow', 'emit'], 'Preparation keyboard action invokes flow emit once')
     t.key(b'\r')
-    t.capture('exact-build-inspection', ['WB004 exact build log'])
+    t.capture('exact-build-inspection', ['Exact preparation build log'])
     # Scroll through the read-only details until the exact emission stage log is visible.
     found = False
     for _ in range(35):
         screen = t.capture('inspection-scroll')
-        if 'WB004 exact emission log' in screen.text():
+        if 'Exact ASIC emission log' in screen.text():
             found = True
             break
         t.key(b']' * 4)
@@ -200,7 +200,7 @@ def acceptance(t, check, http, runs, presets, args):
     t.open_palette('Preparation ' + completed_id + ': artifact ' + artifact)
     t.capture('exact-artifact-palette', ['> Preparation ' + completed_id[:36], artifact[-32:]], ['No matching commands'])
     t.key(b'\r')
-    t.capture('bundle-artifact', ['PREPARATION BUNDLE ARTIFACT', 'WB004 published config'])
+    t.capture('bundle-artifact', ['PREPARATION BUNDLE ARTIFACT', 'Published ASIC config'])
     t.key(b'\x1b')
     (root / 'preparation-mode').write_text('fail')
     t.focus_view('preparation')
@@ -327,11 +327,11 @@ def main():
     args = parser.parse_args()
     for name in ('daemon', 'client', 'preset_export'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    args.evidence = args.evidence or Path('/tmp/opencode') / ('wb004-frontend-' + secrets.token_hex(6))
+    args.evidence = args.evidence or Path('/tmp/opencode') / ('preparation-frontend-' + secrets.token_hex(6))
     require(args.evidence.resolve().is_relative_to('/tmp/opencode'), 'Evidence must be under /tmp/opencode')
     args.palette_only = False
-    args.harness = 'WB004 preparation frontend'
-    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('WB004 budget exhausted')))
+    args.harness = 'Preparation frontend'
+    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Preparation frontend budget exhausted')))
     signal.alarm(args.timeout)
     args.evidence = args.evidence.resolve()
     args.evidence.mkdir(exist_ok=False)
@@ -360,7 +360,7 @@ def main():
                 shared.finish(fixture)
         finally:
             shared.api.save(args.evidence / 'result.json', result)
-    print('PASS WB004 unified preparation frontend: ' + str(len(result['checks'])) + ' assertions; ' + str(args.evidence))
+    print('PASS Unified preparation frontend: ' + str(len(result['checks'])) + ' assertions; ' + str(args.evidence))
 
 
 if __name__ == '__main__':

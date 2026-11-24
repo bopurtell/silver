@@ -17,7 +17,7 @@ let rpc_ok result =
 let bounded label deferred =
   match%map Clock.with_timeout (Time_float.Span.of_sec 15.) deferred with
   | `Result result -> result
-  | `Timeout -> failwith ("WB-065 barrier timed out: " ^ label)
+  | `Timeout -> failwith ("Lifecycle barrier timed out: " ^ label)
 ;;
 
 let rec remove_tree path =
@@ -35,7 +35,7 @@ let rec remove_tree path =
 (* The provider cannot cross these FIFO boundaries until explicitly released. Polling
    below only waits for daemon publication, never guesses when a process has started. *)
 let gate root name =
-  let prefix = Filename.concat root ("wb065-" ^ name) in
+  let prefix = Filename.concat root ("lifecycle-" ^ name) in
   let%map () =
     In_thread.run (fun () ->
       Core_unix.mkfifo (prefix ^ ".ready") ~perm:0o600;
@@ -114,7 +114,7 @@ let wait client instance_id project label predicate =
   let rec loop () =
     require
       (not (Deferred.is_determined deadline))
-      ("WB-065 publication timed out: " ^ label);
+      ("Lifecycle publication timed out: " ^ label);
     let%bind snapshot = asic client instance_id project Get in
     if predicate snapshot
     then return snapshot
@@ -135,7 +135,7 @@ let calls root =
 ;;
 
 let main () =
-  let directory = Filename_unix.temp_dir "workbench-wb065-rpc-" "" in
+  let directory = Filename_unix.temp_dir "workbench-lifecycle-rpc-" "" in
   let root = Filename.concat directory "project" in
   let state_dir = Filename.concat directory "state" in
   let services = ref [] in
@@ -153,7 +153,7 @@ let main () =
       >>| Or_error.ok_exn
     in
     services := service :: !services;
-    let rpc = Rpc.create ~application_version:"wb065-test" ~instance_id ~service in
+    let rpc = Rpc.create ~application_version:"lifecycle-test" ~instance_id ~service in
     let%map server =
       Cohttp_async.Server.create
         ~on_handler_error:`Ignore
@@ -162,7 +162,7 @@ let main () =
            Tcp.Bind_to_port.On_port_chosen_by_os)
         (fun ~body peer request ->
            let%bind response = Rpc.callback rpc ~body peer request in
-           if Cohttp.Header.mem (Cohttp.Request.headers request) "x-wb065-detach"
+           if Cohttp.Header.mem (Cohttp.Request.headers request) "x-test-detach"
            then (
              Ivar.fill_if_empty response_accepted ();
              let%map () = Ivar.read response_release in
@@ -204,7 +204,7 @@ let main () =
           Core_unix.mkdir root;
           Out_channel.write_all
             (Filename.concat root "dune-project")
-            ~data:"(lang dune 3.22)\n(name wb065_rpc_fixture)\n";
+            ~data:"(lang dune 3.22)\n(name lifecycle_rpc_fixture)\n";
           let fixture = Filename.concat root "fixture.py" in
           Out_channel.write_all
             fixture
@@ -229,7 +229,7 @@ let main () =
           Core_unix.mkdir attempt;
           Out_channel.write_all (Filename.concat attempt "done") ~data:"")
       in
-      let owner_id = "wb065-owner" in
+      let owner_id = "lifecycle-owner" in
       let%bind _, owner_server = create owner_id in
       let first = client owner_server in
       let second = client owner_server in
@@ -259,7 +259,7 @@ let main () =
       let%bind owner_reader_gate = gate root "rpc-owner-reader" in
       let%bind () =
         write_json
-          (Filename.concat root "wb065-finalize.json")
+          (Filename.concat root "lifecycle-finalize.json")
           (`Assoc
             [ "after_allocation", `String "rpc-producer"
             ; "initial_inspect_gate", `String "rpc-owner-reader"
@@ -285,7 +285,7 @@ let main () =
             Host: 127.0.0.1\r\n\
             Content-Type: %s\r\n\
             %s: 1\r\n\
-            X-WB065-Detach: 1\r\n\
+            X-Test-Detach: 1\r\n\
             Content-Length: %d\r\n\
             \r\n\
             %s"
@@ -363,7 +363,7 @@ let main () =
           Core_unix.mkdir decoy;
           Out_channel.write_all (Filename.concat decoy "operation.json") ~data:"{}")
       in
-      let observer_id = "wb065-reader" in
+      let observer_id = "lifecycle-reader" in
       let%bind observer_service, observer_server = create observer_id in
       let observer = client observer_server in
       let%bind observer_project = open_project observer observer_id in
@@ -389,7 +389,7 @@ let main () =
       let%bind observer_gate = gate root "rpc-reconnected-reader" in
       let%bind () =
         write_json
-          (Filename.concat attempt "wb065-inspect.json")
+          (Filename.concat attempt "lifecycle-inspect.json")
           (`Assoc [ "gate", `String "rpc-reconnected-reader" ])
       in
       let%bind (_ : Asic.Snapshot.t list) =
@@ -462,7 +462,7 @@ let main () =
               (Some "not_evaluated")
          && Option.equal String.equal (finalization completed).attempt (Some attempt))
         "Completion confused collection, acceptance, or operation identity";
-      let reconnect_id = "wb065-reconnect" in
+      let reconnect_id = "lifecycle-reconnect" in
       let%bind _, reconnect_server = create reconnect_id in
       let reconnect = client reconnect_server in
       let%bind reconnect_project = open_project reconnect reconnect_id in
@@ -536,7 +536,7 @@ let main () =
 
 let () =
   Command.async
-    ~summary:"WB-065 concurrent HTTP clients and read-only finalization reconnect"
+    ~summary:"Concurrent HTTP clients and read-only finalization reconnect"
     (Command.Param.return main)
   |> Command_unix.run
 ;;

@@ -7,7 +7,7 @@ import sys
 def main():
     stdin, stdout = sys.stdin.buffer, sys.stdout.buffer
     # Record only messages that prove attachment and declaration-key delivery.
-    with open(os.environ["WB088_LSP_LOG"], "a", encoding="utf-8", buffering=1) as log:
+    with open(os.environ["TEST_DECLARATION_LSP_LOG"], "a", encoding="utf-8", buffering=1) as log:
         while header := stdin.readline():
             headers = {}
             while header not in (b"\r\n", b"\n", b""):

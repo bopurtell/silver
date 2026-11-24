@@ -1,0 +1,15 @@
+Silver prebuilt commands for Ubuntu 26.04 x86_64
+
+Run ./install.sh --without-asic to install without a provider check. Omit
+--without-asic to check for a CLI contract 4 provider with namedflow1=true
+(requires python3). Install libc6, libgmp10 and zlib1g if missing.
+
+This archive does not include the OCaml simulation-provider SDK, a project
+toolchain, an ASIC provider or EDA tools. Use the Silver source archive to
+install the SDK. See RELEASE.json for archive provenance.
+
+Distribution review: not established by this packaging step. The binary
+statically links Cobalt code including its GPLv3 GAS grammar. Available
+notices and provenance are included for review; the switch inventory lists
+installed packages, not a link-closure audit. This archive and the Silver
+source archive are not by themselves a complete corresponding-source package.

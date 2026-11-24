@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PT.6 C acceptance: hashed groundwork, synthetic bridge and native HTTP route.
+"""Resource Inspector acceptance: hashed evidence, synthetic bridge and native HTTP.
 
 --prepare copies public evidence projections and records byte inventories. --verify
 checks those inputs without executing any provider. Neither mode is UI acceptance.
@@ -185,7 +185,7 @@ def prepare(example, directory):
     after = protected(example)
     require(before == after, "Protected evidence/configuration changed during preparation")
     write_new(directory / "manifest.json", dict(
-        scope="PT6 C groundwork ONLY; no HTTP/PTY/bridge acceptance",
+        scope="Retained resource input verification only; no HTTP, PTY or bridge acceptance",
         script_sha256=sha(Path(__file__)), fixtures=generated,
         sources={str(p): sha(example / p) for p in sources.values()},
         protected=before, provider_record=str(MEASUREMENTS / "provider-final-binaries.json"),
@@ -196,10 +196,11 @@ def prepare(example, directory):
 def verify(example, directory):
     manifest = load(directory / "manifest.json")
     current = protected(example)
-    # PT6 is an explicitly authorized dedicated store, absent at groundwork capture.
-    # All pre-existing pointers remain strict; individual runs protect PT6 too.
-    if ".dev/asic-pt6/current" not in manifest["protected"]["current_pointers"]:
-        current["current_pointers"].pop(".dev/asic-pt6/current", None)
+    # The dedicated retained resource-inspection store did not exist at capture
+    # time. The historical path is exact; individual runs protect that store too.
+    inspector_pointer = ".dev/asic-pt6/current"
+    if inspector_pointer not in manifest["protected"]["current_pointers"]:
+        current["current_pointers"].pop(inspector_pointer, None)
     require(manifest["protected"] == current, "Protected bytes or existing current pointers changed")
     for filename, digest in manifest["fixtures"].items():
         require(sha(directory / filename) == digest, f"Changed fixture {filename}")
@@ -231,7 +232,7 @@ def verify(example, directory):
             "Frozen provider identity record")
     for relative, digest in identities["binaries"].items():
         require(sha(example / GENERATION / relative) == digest, f"Provider companion: {relative}")
-    return dict(status="groundwork_verified", ui_acceptance="NOT_RUN",
+    return dict(status="retained_inputs_verified", ui_acceptance="NOT_RUN",
                 bridge_acceptance="NOT_RUN", historical_files=276, augmented_files=333,
                 evidence_refs=len(augmented["evidence_refs"]),
                 provider_binaries=len(identities["binaries"]),
@@ -397,10 +398,10 @@ def module(name, path):
 
 
 def native_setup(args, base, provider):
-    fs0 = module("resources_fs0", HERE / "test-native-execution.py")
+    native_execution = module("native_execution", HERE / "test-native-execution.py")
     http_module = module("resources_native_http", WB / "demo/synthetic_flow/http_client.py")
 
-    class NativeSession(fs0.Session):
+    class NativeSession(native_execution.Session):
         """Direct native HTTP also works before B's terminal binary is compiled."""
         def start(self):
             super().start()
@@ -424,8 +425,8 @@ def native_setup(args, base, provider):
             result = request(operation)
             if wait and domain == "asic":
                 deadline = time.monotonic() + self.args.outer_timeout
-                while any(fs0.field(o, "state") in ("pending", "executing")
-                          for o in fs0.field(result, "operations")):
+                while any(native_execution.field(o, "state") in ("pending", "executing")
+                          for o in native_execution.field(result, "operations")):
                     require(time.monotonic() < deadline, "Native HTTP resource query timeout")
                     time.sleep(.05)
                     result = request("Get")
@@ -433,23 +434,23 @@ def native_setup(args, base, provider):
 
         def mutate(self, snapshot, mutation):
             return self.rpc("workspace", '(Mutate (expected_revision %s)(mutation %s))' %
-                            (fs0.field(snapshot, "revision"), mutation))
+                            (native_execution.field(snapshot, "revision"), mutation))
     root = base / "project"
     root.mkdir()
     for name in ("state", "results", "home", "config", "client-state", "tmp"):
         (base / name).mkdir()
     (root / "dune-project").write_text("(lang dune 3.17)\n(name resource_inspector_acceptance)\n")
     deny = base / "no-project-execution"
-    deny.write_text("#!" + sys.executable + "\nimport sys\nsys.exit('PT6 acceptance forbids project execution')\n")
+    deny.write_text("#!" + sys.executable + "\nimport sys\nsys.exit('Resource Inspector acceptance forbids project execution')\n")
     deny.chmod(0o700)
-    fs0.write_config(root, deny, provider, base / "results")
+    native_execution.write_config(root, deny, provider, base / "results")
     session = NativeSession(args, base, root)
     session.env.update(HOME=str(base / "home"), XDG_CONFIG_HOME=str(base / "config"),
                        TMPDIR=str(base / "tmp"), PYTHONDONTWRITEBYTECODE="1",
                        OMP_NUM_THREADS="6", OPENROAD_THREADS="6", _OPENLANE_MAX_CORES="6")
     # The shared native parser handles decimal escaped UTF-8 byte sequences correctly.
-    fs0.parse = http_module.parse
-    return fs0, session
+    native_execution.parse = http_module.parse
+    return native_execution, session
 
 
 def stop_session(session):
@@ -457,30 +458,30 @@ def stop_session(session):
         session.stop()
 
 
-def resource_snapshot(fs0, snapshot):
-    resources = fs0.field(snapshot, "resources")
-    require(len(resources) == 1, "Matching PT6 daemon/client must expose resources snapshot")
+def resource_snapshot(native_execution, snapshot):
+    resources = native_execution.field(snapshot, "resources")
+    require(len(resources) == 1, "Matching Resource Inspector daemon/client must expose resources snapshot")
     return resources[0]
 
 
-def source_index(fs0, resources, path):
-    source = next(s for s in fs0.field(resources, "sources") if fs0.field(s, "path") == str(path.resolve()))
-    index = next(i for i in fs0.field(resources, "indexes")
-                 if fs0.field(i, "source_id") == fs0.field(source, "id"))
+def source_index(native_execution, resources, path):
+    source = next(s for s in native_execution.field(resources, "sources") if native_execution.field(s, "path") == str(path.resolve()))
+    index = next(i for i in native_execution.field(resources, "indexes")
+                 if native_execution.field(i, "source_id") == native_execution.field(source, "id"))
     return source, index
 
 
-def operation_load(fs0, path, kind="Coarse_run", refresh=False):
+def operation_load(native_execution, path, kind="Coarse_run", refresh=False):
     return '(Resources (Load (target (%s %s)) (refresh %s)))' % (
-        kind, fs0.sexp(str(path)), str(refresh).lower())
+        kind, native_execution.sexp(str(path)), str(refresh).lower())
 
 
-def synthetic_pty_race(args, base, session, fs0, check):
+def synthetic_pty_race(args, base, session, native_execution, check):
     """Real client navigation while an old target's provider read is in flight."""
     require(args.client and args.client.is_file(), "--pty needs matching --client")
     dashboard = module("resources_synthetic_pty", HERE / "test-retained-asic-dashboard.py")
     t = dashboard.Terminal(session)
-    field, sexp = fs0.field, fs0.sexp
+    field, sexp = native_execution.field, native_execution.sexp
 
     def key(raw):
         with (base / "pty-keys.jsonl").open("a") as out:
@@ -530,8 +531,8 @@ def synthetic_pty_race(args, base, session, fs0, check):
         session.rpc("asic", wait=True)
         text = t.capture("race-new-source-after-old-reply", ["targets/augmented", "program"], ["LATE_OLD_SOURCE"])
         check("targets/original" not in text, "PTY old target reply cannot replace newly selected explicit source")
-        resources_snapshot = resource_snapshot(fs0, session.rpc("asic"))
-        _, old_index = source_index(fs0, resources_snapshot, base / "targets/original")
+        resources_snapshot = resource_snapshot(native_execution, session.rpc("asic"))
+        _, old_index = source_index(native_execution, resources_snapshot, base / "targets/original")
         check(field(field(old_index, "rows")[0], "role") == "LATE_OLD_SOURCE",
               "late old payload actually completed in its own source, not a vacuous race")
         control = base / "targets/augmented/control.json"
@@ -573,7 +574,7 @@ def synthetic_pty_race(args, base, session, fs0, check):
         t.palette("Resources: Compare captured A / B (c)")
         scroll("legacy-unknown-no-delta", ["unknown classification", "no measured delta"], ["Δ(B−A)"])
         # Restore the primary source for cache-only restart assertions.
-        session.rpc("asic", operation_load(fs0, base / "targets/augmented", refresh=True), wait=True)
+        session.rpc("asic", operation_load(native_execution, base / "targets/augmented", refresh=True), wait=True)
         select("augmented")
     finally:
         t.close()
@@ -594,8 +595,8 @@ def native_http(args):
     else:
         base = Path(tempfile.mkdtemp(prefix="resource-inspector-http-", dir="/tmp/opencode"))
     provider = seed_provider(base, args.fixtures)
-    fs0, session = native_setup(args, base, provider)
-    field, sexp = fs0.field, fs0.sexp
+    native_execution, session = native_setup(args, base, provider)
+    field, sexp = native_execution.field, native_execution.sexp
     before = protected(args.example_root)
     result = dict(status="failed", scope="synthetic native HTTP backend acceptance",
                   ui_acceptance="NOT_RUN", checks=[], binaries={str(p): sha(p) for p in (args.daemon, args.client) if p})
@@ -608,12 +609,12 @@ def native_http(args):
     def snapshot(op="Get", wait=False):
         full = session.rpc("asic", op, wait=wait)
         result["last_operations"] = field(full, "operations")
-        return resource_snapshot(fs0, full)
+        return resource_snapshot(native_execution, full)
 
     def load_case(case, refresh=False):
         path = base / "targets" / case
-        state = snapshot(operation_load(fs0, path, refresh=refresh), wait=True)
-        return source_index(fs0, state, path)
+        state = snapshot(operation_load(native_execution, path, refresh=refresh), wait=True)
+        return source_index(native_execution, state, path)
 
     def calls():
         path = base / "provider-calls.jsonl"
@@ -722,7 +723,7 @@ def native_http(args):
         sid, digest = field(source, "id"), field(index, "digest")
         for case in ("invalid", "malformed", "oversize", "row-budget"):
             path = base / "targets" / case
-            state = snapshot(operation_load(fs0, path), wait=True)
+            state = snapshot(operation_load(native_execution, path), wait=True)
             bad = next(s for s in field(state, "sources") if field(s, "path") == str(path))
             check(bool(field(bad, "error")), "invalid source is not empty success: " + case)
         large_source, large_index = load_case("detail-budget")
@@ -753,12 +754,12 @@ def native_http(args):
                   and old_digest in field(o, "key") for o in result["last_operations"]),
               "delayed old page settles and serialized refresh clears its publication")
         (base / "unsupported-capability").touch()
-        state = snapshot(operation_load(fs0, base / "targets/named"), wait=True)
+        state = snapshot(operation_load(native_execution, base / "targets/named"), wait=True)
         unsupported = next(s for s in field(state, "sources") if field(s, "target") == ["Coarse_run", str(base / "targets/named")])
         check(field(unsupported, "freshness")[0] == "Unsupported", "CLI4 provider without resource capability is Unsupported")
         (base / "unsupported-capability").unlink()
         if args.pty:
-            synthetic_pty_race(args, base, session, fs0, check)
+            synthetic_pty_race(args, base, session, native_execution, check)
             result["ui_acceptance"] = "synthetic_late_reply_passed"
         # Freeze a provider-free warm cache and restart only the directly owned daemon.
         (base / "deny-queries").touch()
@@ -766,7 +767,7 @@ def native_http(args):
         stop_session(session)
         session.start()
         restored = snapshot()
-        cached_source, cached_index = source_index(fs0, restored, base / "targets/augmented")
+        cached_source, cached_index = source_index(native_execution, restored, base / "targets/augmented")
         check(field(cached_source, "freshness") == "Cached_unverified", "restart marks evidence cached/unverified")
         check(cached_index == index, "restart preserves exact cached index")
         baseline = calls()
@@ -784,7 +785,7 @@ def native_http(args):
         (base / "deny-queries").unlink()
         session.start()
         broken = session.rpc("asic")
-        check(field(broken, "cache_error") and not field(resource_snapshot(fs0, broken), "indexes"),
+        check(field(broken, "cache_error") and not field(resource_snapshot(native_execution, broken), "indexes"),
               "ordinary changed cache metadata is rejected before publication")
         repaired_source, repaired_index = load_case("augmented", refresh=True)
         repaired = session.rpc("asic")

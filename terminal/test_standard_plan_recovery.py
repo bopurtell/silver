@@ -41,7 +41,7 @@ def main():
     # Reuse the native HTTP session/emulator helpers, then select the actual project.
     resources = module('recovery_resources', ROOT / 'scripts/test-resource-inspector.py')
     dashboard = module('recovery_dashboard', ROOT / 'scripts/test-retained-asic-dashboard.py')
-    fs0, session = resources.native_setup(args, base, recovery / 'provider/project.exe')
+    native_execution, session = resources.native_setup(args, base, recovery / 'provider/project.exe')
     session.root = project
     generation = Path(manifest['generation'])
     session.env.update(
@@ -77,7 +77,7 @@ def main():
         (base / (name + '.json')).write_text(json.dumps(value, indent=2))
 
     def check(ok, label):
-        fs0.require(ok, label)
+        native_execution.require(ok, label)
         result['checks'].append(label)
 
     def selection(profile='balanced', assignments=None):
@@ -88,23 +88,23 @@ def main():
         deadline = time.monotonic() + 15
         while True:
             snapshot = session.rpc('asic')
-            intents = fs0.field(snapshot, 'fresh_intent')
-            if intents and fs0.field(intents[0], 'id') != previous:
+            intents = native_execution.field(snapshot, 'fresh_intent')
+            if intents and native_execution.field(intents[0], 'id') != previous:
                 intent = intents[0]
-                check(dict(fs0.field(intent, 'selection')) == dict(expected),
-                      'PTY stages exact selection: ' + fs0.sexp(expected))
-                check(fs0.field(intent, 'expected_plan_identity') == [],
+                check(dict(native_execution.field(intent, 'selection')) == dict(expected),
+                      'PTY stages exact selection: ' + native_execution.sexp(expected))
+                check(native_execution.field(intent, 'expected_plan_identity') == [],
                       'Fresh intent explicitly uses current-source plan identity (None)')
-                scope = dict(fs0.parse(fs0.field(intent, 'scope')))
+                scope = dict(native_execution.parse(native_execution.field(intent, 'scope')))
                 check(scope['project_scope'][0] == str(project),
                       'Fresh intent source scope is the real private recovery project')
                 preparation = dict(scope['preparation'])
                 check(preparation['build_target'] == 'bin/project.exe'
                       and Path(preparation['results_root']).is_relative_to(recovery),
                       'Fresh scope carries the private preparation configuration')
-                save('fresh-' + fs0.field(expected, 'profile'), intent)
+                save('fresh-' + native_execution.field(expected, 'profile'), intent)
                 return intent
-            fs0.require(time.monotonic() < deadline, 'No new fresh intent from PTY Enter')
+            native_execution.require(time.monotonic() < deadline, 'No new fresh intent from PTY Enter')
             terminal.drain(.1)
 
     def escape():
@@ -129,12 +129,12 @@ def main():
         escape()
 
     def public_plan(expected, label):
-        snapshot = session.rpc('asic', fs0.sexp(['Plan', expected]), wait=True)
-        preview = fs0.field(snapshot, 'preview')[0]
-        check(dict(fs0.field(preview, 'selection')) == dict(expected),
+        snapshot = session.rpc('asic', native_execution.sexp(['Plan', expected]), wait=True)
+        preview = native_execution.field(snapshot, 'preview')[0]
+        check(dict(native_execution.field(preview, 'selection')) == dict(expected),
               'Real public Plan accepts ' + label)
-        plan = json.loads(fs0.field(preview, 'plan_json'))
-        check(plan['plan_identity'] == fs0.field(preview, 'plan_identity'),
+        plan = json.loads(native_execution.field(preview, 'plan_json'))
+        check(plan['plan_identity'] == native_execution.field(preview, 'plan_identity'),
               'Public Plan identity agrees with its actual methodology JSON: ' + label)
         save('public-plan-' + label, preview)
         result.setdefault('plans', {})[label] = plan['plan_identity']
@@ -145,11 +145,11 @@ def main():
               'New production client starts without remembered launch preferences')
         snapshot = session.rpc('asic', 'Discover', wait=True)
         save('discovery', snapshot)
-        check(fs0.field(snapshot, 'catalog_default') == [[['flow', 'standard'], ['profile', 'balanced']]],
+        check(native_execution.field(snapshot, 'catalog_default') == [[['flow', 'standard'], ['profile', 'balanced']]],
               'Real catalog default is standard/balanced')
         preparation = session.rpc('preparation')
         save('preparation', preparation)
-        check(fs0.field(preparation, 'availability') == 'Available',
+        check(native_execution.field(preparation, 'availability') == 'Available',
               'Real native preparation capability is Available')
         terminal = dashboard.Terminal(session)
         terminal.capture('01-startup', ['Overview'])
@@ -173,14 +173,14 @@ def main():
         terminal.capture('07-delay-plan-retained', ['PLAN ENDPOINT', '> ' + prompt])
         check(True, 'Preparation synth_delay selection preserves its endpoint and exact multiword overrides')
         os.write(terminal.master, b'\r')
-        fresh(selection('synth_delay', overrides), previous=fs0.field(initial, 'id'))
+        fresh(selection('synth_delay', overrides), previous=native_execution.field(initial, 'id'))
         terminal.capture('08-delay-ready', ['ready: Fresh input intent', 'endpoint: synthesis'])
         launch_enabled('09-delay-launch-enabled')
         public_plan(selection('synth_delay', overrides), 'synth_delay-override')
         snapshot = session.rpc('asic')
         save('final-asic', snapshot)
-        check(not fs0.field(snapshot, 'workflows') and not fs0.field(snapshot, 'runs')
-              and not fs0.field(snapshot, 'launches'),
+        check(not native_execution.field(snapshot, 'workflows') and not native_execution.field(snapshot, 'runs')
+              and not native_execution.field(snapshot, 'launches'),
               'No workflow, launch submission, or physical run was allocated')
         result['status'] = 'passed'
     except Exception as error:

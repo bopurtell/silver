@@ -1,4 +1,4 @@
-; Fast WB-084 checks. The real two-run journey is deliberately opt-in.
+; Fast authoring checks. The real two-run journey is deliberately opt-in.
 (rule
  (alias runtest)
  (deps

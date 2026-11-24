@@ -165,7 +165,7 @@ let summary_refresh () =
       assert (has (render failed) "Evidence: not updated:");
       assert (
         List.exists row.details ~f:(fun text ->
-          has text "WB003 held summary provider failed"
+          has text "Held summary provider failed"
           && has text "prior evidence kept: REFRESH FAILED"));
       assert (
         Option.equal
@@ -192,7 +192,7 @@ let summary_refresh () =
         | _ -> false);
       assert (
         List.exists (Evidence_activity.row projection).details ~f:(fun text ->
-          has text "WB003 held summary provider failed"
+          has text "Held summary provider failed"
           && has text "prior evidence kept: REFRESH FAILED"));
       let%bind () = Service.completion service in
       let%map reopened = handle service root Get in
@@ -282,7 +282,7 @@ let asynchronous_receipts () =
 
 let () =
   Command.async
-    ~summary:"WB003 backend-to-Session and asynchronous receipt regressions"
+    ~summary:"Backend-to-Session and asynchronous receipt regressions"
     (Command.Param.return (fun () -> summary_refresh () >>= asynchronous_receipts))
   |> Command_unix.run
 ;;

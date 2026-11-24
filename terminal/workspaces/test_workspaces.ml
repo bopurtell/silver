@@ -419,7 +419,7 @@ let%test_unit "merged stock content and presentation survive the schema projecti
   in
   assert (Option.equal Bool.equal checklist.horizontal_stages (Some false));
   List.iter Presets.all ~f:(fun d ->
-    (* WB-007 explicitly ships as an opt-in tile, without changing preset membership. *)
+    (* The hierarchy ships as an opt-in tile, without changing preset membership. *)
     assert (not (List.mem (kinds d) "hierarchy" ~equal:String.equal)))
 ;;
 

@@ -47,12 +47,12 @@ let valid_name s =
     | _ -> false)
 ;;
 
-(* Only the canonical wrapped, single-library WB-079 layout has a known source inventory.
+(* Only the canonical wrapped, single-library IP starter layout has a known source inventory.
    A chip-interface declaration is the IP author's explicit contract. *)
 let library_arguments snapshot ~directory ~mapping =
   let error () =
     failwith
-      "Expected declared WB-079 combinational Block.create library with \
+      "Expected declared combinational Block.create library with \
        ui_in:uo_out:comb8 mapping"
   in
   let name =

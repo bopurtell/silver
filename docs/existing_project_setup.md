@@ -15,10 +15,9 @@ initializer, portable workspace templates and persistent client presentation cho
 Configuration-location migration (WB-049) and new-project creation (WB-051/078)
 shipped after that slice. Multi-monitor UX is separate.
 
-The [post-merge integration plan and evidence](archive/delivery/project_adoption_integration.md) supersede
-the original worktree verification. Templates retain preset composition, bootstrap
-is atomic, header controls persist through their actual palette actions, and
-same-session reconnect preserves local investigation while fencing old responses.
+Templates retain preset composition, bootstrap is atomic, and header controls
+persist when changed through the palette. Same-session reconnect preserves the
+local investigation without applying stale responses.
 
 ## Install
 

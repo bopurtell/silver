@@ -5,7 +5,7 @@ let run : Run_ref.t =
   { backend = Backend_id.of_string "asic"; id = "run:1"; build = None; label = None }
 ;;
 
-(* Frozen pre-WB-003/WB-006 readers. Defaulting a new field only provides
+(* Frozen readers predating activity and timestamp fields. Defaulting a new field only provides
    new-reader/old-record compatibility: these strict readers still reject it. *)
 module Legacy_index = struct
   type t =

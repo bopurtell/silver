@@ -209,8 +209,8 @@ The SDK environment was also checked with the demo's `opam:5.2.0+ox` build path.
   config drift, malformed/tampered receipts, nonzero/timeout outcomes and deduplication.
 
 Attempts, generic jobs, logs and imported artifact handles are **daemon-session
-scoped**. Published bundles remain in their results store, but restart/external
-receipt discovery is [deferred](backlog/README.md#preparation-history-and-external-emission-adoption).
+scoped**. Published bundles remain in their results store, but Silver does not
+discover their receipts after restart or after external emission.
 Resource-preparation composition and exact-bundle verification remain separate work.
 Owner visual/workflow acceptance covers the initial preparation feature and the
 subsequent staging, quick-launch palette and compact planned-run refinements.

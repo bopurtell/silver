@@ -30,7 +30,7 @@ let response = obj (common "index" @ ["rows",`List [row];"measurements",`List [m
   "artifact_count",`Int 76;"diagnostics",`List [str "required resource missing"];"truncated",`Bool false;
   "inventory_status",str "available";"inventory_reason",`Null])
 let real_provider () =
-  match Sys.getenv "PT6_RESOURCE_PROVIDER",Sys.getenv "PT6_RETAINED_ROOT" with
+  match Sys.getenv "WORKBENCH_TEST_RESOURCE_PROVIDER",Sys.getenv "WORKBENCH_TEST_RESOURCE_ROOT" with
   | Some executable,Some retained ->
     let retained=Filename_unix.realpath retained in
     let invocation : Hardcaml_workbench_adapters.Dune_adapter.Invocation.t =

@@ -18,9 +18,7 @@ current adopted scope, verification and limits; the body below retains FS0 evide
 
 `backend/dune` and package declarations include **`yojson`**. The daemon owns the
 ASIC service through `backend/service.ml`; `/api/v1/asic` dispatch in
-`daemon/rpc_server.ml` validates instance/project through that service. Integration
-is delivered, not pending parent wiring. Exact candidate hashes and consolidated
-evidence links are in the [active plan](construction_phase_plan.md#evidence-and-candidate-baseline).
+`daemon/rpc_server.ml` validates the instance and project through that service.
 
 The exact backend API is:
 
@@ -120,8 +118,7 @@ the installed provider must retain its public runtime resources/toolchain.
 Inspected the current sibling `bin/project.ml`, provider
 `bin/{flow_cli,flow_cli_args,flow_cli_identity,experimental_stages}.ml`,
 `execution/results/stage_report_service.ml` and the headless reference client.
-Those source inspections define the decoder boundary. Installed-binary and real
-synthesis verification subsequently passed; see [acceptance](archive/delivery/native_and_synthesis_acceptance.md).
+Those source inspections define the decoder boundary.
 
 ```text
 PROVIDER --version --json
@@ -243,11 +240,7 @@ With the parent's exclusive serialized execution grant, both checks passed:
 ```
 
 The edited service/test OCaml files also passed `ocamlformat --check` in the selected
-switch. Format/lint, runtest, build, synthesis-tile checks and HTTP/PTY/installed
-acceptance passed for this recorded FS0 slice. Later FS1 verification is recorded
-separately in the construction plan and its linked acceptance records.
-[Installed checks](archive/delivery/initial_installation_checks.md) and [native acceptance](archive/delivery/native_and_synthesis_acceptance.md)
-record passed installed native/external fixture/legacy captures, actual HTTP+PTY
+switch. Historical installed and native acceptance covered fixture/baseline captures, actual HTTP+PTY
 fixtures and strictly serial real synthesis: **673/685 cells**, both completed,
 acceptance **`not_evaluated`**. Allocation was observed while launchers were executing
 after submission clients exited; warm/restart checks preserved report identity,

@@ -31,7 +31,7 @@ def resources_preview(t, check, http, runs, presets):
         'Check drc: pass', 'Acceptance (agg.): not_evaluated'], ['Aggregate Setup slack: 0.42 ns'])
     # This fixture intentionally has successful terminal slack but no authoritative
     # supplementary STA observation. Check actual Timing-pane cells, not just text
-    # somewhere else on the screen: WB069 must not borrow finalization's metrics.
+    # somewhere else on the screen: Timing must not borrow finalization's metrics.
     left, top, right, bottom = pane_rect(screen, 'timing')
     timing_body = '\n'.join(line[left + 1:right - 1]
                             for line in screen.lines()[top + 1:bottom - 1])
@@ -45,7 +45,7 @@ def resources_preview(t, check, http, runs, presets):
           'Resources preview body starts one cell inside the frame, matching adjacent tiles')
     stages = [composition.status_text(line) for line in pane_body(screen, 'stage checklist')]
     # The stable initial cursor can remain on Timing if it was first observed
-    # before physical stages hydrated. WB001 clips only a selected long label at
+    # before physical stages hydrated. The checklist clips only a selected long label at
     # this width. Require each canonical row exactly once, accepting that precise
     # bounded selected-label fallback rather than assuming a hydration order.
     names = ['Synthesis', 'Floorplan', 'Placement', 'CTS', 'Routing', 'Signoff']

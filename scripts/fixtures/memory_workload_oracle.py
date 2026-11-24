@@ -40,15 +40,16 @@ def verify_trace(operations, expected, rows, raw, steps):
     return reads, writes, defined
 
 
-def verify_result(result_path, fs2_attempt, case, generation):
+def verify_result(result_path, workbench_attempt, case, generation):
     directory = result_path.parent
     ledger = read_json(directory.parent / 'request.json')
-    assert ledger['fs2_attempt_id'] == fs2_attempt
+    # The retained provider ledger uses this field for the Workbench attempt.
+    assert ledger['fs2_attempt_id'] == workbench_attempt
     assert (ledger['case'], ledger['seed']) == (case, '34097')
     assert Path(ledger['generation']) == generation
     result = read_json(result_path)
     simulation = read_json(directory / result['simulation']['path'])
-    assert simulation['attempt_id'] != fs2_attempt
+    assert simulation['attempt_id'] != workbench_attempt
     for ref in [result[k] for k in ('simulation', 'stimulus', 'trace')] + [
         x['source'] for x in simulation['artifacts']
     ]:

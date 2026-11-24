@@ -15,6 +15,6 @@ elif sys.argv[1:2] == ["observation"]:
         if time.monotonic() > deadline:
             raise RuntimeError("Fixture hold timed out")
         time.sleep(0.01)
-    sys.exit("WB003 held summary provider failed")
+    sys.exit("Held summary provider failed")
 else:
     raise RuntimeError("Unexpected command: " + repr(sys.argv[1:]))

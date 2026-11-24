@@ -2,9 +2,8 @@
 
     Configurations are discovered through the project, which decides what is valid; the
     Workbench selects among them and records which one produced a job or artifact. The
-    settings a configuration carries are part of the versioned project-driver contract and
-    are added in milestone 1C, so this type identifies and describes a configuration
-    without reproducing its contents. *)
+    configuration's settings belong to the versioned project-driver contract. This type
+    identifies and describes the configuration without reproducing its contents. *)
 
 open! Core
 

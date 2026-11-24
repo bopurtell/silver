@@ -43,7 +43,7 @@ spec = importlib.util.spec_from_file_location(
     'investigation', Path(__file__).with_name('test-retained-asic-investigation.py'))
 investigation = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(investigation)
-metrics, fs0 = investigation.metrics, investigation.fs0
+metrics, native_execution = investigation.metrics, investigation.native_execution
 field, require, save = investigation.field, investigation.require, investigation.save
 STAGES = investigation.DEFAULTS
 
@@ -332,7 +332,7 @@ def rekey_envelope(raw, old, new):
             atoms += 1
     require(depth == 0 and len(spans) == 1, 'Expected exactly one envelope identity')
     start, end = spans[0]
-    replacement = fs0.sexp(new).encode('utf-8')
+    replacement = native_execution.sexp(new).encode('utf-8')
     require(metrics.parse(replacement.decode('utf-8')) == new, 'Invalid replacement identity encoding')
     return raw[:start] + replacement + raw[end:]
 
@@ -676,12 +676,12 @@ def exercise(args, result):
         # Reuse the allowlisting guard; build/test/exec remain rejected.
         metrics.guard_generic_builds(session)
         session.start()
-        summary = session.rpc('asic', '(Load_summary %s)' % fs0.sexp(run), wait=True)
+        summary = session.rpc('asic', '(Load_summary %s)' % native_execution.sexp(run), wait=True)
         require(any(field(s, 'freshness') == 'Cached_unverified' for s in field(summary, 'summaries')),
                 'Summary was not restored from cache')
         for domain, stage in STAGES.items():
             snap = session.rpc('asic', '(Inspect (run %s) (domain %s) (stage %s) (refresh false))' %
-                               (fs0.sexp(run), domain, stage), wait=True)
+                               (native_execution.sexp(run), domain, stage), wait=True)
             restored = next(i for i in field(snap, 'inspections') if field(i, 'domain') == domain)
             expected = metrics.put(indexes[domain], 'cached_unverified', 'true')
             require(restored == expected, domain + ': restored index differs from real retained cache')
@@ -691,7 +691,7 @@ def exercise(args, result):
         workspace = next(w for w in field(ws, 'workspaces') if field(w, 'name') == 'Overview')
         context = next(c for c in field(ws, 'contexts') if field(c, 'id') == field(workspace, 'context'))
         ws = session.mutate(ws, '(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run (%s)))' %
-                            (field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), fs0.sexp(run)))
+                            (field(workspace, 'id'), field(context, 'id'), field(context, 'selection_revision'), native_execution.sexp(run)))
         ws = session.mutate(ws, '(Create_tile (workspace %s) (kind timing) (geometry ((x 0) (y 0) (width 80) (height 30))))' % field(workspace, 'id'))
         tile = field(field(ws, 'tiles')[-1], 'id')
         session.mutate(ws, '(Set_zoom (workspace %s) (tile (%s)))' % (field(workspace, 'id'), tile))

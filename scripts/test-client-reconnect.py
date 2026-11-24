@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Two real native PTY clients, one private daemon, synthetic FS2 only; no builds.
+"""Two real native PTY clients, one private daemon, synthetic simulation only; no builds.
 
 Run: python3 scripts/test-client-reconnect.py [--evidence NEW-DIR]
-Reuses the FS3 PTY/screen oracle and tool guards. Evidence is retained under
+Reuses the project adoption PTY/screen oracle and tool guards. Evidence is retained under
 /tmp/opencode; all owned processes are stopped even on assertion/timeout.
 Timing attachment is deliberately outside this simulation-only fixture.
 """
@@ -70,7 +70,7 @@ def provider():
     args = parser.parse_args(sys.argv[2:])
     with args.calls.open('a') as out:
         out.write(json.dumps(dict(operation=args.operation, pid=os.getpid())) + '\n')
-    require(args.protocol_version == '1', 'FS2 protocol version')
+    require(args.protocol_version == '1', 'Simulation protocol version')
     if args.operation == 'discover':
         print(wire.sexp(wire.catalog(cases=['reconnect-case'])))
         return
@@ -105,7 +105,7 @@ class Terminal(harness.Terminal):
         self.process.send_signal(signal.SIGWINCH)
 
     def screen(self):
-        return harness.fs0.terminal_screen(bytes(self.data), width=self.width, height=self.height)
+        return harness.native_execution.terminal_screen(bytes(self.data), width=self.width, height=self.height)
 
     def drain(self, seconds=.15):
         text = super().drain(seconds)
@@ -136,7 +136,7 @@ class Terminal(harness.Terminal):
 def exercise(test):
     (test.root / 'dune-project').write_text('(lang dune 3.22)\n(name reconnect_fixture)\n')
     (test.root / 'hardcaml-workbench.sexp').write_text(
-        '(lang hardcaml-workbench 1)\n(project (name "FS3 acceptance"))\n'
+        '(lang hardcaml-workbench 1)\n(project (name "Project adoption acceptance"))\n'
         '(dune (build_alias @never-build) (test_alias @never-test))\n')
     calls = test.evidence / 'provider-calls.jsonl'
     (test.root / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([

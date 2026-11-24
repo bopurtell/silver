@@ -1213,13 +1213,13 @@ let finalization_lifecycle ~root ~state_dir ~reference =
       Deferred.unit)
 ;;
 
-(* WB-065 uses FIFO rendezvous, not elapsed-time guesses, to place cancellation at
+(* Lifecycle tests use FIFO rendezvous, not elapsed-time guesses, to place cancellation at
    provider boundaries. Snapshot polling yields to Async and is only a publication
    barrier; the provider cannot advance past a gate without an explicit release. *)
 let finalization_cancellation_matrix ~root ~state_dir ~reference =
   let services = ref [] in
   let unrelated = ref None in
-  let directory = state_dir ^ "-wb065" in
+  let directory = state_dir ^ "-lifecycle" in
   let create () =
     let service = Service.create ~state_dir:directory in
     services := service :: !services;
@@ -1237,10 +1237,10 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
       Out_channel.write_all path ~data:(Yojson.Safe.to_string json))
   in
   let control fields =
-    write_json (Filename.concat root "wb065-finalize.json") (`Assoc fields)
+    write_json (Filename.concat root "lifecycle-finalize.json") (`Assoc fields)
   in
   let gate name =
-    let prefix = Filename.concat root ("wb065-" ^ name) in
+    let prefix = Filename.concat root ("lifecycle-" ^ name) in
     let%map () =
       In_thread.run (fun () ->
         Core_unix.mkfifo (prefix ^ ".ready") ~perm:0o600;
@@ -1283,7 +1283,7 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
     in
     match%map Clock.with_timeout (Time_float.Span.of_sec 10.) (loop ()) with
     | `Result snapshot -> snapshot
-    | `Timeout -> failwith "WB-065 snapshot publication barrier timed out"
+    | `Timeout -> failwith "Lifecycle snapshot publication barrier timed out"
   in
   let count_launches () =
     In_thread.run (fun () ->
@@ -1297,7 +1297,7 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
     match json with
     | `Assoc fields ->
       `Assoc ((key, replacement) :: List.Assoc.remove fields key ~equal:String.equal)
-    | _ -> failwith "Expected WB-065 receipt object"
+    | _ -> failwith "Expected lifecycle receipt object"
   in
   Monitor.protect
     ~finally:(fun () ->
@@ -1312,7 +1312,7 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
           Reader.close (Process.stderr process)
       in
       In_thread.run (fun () ->
-        let path = Filename.concat root "wb065-finalize.json" in
+        let path = Filename.concat root "lifecycle-finalize.json" in
         if Poly.equal (Sys_unix.file_exists path) `Yes then Core_unix.unlink path))
     (fun () ->
       let service = create () in
@@ -1324,7 +1324,7 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
         Process.create_exn
           ~working_dir:root
           ~prog:(Filename.concat root "fixture.py")
-          ~args:[ "wb065-unrelated" ]
+          ~args:[ "lifecycle-unrelated" ]
           ()
       in
       unrelated := Some sentinel;
@@ -1505,7 +1505,7 @@ let finalization_cancellation_matrix ~root ~state_dir ~reference =
       let%bind (_ : Asic.Snapshot.t) =
         settled detached root (finalize "postcheck" (Some acceptance))
       in
-      let inspect_gate_file = Filename.concat attempt "wb065-inspect.json" in
+      let inspect_gate_file = Filename.concat attempt "lifecycle-inspect.json" in
       let%bind reader_gate = gate "observer-cancel" in
       let%bind () =
         write_json inspect_gate_file (`Assoc [ "gate", `String "observer-cancel" ])
@@ -3475,7 +3475,7 @@ let main () =
 
 let () =
   Command.async
-    ~summary:"FS0 public ASIC adapter and summary cache fixtures"
+    ~summary:"Public ASIC adapter and summary cache fixtures"
     (Command.Param.return main)
   |> Command_unix.run
 ;;

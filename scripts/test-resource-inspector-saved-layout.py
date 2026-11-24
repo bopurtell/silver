@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Native PT6 saved custom layout + explicit Resources builtin recovery.
+"""Native Resources saved custom layout + explicit Resources builtin recovery.
 
-Metadata-only project, private state and strict FS3 tool guards. The synthetic pin
+Metadata-only project, private state and strict adoption tool guards. The synthetic pin
 is only a layout witness; there is no SRAM, producer allocation or ASIC provider.
 """
 import argparse
@@ -34,8 +34,8 @@ def main():
     args = parser.parse_args()
     for name in ("daemon", "terminal", "workspace_cli", "setup"):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    g = module("pt6_saved_groundwork", HERE / "test-resource-inspector.py")
-    c = module("pt6_saved_composition", HERE / "test-workspace-config.py")
+    g = module("resource_saved_fixtures", HERE / "test-resource-inspector.py")
+    c = module("resource_saved_composition", HERE / "test-workspace-config.py")
     field, sexp = c.field, c.sexp
     before_protected = g.protected(g.DEFAULT_EXAMPLE)
     os.umask(0o077)
@@ -64,7 +64,7 @@ def main():
     try:
         (test.root / "dune-project").write_text("(lang dune 3.22)\n(name resources_saved_layout)\n")
         (test.root / "dune").write_text("(dirs)\n")
-        test.command(args.setup, ["--root", test.root, "--project-name", "FS3 acceptance"], "setup")
+        test.command(args.setup, ["--root", test.root, "--project-name", "Project adoption acceptance"], "setup")
         config_path = args.evidence / "legacy-custom-only.sexp"
         config = c.custom_config()
         definition = c.replace(field(config, "definitions")[0], "key", "resources")

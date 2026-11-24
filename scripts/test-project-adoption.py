@@ -29,10 +29,10 @@ import urllib.error
 import urllib.request
 
 sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location('fs0', Path(__file__).with_name('test-native-execution.py'))
-fs0 = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fs0)
-sexp, field, require = fs0.sexp, fs0.field, fs0.require
+spec = importlib.util.spec_from_file_location('native_execution', Path(__file__).with_name('test-native-execution.py'))
+native_execution = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(native_execution)
+sexp, field, require = native_execution.sexp, native_execution.field, native_execution.require
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -122,7 +122,7 @@ class Acceptance:
             'probe = a == ["--version"]\n' +
             'describe = a == ["describe", "workspace", "--root", ' + repr(str(self.root)) + ', "--format=sexp", "--lang=0.1"]\n' +
             'with pathlib.Path(' + repr(str(self.evidence / 'metadata-calls.jsonl')) + ').open("a") as f: f.write(json.dumps(dict(argv=a, allowed=probe or describe)) + "\\n")\n' +
-            'if not (probe or describe): sys.exit("FS3 forbids Dune actions")\n' +
+            'if not (probe or describe): sys.exit("Metadata-only adoption forbids Dune actions")\n' +
             'print("3.22.0" if probe else ' + repr(sexp([['root', str(self.root)], ['build_context', '_build/default']])) + ')\n')
         guard.chmod(0o700)
         # Deny toolchain/provider access even if an unexpected path tries it.
@@ -130,7 +130,7 @@ class Acceptance:
             blocked = private_bin / name
             blocked.write_text('#!' + sys.executable + '\nimport pathlib, sys\n' +
                 'with pathlib.Path(' + repr(str(self.evidence / 'forbidden-tools.jsonl')) + ').open("a") as f: f.write(repr(sys.argv) + "\\n")\n' +
-                'sys.exit("FS3 forbids this tool")\n')
+                'sys.exit("Metadata-only adoption forbids this tool")\n')
             blocked.chmod(0o700)
         self.env['PATH'] = str(private_bin) + os.pathsep + self.env.get('PATH', '')
 
@@ -211,7 +211,7 @@ class Acceptance:
         project = field(opened[1], 'project')
         self.project = field(project, 'id')
         (self.evidence / ('opened-' + self.instance + '.sexp')).write_text(sexp(opened) + '\n')
-        self.check(field(project, 'name') == 'FS3 acceptance', 'Actual daemon opens initialized manifest with its display name')
+        self.check(field(project, 'name') == 'Project adoption acceptance', 'Actual daemon opens initialized manifest with its display name')
 
     def close(self):
         stop(self.process)
@@ -295,7 +295,7 @@ class Terminal:
                     break
                 self.data.extend(data)
         require(self.process.poll() is None, 'Terminal unexpectedly exited')
-        return fs0.terminal_screen(bytes(self.data), width=120, height=40)
+        return native_execution.terminal_screen(bytes(self.data), width=120, height=40)
 
     def wait(self, label, expected=(), absent=(), ready=False):
         deadline = time.monotonic() + 20
@@ -335,7 +335,7 @@ class Terminal:
 
 def manifest_reload(test, manifest):
     original = manifest.read_text()
-    changed = original.replace('FS3 acceptance', 'FS3 reloaded manifest')
+    changed = original.replace('Project adoption acceptance', 'Reloaded project manifest')
     require(changed != original, 'Manifest fixture must contain its display name')
     calls = (test.evidence / 'metadata-calls.jsonl').read_bytes()
     manifest.write_text(changed)
@@ -344,7 +344,7 @@ def manifest_reload(test, manifest):
                'Explicit manifest-only HTTP reload succeeds with no discovery job')
     snapshot = test.raw('snapshot', [['instance_id', test.instance]])
     project = next(p for p in field(snapshot[1], 'projects') if field(p, 'id') == test.project)
-    test.check(field(project, 'name') == 'FS3 reloaded manifest' and field(snapshot[1], 'jobs') == []
+    test.check(field(project, 'name') == 'Reloaded project manifest' and field(snapshot[1], 'jobs') == []
                and (test.evidence / 'metadata-calls.jsonl').read_bytes() == calls,
                'Manifest-only reload applies edited name without metadata probes or tool execution')
     manifest.write_text(original)
@@ -447,7 +447,7 @@ def terminal_integration(test, before, starters, header_id):
         test.check(parse(pref_file.read_text()) == stored,
                    'Polling preserves explicit header toggle after an existing preference load')
 
-        # WB-019: main-window and palette bottom hints hide independently, persist with
+        # Main-window and palette bottom hints hide independently, persist with
         # the other presentation choices and are restorable by keyboard alone.
         def hint_preferences(label, main, palette):
             deadline = time.monotonic() + 10
@@ -562,10 +562,10 @@ def exercise(test):
     from fixtures.testing_layout import STOCK_KINDS
 
     root = test.root
-    (root / 'dune-project').write_text('(lang dune 3.22)\n(name fs3_acceptance)\n')
+    (root / 'dune-project').write_text('(lang dune 3.22)\n(name project_adoption_acceptance)\n')
     (root / 'dune').write_text('(dirs)\n')
     original = {p.name: p.read_bytes() for p in root.iterdir()}
-    init = ['--root', root, '--project-name', 'FS3 acceptance',
+    init = ['--root', root, '--project-name', 'Project adoption acceptance',
             '--build-alias', '@acceptance-build', '--test-alias', '@acceptance-test']
     dry = test.command(test.args.setup, init + ['--dry-run'], 'initialize-dry-run')
     test.check({p.name: p.read_bytes() for p in root.iterdir()} == original,
@@ -622,7 +622,7 @@ def exercise(test):
         if kind == 'generic':
             generic_id = created
     legacy = [entry for entry in portable(starters['generic'], 'Legacy custom') if entry[0] != 'preset']
-    unknown = replace_field(portable(starters['generic'], 'Unknown preset'), 'preset', ['future-fs3-preset'])
+    unknown = replace_field(portable(starters['generic'], 'Unknown preset'), 'preset', ['future-preset'])
     sparse = replace_field(portable(starters['overview'], 'Sparse preset'), 'views', [])
     for label, template in [('legacy', legacy), ('unknown-preset', unknown), ('sparse-preset', sparse)]:
         path = test.evidence / (label + '.sexp')
@@ -651,14 +651,14 @@ def exercise(test):
     visible = next(t for t in field(current, 'tiles')
                    if field(t, 'workspace') == generic_id and field(t, 'hidden') == 'false')
     current = test.mutate(current, ['Set_zoom', ['workspace', generic_id], ['tile', [field(visible, 'id')]]])
-    current = test.mutate(current, ['Create_tile', ['workspace', generic_id], ['kind', 'future-fs3-view'],
+    current = test.mutate(current, ['Create_tile', ['workspace', generic_id], ['kind', 'future-view'],
         ['geometry', [['x', '2'], ['y', '3'], ['width', '17'], ['height', '13']]]])
     portable_text = test.cli('export', [generic_id], 'export-customized')
     template = parse(portable_text)
     custom = test.evidence / 'customized.sexp'
     custom.write_text(portable_text)
     test.check(any(field(v, 'hidden') == 'true' for v in field(template, 'views'))
-               and any(field(v, 'kind') == 'future-fs3-view' for v in field(template, 'views')),
+               and any(field(v, 'kind') == 'future-view' for v in field(template, 'views')),
                'Export preserves hidden and extensible unknown views')
     current, clone_id = test.imported(current, template, generic_id, 'cloned custom', 'clone-custom', clone=True)
     current, imported_id = test.imported(current, template, custom, 'roundtrip custom', 'import-custom')
@@ -723,7 +723,7 @@ def main():
         require(args.evidence.is_relative_to(base) and args.evidence != base, 'Evidence must be under /tmp/opencode')
         args.evidence.mkdir(mode=0o700)
     else:
-        args.evidence = Path(tempfile.mkdtemp(prefix='fs3-adoption-', dir=base))
+        args.evidence = Path(tempfile.mkdtemp(prefix='project-adoption-', dir=base))
     for name in ('setup', 'workspace_cli', 'daemon', 'terminal'):
         binary = getattr(args, name).resolve()
         require(binary.is_file() and os.access(binary, os.X_OK), 'Missing built executable: ' + str(binary))

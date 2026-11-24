@@ -143,5 +143,3 @@ Esc/Enter and cached/palette reopening preserve the selected inspection's full
 otherwise ambiguous cache inventory, pinned queries sort before unpinned queries
 with a stable key tie-breaker. Explicit Import remains the route to capture a new
 current source intentionally.
-
-See the [frontend implementation and acceptance record](archive/workloads-waveforms/workloads_frontend_acceptance.md) for historical verification.

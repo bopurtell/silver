@@ -8,7 +8,7 @@ recapture uses an explicit reviewed app pair and the stopped-daemon launcher;
 recover-collection requires that recorded transition plus collection-only admission,
 and submits no implementation. Original failed evidence is never rewritten.
 The native session harness is reused, including its real
-FIFO/PT.8 LaunchForms, waveform, A/B comparison and simulation restart checks.
+FIFO/memory workload LaunchForms, waveform, A/B comparison and simulation restart checks.
 """
 import argparse
 import contextlib
@@ -269,7 +269,7 @@ def simulations(args, evidence, report):
         save(readiness / 'preparation.json', preparation)
         final = session.api(domain='asic')
         require(not field(final, 'workflows') and not field(final, 'runs') and not field(final, 'launches'),
-                'phase 1 has zero EDA workflows/runs/launch submissions')
+                'simulation checks have zero EDA workflows/runs/launch submissions')
     manifest = json.loads((args.store / 'manifest.json').read_text())
     env = dict(os.environ, **manifest['environment'])
     # Compile the companion's exact captured target before EDA activation.

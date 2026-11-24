@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PT6 installed public bridge and private native HTTP/PTY retained-evidence acceptance."""
+"""Resource Inspector installed public bridge and private native HTTP/PTY retained-evidence acceptance."""
 import argparse
 import importlib.util
 import json
@@ -57,10 +57,10 @@ def relay(policy_file, argv):
     with (base / "provider-calls.jsonl").open("a") as log:
         log.write(json.dumps(dict(argv=argv, allowed=bool(allowed))) + "\n")
     if not allowed or (base / "deny-queries").exists():
-        sys.exit("PT6 retained acceptance: query denied; no producer commands allowed")
+        sys.exit("Retained Resource Inspector acceptance: query denied; no producer commands allowed")
     stem = base / ("provider-" + str(os.getpid()))
     proc = subprocess.run([policy["provider"], *argv], capture_output=True, timeout=120,
-                          env=dict(os.environ, PATH="/nonexistent/pt6-no-tools", TOOLCHAIN="/nonexistent/pt6"))
+                          env=dict(os.environ, PATH="/nonexistent/resource-inspector-no-tools", TOOLCHAIN="/nonexistent/resource-inspector"))
     stem.with_suffix(".stdout").write_bytes(proc.stdout)
     stem.with_suffix(".stderr").write_bytes(proc.stderr)
     groundwork.write_new(stem.with_suffix(".json"), dict(argv=argv, exit=proc.returncode))
@@ -69,9 +69,9 @@ def relay(policy_file, argv):
     return proc.returncode
 
 
-def decode_fields(fs0, item):
+def decode_fields(native_execution, item):
     result = {}
-    for key, value in fs0.field(item, "fields"):
+    for key, value in native_execution.field(item, "fields"):
         try:
             result[key] = json.loads(value)
         except ValueError:
@@ -79,7 +79,7 @@ def decode_fields(fs0, item):
     return result
 
 
-def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
+def exercise_pty(args, base, session, native_execution, targets, check, snapshot, load_case):
     g = groundwork
     dashboard = g.module("resource_pty_dashboard", g.HERE / "test-retained-asic-dashboard.py")
 
@@ -103,7 +103,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
             self.key(b"\r")
 
     t = Terminal(session)
-    field = fs0.field
+    field = native_execution.field
     sequence = 0
 
     def shot(label, expected=()):
@@ -141,7 +141,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         tile = next(tile for tile in field(workspace, "tiles") if field(tile, "workspace") == field(resources, "id")
                     and field(tile, "kind") == "resources")
         session.mutate(workspace, '(Set_zoom (workspace %s)(tile (%s)))' %
-                       (fs0.sexp(field(resources, "id")), fs0.sexp(field(tile, "id"))))
+                       (native_execution.sexp(field(resources, "id")), native_execution.sexp(field(tile, "id"))))
         shot("actual-table", ["program", "RM_IHPSG13_1P_256x16_c2_bm_bist", "matched"])
         check(True, "PTY actual program/stock macro/matched table")
         calls_before = (base / "provider-calls.jsonl").read_bytes()
@@ -236,17 +236,17 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         # Adopt the genuine historical FIFO allocation solely to test existing run pins.
         manifest = g.load(args.example_root / ".dev/workbench-real-demo/manifest.json")
         reference = [[k, manifest["allocation"][k]] for k in ("attempt", "stream_id")]
-        registered = session.rpc("asic", "(Register %s)" % fs0.sexp(reference), wait=True)
+        registered = session.rpc("asic", "(Register %s)" % native_execution.sexp(reference), wait=True)
         actual_runs = field(registered, "runs")
         check(len(actual_runs) == 1 and field(actual_runs[0], "reference") == reference,
               "pin test adopts only genuine historical FIFO allocation, no fabricated SRAM observation")
         run = field(actual_runs[0], "run")
-        observed = session.rpc("asic", "(Observe %s)" % fs0.sexp(run), wait=True)
+        observed = session.rpc("asic", "(Observe %s)" % native_execution.sexp(run), wait=True)
         observed_run = next(r for r in field(observed, "runs") if field(r, "run") == run)
         check(field(observed_run, "execution_file") == [manifest["execution_file"]],
               "read-only Observe binds genuine historical FIFO execution before resource inventory query")
-        unavailable = session.rpc("asic", '(Resources (Load (target (Run %s))(refresh true)))' % fs0.sexp(run), wait=True)
-        resource_state = g.resource_snapshot(fs0, unavailable)
+        unavailable = session.rpc("asic", '(Resources (Load (target (Run %s))(refresh true)))' % native_execution.sexp(run), wait=True)
+        resource_state = g.resource_snapshot(native_execution, unavailable)
         historical_source = next(s for s in field(resource_state, "sources") if field(s, "target") == ["Run", run])
         historical_index = next(i for i in field(resource_state, "indexes") if field(i, "source_id") == field(historical_source, "id"))
         historical_provenance = json.loads(field(historical_index, "provenance"))
@@ -260,7 +260,7 @@ def exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case):
         shot("restore-explicit-after-historical", ["program", "matched"])
         workspace = session.rpc("workspace")
         session.mutate(workspace, '(Set_tile_binding (tile %s)(binding (Pin_run %s)))' %
-                       (fs0.sexp(field(tile, "id")), fs0.sexp(run)))
+                       (native_execution.sexp(field(tile, "id")), native_execution.sexp(run)))
         t.palette("Inspect resources (open Resources workspace)")
         shot("explicit-source-survives-pin", ["program", "matched", "Explicit source"])
         check(True, "PTY explicit coarse SRAM source survives genuine FIFO run pin")
@@ -324,7 +324,7 @@ def native_retained(args):
                "fifo": (args.example_root / FIFO_BUNDLE, "Bundle", "bundle"),
                "flops": (args.example_root / "acceptance/resource-realization/installed-final/emitted-flops", "Bundle", "bundle"),
                "fallback": (args.example_root / "acceptance/resource-realization/installed-final/emitted-fallback", "Bundle", "bundle")}
-    # Same semantic-negative recipe as independent PT5b acceptance, on disposable bytes.
+    # Same semantic-negative recipe as earlier resource-evidence acceptance, on disposable bytes.
     # No producer record or new run identity is fabricated; source labels remain diagnostic.
     failed = base / "diagnostic-failed-evidence"
     shutil.copytree(targets["augmented"][0], failed)
@@ -360,10 +360,10 @@ def native_retained(args):
     companion = args.provider.parent / "hardcaml-asic-experimental-resource-inspect"
     g.require(companion.is_file(), "actual installed new bridge companion")
     (base / companion.name).symlink_to(companion)
-    fs0, session = g.native_setup(args, base, wrapper)
-    field, sexp = fs0.field, fs0.sexp
+    native_execution, session = g.native_setup(args, base, wrapper)
+    field, sexp = native_execution.field, native_execution.sexp
     result = dict(status="failed", scope="actual retained installed bridge over native HTTP",
-                  contract_revision="PT6-A-contract-r3 + B final",
+                  contract_revision="resource-inspection bridge v1",
                   ui_acceptance="NOT_RUN", checks=[], provider=str(args.provider),
                   daemon_sha256=g.sha(args.daemon), script_sha256=g.sha(base / "tested-script.py"),
                   common_sha256=g.sha(base / "tested-common.py"),
@@ -377,12 +377,12 @@ def native_retained(args):
         g.require(ok, message)
 
     def snapshot(op="Get", wait=False):
-        return g.resource_snapshot(fs0, session.rpc("asic", op, wait=wait))
+        return g.resource_snapshot(native_execution, session.rpc("asic", op, wait=wait))
 
     def load_case(case, refresh=False):
         path, tag, _ = targets[case]
-        state = snapshot(g.operation_load(fs0, path, tag, refresh), wait=True)
-        return g.source_index(fs0, state, path)
+        state = snapshot(g.operation_load(native_execution, path, tag, refresh), wait=True)
+        return g.source_index(native_execution, state, path)
 
     def detail(source, index, section, offset=0, limit=8):
         state = snapshot('(Resources (Detail (source_id %s)(expected_digest %s)(resource_id program)(section %s)(offset %d)(limit %d)))' %
@@ -412,14 +412,14 @@ def native_retained(args):
             check(any(field(m, "name") == name and field(m, "classification") == "Derived"
                       for m in field(index, "measurements")), "HTTP provider-owned derived classification: " + name)
         geometry = detail(source, index, "geometry")
-        check(any(decode_fields(fs0, item).get("instances", [{}])[0].get("area_um2") == 28127.104
-                  for item in field(geometry, "items") if "instances" in decode_fields(fs0, item)), "HTTP actual geometry footprint")
+        check(any(decode_fields(native_execution, item).get("instances", [{}])[0].get("area_um2") == 28127.104
+                  for item in field(geometry, "items") if "instances" in decode_fields(native_execution, item)), "HTTP actual geometry footprint")
         raw_evidence = g.load(args.example_root / g.MEASUREMENTS / "installed-final/evidence-50.json")
         raw_paths = g.final(raw_evidence)["resources"][0]["timing_links"]["paths"]
         for oracle in g.load(args.fixtures / "byte-oracles.json")["paths"]:
             position = raw_paths.index(oracle["public_path"])
             page = detail(source, index, "timing", position, 1)
-            value = decode_fields(fs0, field(page, "items")[0])
+            value = decode_fields(native_execution, field(page, "items")[0])
             check(all(value.get(k) == v for k, v in oracle["public_path"].items()), "HTTP exact native timing path/span/blank columns")
             check(int(field(page, "total")) == 186, "HTTP timing total186")
         electric = detail(source, index, "electrical", 0, 1)
@@ -470,13 +470,13 @@ def native_retained(args):
         if args.pty:
             g.require(args.client and args.client.is_file(), "--pty requires matching compiled --client")
             result["client_sha256"] = g.sha(args.client)
-            exercise_pty(args, base, session, fs0, targets, check, snapshot, load_case)
+            exercise_pty(args, base, session, native_execution, targets, check, snapshot, load_case)
             result["ui_acceptance"] = "initial_pty_passed"
             saved_workspace = session.rpc("workspace")
         (base / "deny-queries").touch()
         session.stop()
         session.start()
-        restored_source, restored_index = g.source_index(fs0, snapshot(), targets["augmented"][0])
+        restored_source, restored_index = g.source_index(native_execution, snapshot(), targets["augmented"][0])
         check(field(restored_source, "freshness") == "Cached_unverified" and restored_index == index, "HTTP restart exact cached-unverified actual evidence")
         baseline = calls()
         load_case("augmented")
@@ -505,7 +505,7 @@ def public_acceptance(args):
     provider = args.provider.resolve()
     bin_dir = provider.parent
     companion = bin_dir / "hardcaml-asic-experimental-resource-inspect"
-    g.require(companion.is_file(), "New bridge companion required; PT5b dispatcher alone is insufficient")
+    g.require(companion.is_file(), "New bridge companion required; the older dispatcher alone is insufficient")
     base = args.evidence.resolve() if args.evidence else Path(tempfile.mkdtemp(
         prefix="resource-inspector-retained-", dir="/tmp/opencode"))
     if args.evidence:
@@ -515,7 +515,7 @@ def public_acceptance(args):
     g.write_new(base / "protected-before.json", before)
     shutil.copyfile(Path(__file__), base / "tested-script.py")
     result = dict(status="failed", scope="installed real bridge public acceptance ONLY",
-                  contract_revision="PT6-A-contract-r3 + B final",
+                  contract_revision="resource-inspection bridge v1",
                   ui_acceptance="NOT_RUN", http_acceptance="NOT_RUN", checks=[], commands=[],
                   provider=str(provider), script_sha256=g.sha(base / "tested-script.py"),
                   binaries={p.name: g.sha(p) for p in sorted(bin_dir.glob("hardcaml-asic*")) if p.is_file()})
@@ -548,8 +548,8 @@ def public_acceptance(args):
             if artifact:
                 argv += ["--artifact-id", artifact]
         proc = subprocess.run(argv, capture_output=True, timeout=120,
-                              env=dict(os.environ, PATH="/nonexistent/pt6-no-tools",
-                                       TOOLCHAIN="/nonexistent/pt6", PYTHONDONTWRITEBYTECODE="1"))
+                              env=dict(os.environ, PATH="/nonexistent/resource-inspector-no-tools",
+                                       TOOLCHAIN="/nonexistent/resource-inspector", PYTHONDONTWRITEBYTECODE="1"))
         stem = "%03d" % len(result["commands"])
         (base / (stem + ".stdout")).write_bytes(proc.stdout)
         (base / (stem + ".stderr")).write_bytes(proc.stderr)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""C-owned PT6 broad/native regression recorder. Existing private fixture routes only.
+"""Resource Inspector native regression recorder. Existing private fixture routes only.
 
-Builds and each native suite hold the shared PT6 lock. All nested fixture builds
+Builds and each native suite hold the shared regression lock. All nested fixture builds
 are already explicit six-job Dune calls. A new receipt directory is required.
 """
 import argparse
@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--resume", action="store_true", help="ASIC-only resume without forcing already completed tests")
     parser.add_argument("--output", type=Path, required=True, help="new receipt directory")
     args = parser.parse_args()
-    g = module("pt6_regression_groundwork", HERE / "test-resource-inspector.py")
+    g = module("resource_regression_fixtures", HERE / "test-resource-inspector.py")
     output = args.output.resolve()
     g.require(output.parent.is_dir(), "Receipt parent exists")
     output.mkdir()
@@ -58,6 +58,7 @@ def main():
                 if p.is_file() and (p.suffix in (".ml", ".mli") or p.name == "dune")}
 
     native_root = Path("/tmp/opencode") / ("resource-inspector-regression-" + args.suite + "-" + secrets.token_hex(6))
+    # Shared with the retained review tooling; lock paths must match exactly.
     lock = ["flock", "/tmp/opencode/workbench-pt6-build.lock"]
     cwd = WB
     if args.suite == "asic-full":

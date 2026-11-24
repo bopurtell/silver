@@ -1,4 +1,4 @@
-"""WB-096 lifecycle acceptance; real HTTP/daemon, private short prepared-flow provider."""
+"""Signoff cancellation lifecycle acceptance; real HTTP/daemon, private short prepared-flow provider."""
 import argparse
 import json
 from pathlib import Path
@@ -203,7 +203,7 @@ def main():
     parser.add_argument("--daemon", required=True, type=lambda p: Path(p).resolve())
     parser.add_argument("--evidence-dir", type=Path, default=Path("/tmp/opencode"))
     args = parser.parse_args()
-    args.evidence = Path(tempfile.mkdtemp(prefix="wb096-routing-cancellation-", dir=args.evidence_dir))
+    args.evidence = Path(tempfile.mkdtemp(prefix="routing-cancellation-", dir=args.evidence_dir))
     checks = []
 
     def check(ok, message):

@@ -72,7 +72,7 @@ elif args[:1] == ["stages"]:
 
     # Opt-in companion PTY gate: pause on either side of the real allocation
     # event. Only synthesis has started in the held observation.
-    gate = os.environ.get("WB095_PHYSICAL_GATE")
+    gate = os.environ.get("COMPANION_FLOW_PHYSICAL_GATE")
     gated = gate is not None
 
     def save(status=None, *, omit_stages=False):

@@ -1,4 +1,4 @@
-"""WB-083: real native menu, dispatch, daemon, authoring files and launch selection."""
+"""Flow authoring: real native menu, dispatch, daemon, authoring files and launch selection."""
 import argparse
 from contextlib import closing
 import json

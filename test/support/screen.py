@@ -1,4 +1,4 @@
-"""The historical FS0 ANSI screen oracle (not a general terminal emulator)."""
+"""The native execution ANSI screen oracle (not a general terminal emulator)."""
 import re
 import unicodedata
 

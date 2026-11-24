@@ -44,7 +44,7 @@ STATUS_PADDING = re.compile(r'(?<=\S:) {2,}(?=\S)')
 
 
 def status_text(text):
-    """Checklist keywords share a padded column (WB-001); oracles match `Label: status`."""
+    """Checklist keywords share a padded column; oracles match `Label: status`."""
     return STATUS_PADDING.sub(' ', text)
 
 

@@ -107,7 +107,7 @@ let%test_unit "artifact waits distinguish offset and byte budget with the shared
   assert (not (String.equal (key 0 4096) (key 4096 4096)))
 ;;
 
-let%test_unit "FS1 waits use shared index detail and binary page identities" =
+let%test_unit "ASIC inspection waits use shared index detail and binary page identities" =
   let run = Asic_snapshot_fixture.run_a in
   let keys_for op = keys op Asic_snapshot_fixture.snapshot in
   let index refresh =

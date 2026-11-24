@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-095 native Silver and standalone Cobalt PTYs against one private real daemon."""
+"""Companion flow launch with native Silver and standalone Cobalt PTYs against one private real daemon."""
 import argparse
 from contextlib import contextmanager
 import hashlib
@@ -404,27 +404,27 @@ def without_submit(trace, f, prior, before):
     assert len(field(f.snapshot(), 'workflows')) == before
 
 
-def c8(f, ui, native, native_trace, cobalt_trace):
+def exercise_stage_checklist(f, ui, native, native_trace, cobalt_trace):
     compared = {}
     watched = checklist.selected(f)
     assert watched
-    screen = ui.capture('c8-empty-editor', 'WB095_OUTSIDE_DOCUMENT')
+    screen = ui.capture('stage-checklist-empty-editor', 'COMPANION_FLOW_EDITOR_WITNESS')
     assert 'Silver: Flow Runner' not in screen
     ui.command('silver stage checklist')
     selection = selected_inputs('standard', 'routing')
     assert not field(f.snapshot(), 'workflows')
-    capture_stage_rows(ui, 'c8-checklist-no-asic-evidence', selection)
+    capture_stage_rows(ui, 'stage-checklist-checklist-no-asic-evidence', selection)
     ui.send(b'gg', b'j', b'j', b'j', b'j')
-    capture_stage_rows(ui, 'c8-routing-selected', selection, selected='routing')
+    capture_stage_rows(ui, 'stage-checklist-routing-selected', selection, selected='routing')
 
     with hold_physical(f) as gate:
-        progress = LiveProgress(f, ui, native_trace, cobalt_trace, 'c8-stage-progress', gate, selection)
+        progress = LiveProgress(f, ui, native_trace, cobalt_trace, 'stage-checklist-stage-progress', gate, selection)
         begin = len(cobalt_trace)
         ui.send(b'R')
         compared['checklist'] = selected_workflow(
             f, TraceWindow(cobalt_trace, begin), 'Launch_fresh', 'checklist',
             before_done=progress.before_done, after_done=progress.after_done)
-    capture_stage_rows(ui, 'c8-focus-after-R', selection,
+    capture_stage_rows(ui, 'stage-checklist-focus-after-R', selection,
                        expected_stage_statuses('routing', completed=True), selected='routing', elaboration=True)
     for index, endpoint in [(5, 'routing'), (1, 'synthesis'), (6, 'timing')]:
         checklist.position(f, index)
@@ -438,37 +438,37 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     for name, endpoint in [('synth', 'synthesis'), ('timing', 'timing'), ('routing', 'routing')]:
         begin = len(cobalt_trace)
         ui.palette(name)
-        screen = ui.capture('c8-alias-' + name, 'Run ' + name + ' ·')
+        screen = ui.capture('stage-checklist-alias-' + name, 'Run ' + name + ' ·')
         assert_first(screen, name)
         ui.send(b'\r')
         result = selected_workflow(f, TraceWindow(cobalt_trace, begin), 'Launch_fresh', name)
         assert result['selection'] == compared['native-' + endpoint]['selection']
         compared[name] = result
-    ui.capture('c8-last-ack', 'Accepted · workfl')
-    capture_stage_rows(ui, 'c8-last-progress', selection,
+    ui.capture('stage-checklist-last-ack', 'Accepted · workfl')
+    capture_stage_rows(ui, 'stage-checklist-last-progress', selection,
                        expected_stage_statuses('routing', completed=True), selected='routing', elaboration=True)
     ui.palette('routing')
-    ui.capture('c8-alias-reopened', 'Run routing ·')
+    ui.capture('stage-checklist-alias-reopened', 'Run routing ·')
     ui.send(b' checklist')
-    screen = ui.capture('c8-related', 'routing checklist', '> Silver: Stage Checklist')
+    screen = ui.capture('stage-checklist-related', 'routing checklist', '> Silver: Stage Checklist')
     assert 'Run routing ·' not in screen, screen
     ui.send(b'\x1b')
-    capture_stage_rows(ui, 'c8-palette-restores-checklist', selection,
+    capture_stage_rows(ui, 'stage-checklist-palette-restores-checklist', selection,
                        expected_stage_statuses('routing', completed=True), selected='routing', elaboration=True)
     assert checklist.selected(f) == watched
     assert len({record['run'] for record in compared.values()}) == len(compared)
     assert len({record['workflow'] for record in compared.values()}) == len(compared)
-    save(f.base / 'c8-comparisons.json', compared)
+    save(f.base / 'stage-checklist-comparisons.json', compared)
 
     # The real Discover reply loses Routing while an already rendered exact
     # action remains captured in the Cobalt palette.
     ui.palette('routing')
-    assert_first(ui.capture('c8-alias-before-withdrawal', 'Run routing · endpoint routing'), 'routing')
+    assert_first(ui.capture('stage-checklist-alias-before-withdrawal', 'Run routing · endpoint routing'), 'routing')
     (f.root / 'withdraw-routing').touch()
     companion_operation(f, 'Discover')
     begin, before = len(cobalt_trace), len(field(f.snapshot(), 'workflows'))
     ui.send(b'\r', b' vM')
-    ui.capture('c8-captured-stale', 'Silver stage · Rejected')
+    ui.capture('stage-checklist-captured-stale', 'Silver stage · Rejected')
     without_submit(cobalt_trace, f, begin, before)
     assert not exchanges(cobalt_trace[begin:], 'Stage_fresh')
     # The independent observation reader also sends unscoped Get requests.
@@ -482,10 +482,10 @@ def c8(f, ui, native, native_trace, cobalt_trace):
     ui.send(b'\x1b')
 
     ui.send(b' vU', b'r', b'\x1b')
-    capture_stage_rows(ui, 'c8-routing-evidence-stays-separate-from-capability', selection,
+    capture_stage_rows(ui, 'stage-checklist-routing-evidence-stays-separate-from-capability', selection,
                        expected_stage_statuses('routing', completed=True), elaboration=True)
     ui.palette('routing')
-    screen = ui.capture('c8-exact-disabled', 'Run routing · Unavailable:')
+    screen = ui.capture('stage-checklist-exact-disabled', 'Run routing · Unavailable:')
     assert_first(screen, 'routing')
     begin, before = len(cobalt_trace), len(field(f.snapshot(), 'workflows'))
     ui.send(b'\t', b'\r')
@@ -513,59 +513,59 @@ def selected_inputs(flow, endpoint, *, profile='balanced', assignments=()):
                 chip_target=[[['chip', 'demo-chip'], ['variant', 'small']]])
 
 
-def c9(f, ui, native_url, native_trace, cobalt_trace):
+def exercise_flow_review(f, ui, native_url, native_trace, cobalt_trace):
     watched = checklist.selected(f)
     before = len(field(f.snapshot(), 'workflows'))
     ui.palette('st')
     ui.send(b'\t', b'\r')
-    capture_stage_rows(ui, 'c9-stage-initial', selected_inputs('standard', 'routing'))
+    capture_stage_rows(ui, 'flow-review-stage-initial', selected_inputs('standard', 'routing'))
     ui.send(b'g', b'g', b'j', b'j', b'j', b'j')
-    capture_stage_rows(ui, 'c9-stage-routing', selected_inputs('standard', 'routing'), selected='routing')
+    capture_stage_rows(ui, 'flow-review-stage-routing', selected_inputs('standard', 'routing'), selected='routing')
     ui.palette('flow')
-    assert_first(ui.capture('c9-flow-palette', 'Silver: Flow Runner'), 'flow',
+    assert_first(ui.capture('flow-review-flow-palette', 'Silver: Flow Runner'), 'flow',
                  title='Silver: Flow Runner')
     ui.send(b'\t', b'\r')
-    ui.capture('c9-flow-choice', 'WB095_OUTSIDE_DOCUMENT', 'Silver: Flow Runner',
+    ui.capture('flow-review-flow-choice', 'COMPANION_FLOW_EDITOR_WITNESS', 'Silver: Flow Runner',
                '› Standard fixture · active', 'Explore fixture')
     ui.send(b'j')
-    ui.capture('c9-flow-explore', '› Explore fixture · active')
+    ui.capture('flow-review-flow-explore', '› Explore fixture · active')
     ui.send(b'k')
-    ui.capture('c9-flow-standard', '› Standard fixture · active')
+    ui.capture('flow-review-flow-standard', '› Standard fixture · active')
     ui.send(b'j')
-    ui.capture('c9-flow-explore-again', '› Explore fixture · active')
+    ui.capture('flow-review-flow-explore-again', '› Explore fixture · active')
     assert not exchanges(cobalt_trace, 'Plan', 'Stage_fresh')
     without_submit(cobalt_trace, f, 0, before)
     ui.command('Toggle Silver: Flow Runner')
-    screen = ui.capture('c9-selector-hidden', 'WB095_OUTSIDE_DOCUMENT')
+    screen = ui.capture('flow-review-selector-hidden', 'COMPANION_FLOW_EDITOR_WITNESS')
     assert 'Explore fixture' not in screen
     ui.palette('st')
     ui.send(b'\t', b'\r')
     selection = selected_inputs('explore', 'routing')
-    capture_stage_rows(ui, 'c9-stage-explore', selection, selected='routing')
+    capture_stage_rows(ui, 'flow-review-stage-explore', selection, selected='routing')
     with hold_physical(f) as gate:
-        progress = LiveProgress(f, ui, native_trace, cobalt_trace, 'c9-stage-progress', gate, selection)
+        progress = LiveProgress(f, ui, native_trace, cobalt_trace, 'flow-review-stage-progress', gate, selection)
         begin = len(cobalt_trace)
         ui.send(b'R')
         stage = selected_workflow(f, TraceWindow(cobalt_trace, begin), 'Launch_fresh', 'selected-flow',
                                   before_done=progress.before_done, after_done=progress.after_done)
     assert stage['selection'] == selection
     assert not stage['expected_plan'] and checklist.selected(f) == watched
-    save(f.base / 'c9-selected-flow.json', stage)
+    save(f.base / 'flow-review-selected-flow.json', stage)
 
     start_after_stage = len(cobalt_trace)
     ui.command('flow')
     ui.send(b'k')
-    ui.capture('c9-stale-standard-choice', '› Standard fixture · active')
+    ui.capture('flow-review-stale-standard-choice', '› Standard fixture · active')
     ui.palette('st')
     ui.send(b'\t', b'\r')
-    capture_stage_rows(ui, 'c9-no-borrowed-explore-evidence', selected_inputs('standard', 'routing'),
+    capture_stage_rows(ui, 'flow-review-no-borrowed-explore-evidence', selected_inputs('standard', 'routing'),
                        selected='routing')
     ui.command('flow')
     ui.send(b'j')
-    ui.capture('c9-explore-restored', '› Explore fixture · active')
+    ui.capture('flow-review-explore-restored', '› Explore fixture · active')
     ui.palette('st')
     ui.send(b'\t', b'\r')
-    capture_stage_rows(ui, 'c9-same-flow-evidence-restored', selection,
+    capture_stage_rows(ui, 'flow-review-same-flow-evidence-restored', selection,
                        expected_stage_statuses('routing', completed=True), selected='routing', elaboration=True)
     without_submit(cobalt_trace, f, start_after_stage, before + 1)
 
@@ -574,19 +574,19 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     expected = native_plan(f, native_url, selection)
     assert dict(field(expected, 'selection')) == selection
     ui.command('Silver: Flow Review')
-    ui.capture('c9-review-choices', 'Silver: Flow Review', '› Flow choice: Explore fixture')
+    ui.capture('flow-review-review-choices', 'Silver: Flow Review', '› Flow choice: Explore fixture')
     begin = len(cobalt_trace)
     ui.send(b'K')  # No reviewed preview: never submit anything else.
     without_submit(cobalt_trace, f, begin, before)
     ui.send(b'\r')
-    ui.capture('c9-edit', 'Flow inputs', 'Explore fixture')
+    ui.capture('flow-review-edit', 'Flow inputs', 'Explore fixture')
     ui.send(b'\x15', b'review', b'\t', b'\x15', b'routing', b'\t', b'\x15', b'delay', b'\r')
-    ui.capture('c9-draft', 'Applied draft (not a preview)', 'Profile: review')
+    ui.capture('flow-review-draft', 'Applied draft (not a preview)', 'Profile: review')
     assert not exchanges(cobalt_trace[begin:], 'Plan')
     without_submit(cobalt_trace, f, begin, before)
     ui.send(b'p')
     plan_id = field(expected, 'plan_identity')
-    ui.capture('c9-preview', 'Reviewed preview: ' + plan_id, 'demo-chip / small',
+    ui.capture('flow-review-preview', 'Reviewed preview: ' + plan_id, 'demo-chip / small',
                'Flow: explore', 'Profile: review', 'Endpoint: routing', 'Parameter STRATEGY = delay')
     without_submit(cobalt_trace, f, begin, before)
     ui.send(b'K', b'K')
@@ -594,29 +594,29 @@ def c9(f, ui, native_url, native_trace, cobalt_trace):
     assert result['selection'] == selection and result['expected_plan'] == [plan_id]
     transmitted = field(op(exchanges(cobalt_trace, 'Run')[0]['request'])[1], 'preview')
     assert dict(transmitted) == dict(expected)
-    ui.capture('c9-ack', 'Accepted · workflow ' + result['workflow'])
+    ui.capture('flow-review-ack', 'Accepted · workflow ' + result['workflow'])
     assert checklist.selected(f) == watched
-    save(f.base / 'c9-comparison.json', result)
+    save(f.base / 'flow-review-comparison.json', result)
 
     ui.send(b'p')
-    ui.capture('c9-preview-before-edit', 'Reviewed preview: ' + plan_id)
+    ui.capture('flow-review-preview-before-edit', 'Reviewed preview: ' + plan_id)
     # Change the draft after review. The old preview must not be submittable.
     ui.send(b'G', b'\r')
-    ui.capture('c9-reedit', 'Flow inputs', 'Explore fixture')
+    ui.capture('flow-review-reedit', 'Flow inputs', 'Explore fixture')
     ui.send(b'\t', b'\t', b'\x15', b'area', b'\r')
-    ui.capture('c9-invalidated', 'Kickoff disabled: Prepare the edited inputs before Kickoff')
+    ui.capture('flow-review-invalidated', 'Kickoff disabled: Prepare the edited inputs before Kickoff')
     begin = len(cobalt_trace)
     ui.send(b'K')
     without_submit(cobalt_trace, f, begin, before + 1)
     ui.send(b'p')
-    ui.capture('c9-preview-before-supersession', 'Reviewed preview:', 'Parameter STRATEGY = area')
+    ui.capture('flow-review-preview-before-supersession', 'Reviewed preview:', 'Parameter STRATEGY = area')
     # Another client uses the same protocol context (as a second companion
     # would). Its plan must not be substituted for the one Cobalt displayed.
     alternate = dict(selection, endpoint='placement')
     companion_operation(f, '(Plan %s)' % sexp(list(alternate.items())))
     begin = len(cobalt_trace)
     ui.send(b'K')
-    ui.capture('c9-server-stale', 'reviewed preview was superseded')
+    ui.capture('flow-review-server-stale', 'reviewed preview was superseded')
     without_submit(cobalt_trace, f, begin, before + 1)
 
 
@@ -626,18 +626,18 @@ def main():
         parser.add_argument('--' + key, required=True, type=lambda x: Path(x).resolve(strict=True))
     parser.add_argument('--cobalt-source', required=True, type=lambda x: Path(x).resolve(strict=True))
     parser.add_argument('--evidence-parent', type=Path, default=EVIDENCE_ROOT)
-    parser.add_argument('--slice', choices=('c8', 'c9'), required=True)
+    parser.add_argument('--scenario', choices=('stage-checklist', 'flow-review'), required=True)
     args = parser.parse_args()
     parent = args.evidence_parent.resolve()
     if not parent.is_relative_to(EVIDENCE_ROOT):
         parser.error(f'--evidence-parent must be in {EVIDENCE_ROOT}')
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    args.evidence = Path(tempfile.mkdtemp(prefix=f'wb095-{args.slice}-', dir=parent))
+    args.evidence = Path(tempfile.mkdtemp(prefix=f'companion-flow-{args.scenario}-', dir=parent))
     tmp = args.evidence / 'tmp'
     tmp.mkdir(mode=0o700)
     os.environ['TMPDIR'] = str(tmp)  # Includes the daemon, both clients, and their subprocesses.
     args.build_lock = parent / 'publisher-build.lock'
-    print(f'WB-095 {args.slice} evidence: {args.evidence}', flush=True)
+    print(f'Companion flow {args.scenario} evidence: {args.evidence}', flush=True)
     binaries = {}
     for name in ('daemon', 'client', 'preset_export', 'cobalt'):
         path = getattr(args, name)
@@ -652,9 +652,9 @@ def main():
         assert ok, label
 
     try:
-        f, _ = fixture.setup(args, args.slice, check, configure=configure, attach=False, use_switch=False)
+        f, _ = fixture.setup(args, args.scenario, check, configure=configure, attach=False, use_switch=False)
         file = f.base / 'outside-project.txt'
-        file.write_text('WB095_OUTSIDE_DOCUMENT\n')
+        file.write_text('COMPANION_FLOW_EDITOR_WITNESS\n')
         env = dict(os.environ, HOME=str(f.base / 'home'), XDG_CONFIG_HOME=str(f.base / 'config'),
                    XDG_STATE_HOME=str(f.base / 'client-state'), XDG_RUNTIME_DIR=str(f.base / 'home'),
                    TERM='xterm-256color', COLORTERM='truecolor', LC_ALL='C.UTF-8')
@@ -662,24 +662,25 @@ def main():
             f.terminal = native = Terminal(f.base, args, native_url, 180, 55, inherited=True)
             native.capture('native-startup', ['stage checklist'])
             native.command('Quick-launch behavior: keep current context')
-            seed = api.c.demo.seed_simulation(f.base, f.http)
-            watched = seed['submissions']['synthetic-fs2-v1-pass']['attempt_id']
+            demo = api.c.demo
+            seed = demo.seed_simulation(f.base, f.http)
+            watched = seed['submissions'][demo.SIMULATION_SUBMISSION_PREFIX + 'pass']['attempt_id']
             width, height = 260, 36
             with editor(str(args.cobalt), file, env, ['--silver-endpoint', url, '--silver-project',
                                                      str(f.root), '--silver-run', watched], width=width) as term:
                 ui = Cobalt(term, f.base, width, height)
                 attempt_row = re.compile(r'\bAttempt: +' + re.escape(watched) + r'(?= *[│\n]|$)')
-                ui.capture(args.slice + '-watched-before', 'Silver: Overview',
+                ui.capture(args.scenario + '-watched-before', 'Silver: Overview',
                            matches_screen=lambda screen: attempt_row.search(screen) is not None)
-                if args.slice == 'c8':
-                    c8(f, ui, native, native_trace, trace)
+                if args.scenario == 'stage-checklist':
+                    exercise_stage_checklist(f, ui, native, native_trace, trace)
                 else:
-                    c9(f, ui, native_url, native_trace, trace)
+                    exercise_flow_review(f, ui, native_url, native_trace, trace)
                 assert {field(parse(r['request']), 'operation')[1] for r in trace if
                         r['path'] == '/api/v1/simulation' and
                         isinstance(field(parse(r['request']), 'operation'), list) and
                         field(parse(r['request']), 'operation')[0] == 'Observe'} == {watched}
-            assert file.read_text() == 'WB095_OUTSIDE_DOCUMENT\n'
+            assert file.read_text() == 'COMPANION_FLOW_EDITOR_WITNESS\n'
             for rows in (native_trace, trace):
                 opens = [r for r in rows if r['path'] == '/api/v1/open-project']
                 assert opens
@@ -690,7 +691,7 @@ def main():
     finally:
         if f:
             fixture.finish(f)
-    print('PASS: WB-095 ' + args.slice)
+    print('PASS: companion flow ' + args.scenario)
 
 
 if __name__ == '__main__':

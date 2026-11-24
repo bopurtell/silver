@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-052 opt-in real OpenSSH/PTY viewer locality test; never builds.
+"""Opt-in real OpenSSH/PTY viewer locality test; never builds.
 
 Example (run in the selected opam environment):
   python3 -B terminal/test_viewer_ssh_locality.py \
@@ -125,7 +125,7 @@ LogLevel VERBOSE
 ''')
     pub = (evidence / 'host-key.pub').read_text().split()
     known = write(evidence / 'known_hosts', f'[127.0.0.1]:{port} {pub[0]} {pub[1]}\n')
-    args.ssh_host = 'wb052-private-loopback'
+    args.ssh_host = 'viewer-private-loopback'
     args.ssh_config = write(evidence / 'ssh_config', f'''Host {args.ssh_host}
  HostName 127.0.0.1
  Port {port}
@@ -189,7 +189,7 @@ def run(args, evidence, result, cleanup):
     check(args.loopback or probe['hostname'] != socket.gethostname(),
           'distinct runner hostnames required in two-host mode (explicitly waived for loopback)')
 
-    remote_dir = remote('import tempfile; print(tempfile.mkdtemp(prefix="wb052-viewer-"))').strip()
+    remote_dir = remote('import tempfile; print(tempfile.mkdtemp(prefix="viewer-"))').strip()
     result['remote_private_directory'] = remote_dir
 
     def remote_cleanup():
@@ -211,7 +211,7 @@ def run(args, evidence, result, cleanup):
     for name in ('project', 'state', 'home', 'config', 'tmp'):
         (evidence / name).mkdir()
     root = evidence / 'project'
-    write(root / 'dune-project', '(lang dune 3.22)\n(name wb052_viewer)\n')
+    write(root / 'dune-project', '(lang dune 3.22)\n(name viewer_ssh_locality)\n')
     write(root / 'suite-id', 'fixture\n')
     write(root / 'hardcaml-workbench-simulation.sexp', handoff.wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
@@ -362,12 +362,12 @@ def main():
             parser.error('--' + name + ' must name a prebuilt executable')
         setattr(args, name, path)
     os.umask(0o077)
-    evidence = Path(tempfile.mkdtemp(prefix='wb052-viewer-ssh-', dir=args.evidence_parent))
+    evidence = Path(tempfile.mkdtemp(prefix='viewer-ssh-', dir=args.evidence_parent))
     print('Evidence: ' + str(evidence), flush=True)
     result = dict(status='failed', checks=[], invocation=sys.argv)
 
     def deadline(*_):
-        raise TimeoutError('WB-052 SSH viewer test budget exhausted')
+        raise TimeoutError('SSH viewer test budget exhausted')
 
     previous = signal.signal(signal.SIGALRM, deadline)
     try:

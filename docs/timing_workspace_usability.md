@@ -218,8 +218,7 @@ reads. Starting with Timing already restored produced the same read counts.
 After server crashes, recovery preserved partial work and reduced verification from
 six jobs to two, then **one job at a time**, with numerical worker limits of one.
 Interrupted checks were not counted as passed. No repository staging, commits or
-pushes were performed. The [implementation plan](archive/delivery/timing_usability_preload_plan.md)
-records the agent handoffs and recovery history.
+pushes were performed.
 
 ## Updated retained example
 

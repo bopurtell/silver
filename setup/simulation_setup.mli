@@ -1,7 +1,7 @@
 open! Core
 open Hardcaml_workbench_protocol
 
-(** Simulation provider setup assistance (WB-039).
+(** Simulation provider setup assistance.
 
     Generates [.workbench/hardcaml-workbench-simulation.sexp] from explicit provider
     inputs, and checks a configured project by running provider discovery once. Provider

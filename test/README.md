@@ -5,9 +5,7 @@ This directory is the suite index, shared test support and fixture/baseline stor
 application's **Testing workspace** runs project-declared cases; that is a different
 thing from the tests of Workbench itself.
 
-Start with [the testing guide](../docs/testing.md),
-[source inventory](../docs/testing_inventory.md) and
-[tool-tests versus hardware verification](../docs/testing_strategy_status.md).
+Start with [the ownership guide and source map](../docs/testing.md).
 
 ## Select existing suites
 

@@ -11,7 +11,7 @@ The demo also includes a standalone FS2 provider, `simulation_provider.py`, with
 adjacent `simulation_wire.py`. Prepare copies both into the demo project and writes
 the companion simulation configuration. Explicit seed creates the Testing workspace
 and representative pass/failure attempts; ordinary startup/viewing never runs tests.
-[Controls, upgrade and evidence](../../docs/synthetic_testing.md).
+[Testing walkthrough](../../docs/synthetic_flow.md#testing-workspace).
 
 ## Prepare and open
 

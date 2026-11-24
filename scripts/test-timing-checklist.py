@@ -60,7 +60,7 @@ def observation(execution_file, generation='a'):
 
 def provider(base, args):
     """Overlay public read results, preserving the harness's real request logging."""
-    original = load('wb069_private_provider', base / 'project/synthetic-provider/provider.py')
+    original = load('timing_checklist_private_provider', base / 'project/synthetic-provider/provider.py')
     old_report, old_inspect = original.report, original.inspect
     def generation():
         return (base / 'analysis-generation').read_text().strip()
@@ -82,13 +82,13 @@ def provider(base, args):
             attempt_id=a['attempt_id'], domain=domain, stage=stage,
             analysis_id=a['analysis_id'], analysis_digest=a['source_digest'], source_digest=digest,
             diagnostics=['Fixture: STA completed before later DRC timeout; no signoff checkpoint'],
-            truncated=False, rows=[dict(id='wb069-path', category='timing_path', producer='OpenROAD.STAPostPNR',
-                corner='slow', group='setup', name='captured-wb069-path', value=-.125, unit='ns', status='violated',
+            truncated=False, rows=[dict(id='retained-setup-path', category='timing_path', producer='OpenROAD.STAPostPNR',
+                corner='slow', group='setup', name='captured-retained-setup-path', value=-.125, unit='ns', status='violated',
                 source='{}', fields=[['startpoint', 'fixture/start'], ['endpoint', 'fixture/end']])])
         if row_id:
-            if row_id != 'wb069-path':
+            if row_id != 'retained-setup-path':
                 raise ValueError('wrong captured row')
-            result.update(row_id=row_id, detail='WB069 exact retained analysis detail; no checkpoint or execution')
+            result.update(row_id=row_id, detail='Exact retained timing analysis detail; no checkpoint or execution')
         return result
     original.report, original.inspect = report, inspect
     sys.argv = [str(base / 'project/synthetic-flow')] + args
@@ -130,7 +130,7 @@ def acceptance(t, check, http, runs, presets):
             native = response.read().decode()
         (base / (name + '.sexp')).write_text(native)
         return composition.parse(native)[1]
-    snapshot = native_snapshot('wb069-native-summary')
+    snapshot = native_snapshot('native-summary')
     summary = next(s for s in field(snapshot, 'summaries') if field(s, 'run') == run)
     analysis = field(summary, 'timing_analysis')[0]
     check(field(analysis, 'status') == 'Completed', 'Native HTTP summary carries independently completed STA')
@@ -148,7 +148,7 @@ def acceptance(t, check, http, runs, presets):
           ['Overview', 'Testing', 'Waveforms', 'Timing', 'Resources', 'Editor'],
           'Fresh native stock order is exactly Overview, Testing, Waveforms, Timing, Resources, Editor')
     t.command('Inspect timing paths asic/%s' % field(run, 'id'))
-    generic = t.capture('wb069-generic-legacy-palette', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    generic = t.capture('generic-legacy-palette', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     exact_generic = [a for a in calls()[len(baseline):] if a[:1] == ['inspect']]
     check(exact_generic and all(a[a.index('--stage') + 1] == 'signoff' and '--expected-digest' in a
                                 for a in exact_generic), 'Generic palette retains historical Signoff analysis identity')
@@ -162,7 +162,7 @@ def acceptance(t, check, http, runs, presets):
             return right - left >= t.width - 2
         wait(zoomed,
              'client observed exact zoom before key activation')
-    shot = t.capture('wb069-both-overview', ['completed 1.575s', 'Timing: completed', 'Signoff: failed'])
+    shot = t.capture('both-overview', ['completed 1.575s', 'Timing: completed', 'Signoff: failed'])
     def body(screen, title):
         left, top, right, bottom = HARNESS.pane_rect(screen, title)
         return [line[left + 1:right - 1].strip() for line in screen.lines()[top + 1:bottom - 1]]
@@ -178,18 +178,18 @@ def acceptance(t, check, http, runs, presets):
     zoom('stage-checklist')
     for _ in range(5): t.key(b'j')
     t.key(b'r')
-    t.capture('wb069-read-only-r', ['Timing: completed', '1.575s', 'Unsupported fresh endpoint'])
+    t.capture('read-only-r', ['Timing: completed', '1.575s', 'Unsupported fresh endpoint'])
     # Leave the UI untouched while its periodic workspace polling continues. Feedback
     # must remain readable, rather than merely appear in a transient draw window.
     t.drain(1.5)
-    t.capture('wb069-unsupported-after-polls', ['Timing: completed', '1.575s', 'Unsupported fresh endpoint'])
+    t.capture('unsupported-after-polls', ['Timing: completed', '1.575s', 'Unsupported fresh endpoint'])
     check(not any(a[:2] in (['flow', 'plan'], ['flow', 'run']) or a[:1] == ['finalize'] for a in calls()[len(baseline):]),
           'r on legacy unsupported Timing may discover read-only capabilities but never Plans/Runs/Finalizes')
     t.key(b'd')
-    t.capture('wb069-checklist-full-details', ['Analysis ID:', 'Current execution outcome: failed', 'Duration: 1.575 s'])
+    t.capture('checklist-full-details', ['Analysis ID:', 'Current execution outcome: failed', 'Duration: 1.575 s'])
     t.key(b'\x1b')
     t.key(b'\r')
-    t.capture('wb069-checklist-enter', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('checklist-enter', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     exact = [a for a in calls()[len(baseline):] if a[:1] == ['inspect']]
     check(exact and all('--expected-digest' in a for a in exact), 'Checklist Enter uses captured analysis digest for index and detail')
     check(any('--row-id' in a and a[a.index('--expected-digest') + 1] == 'b' * 64 for a in exact), 'Detail uses returned INDEX digest, not observation digest')
@@ -197,15 +197,15 @@ def acceptance(t, check, http, runs, presets):
     mutate('(Set_zoom (workspace %s) (tile ()))' % sexp(wid))
     zoom('timing')
     t.key(b'd')
-    t.capture('wb069-analysis-details', ['Analysis ID:', 'Current execution outcome: failed', 'Duration: 1.575 s'])
+    t.capture('analysis-details', ['Analysis ID:', 'Current execution outcome: failed', 'Duration: 1.575 s'])
     t.key(b'\x1b')
     t.key(b'\r')
-    t.capture('wb069-tile-enter', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('tile-enter', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     check(len(field(registry(), 'workspaces')) == original_count and
           [field(x, 'id') for x in field(registry(), 'tiles')] == original_ids,
           'Palette and both Overview entry points reuse built-in Timing without workspace or tile growth')
     t.command('Separate Timing investigation asic/%s' % field(run, 'id'))
-    t.capture('wb069-explicit-separate', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('explicit-separate', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     check(len(field(registry(), 'workspaces')) == original_count + 1,
           'Explicit separate action captures an independent investigation')
     t.command('Close separate investigation')
@@ -213,13 +213,13 @@ def acceptance(t, check, http, runs, presets):
     check([field(x, 'id') for x in field(registry(), 'tiles')] == original_ids,
           'Discoverable close removes only separate work and retains all original tiles')
     t.command('Separate Timing investigation asic/%s' % field(run, 'id'))
-    t.capture('wb069-reopened-separate', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('reopened-separate', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     # Source changes cannot turn refresh of a captured investigation into newest evidence.
     t.resize(180, 55)
     (base / 'analysis-generation').write_text('c')
     t.key(b'r')
-    t.capture('wb069-stale-source', ['analysis source changed'])
-    failed_refresh = field(native_snapshot('wb069-exact-source-rejection'), 'operations')
+    t.capture('stale-source', ['analysis source changed'])
+    failed_refresh = field(native_snapshot('exact-source-rejection'), 'operations')
     check(any(field(op, 'state') == 'failed' and field(op, 'run') == [run]
               and 'captured analysis source changed' in ''.join(field(op, 'error')) for op in failed_refresh),
           'Separate refresh rejects the exact captured source instead of switching to C')
@@ -230,22 +230,22 @@ def acceptance(t, check, http, runs, presets):
     context = next(c for c in field(registry(), 'contexts') if field(c, 'id') == field(overview, 'context'))
     mutate('(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run ()))' %
            (sexp(wid), sexp(field(context, 'id')), field(context, 'selection_revision')))
-    t.capture('wb069-pin-retains-source', ['completed 1.575s', 'PIN'])
+    t.capture('pin-retains-source', ['completed 1.575s', 'PIN'])
     checklist = tile('stage-checklist')
     mutate('(Set_tile_binding (tile %s) (binding (Pin_run %s)))' % (sexp(field(checklist, 'id')), sexp(run)))
     zoom('timing')
     t.key(b'r')
-    t.capture('wb069-pinned-summary-refreshed', ['completed 1.575s', 'PIN'])
-    updated = wait(lambda: next((s for s in field(native_snapshot('wb069-refreshed-summary'), 'summaries')
+    t.capture('pinned-summary-refreshed', ['completed 1.575s', 'PIN'])
+    updated = wait(lambda: next((s for s in field(native_snapshot('refreshed-summary'), 'summaries')
         if field(s, 'run') == run and field(field(field(s, 'timing_analysis')[0], 'target'), 'source_digest') == 'c' * 64), None),
         'pinned summary source refresh')
     check(field(field(field(updated, 'timing_analysis')[0], 'target'), 'source_digest') == 'c' * 64,
           'Explicit pinned Overview refresh loads the new observation without selecting another run')
     mutate('(Set_zoom (workspace %s) (tile ()))' % sexp(wid))
-    t.capture('wb069-pinned-surfaces-coherent', ['completed 1.575s', 'Timing: completed', 'Signoff: failed'])
+    t.capture('pinned-surfaces-coherent', ['completed 1.575s', 'Timing: completed', 'Signoff: failed'])
     zoom('timing')
     t.key(b'\r')
-    t.capture('wb069-pin-conflict', ['Built-in Timing has a different selected run', 'Separate Timing'])
+    t.capture('pin-conflict', ['Built-in Timing has a different selected run', 'Separate Timing'])
     check(len(field(registry(), 'workspaces')) == original_count + 1,
           'Pinned unrelated Overview inspection neither steals Main nor silently creates a workspace')
     context_after = next(c for c in field(registry(), 'contexts') if field(c, 'id') == field(overview, 'context'))
@@ -253,45 +253,45 @@ def acceptance(t, check, http, runs, presets):
     mutate('(Select_run (workspace %s) (context %s) (expected_selection_revision %s) (run (%s)))' %
            (sexp(wid), sexp(field(context_after, 'id')), field(context_after, 'selection_revision'), sexp(run)))
     t.command('Inspect timing paths asic/%s' % field(run, 'id'))
-    t.capture('wb069-builtin-new-source-same-workspace', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('builtin-new-source-same-workspace', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     check(len(field(registry(), 'workspaces')) == original_count + 1 and
           [field(x, 'id') for x in field(registry(), 'tiles') if field(x, 'id') in original_ids] == original_ids,
            'A changed source rebinds built-in Timing without changing its tile IDs or workspace count')
     # A second source transition must reset the same built-in again, rather than
     # accidentally relying on one-time legacy Signoff recovery.
     (base / 'analysis-generation').write_text('e')
-    native_snapshot('wb069-second-source-refresh', '(Refresh %s)' % sexp(run))
+    native_snapshot('second-source-refresh', '(Refresh %s)' % sexp(run))
     wait(lambda: any(field(s, 'run') == run and field(s, 'timing_analysis') and
          field(field(field(s, 'timing_analysis')[0], 'target'), 'source_digest') == 'e' * 64
-         for s in field(native_snapshot('wb069-second-source'), 'summaries')), 'second source summary')
+         for s in field(native_snapshot('second-source'), 'summaries')), 'second source summary')
     t.command('Inspect timing paths asic/%s' % field(run, 'id'))
-    t.capture('wb069-builtin-second-source', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('builtin-second-source', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     t.focus_view('path provenance')
     t.command('Strings: Show full identifiers and source paths')
-    t.capture('wb069-builtin-second-source-identity', ['Analysis digest: ' + 'e' * 64],
+    t.capture('builtin-second-source-identity', ['Analysis digest: ' + 'e' * 64],
               ['Analysis digest: ' + 'a' * 64, 'Analysis digest: ' + 'c' * 64])
     second_target = next(field(field(s, 'timing_analysis')[0], 'target')
-        for s in field(native_snapshot('wb069-second-source-index'), 'summaries') if field(s, 'run') == run)
+        for s in field(native_snapshot('second-source-index'), 'summaries') if field(s, 'run') == run)
     check(any(field(i, 'run') == run and field(i, 'analysis') == [second_target]
-              for i in field(native_snapshot('wb069-second-source-index'), 'inspections')),
+              for i in field(native_snapshot('second-source-index'), 'inspections')),
           'Second source change publishes and displays the exact new analysis identity')
     check(len(field(registry(), 'workspaces')) == original_count + 1 and
           [field(x, 'id') for x in field(registry(), 'tiles') if field(x, 'id') in original_ids] == original_ids,
           'Two successive source changes reuse the same built-in workspace and tiles')
     # Return to C for the existing exact captured restart/source rejection fence.
     (base / 'analysis-generation').write_text('c')
-    native_snapshot('wb069-return-source-refresh', '(Refresh %s)' % sexp(run))
+    native_snapshot('return-source-refresh', '(Refresh %s)' % sexp(run))
     wait(lambda: any(field(s, 'run') == run and field(s, 'timing_analysis') and
          field(field(field(s, 'timing_analysis')[0], 'target'), 'source_digest') == 'c' * 64
-         for s in field(native_snapshot('wb069-return-source'), 'summaries')), 'return source summary')
+         for s in field(native_snapshot('return-source'), 'summaries')), 'return source summary')
     t.command('Separate Timing investigation asic/%s' % field(run, 'id'))
-    t.capture('wb069-new-source-new-investigation', ['captured-wb069-path', 'WB069 exact retained analysis detail'])
+    t.capture('new-source-new-investigation', ['captured-retained-setup-path', 'Exact retained timing analysis detail'])
     check(len([w for w in field(registry(), 'workspaces') if 'Timing · captured' in field(w, 'name')]) == 2,
           'A new analysis digest creates a distinct investigation instead of retargeting the prior captured source')
     (base / 'restart-expected-target.json').write_text(json.dumps(dict(run=run,
         target=field(field(updated, 'timing_analysis')[0], 'target'))))
     check(not any(a[:2] in (['flow', 'plan'], ['flow', 'run']) or a[:1] == ['finalize'] for a in calls()[len(baseline):]),
-          'All WB069 browsing/detail/refresh/pinning operations are read-only')
+          'All timing checklist browsing/detail/refresh/pinning operations are read-only')
     return 'Overview'
 
 
@@ -327,13 +327,13 @@ def restart_acceptance(t, check, http, runs, presets):
     check(calls() == baseline, 'Restart warm exact-target cache lookup performs no provider read')
     t.focus_view('path provenance')
     t.command('Strings: Show full identifiers and source paths')
-    t.capture('wb069-daemon-restart-exact-cached', ['captured-wb069-path', 'CACHED UNVERIFIED',
+    t.capture('daemon-restart-exact-cached', ['captured-retained-setup-path', 'CACHED UNVERIFIED',
         'Captured analysis: ' + field(target, 'analysis_id'), 'Analysis digest: ' + 'c' * 64],
         ['Analysis digest: ' + 'd' * 64])
     check(True, 'Fresh client restores exact captured target/path after daemon restart, without selecting newer D evidence')
     t.focus_view('timing paths')
     t.key(b'r')
-    t.capture('wb069-restart-no-silent-replacement', ['ERROR:', 'CACHED UNVERIFIED',
+    t.capture('restart-no-silent-replacement', ['ERROR:', 'CACHED UNVERIFIED',
         'Analysis digest: ' + 'c' * 64], ['Analysis digest: ' + 'd' * 64])
     failed = field(native(), 'operations')
     check(any(field(op, 'state') == 'failed' and field(op, 'run') == [run]
@@ -352,14 +352,14 @@ def main():
     args = p.parse_args()
     for name in ('daemon', 'client', 'preset_export'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
-    args.evidence = args.evidence or Path('/tmp/opencode') / ('wb069-timing-' + secrets.token_hex(6))
+    args.evidence = args.evidence or Path('/tmp/opencode') / ('timing-checklist-' + secrets.token_hex(6))
     if not args.evidence.resolve().is_relative_to('/tmp/opencode'):
         p.error('Evidence must be private /tmp/opencode state')
     args.palette_only = False
     args.timing_preload = 'explicit-only'  # This harness asserts explicit-read boundaries.
-    args.harness = 'WB069 fixture-only timing Overview/exact navigation'
+    args.harness = 'Fixture-only timing Overview/exact navigation'
     os.umask(0o077)
-    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('WB069 acceptance deadline')))
+    signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Timing checklist acceptance deadline')))
     signal.alarm(args.timeout)
     try:
         HARNESS.composition.run(args, acceptance=acceptance, extra_runs=(), focused=True,
@@ -376,5 +376,5 @@ if __name__ == '__main__':
             print(str(error), file=sys.stderr)
             sys.exit(2)
     else:
-        HARNESS = load('wb069_sidebar', HERE / 'test-overview-sidebar.py')
+        HARNESS = load('timing_checklist_sidebar', HERE / 'test-overview-sidebar.py')
         main()

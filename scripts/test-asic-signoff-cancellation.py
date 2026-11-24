@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Use --fixture --daemon PATH for the short, synthetic WB-096 lifecycle check.
+"""Use --fixture --daemon PATH for the short, synthetic Signoff cancellation lifecycle check.
 
 Without --fixture: parent-run real Workbench signoff cancellation acceptance (<180s; no builds).
 
@@ -32,8 +32,8 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('terminal_results', Path(__file__).with_name('test-asic-terminal-results.py'))
 terminal_results = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(terminal_results)
-metrics, fs0 = terminal_results.metrics, terminal_results.fs0
-field, record, require = fs0.field, fs0.record, fs0.require
+metrics, native_execution = terminal_results.metrics, terminal_results.native_execution
+field, record, require = native_execution.field, native_execution.record, native_execution.require
 
 
 def save(path, value):
@@ -97,7 +97,7 @@ def exercise(args):
     tracked = {}
     owned_containers = {}
     sequence = 0
-    key = 'fs1-cancel-' + args.evidence.name
+    key = 'signoff-cancel-' + args.evidence.name
     source_receipt = terminal_results.load(args.source_receipt)
     manifest = json.loads(source_receipt['plan']['bundle_manifest'])
     source_paths = []
@@ -212,7 +212,7 @@ def exercise(args):
 
     def cancel():
         nonlocal cancelled
-        session.rpc('asic', '(Cancel %s)' % fs0.sexp('run:' + key))
+        session.rpc('asic', '(Cancel %s)' % native_execution.sexp('run:' + key))
         cancelled = True
 
     try:
@@ -237,7 +237,7 @@ def exercise(args):
         cfg = metrics.put(cfg, 'project_executable', str(args.project))
         cfg = metrics.put(cfg, 'results_root', str(args.evidence / 'results'))
         cfg = metrics.put(cfg, 'stage_timeout_seconds', ['2400'])
-        (root / 'hardcaml-workbench-asic.sexp').write_text(fs0.sexp(cfg) + '\n')
+        (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
         session = Session(args, args.evidence, root)
         session.deadline = work_end
         for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES'):
@@ -254,7 +254,7 @@ def exercise(args):
         check(field(field(preview, 'selection'), 'endpoint') == 'signoff', 'Captured exact HTTP signoff preview')
         save(args.evidence / 'captured-preview.json', record(preview))
         launched = True  # Even a timed-out delivery must cancel this exact key.
-        session.rpc('asic', '(Run (key %s) (preview %s))' % (fs0.sexp(key), fs0.sexp(preview)))
+        session.rpc('asic', '(Run (key %s) (preview %s))' % (native_execution.sexp(key), native_execution.sexp(preview)))
         # The Run RPC client has exited; daemon now owns execution.
         outcome['launch_key'] = 'run:' + key
         while True:
@@ -313,7 +313,7 @@ def exercise(args):
             time.sleep(.25)
         check(settled_at is not None and time.monotonic() - settled_at >= 3, 'Backend cancellation settles provider outcome and removes owned container/descendants, stable for 3s')
         check(field(operation(snapshot), 'state') == 'failed', 'Cancelled backend launcher is failed, never completed')
-        check('cancel' in fs0.sexp(field(operation(snapshot), 'error')).lower(), 'Workbench launcher reports cancellation rather than unrelated execution failure')
+        check('cancel' in native_execution.sexp(field(operation(snapshot), 'error')).lower(), 'Workbench launcher reports cancellation rather than unrelated execution failure')
         check(observation['state']['outcome']['status'] in ('failed', 'interrupted', 'cancelled'), 'Provider publishes interrupted/failed final outcome, not completed')
         check(any(word in str(observation['state']['outcome'].get('error', '')).lower() for word in ('interrupt', 'cancel', 'signal')),
               'Provider outcome attributes failure to interruption/cancellation')
@@ -335,7 +335,7 @@ def exercise(args):
         check(execution['status'] in ('failed', 'interrupted', 'cancelled') and execution['attempt_id'] == reference['stream_id'], 'Exact execution receipt is non-successful')
         # Explicit read-only Observe reconciles the registry after its automatic
         # reader was cancelled; it does not restart or advance provider execution.
-        final = session.rpc('asic', '(Observe %s)' % fs0.sexp(field(field(snapshot, 'runs')[0], 'run')), wait=True)
+        final = session.rpc('asic', '(Observe %s)' % native_execution.sexp(field(field(snapshot, 'runs')[0], 'run')), wait=True)
         check(field(field(final, 'runs')[0], 'status') in ('failed', 'interrupted', 'cancelled'), 'Workbench run status reconciles actual failed/interrupted execution')
         check(session.process.poll() is None and session.rpc('workspace') is not None, 'Daemon remains live and accepts independent HTTP requests after client detach/cancel')
         metrics.no_generic_jobs(session, 'after cancellation')
@@ -415,7 +415,7 @@ def main():
         setattr(args, key, getattr(args, key).resolve())
     require(all(p.is_file() for p in (args.project, args.client, args.daemon, args.source_receipt)), 'Missing existing binaries/specimen receipt')
     args.outer_timeout = 6
-    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-fs1-cancellation-', dir='/tmp/opencode'))
+    args.evidence = Path(tempfile.mkdtemp(prefix='workbench-signoff-cancellation-', dir='/tmp/opencode'))
     save(args.evidence / 'commands.json', dict(argv=sys.argv, options={k: str(v) for k, v in vars(args).items()}))
     print('Evidence: ' + str(args.evidence), flush=True)
 

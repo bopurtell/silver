@@ -1,173 +1,46 @@
-# Experimental appearance presets
+# Themes and appearance
 
-First FS5 slice implemented 2026-10-15. These are skins over the actual FS0 tile
-host, not a separate renderer or synthetic-only application. No final product
-default has been selected. The aesthetics worktree now starts with A/Instrument,
-vivid color, Unicode markers and comfortable density as an experimental review preset.
+## Live color schemes
 
-**Current theme:** `silver-dark` on a fresh install. Open **Space c c**, search
-`theme` and press **Enter**. Browse the list to preview `silver-light` or another
-theme independently of skin, intensity, icons and density. Tile titles are lowercase and unadorned;
-focused frames retain emphasis. Labels stay neutral while typed status values keep
-their colors. [Current controls and real-example demo](real_asic_example_demo.md);
-[earlier scheme comparisons](overview_sidebar.md).
+Open the palette (**Space c c**), type `theme`, and choose **Choose theme…**.
+Type to filter; **↑/↓** or **Tab/Shift-Tab** previews the highlighted theme on
+your workspace. **Enter** saves it, and **Esc** restores the previous theme.
 
-**Frontend composition follow-on delivered:** bounded fuzzy palette with matched
-character highlighting and Tab/Shift-Tab navigation, quiet default Follow/project
-badges, per-tile presentation controls, typed status colors and centralized OCaml
-workspace definitions. See [source map, controls and acceptance](frontend_composition.md).
+Try **Silver Dark**, **Silver Light**, **Silver Blue**, **Silver Dusk**,
+**Silver Patina**, or **Silver Pearl**. Search `cobalt` or `btop` for palettes
+adapted from those applications; they ship with Silver and need no separate
+installation.
 
-The subsequent [refinement](frontend_refinement.md) supplies styled palette/short
-panel borders, titles in borders, zero default vertical inset, one-row navigation,
-wide width-aware run labels, horizontal stages, compact Overview panels and a
-dedicated Timing investigation workspace. Padding now applies horizontally;
-explicit visibility/badge controls and the density axis remain supported.
+## Presets and independent controls
 
-## Try them
+Search `appearance` in the palette. `[active]` marks the current setting.
 
-Start the client using the normal [README instructions](../README.md). Press
-**Space c c**, search for one of these commands, and press **Enter**:
-
-| Palette command | Treatment |
+| Preset | Presentation |
 | --- | --- |
-| `Appearance: A - Instrument` | Rounded Unicode frames, lowercase border titles and synthesis-count emphasis |
-| `Appearance: B - Structured` | Rectangular frames and clear focus emphasis |
-| `Appearance: C - Minimal` | Borderless, quieter chrome |
-| `Appearance: D - Studio` | Filled card surfaces and tile-title badges |
-| `Appearance: E - Structured studio` | Structured frames plus Studio header treatment |
+| A — Instrument | Rounded frames and lowercase border titles |
+| B — Structured | Rectangular frames and clear focus |
+| C — Minimal | Quiet, borderless chrome |
+| D — Studio | Filled cards and tile-title badges |
+| E — Structured studio | Structured frames with Studio-style headers |
 
-Independent commands:
+You can choose color (**Vivid**, **Selective**, or **Restrained**), icons
+(**Unicode**, **ASCII**, or **Off**), and density (**Compact** or
+**Comfortable**) independently. Unicode uses standard box drawing, not Nerd
+Font. Status animation indicates a pending request or active producer, not a
+passing result. Changing appearance does not alter provider output, start
+work, or change run selections, pins, or layouts.
 
-- `Appearance: Color Vivid`, `Selective`, or `Restrained`.
-- `Appearance: Icons Off`, `ASCII`, or `Unicode`.
-- `Appearance: Density Compact` or `Comfortable`.
+Appearance choices persist per project and environment; they don't change
+another running client. See [presentation preferences](existing_project_setup.md#persistent-presentation-preferences)
+and [workspace layout](workspace_configuration.md) for related settings.
 
-Search `appearance` to see all controls; `[active]` indicates the current choice.
-Try **E + Unicode + Selective + Comfortable**, or **A + Unicode + Vivid + Compact**.
-Existing header/chrome toggles still work. ASCII/off modes use ASCII framing and
-do not require a special font; Unicode uses standard box drawing, not Nerd Font.
-Provider text is preserved, so icon mode does not transliterate source/log content.
+## Capture frames locally
 
-Changes affect only this client. They retain workspace, selected run, pinned tile
-references, focus, filters, scroll and requested layout. They do not submit provider
-work or change the daemon registry. FS3 now saves explicit presentation choices for
-the next client restart, scoped to project/environment; see
-[presentation persistence](existing_project_setup.md#persistent-presentation-preferences).
-Other attached clients retain their current choices until restarted or changed.
-
-Frames/padding degrade on small tiles to protect evidence rows. Comfortable density
-adds default inner padding when space permits; explicit padding overrides take
-priority. Appearance does not populate workspaces or
-change layout mode: **Layout: Fit tiles to window** fills the available surface,
-while **Layout: Requested tile sizes** uses the saved shelf sizes. Fit is the new
-client default; requested geometry remains intact. Filled title badges indicate focus; they are not fake
-navigation tabs. Real tile-local tab groups, richer path inspectors, source peeks,
-Nerd Font mode and final visual polish remain subsequent F12/gallery work.
-
-## Captures
-
-### Native activity and semantic icons — 2026-10-17
-
-The current client uses the installed `Bonsai_term_spinner` component for active
-work, with one shared Dot/Line pair rather than a timer per tile. Choose:
-
-- **Appearance: Icons Unicode** — compact glyphs and the native dot spinner.
-- **Appearance: Icons ASCII** — printable fallback symbols and the native line spinner.
-- **Appearance: Icons Off** — no added indicators; all labels and controls remain.
-
-Indicators appear beside checklist stages, run/job lifecycle values, planned-run
-readiness/producer state and structured simulation requests/attempts/cases. Pins,
-simulation seed/artifact/log headings also have compact context glyphs. Titles stay
-lowercase and unadorned, and the current dense layout remains intact. All glyphs
-are single-cell in the renderer; no Nerd Font is required.
-
-Animation follows actual pending requests or active producers, not elapsed time
-alone or text found inside reports. Historical/detached ASIC observations do not
-animate without an exact active producer. Completion, simulation verdicts and
-evidence freshness stay distinct; full labels/identities are retained. Appearance
-changes do not invoke providers. The icon setting persists with FS3 preferences.
-
-[Implementation and native evidence](terminal_indicators_plan.md):351 indicator
-checks plus existing FS2, Overview, checklist and interrupt regressions passed.
-
-### Deterministic skin captures
-
-Generate plain-text and ANSI terminal frames without a daemon or EDA:
+From the Silver checkout, build the normal terminal binary and run:
 
 ```sh
-_build_workbench/default/terminal/main.exe --capture-appearance /tmp/opencode/wb-appearance-review
+_build/default/terminal/main.exe --capture-appearance /path/to/new-capture-directory
 ```
 
-The command emits A–E × compact/comfortable × five identical synthetic scenarios
-(aesthetic Overview, synthesis, timing-unavailable, pinned synthesis, palette)
-× 80×24/120×40, in `.txt` and `.ansi`: 200 files. ANSI files retain colors for terminal viewing. The synthetic
-50/73 counts are labeled fixtures; this is not new ASIC evidence or a complete rich
-Timing gallery. Current captures: `/tmp/opencode/workbench-appearance-20261015/`.
-
-## Verification
-
-- Terminal build and inline tests passed; formatter and lint checks passed.
-- Renderer tests cover all 90 preset/color/icon/density combinations, cell bounds
-  down to 1×1, headerless views, ASCII fallback, distinct skins and following/pinned
-  73/50 evidence at compact sizes.
-- Pure state tests retain contexts, pins and local state while changing appearance.
-- Actual PTY palette selection exercised all five presets and verified their active
-  markers, unchanged daemon registry and no provider calls caused by restyling:
-  `/tmp/opencode/workbench-fs0-cub6u1kx/fixture/pty.ansi` and its recorded responses.
-- Installed client/discovery/hierarchy/resize workflow and legacy capture checks
-  passed after integration. No real EDA run was needed for this appearance change.
-
-## Empty or sparse saved workspaces
-
-### Aesthetics worktree first pass (2026-10-16)
-
-Use **Apply default layout (add missing tiles)** from Overview to add the new
-**Session**, **Workspaces**, and **Stage checklist** tiles to an existing layout.
-**Layout: Fit tiles to window** gives Overview a compact workspace strip across
-the top, session/run/checklist sidebar, and larger content panels when space permits.
-Requested sizes remain available through the separate Requested layout mode.
-Narrow surfaces fall back to a grid or focused-tile view.
-
-The subsequent [composition delivery](frontend_composition.md) moves the run selector
-to the wider upper-main region, stacks main panels, and centralizes Overview/Timing/
-Testing in `terminal/workspaces/`. Use **Apply preset: Overview (add missing tiles)**
-for additive membership or explicit **Reset arrangement** for requested geometry;
-both preserve extras, pins and contexts. Navigation is quiet by default; Testing now
-includes the FS2 simulation tile. The earlier geometry description above is historical.
-
-- **Tab / Shift-Tab** focus the next/previous visible tile.
-- In **Workspaces**, **j/k or arrows** browse and **Enter** opens the destination;
-  **1–9** also switch registry workspaces. **Create Testing workspace** explicitly
-  adds a testing arrangement. These are workspaces within a terminal window.
-- **Session** shows project, context linkage, connection/status and selected run.
-  Its presence removes the redundant global header. **Enter** opens full details,
-  **[ / ]** scroll, and **Esc** returns. Long opaque run IDs use six leading and
-  six trailing characters; identities used for actions remain exact.
-- **Stage checklist** uses explicit stage statuses, symbols and semantic colors.
-  Providers supplying the optional stage-plan extension populate live rows; others
-  still say **not reported**. **j/k** selects a stage, **Enter** inspects it and
-  **r** prepares its advertised new-run action. Use the existing palette launch
-  command after planning. Imported aggregate outcomes/check verdicts and freshness
-  remain separate from stage completion. The [synthetic flow demo](synthetic_flow.md)
-  exercises this end to end without EDA tools.
-- Rounded Instrument frames, brighter semantic colors and comfortable padding
-  are the provisional startup combination. Palette appearance controls still work;
-  ASCII/off modes provide font-independent alternatives. Decoration degrades at
-  small sizes to keep evidence readable.
-
-`bonsai_term_spinners` was not installed in the selected switch during this slice;
-animated indicators and Nerd Font experiments remain follow-ups.
-
-### Earlier saved layouts
-
-The original acceptance state left Overview empty by moving its only tile into
-Timing, and its FS0 comparison workspace contains just two small synthesis tiles.
-That is saved test layout, not missing run evidence. Use **Switch to Overview →
-Apply default layout (add missing tiles)** for the full dashboard, then **Fit tiles
-to window**. Appearance presets change style only. Default stage views explicitly
-report not-requested/unsupported evidence for a synthesis-only run.
-
-Regression coverage: `python3 -B scripts/test-retained-asic-dashboard.py` operates on a private
-copy of saved Workbench state and verifies startup/loading, additive 13-tile Overview,
-full-surface pinned/following comparison, Preferred/Fit transitions and unchanged
-provider evidence. Captures: `/tmp/opencode/workbench-fs0-dashboard-52akmtcc/`.
+This writes deterministic synthetic scenarios as plain-text and ANSI frames.
+It does not start a daemon, open real evidence, or invoke EDA tools.

@@ -43,7 +43,7 @@ let () =
     |> fun host ->
     let host, save = choose host "tile.headers" in
     assert save;
-    (* WB-048: every persisted appearance field, through the production catalog. *)
+    (* Every persisted appearance field, through the production catalog. *)
     let host =
       List.fold
         [ "tile.presentation.title"

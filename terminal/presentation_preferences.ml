@@ -14,7 +14,7 @@ type tile_headers =
   }
 [@@deriving sexp]
 
-(** Schema 3 (WB-048): the remaining explicit per-tile appearance overrides. Absent fields
+(** Schema 3: the remaining explicit per-tile appearance overrides. Absent fields
     inherit. Header stays in [tile_headers]; run reference and freshness never persist. *)
 type tile_appearance =
   { tile : W.Tile_id.t
@@ -65,17 +65,17 @@ let path ~state_directory ~project_key =
     ("presentation-" ^ Plain_rpc.digest project_key ^ ".sexp")
 ;;
 
-(* Schema 2 adds the independent main-window/palette hint choices (WB-019). Schema 1 files
+(* Schema 2 adds the independent main-window/palette hint choices. Schema 1 files
    remain readable: they predate the choices, so both hint areas stay visible. Schema 3
-   adds [tile_appearance] (WB-048); schema 1/2 files predate it, so those tiles inherit. *)
+   adds [tile_appearance]; schema 1/2 files predate it, so those tiles inherit. *)
 (* Schema 4 adds optional compression/precision. Schema 3 entries retain their explicit
    choices and inherit compact strings and three decimals for these absent fields. *)
 (* Schema 5 adds the optional project Timing index preload policy. Schemas 1–4 inherit
    background-index; newly captured preferences always record the choice. *)
 (* Schema 6 adds sparse project/global and session/workspace compression choices. *)
-(* WB004 adds an optional quick-launch context-follow choice. Existing files inherit
+(* The current schema adds an optional quick-launch context-follow choice. Existing files inherit
    [true]; their stock layout/default migration is independent of this preference. *)
-(* WB-097 adds the optional Timing detail count. A missing field inherits the
+(* The current schema also adds the optional Timing detail count. A missing field inherits the
    current default; a saved zero remains index-only. *)
 let schema_version = 6
 
@@ -772,7 +772,7 @@ let%test_unit "main-window and palette hints persist independently of global chr
         assert (Bool.equal restored.chrome chrome);
         assert (Bool.equal restored.main_hints main_hints);
         assert (Bool.equal restored.palette_hints palette_hints))));
-  (* A schema 1 file (written before WB-019) keeps its chrome choice and shows hints. *)
+  (* A schema 1 file keeps its chrome choice and shows hints. *)
   let legacy =
     { (capture ~project_key:"root/env" { base with chrome = false }) with
       schema_version = 1

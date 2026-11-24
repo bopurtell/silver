@@ -612,13 +612,13 @@ let concurrent_runs ~root ~config ~create =
 let tests fixture =
   codecs ();
   reducers ();
-  let tree = Filename_unix.temp_dir "fs2-backend-" "" in
+  let tree = Filename_unix.temp_dir "simulation-backend-" "" in
   let root = Filename.concat tree "project" in
   let state_dir = Filename.concat tree "state" in
   Files.mkdir root;
   Out_channel.write_all
     (Filename.concat root "dune-project")
-    ~data:"(lang dune 3.22)\n(name fs2_backend_test)\n";
+    ~data:"(lang dune 3.22)\n(name simulation_backend_test)\n";
   Out_channel.write_all (Filename.concat root "dune") ~data:"";
   let config : Config.t =
     { schema_version = 1
@@ -1180,14 +1180,14 @@ let tests fixture =
         (Option.is_some reopened.history_error
          && not (Hashtbl.mem reopened.entries "sim-corrupt"))
         "Corrupt history trusted";
-      printf "FS2 backend simulation tests passed\n%!";
+      printf "Simulation backend tests passed\n%!";
       return ())
 ;;
 
 let () =
   Command_unix.run
     (Command.async
-       ~summary:"FS2 supervisor/reducer/store tests"
+       ~summary:"Simulation supervisor/reducer/store tests"
        (let%map_open.Command fixture = anon ("FIXTURE" %: string) in
         fun () -> tests (Filename_unix.realpath fixture)))
 ;;

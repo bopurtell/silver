@@ -411,7 +411,7 @@ class Contract(unittest.TestCase):
         self.args.identities = dict(source_layout='ownership-v1')
         value = dict(status='passed', store=str(self.store), root=str(self.args.root),
                      manifest_sha256=w.sha(self.store / 'manifest.json'), identities=self.args.identities,
-                     attempts=['normal', 'mismatch', 'pt8'])
+                     attempts=['normal', 'mismatch', 'memory'])
         self.write(receipt, value)
         prior = dict(value, simulation_receipt=str(receipt), simulation_receipt_sha256=w.sha(receipt))
         self.assertEqual(w.native_prerequisite(self.args, prior), value)

@@ -1,7 +1,7 @@
 # Workloads: launch, inspect and compare results
 
 For everyday FIFO and memory-workload development, use the example's
-[checkout-backed launcher](../../hardcaml_asic_example/docs/workbench_main.md).
+[checkout-backed launcher](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md).
 For the workflow in Silver, see [Workloads workspace controls](workloads_workspace.md).
 
 ## What “workload” means here
@@ -36,7 +36,7 @@ consume one fixed workload, with multiple internal traffic phases. There is no
 arbitrary N-workload composition feature or separate workload runner. Hardware
 variant, concrete driver/model/image artifacts and execution identities remain
 separate from the logical workload. See the
-[provider terminology and contract](../../hardcaml_asic/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
+[provider terminology and contract](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
 
 ## Inspect and compare retained evidence
 
@@ -73,7 +73,7 @@ Restored evidence is labelled **Cached unverified** until explicitly refreshed.
 
 ## Run the example workload
 
-On the [prepared and published example checkout](../../hardcaml_asic_example/docs/workbench_main.md#prepare-publish-then-start),
+On the [prepared and published example checkout](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md#prepare-publish-then-start),
 open Silver using `python3 -B scripts/silver.py open` from the example checkout in
 its selected opam environment. If its daemon is already running, use `client`
 instead of `open`. In Silver:
@@ -127,7 +127,3 @@ A Testing result-reference artifact points to the retained workload evidence;
 it is not a copy of the full bundle.
 Simulation success, functional verification and performance availability are shown
 separately. Readable failure/partial evidence does not become a performance pass.
-
-See [Workloads acceptance](archive/workloads-waveforms/workloads_acceptance.md) and
-[waveform acceptance](archive/workloads-waveforms/waveform_acceptance.md) for the
-original captured sessions and receipts.

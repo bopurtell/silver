@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WB-028 independent acceptance using a prebuilt waveform_probe, never builds.
+"""Embedded waveform acceptance using a prebuilt waveform_probe, never builds.
 
 Use --vcd for a retained real native FIFO trace (repeatable). Defaults discover
 retained pass/failure/long FIFO fixtures under /tmp/opencode. Each subprocess is
@@ -151,7 +151,7 @@ class DelayedBytesProxy:
 
 
 def replay_provider():
-    """Private FS2 producer: replay retained bytes, never invoke a simulator."""
+    """Private simulation provider: replay retained bytes, never invoke a simulator."""
     p = argparse.ArgumentParser()
     p.add_argument('--fixture', type=Path, required=True)
     p.add_argument('--calls', type=Path, required=True)
@@ -169,9 +169,9 @@ def replay_provider():
     request = dict(wire.parse(a.request.read_text()))
     selected = dict(request['selection'])
     case = selected['cases'][0]
-    print('WB028_LOG_ATTEMPT=' + request['attempt_id'], flush=True)
-    print('WB028_LOG_CASE=' + case, flush=True)
-    print('WB028_LOG_SEED=' + selected['seed'], flush=True)
+    print('SIM_LOG_ATTEMPT=' + request['attempt_id'], flush=True)
+    print('SIM_LOG_CASE=' + case, flush=True)
+    print('SIM_LOG_SEED=' + selected['seed'], flush=True)
     writer = wire.EventWriter(a.events, request['attempt_id'])
     writer.emit('Started')
     writer.emit(['Case_started', case])
@@ -337,7 +337,7 @@ def pty_acceptance(args, evidence, fixture, check):
                         self.data = bytearray()
                 self.repaint_checkpoints.append(dict(width=width, height=height,
                     archived_bytes=len(self.history), received_bytes=self.received_bytes))
-            return native.fs0.terminal_screen(bytes(self.data), self.width, self.height)
+            return native.native_execution.terminal_screen(bytes(self.data), self.width, self.height)
 
         def poll(self, seconds):
             before = len(self.data)
@@ -1192,8 +1192,8 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.capture('workspace-waves-focused-navigation', ['Cursor 1 ticks', '[*] outputs.occupancy'])
         focus_pane('Logs')
         terminal.palette('Zoom focused tile')
-        terminal.capture('workspace-exact-first-job-logs', ['WB028_LOG_SEED=42', 'WB028_LOG_ATTEMPT=' + aid],
-                         absent=['WB028_LOG_SEED=99'])
+        terminal.capture('workspace-exact-first-job-logs', ['SIM_LOG_SEED=42', 'SIM_LOG_ATTEMPT=' + aid],
+                         absent=['SIM_LOG_SEED=99'])
         check(field(wave_workspace(workspace_registry()), 'zoomed_tile') == [field(pane_tiles['waveform-logs'], 'id')],
               'independent Logs focus/zoom targets its actual registered tile')
         terminal.palette('Unzoom workspace')
@@ -1226,18 +1226,18 @@ def pty_acceptance(args, evidence, fixture, check):
                          absent=['alternate_outputs.', 'Fetching bounded bytes'])
         release_gate(gate)
         terminal.capture('workspace-picker-replacement-after-old-completion', ['[ ] outputs.occupancy'],
-                         absent=['alternate_outputs.', 'Fetching bounded bytes', 'WB028_LOG_SEED=99'])
+                         absent=['alternate_outputs.', 'Fetching bounded bytes', 'SIM_LOG_SEED=99'])
         persisted_pin('workspace-picker-replacement-after-old-completion', first_pin_artifact, first_job)
         terminal.palette('Unzoom workspace')
-        terminal.capture('workspace-picker-replacement-matching-logs', ['WB028_LOG_SEED=42', 'retained-vcd'],
-                         absent=['WB028_LOG_SEED=99'])
+        terminal.capture('workspace-picker-replacement-matching-logs', ['SIM_LOG_SEED=42', 'retained-vcd'],
+                         absent=['SIM_LOG_SEED=99'])
         check(calls.read_bytes() == investigation_calls,
               'stale workspace picker completion cannot retarget pin, signals or logs and invokes no provider')
         focus_pane('VCD picker')
         terminal.key(b'j\r')
         persisted_pin('workspace-picker-retarget', alternate, first_job)
-        terminal.capture('workspace-picker-retarget', ['alternate-vcd', 'WB028_LOG_SEED=42'],
-                         absent=['WB028_LOG_SEED=99'])
+        terminal.capture('workspace-picker-retarget', ['alternate-vcd', 'SIM_LOG_SEED=42'],
+                         absent=['SIM_LOG_SEED=99'])
         exact_signal_scope('workspace-picker-exact-alternate-model', 'alternate_outputs')
         check(True, 'explicit picker retarget coordinates Signals/Waves identity and matching attempt Logs')
         alternate_session = session_metadata('workspace-session-alternate', alternate)
@@ -1251,8 +1251,8 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.palette('Switch to Overview')
         terminal.capture('workspace-switch-overview', ['Overview'], absent=['╭ Signals '])
         terminal.palette('Switch to Waveforms')
-        terminal.capture('workspace-switch-back-pinned', ['alternate-vcd', 'WB028_LOG_SEED=42'],
-                         absent=['WB028_LOG_SEED=99'])
+        terminal.capture('workspace-switch-back-pinned', ['alternate-vcd', 'SIM_LOG_SEED=42'],
+                         absent=['SIM_LOG_SEED=99'])
         persisted_pin('workspace-navigation-keeps-pin', alternate, first_job)
         check(session_metadata('workspace-session-after-testing-change', alternate) == alternate_session,
               'Session metadata remains pinned when Testing changes to a different attempt and case')
@@ -1278,15 +1278,15 @@ def pty_acceptance(args, evidence, fixture, check):
               'W reuses existing workspace and all independent tile IDs')
         focus_pane('Logs')
         terminal.palette('Zoom focused tile')
-        terminal.capture('workspace-second-job-logs', ['WB028_LOG_SEED=99', 'WB028_LOG_ATTEMPT=' + second_id],
-                         absent=['WB028_LOG_SEED=42'])
+        terminal.capture('workspace-second-job-logs', ['SIM_LOG_SEED=99', 'SIM_LOG_ATTEMPT=' + second_id],
+                         absent=['SIM_LOG_SEED=42'])
         terminal.palette('Unzoom workspace')
         focus_pane('VCD picker')
         terminal.key(b'j\r')
         second_artifact = second_artifacts[1]
         persisted_pin('workspace-second-picker', second_artifact, second_job)
-        terminal.capture('workspace-second-picker-logs', ['WB028_LOG_SEED=99', 'alternate-vcd'],
-                         absent=['WB028_LOG_SEED=42'])
+        terminal.capture('workspace-second-picker-logs', ['SIM_LOG_SEED=99', 'alternate-vcd'],
+                         absent=['SIM_LOG_SEED=42'])
         exact_signal_scope('workspace-second-picker-exact-model', 'alternate_outputs')
         check(calls.read_bytes() == investigation_calls and len(field(session.api(), 'attempts')) == 2,
               'workspace create/reuse/focus/hide/zoom/picker/navigation never invokes or cancels simulations')
@@ -1304,8 +1304,8 @@ def pty_acceptance(args, evidence, fixture, check):
             terminal.palette('Switch to Waveforms')
 
         restart_client('client-restart')
-        terminal.capture('client-restart-restored', ['Session', 'Signals', 'Waves', 'WB028_LOG_SEED=99'],
-                         absent=['WB028_LOG_SEED=42'])
+        terminal.capture('client-restart-restored', ['Session', 'Signals', 'Waves', 'SIM_LOG_SEED=99'],
+                         absent=['SIM_LOG_SEED=42'])
         persisted_pin('client-restart-restored', second_artifact, second_job)
         session_metadata('client-restart-session-pinned', second_artifact)
         stacked_values('client-restart-stacked-persisted', names=('inputs.-clock',))
@@ -1332,8 +1332,8 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal = Terminal(session)
         terminal.capture('missing-restart-startup', ['Overview', 'Waveforms'])
         terminal.palette('Switch to Waveforms')
-        terminal.capture('missing-restart-unavailable', ['VCD unavailable', 'Logs', 'WB028_LOG_SEED=99', '>* alternate-vcd'],
-                         absent=['WB028_LOG_SEED=42', 'Cursor 0 ticks'])
+        terminal.capture('missing-restart-unavailable', ['VCD unavailable', 'Logs', 'SIM_LOG_SEED=99', '>* alternate-vcd'],
+                         absent=['SIM_LOG_SEED=42', 'Cursor 0 ticks'])
         persisted_pin('missing-restart-exact-identity', second_artifact, second_job)
         session_metadata('missing-restart-session-compact-pin', second_artifact, loaded=False)
         focus_pane('Session')
@@ -1364,7 +1364,7 @@ def pty_acceptance(args, evidence, fixture, check):
         terminal.capture('daemon-restart-startup', ['Overview', 'Waveforms'])
         terminal.palette('Switch to Waveforms')
         terminal.capture('daemon-restart-unavailable-stale-logs', ['VCD unavailable', 'Logs unavailable', '>* alternate-vcd'],
-                         absent=['WB028_LOG_SEED=777', 'WB028_LOG_SEED=42', 'WB028_LOG_SEED=99'])
+                         absent=['SIM_LOG_SEED=777', 'SIM_LOG_SEED=42', 'SIM_LOG_SEED=99'])
         persisted_pin('daemon-restart-recorded-identity', second_artifact, second_job)
         workspace_identity('daemon-restart-exact-unavailable-session', second_artifact, second_job, cursor=None)
         check(calls.read_bytes() == after_restart_calls,
@@ -1449,9 +1449,9 @@ def main():
         parser.error('--daemon and --client must be supplied together')
     if args.daemon:
         args.daemon, args.client = args.daemon.resolve(), args.client.resolve()
-    evidence = args.evidence or Path(tempfile.mkdtemp(prefix='wb028-accept-', dir='/tmp/opencode'))
+    evidence = args.evidence or Path(tempfile.mkdtemp(prefix='waveform-acceptance-', dir='/tmp/opencode'))
     evidence.mkdir(parents=True, exist_ok=True)
-    print('WB028 evidence: ' + str(evidence), flush=True)
+    print('Embedded waveform evidence: ' + str(evidence), flush=True)
     results, checks = [], []
 
     def check(ok, label):
@@ -1468,9 +1468,9 @@ def main():
         command = [str(args.probe), str(path), str(start), str(stop), *map(str, times)]
         rss = evidence / (label + '.rss-kib')
         timed = ['/usr/bin/time', '-f', '%M', '-o', str(rss), *command]
-        env = dict(os.environ, **{'WB028_' + k: str(v) for k, v in (limits or {}).items()})
+        env = dict(os.environ, **{'WAVEFORM_PROBE_' + k: str(v) for k, v in (limits or {}).items()})
         if view:
-            env['WB028_VIEW'] = '1'
+            env['WAVEFORM_PROBE_VIEW'] = '1'
         since = time.monotonic()
         completed = subprocess.run(timed, env=env, capture_output=True, timeout=30)
         wall_ms = (time.monotonic() - since) * 1000

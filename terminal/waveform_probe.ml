@@ -201,7 +201,7 @@ let run () =
   and stop = Int64.of_string args.(3) in
   let query_times = List.drop (Array.to_list args) 4 |> List.map ~f:Int64.of_string in
   let budget name default =
-    match Sys.getenv ("WB028_" ^ name) with
+    match Sys.getenv ("WAVEFORM_PROBE_" ^ name) with
     | None -> default
     | Some s -> Int.of_string s
   in
@@ -345,7 +345,7 @@ let run () =
        ]
        @ rendering
        @
-       if Option.is_some (Sys.getenv "WB028_VIEW")
+       if Option.is_some (Sys.getenv "WAVEFORM_PROBE_VIEW")
        then [ pair "view_frames" (view_frames trace ~bytes ~start) ]
        else [])
 ;;

@@ -14,7 +14,7 @@ import tempfile
 
 def main():
     probe = str(pathlib.Path(sys.argv[1]).resolve())
-    with tempfile.TemporaryDirectory(prefix="fs3-presentation-") as directory:
+    with tempfile.TemporaryDirectory(prefix="presentation-preferences-") as directory:
         state = pathlib.Path(directory) / "state"
 
         def run(mode, path=state, *extra):
@@ -44,7 +44,7 @@ def main():
             combo = "".join(choices)
             run("hints-write", state, combo)
             run("hints-read", state, combo)
-        # Schema 2 (before WB-048 tile appearance) and schema 1 (before WB-019
+        # Schema 2 (before tile appearance overrides) and schema 1 (before
         # hints) files stay readable; missing fields inherit.
         assert b"(schema_version 6)" in original and b"tile_appearance" in original
         run("headers-write")

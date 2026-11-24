@@ -30,9 +30,9 @@ import provider
 
 # Reuse the existing ANSI screen reconstruction oracle rather than matching stale
 # PTY diff bytes (Enter/Esc must change the CURRENT screen).
-screen_spec = importlib.util.spec_from_file_location('fs0_screen', REPO / 'scripts/test-native-execution.py')
-fs0_screen = importlib.util.module_from_spec(screen_spec)
-screen_spec.loader.exec_module(fs0_screen)
+screen_spec = importlib.util.spec_from_file_location('screen_oracle', REPO / 'scripts/test-native-execution.py')
+screen_oracle = importlib.util.module_from_spec(screen_spec)
+screen_spec.loader.exec_module(screen_oracle)
 
 
 def require(condition, message):
@@ -234,10 +234,10 @@ def pty_check(base, client_path, http):
         deadline = time.monotonic() + 10
         while True:
             drain(.1)
-            text = fs0_screen.terminal_screen(bytes(transcript))
+            text = screen_oracle.terminal_screen(bytes(transcript))
             # Skins may uppercase headings. Match presentation case-insensitively;
             # exact stage IDs/selections/statuses are independently fenced by HTTP.
-            # Checklist keywords share a padded column (WB-001).
+            # Checklist keywords share a padded column.
             visible = re.sub(r'(?<=\S:) {2,}(?=\S)', ' ', text).casefold()
             if all(s.casefold() in visible for s in expected) and all(s.casefold() not in visible for s in absent):
                 (base / ('pty-' + label + '.txt')).write_text(text)
@@ -454,17 +454,17 @@ def integration(base, args):
         require(daemon.poll() is None, 'Daemon exited; see daemon.log')
         url = field(parse(metadata.read_text()), 'endpoint')
         http, runs = demo.seed(base, url, args.preset_export)
-        # Explicit seed now schedules FS2 through the normal supervisor. Account
+        # Explicit seed now schedules simulation through the normal supervisor. Account
         # for those exact jobs; unrelated Dune/build/discovery jobs remain errors.
         jobs = field(http.raw('/api/v1/snapshot', [['instance_id', http.instance]]), 'jobs')
         require(len(jobs) == 3 and all(field(field(j, 'kind'), 'namespace') == 'simulation' for j in jobs) and
                 sorted(field(field(j, 'kind'), 'name') for j in jobs) == ['discover', 'run', 'run'] and
                 all(field(j, 'state') == 'Complete' for j in jobs),
-                'Fresh seed must create only one FS2 discovery and two completed synthetic process jobs')
+                'Fresh seed must create only one simulation discovery and two completed synthetic process jobs')
         simulation = http.rpc(domain='simulation', wait=False)
         require(len(field(simulation, 'attempts')) == 2 and
                 {field(a, 'outcome') for a in field(simulation, 'attempts')} == {'Passed', 'Failed'},
-                'Fresh seed FS2 pass/failure attempts')
+                'Fresh seed simulation pass/failure attempts')
         presets = demo.workspace_presets(args.preset_export)
         layout = http.rpc(domain='workspace')
         for arrangement in field(layout, 'workspaces'):
@@ -490,7 +490,7 @@ def integration(base, args):
             for key, unit in [('final_standard_cell_area', 'um^2'), ('final_utilization', 'fraction')]:
                 require(field(metrics[key], 'availability') == 'available' and field(metrics[key], 'value') and
                         field(metrics[key], 'unit_') == [unit], 'Daemon physical metric projection: ' + key)
-        require(len(field(snapshot, 'inspections')) == 8, 'Expected four FS1 indexes per reference run')
+        require(len(field(snapshot, 'inspections')) == 8, 'Expected four ASIC inspection indexes per reference run')
         for index in field(snapshot, 'inspections'):
             row = field(index, 'rows')[0]
             http.rpc('(Inspect_detail (run %s) (domain %s) (stage %s) (source_digest %s) (row_id %s))' %

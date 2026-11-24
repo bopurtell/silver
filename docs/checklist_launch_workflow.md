@@ -32,7 +32,7 @@ remain subject to selection/capability/context revalidation.
 
 Restored and verified 2026-10-17 for the actual ASIC example as well as synthetic
 stage actions. This supersedes the earlier limitation that real normalized stage
-rows could only report status. [Implementation plan](archive/delivery/checklist_launch_workflow_plan.md).
+rows could only report status.
 
 ## Use the restored workflow
 

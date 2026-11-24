@@ -2,7 +2,7 @@
 """Native indicator acceptance using matching prebuilt binaries and private state.
 
 No builds or EDA. Evidence must be a NEW directory below /tmp/opencode. Exercises
-real public Plan/Launch/Observe and FS2 requests, bounded synthetic providers, and
+real public Plan/Launch/Observe and simulation requests, bounded synthetic providers, and
 actual reconstructed ANSI cells (including screenshots), never daemon state files.
 """
 import argparse
@@ -299,7 +299,7 @@ def acceptance(t, http, runs, check):
     samples(t, 'failed-plan-settled', 'failed:', check, False)
     t.command('Unzoom workspace')
 
-    # Seeded FS2 evidence is public, exact and semantically distinct from exit 0.
+    # Seeded simulation evidence is public, exact and semantically distinct from exit 0.
     t.command('Switch to Testing')
     t.capture('cooperative-testing-default', ['SIMULATION CATALOG', 'ATTEMPTS', 'ARTIFACTS'])
     testing.ensure_legacy_simulation(http)
@@ -312,7 +312,8 @@ def acceptance(t, http, runs, check):
         t.key(b'\t')
     require(available, 'Testing simulation commands available through native focus')
     receipts = demo.provider.load(t.base / 'simulation-seed.json')['submissions']
-    for outcome, key in (('Passed', 'synthetic-fs2-v1-pass'), ('Failed', 'synthetic-fs2-v1-failure')):
+    for outcome, label in (('Passed', 'pass'), ('Failed', 'failure')):
+        key = demo.SIMULATION_SUBMISSION_PREFIX + label
         aid = receipts[key]['attempt_id']
         detail = testing.details(http, aid)
         check(field(detail, 'outcome') == outcome and field(detail, 'exit_code') == ['0'],
@@ -337,7 +338,7 @@ def acceptance(t, http, runs, check):
           'Exactly one ASIC producer, solely explicit Launch; no finalize or EDA')
     check(sum(x['operation'] == 'run' for x in final_calls['simulation-calls.jsonl']) == 2
           and sum(x['operation'] == 'discover' for x in final_calls['simulation-calls.jsonl']) == 1,
-          'Testing browsing and indicator changes retain exactly the two seeded FS2 attempts and one seed discovery')
+          'Testing browsing and indicator changes retain exactly the two seeded simulation attempts and one seed discovery')
     save(t.base / 'exact-preview.json', preview)
     save(t.base / 'exact-launch.json', launch)
     save(t.base / 'provider-calls-final.json', calls(t.base))

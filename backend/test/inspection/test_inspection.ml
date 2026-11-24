@@ -123,7 +123,7 @@ let parser_tests () =
     ; "diagnostics", `List [ str (String.make (Inspection.index_limit + 1) 'x') ]
     ]
     ~f:(fun (key, value) -> rejects (fun () -> parse (replace response key value)));
-  (* WB-006: producer-supplied production times keep their meaning and zone; anything else
+  (* Producer-supplied production times keep their meaning and zone; anything else
      stays visibly unknown rather than being reinterpreted. *)
   let produced value =
     let index =
@@ -867,7 +867,7 @@ let observation_generation_tests () =
     ignore (successful_detail snapshot : Asic_inspection.Detail.t);
     require (inspection_calls () = calls + 1) "Index eviction retained reusable details"
   in
-  (* WB-003 #1/#2 and WB-006 #1/#2 against the daemon: a held explicit refresh reports an
+  (* Against the daemon, a held explicit refresh reports an
      evidence read for its whole duration; refreshing unchanged bytes moves only the
      validation time; a warm reopen reports only a cache lookup and calls no provider. *)
   let activity_and_time_tests () =
