@@ -38,14 +38,24 @@ The fixture uses an explicitly selected compatible switch, and the native
 application script exercises an isolated install. See
 [terminal baselines](../test/baselines/terminal/README.md) before updating captures.
 
-## Manual cold build on GitHub Actions
+## Manual native CI on GitHub Actions
 
 Once `.github/workflows/ci.yml` is on the default branch, open **Actions**,
 select **Silver native CI**, choose **Run workflow**, and select the branch
-to test. The runner builds the pinned OxCaml switch and native
-dependencies from scratch before building Silver and running `@test-local` and
-`@test-api`. Compare the toolchain setup time with the build and test times when
-deciding what to cache. Ordinary pushes and pull requests do not start this job.
+to test. The runner reuses the pinned OxCaml switch and native dependencies
+when there is an exact cache hit; otherwise it provisions them from scratch.
+Each run builds the Silver packages from the selected revision and runs both
+`@test-local` and `@test-api`. Silver's `_build` directory is not cached.
+
+Leave **Benchmark a cold provisioning** unchecked for both runs. Checking it
+skips both restore and save; use that only for a separate cold benchmark.
+To measure the benefit, dispatch once to populate the cache, then dispatch
+again on the same branch after a Silver-only source change. (Running twice
+at the same revision also tests reuse.) Check the first log for a cache miss
+and successful save, and the second for an exact hit and no provisioning.
+Compare **total job time**, including cache transfer, as well as the individual
+build and test times. For reference, the [first uncached run](https://github.com/bopurtell/silver/actions/runs/45603339552)
+took 73m 28s, of which 48m 29s was provisioning.
 
 ## Inline expect-test prerequisite
 

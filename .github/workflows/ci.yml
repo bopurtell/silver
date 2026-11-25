@@ -2,6 +2,11 @@ name: Silver native CI
 
 on:
   workflow_dispatch:
+    inputs:
+      cold:
+        description: Benchmark a cold provisioning (skip cache restore and save)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,11 +18,17 @@ jobs:
     env:
       # Match the release workflow's target and pinned image.
       UBUNTU_IMAGE: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+      PLATFORM: linux/amd64
+      # Large switch archives can take longer than the default 10 minutes
+      # for an individual segment on a slow cache connection.
+      SEGMENT_DOWNLOAD_TIMEOUT_MINS: 30
     steps:
       - name: Check out the selected revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Check cold and warm cache behavior
+        run: python3 -B scripts/ci/test_cache.py
       - name: Make room for the cold OxCaml build
         shell: bash
         run: |
@@ -26,13 +37,73 @@ jobs:
           # GitHub-hosted runner. The compiled opam switch alone can exceed 10 GiB.
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
           df -h /
-      - name: Provision, build and test native Silver
+      - name: Set up the native container and calculate the exact toolchain key
+        id: setup
         shell: bash
         run: |
-          docker run --rm --platform linux/amd64 \
+          mkdir "$RUNNER_TEMP/silver-ci-data"
+          docker run --detach --name silver-native-ci --platform "$PLATFORM" \
             --volume "$PWD:/checkout:ro" --workdir /checkout \
+            --volume "$RUNNER_TEMP/silver-ci-data:/home/silver-ci/.local/share" \
+            --env SILVER_CI_UID="$(id -u)" --env SILVER_CI_GID="$(id -g)" \
             --env SILVER_BUILD_JOBS=2 --env SILVER_TEST_JOBS=1 \
-            "$UBUNTU_IMAGE" bash scripts/ci/container.sh
+            "$UBUNTU_IMAGE" sleep infinity
+          docker exec silver-native-ci bash scripts/ci/container.sh setup
+          # apt repositories can change even with a pinned image. Include
+          # actual installed package versions, not just the host-deps list.
+          host_packages=$(docker exec silver-native-ci dpkg-query -W \
+            -f='${Package}\t${Architecture}\t${Version}\n' | LC_ALL=C sort | sha256sum)
+          fingerprint=$(
+            {
+              printf '%s\n' "$UBUNTU_IMAGE" "$PLATFORM" "$(id -u):$(id -g)" \
+                /home/silver-ci/.local/share/silver "$host_packages"
+              sha256sum .github/workflows/ci.yml scripts/ci/container.sh scripts/ci/check.sh \
+                scripts/release/host-deps.sh scripts/release/managed-toolchain.sh \
+                scripts/release/toolchain.env silver_provider.opam silver.opam
+            } | sha256sum | cut -d ' ' -f1
+          )
+          echo "key=silver-native-v1-linux-amd64-$fingerprint" >> "$GITHUB_OUTPUT"
+      - name: Restore exact managed toolchain
+        id: restore
+        if: ${{ !inputs.cold }}
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/silver-ci-data/silver
+          key: ${{ steps.setup.outputs.key }}
+      - name: Provision or verify the managed toolchain
+        shell: bash
+        env:
+          SILVER_CACHE_KEY: ${{ steps.setup.outputs.key }}
+          SILVER_CACHE_HIT: ${{ steps.restore.outputs.cache-hit == 'true' }}
+        run: |
+          if [[ "$SILVER_CACHE_HIT" != true ]]; then
+            # A failed archive extraction may leave partial state. This is
+            # our disposable runner-temp directory, not the source checkout.
+            if [[ -d "$RUNNER_TEMP/silver-ci-data/silver" ]]; then
+              chmod -R u+rwX "$RUNNER_TEMP/silver-ci-data/silver"
+            fi
+            rm -rf -- "$RUNNER_TEMP/silver-ci-data/silver"
+          fi
+          docker exec --env SILVER_CACHE_KEY --env SILVER_CACHE_HIT \
+            silver-native-ci bash scripts/ci/container.sh provision
+      # Save the compiled switch once, before any application builds/tests.
+      # The cache action creates/compresses the archive directly (no extra tar).
+      - name: Save successfully provisioned managed toolchain
+        if: ${{ !inputs.cold && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/silver-ci-data/silver
+          key: ${{ steps.setup.outputs.key }}
+      - name: Build and test native Silver
+        shell: bash
+        env:
+          SILVER_CACHE_KEY: ${{ steps.setup.outputs.key }}
+        run: |
+          docker exec --env SILVER_CACHE_KEY \
+            silver-native-ci bash scripts/ci/container.sh test
+      - name: Remove the native container
+        if: always()
+        run: docker rm -f silver-native-ci || true
       - name: Report remaining runner disk space
         if: always()
         run: df -h /
