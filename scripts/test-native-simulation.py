@@ -142,7 +142,7 @@ def run(args):
             str(HERE / 'fixtures/simulation_fault_provider.py'), '--control', str(control), '--calls', str(calls)]
         cfg = [('schema_version', 1), ('provider_executable', sys.executable), ('provider_args', prefix),
                ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 90)]
-        (root / 'hardcaml-workbench-simulation.sexp').write_text(sexp(cfg))
+        (root / 'silver-simulation.sexp').write_text(sexp(cfg))
 
     mode('pass'); configure()
     session = Session(args, evidence, root)
@@ -186,7 +186,7 @@ def run(args):
 
     try:
         session.start()
-        check(not (root / 'hardcaml-workbench-asic.sexp').exists(), 'project-only configuration has no ASIC dependency')
+        check(not (root / 'silver-asic.sexp').exists(), 'project-only configuration has no ASIC dependency')
         snap = session.discover(); digest = field(snap, 'discovery_digest')[0]
         op = launch('dedup', digest)
         original = allocate(op); oid = field(original, 'id')

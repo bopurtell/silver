@@ -140,8 +140,8 @@ def stage_payload(source, installed, binary):
     actual = {p.name for p in installed_bin.iterdir()}
     if expected != actual:
         raise ValueError(f"release command table mismatch: missing={expected - actual}; extra={actual - expected}")
-    for required in ("META", "dune-package", "hardcaml_workbench_provider.cmxa"):
-        if not (installed / "lib" / "hardcaml_workbench_provider" / required).is_file():
+    for required in ("META", "dune-package", "silver_provider.cmxa"):
+        if not (installed / "lib" / "silver_provider" / required).is_file():
             raise ValueError(f"source installer did not install SDK {required}")
     for relative in (
         "README.md", "install.sh", "scripts/installer-provider.py", "scripts/release/commands.txt",

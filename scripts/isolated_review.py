@@ -17,7 +17,7 @@ Each invocation creates a fresh private session below --session-parent (default
 this worktree/.dev/isolated-review). State, preferences, logs, binary snapshots
 and a launch receipt are retained after exit. The launcher owns and stops only
 the processes it creates; there is no attach/stop-existing-daemon operation.
-The displayed provider must match hardcaml-workbench-asic.sexp in the project.
+The displayed provider must match silver-asic.sexp in the project.
 """
 import argparse
 import hashlib
@@ -37,7 +37,7 @@ import isolated_example
 
 REPO = Path(__file__).resolve().parent.parent
 OWNER_PROJECT = REPO.parent / 'hardcaml_asic_example'
-MAIN_CHECKOUT = REPO.parent / 'hardcaml_workbench'
+MAIN_CHECKOUT = REPO.parent / 'silver'
 DEFAULT_LIBRARIES = ('core', 'hardcaml', 'hardcaml_asic',
                      'hardcaml_asic.execution', 'ppx_jane', 'ppx_hardcaml')
 

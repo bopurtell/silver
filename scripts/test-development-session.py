@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import pty
 import re
 import select
@@ -102,7 +103,7 @@ def validate_capture(store, root, manifest):
     require('git_context' in manifest and manifest['max_jobs'] <= 2, 'scoped Git and max2 capture')
     context = manifest['git_context']
     require(sha(Path(context['real_git'])) == context['real_git_sha256'], 'exact scoped real Git')
-    config = dict(parse((root / 'hardcaml-workbench-preparation.sexp').read_text()))
+    config = dict(parse((config_path(root, 'silver-preparation.sexp')).read_text()))
     target = config['build_target']
     require(isinstance(target, str) and not target.startswith('-') and
             not Path(target).is_absolute() and '..' not in Path(target).parts and target.endswith('.exe'),
@@ -111,7 +112,7 @@ def validate_capture(store, root, manifest):
             str(Path(target).parent / 'dune') in manifest['source_files'],
             'build target belongs to captured source inventory')
     return dict(source_layout=manifest['source_layout'], build_target=target,
-                preparation_config_sha256=sha(root / 'hardcaml-workbench-preparation.sexp'),
+                preparation_config_sha256=sha(config_path(root, 'silver-preparation.sexp')),
                 asic_generation=str(asic), asic_receipt_sha256=manifest['asic_receipt_sha256'])
 
 

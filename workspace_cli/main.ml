@@ -3,12 +3,12 @@
 open! Core
 
 open! Async
-open Hardcaml_workbench_protocol
-module Client = Hardcaml_workbench_native_http.Client
+open Silver_protocol
+module Client = Silver_native_http.Client
 module W = Workspace
 module T = Workspace_template
 module C = Workspace_config
-module Presets = Hardcaml_workbench_workspaces.Presets
+module Presets = Silver_workspaces.Presets
 
 let protocol_ok = function
   | Ok value -> value

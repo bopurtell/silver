@@ -1,6 +1,6 @@
 (lang dune 3.22)
 
-(name hardcaml_workbench)
+(name silver)
 
 (generate_opam_files true)
 
@@ -12,7 +12,7 @@
 (maintainers "Bohdan Purtell <bohdanpurtell@gmail.com>")
 
 (package
- (name hardcaml_workbench)
+ (name silver)
  (synopsis "A local development workbench for independent Hardcaml projects")
  (description
   "A standalone native OCaml application for inspecting, running, measuring, and\ndebugging independently owned Hardcaml projects.")
@@ -21,7 +21,7 @@
    (>= 5.1))
   ; Portable shared protocol and application code.
    core
-   hardcaml_workbench_provider
+   silver_provider
    ppx_jane
    ; Native daemon, backend, and adapters.
    core_unix
@@ -45,7 +45,7 @@
    (ocaml-lsp-server :with-dev-setup)))
 
 (package
- (name hardcaml_workbench_provider)
+ (name silver_provider)
  (synopsis "Synchronous simulation provider library for Silver")
  (description "Wire types, validation and a synchronous runner for simulation providers.")
   (depends
@@ -56,7 +56,7 @@
    (conf-python-3 :with-test)))
 
 (package
- (name hardcaml_workbench_web)
+ (name silver_web)
  (synopsis "Optional browser client for Silver")
  (description
   "The optional Bonsai Web client and precompiled browser assets for Silver.")

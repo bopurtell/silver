@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Config = Hardcaml_workbench_project_integration.Preparation_config
+open Silver_protocol
+module Config = Silver_project_integration.Preparation_config
 
 let require condition message = if not condition then failwith message
 
@@ -160,7 +160,7 @@ let publication_root ~store ~bundle_identity output_dir =
       let target = Core_unix.readlink output_dir in
       let name = Filename.basename target in
       require
-        (Hardcaml_workbench_project_integration.Manifest.valid_components target
+        (Silver_project_integration.Manifest.valid_components target
          && (not (String.contains target '\000'))
          && String.equal target (Filename.concat ".objects" name)
          && String.is_prefix name ~prefix:(bundle_identity ^ "."))
@@ -341,7 +341,7 @@ let validate config ~selection ~expected_plan_identity output =
         exact_fields file [ "path"; "sha256" ];
         let path = text (field file "path") in
         require
-          (Hardcaml_workbench_project_integration.Manifest.valid_components path
+          (Silver_project_integration.Manifest.valid_components path
            && (not (String.contains path '\000'))
            && not (String.equal path "manifest.json"))
           "Invalid bundle path";

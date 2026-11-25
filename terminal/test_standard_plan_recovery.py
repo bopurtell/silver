@@ -57,7 +57,9 @@ def main():
     wrapper.chmod(0o700)
     args.daemon = wrapper
     watched = [project / name for name in manifest['source_snapshot']]
-    watched += list(project.glob('hardcaml-workbench-*.sexp'))
+    watched += [path for dir in (project, project / '.silver', project / '.workbench')
+                for glob in ('silver-*.sexp', 'hardcaml-workbench-*.sexp')
+                for path in dir.glob(glob)]
     watched += [recovery / 'manifest.json', recovery / 'source-snapshot.json', generation / 'receipt.json']
     watched += [recovery / 'provider' / name for name in manifest['captured_files']]
 

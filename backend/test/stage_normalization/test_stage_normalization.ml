@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Public = Hardcaml_workbench_backend.Asic_public
+open Silver_protocol
+module Public = Silver_backend.Asic_public
 
 let require b message = if not b then failwith message
 let stream = "6c006def1f794542a1c4cf481e8eba2f"

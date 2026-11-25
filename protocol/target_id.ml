@@ -3,5 +3,5 @@
     originates from project integration rather than from workspace inspection. *)
 
 include Id.Make (struct
-    let module_name = "Hardcaml_workbench_protocol.Target_id"
+    let module_name = "Silver_protocol.Target_id"
   end)

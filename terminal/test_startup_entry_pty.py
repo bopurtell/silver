@@ -122,7 +122,7 @@ def exercise(client, base, real_renderer=None):
                                 build_label="//:rtl", test_label="//:simulation")
         assert "package Counter" in (root / "Counter.bs").read_text()
         for relative in ("BUILD.bazel", "MODULE.bazel", "simulation_provider.py",
-                         ".workbench/hardcaml-workbench-simulation.sexp"):
+                         ".silver/silver-simulation.sexp"):
             assert (root / relative).is_file(), relative
         assert not (root / "dune-project").exists(), "Bluespec must not generate a Dune project"
         assert not (root / "bazel-invocations").exists(), "wizard must not run Bazel"
@@ -208,7 +208,7 @@ def exercise(client, base, real_renderer=None):
     # daemon-attach path rather than ag's default standalone path. Hold the private
     # lock so the test neither needs nor auto-spawns a shared user daemon.
     assert not runtime.exists()
-    lock_dir = runtime / "hardcaml-workbench"
+    lock_dir = runtime / "silver"
     lock_dir.mkdir(parents=True)
     with (lock_dir / "lifetime.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

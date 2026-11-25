@@ -6,8 +6,8 @@
 ; See docs/development.md#inline-expect-test-prerequisite.
 
 (library
- (name hardcaml_workbench_protocol_test)
- (libraries core hardcaml_workbench_protocol hardcaml_workbench_provider)
+ (name silver_protocol_test)
+ (libraries core silver_protocol silver_provider)
  (inline_tests
   (flags
    (-source-tree-root .)))

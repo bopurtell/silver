@@ -238,7 +238,7 @@ class PrivateJourneyTests(unittest.TestCase):
             source.mkdir()
             evidence.mkdir()
             owner_manifest = '(lang hardcaml-workbench 1)\n(project (name controlled_fifo_specimen))\n(dune (driver ./fifo))\n'
-            (source / "hardcaml-workbench.sexp").write_text(owner_manifest)
+            (source / "silver.sexp").write_text(owner_manifest)
             tools = root / "tools"
             tools.mkdir()
             docker = tools / "docker"
@@ -260,8 +260,8 @@ class PrivateJourneyTests(unittest.TestCase):
             with mock.patch.object(rung, "containers", return_value=[]), \
                     mock.patch.object(rung, "command", side_effect=controlled_command):
                 rung.prepare()
-            self.assertEqual((source / "hardcaml-workbench.sexp").read_text(), owner_manifest)
-            private = (rung.root / "hardcaml-workbench.sexp").read_text()
+            self.assertEqual((source / "silver.sexp").read_text(), owner_manifest)
+            private = (rung.root / "silver.sexp").read_text()
             self.assertEqual(private, runner.private_manifest("SRAM qualification"))
             self.assertNotIn("driver", private)
             self.assertNotIn("controlled_fifo_specimen", private)
@@ -316,7 +316,7 @@ class PrivateJourneyTests(unittest.TestCase):
             self.assertEqual(config["profile"], "qualification")
             self.assertTrue(config["verify_reopen"])
             self.assertFalse(inputs["installs"])
-            self.assertFalse((source / "hardcaml-workbench.sexp").exists())
+            self.assertFalse((source / "silver.sexp").exists())
             self.assertFalse((root / "evidence").exists())
             args.evidence_root = source / "evidence"
             with self.assertRaisesRegex(ValueError, "separate"):
@@ -683,7 +683,7 @@ class ConfigureTests(unittest.TestCase):
                 ["pdk_root", [str(toolchain / "pdk")]]]
         hashes = {}
         for kind, value in (("preparation", preparation), ("asic", asic)):
-            path = self.file(self.selection / "config" / ("hardcaml-workbench-" + kind + ".sexp"),
+            path = self.file(self.selection / "config" / ("silver-" + kind + ".sexp"),
                              self.runner.sexp(value))
             hashes[kind] = self.runner.digest(path)
         manifest = self.store / "simulation/manifest.json"
@@ -704,7 +704,7 @@ class ConfigureTests(unittest.TestCase):
             config_sha256=hashes, apps=apps, tools=tools)))
         # Owner root companions deliberately differ: derive from the prepared
         # immutable selection without adopting or rewriting active owner config.
-        self.owner = self.file(self.root / "hardcaml-workbench-asic.sexp", "owner config: untouched")
+        self.owner = self.file(self.root / "silver-asic.sexp", "owner config: untouched")
 
     def invoke(self, succeeds=True):
         output = io.StringIO()
@@ -783,7 +783,7 @@ class ConfigureTests(unittest.TestCase):
 
     def test_changed_companions_fail_without_writes(self):
         self.prepare()
-        companion = self.selection / "config/hardcaml-workbench-asic.sexp"
+        companion = self.selection / "config/silver-asic.sexp"
         companion.write_text("changed owner selection")
         self.assertIn("identity mismatch", self.invoke(succeeds=False))
         self.assertFalse(self.output.parent.exists())
@@ -897,14 +897,14 @@ class AutomaticResolutionTests(unittest.TestCase):
         manifest = self.store / "simulation/manifest.json"
         simulation = self.runner.sexp([["schema_version", "1"],
                                        ["provider_args", ["-B", "provider.py", "--manifest", str(manifest)]]])
-        installed = self.file(self.selection / "config/hardcaml-workbench-simulation.sexp", simulation)
+        installed = self.file(self.selection / "config/silver-simulation.sexp", simulation)
         install_path = self.store / "install.json"
         install = json.loads(install_path.read_text())
         install["config_sha256"]["simulation"] = self.runner.digest(installed)
         install_path.write_text(json.dumps(install))
         for kind in ("asic", "preparation", "simulation"):
-            name = "hardcaml-workbench-" + kind + ".sexp"
-            self.file(self.root / ".workbench" / name, (self.selection / "config" / name).read_text())
+            name = "silver-" + kind + ".sexp"
+            self.file(self.root / ".silver" / name, (self.selection / "config" / name).read_text())
 
     def auto(self):
         resolver = self.resolver()
@@ -915,9 +915,9 @@ class AutomaticResolutionTests(unittest.TestCase):
         self.prepare_common()
         config, inputs = self.auto()
         self.assertEqual(config["flow"], "standard")
-        self.assertEqual(len([p for p in inputs["inputs_sha256"] if "/.workbench/" in p]), 3)
+        self.assertEqual(len([p for p in inputs["inputs_sha256"] if "/.silver/" in p]), 3)
         self.file(self.root / ".dev/workbench-pyramid/old.json", "stale config")
-        (self.root / ".workbench/hardcaml-workbench-asic.sexp").write_text("()")
+        (self.root / ".silver/silver-asic.sexp").write_text("()")
         with self.assertRaisesRegex(ValueError, "common config differs"):
             self.auto()
         self.assertFalse(self.evidence.exists())
@@ -937,29 +937,29 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_root_only_current_configs_are_supported(self):
         self.prepare_common()
-        for path in (self.root / ".workbench").iterdir():
+        for path in (self.root / ".silver").iterdir():
             path.rename(self.root / path.name)
-        (self.root / ".workbench").rmdir()
+        (self.root / ".silver").rmdir()
         config, inputs = self.auto()
         for kind, path in inputs["current_configs"].items():
-            self.assertEqual(path, str(self.root / ("hardcaml-workbench-" + kind + ".sexp")))
+            self.assertEqual(path, str(self.root / ("silver-" + kind + ".sexp")))
             self.assertIn(path, config["sdk_identity_files"])
         self.assertFalse(self.evidence.exists())
 
     def test_identical_dual_files_select_common_and_track_both(self):
         self.prepare_common()
-        for path in (self.root / ".workbench").iterdir():
+        for path in (self.root / ".silver").iterdir():
             self.file(self.root / path.name, path.read_text())
         config, inputs = self.auto()
         for kind, path in inputs["current_configs"].items():
-            self.assertEqual(path, str(self.root / ".workbench" / ("hardcaml-workbench-" + kind + ".sexp")))
+            self.assertEqual(path, str(self.root / ".silver" / ("silver-" + kind + ".sexp")))
             self.assertIn(str(self.root / pathlib.Path(path).name), inputs["inputs_sha256"])
         self.assertFalse(self.evidence.exists())
 
     def test_dual_conflicts_rejected_before_semantic_comparison(self):
         self.prepare_common()
         for kind in ("asic", "preparation", "simulation"):
-            common = self.root / ".workbench" / ("hardcaml-workbench-" + kind + ".sexp")
+            common = self.root / ".silver" / ("silver-" + kind + ".sexp")
             for text in (common.read_text() + "\n", "()"):
                 with self.subTest(kind=kind, text=text):
                     root_copy = self.file(self.root / common.name, text)
@@ -970,7 +970,7 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_selected_current_config_may_semantically_equal_installed_bytes(self):
         self.prepare_common()
-        for path in (self.root / ".workbench").iterdir():
+        for path in (self.root / ".silver").iterdir():
             value = self.runner.parse(path.read_text())
             path.write_text("\n" + self.runner.sexp(list(reversed(value))) + "\n")
         _, inputs = self.auto()
@@ -979,7 +979,7 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_unsafe_current_paths_rejected_including_unselected_root_copy(self):
         self.prepare_common()
-        common = self.root / ".workbench/hardcaml-workbench-asic.sexp"
+        common = self.root / ".silver/silver-asic.sexp"
         saved = common.read_text()
         outside = self.file(self.base / "outside.sexp", saved)
         for path in (common, self.root / common.name):
@@ -1007,7 +1007,7 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_common_directory_symlink_is_rejected(self):
         self.prepare_common()
-        directory = self.root / ".workbench"
+        directory = self.root / ".silver"
         moved = self.root / "configs"
         directory.rename(moved)
         directory.symlink_to(moved, target_is_directory=True)
@@ -1026,7 +1026,7 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_common_provider_cannot_silently_select_a_different_generation(self):
         self.prepare_common()
-        path = self.root / ".workbench/hardcaml-workbench-asic.sexp"
+        path = self.root / ".silver/silver-asic.sexp"
         path.write_text(path.read_text().replace(str(self.generation), str(self.root / ".dev/old-generation")))
         with self.assertRaisesRegex(ValueError, "common config differs"):
             self.auto()
@@ -1034,7 +1034,7 @@ class AutomaticResolutionTests(unittest.TestCase):
 
     def test_missing_common_config_is_an_error(self):
         self.prepare_common()
-        (self.root / ".workbench/hardcaml-workbench-preparation.sexp").unlink()
+        (self.root / ".silver/silver-preparation.sexp").unlink()
         with self.assertRaisesRegex(ValueError, "missing prepared main setup input"):
             self.auto()
         self.assertFalse(self.evidence.exists())

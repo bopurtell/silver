@@ -1,11 +1,11 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Bonsai_term
 module H = Workspace_host
 module W = Workspace
 module T = Tile_presentation
 module E = Evidence_style
-module P = Hardcaml_workbench_workspaces
+module P = Silver_workspaces
 
 module Role = struct
   type t =
@@ -4554,9 +4554,9 @@ let palette_page host dimensions =
       | Some (H.Starter_preview (_, Bluespec_module_in _)) ->
         "NEW BLUESPEC MODULE PREVIEW · Enter applies · Esc cancels · ↑/↓ scroll"
       | Some (H.Starter_preview (p, _)) ->
-        (if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.add_to_project_recipe
+        (if String.equal p.operation.recipe Silver_protocol.Authoring.add_to_project_recipe
          then "ASIC STARTER PREVIEW · a applies"
-         else if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.module_recipe
+         else if String.equal p.operation.recipe Silver_protocol.Authoring.module_recipe
          then "NEW MODULE PREVIEW · Enter applies"
          else "NEW IP LIBRARY PREVIEW · Enter applies")
         ^ " · Esc cancels · ↑/↓ scroll"
@@ -4681,7 +4681,7 @@ let palette_page host dimensions =
         List.concat_map rows ~f:(wrap_cells ~width)
       | Some H.Design_executable ->
         [ "Path to the built design CLI (absolute or relative to the open project)."
-        ; "Enter writes .workbench/hardcaml-workbench-asic.sexp. Esc cancels."
+        ; "Enter writes .silver/silver-asic.sexp. Esc cancels."
         ; "Uses _flow_tools and _flow_results/workbench/asic under the project root."
         ; "No build or EDA runs. Reopen with a fresh daemon to discover flows."
         ] |> List.concat_map ~f:(wrap_cells ~width)

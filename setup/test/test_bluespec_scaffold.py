@@ -13,7 +13,7 @@ BINARY = Path(sys.argv.pop(1)).resolve()
 SIMULATION_SETUP = Path(sys.argv.pop(1)).resolve()
 EXAMPLES = [Path(sys.argv.pop(1)).resolve() for _ in range(2)]
 MANIFEST = Path(".silver/project.json")
-SIMULATION = Path(".workbench/hardcaml-workbench-simulation.sexp")
+SIMULATION = Path(".silver/silver-simulation.sexp")
 
 
 class ScaffoldTests(unittest.TestCase):
@@ -123,9 +123,9 @@ class ScaffoldTests(unittest.TestCase):
 
         other = self.base / "configuration"
         other.mkdir()
-        (root / ".workbench").symlink_to(other, target_is_directory=True)
+        (root / ".silver").symlink_to(other, target_is_directory=True)
         self.invoke("--bluespec", root, success=False)
-        self.assertEqual(list(root.iterdir()), [root / ".workbench"])
+        self.assertEqual(list(root.iterdir()), [root / ".silver"])
         self.assertEqual(list(other.iterdir()), [])
 
     def test_missing_python_and_bad_usage_do_not_create_project(self):

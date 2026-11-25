@@ -300,7 +300,7 @@ class Terminal:
         """Check exact saved navigation identity independently of clipped tab labels."""
         expected_members = sorted((field(tile, 'id'), field(tile, 'kind'))
             for tile in field(registry, 'tiles') if field(tile, 'workspace') == workspace)
-        directory = self.base / 'client-state/hardcaml-workbench/terminal'
+        directory = self.base / 'client-state/silver/terminal'
         deadline = time.monotonic() + 12
         while True:
             for path in directory.glob('navigation-*.sexp'):

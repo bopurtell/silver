@@ -1,5 +1,5 @@
 open! Core
-module Integration = Hardcaml_workbench_project_integration
+module Integration = Silver_project_integration
 module Config = Integration.Asic_config
 
 let check ~root =

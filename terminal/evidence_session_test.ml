@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module H = Workspace_host
-module P = Hardcaml_workbench_workspaces
+module P = Silver_workspaces
 
 let%test_unit "late inspection receipts cannot retarget selection or reconnect \
                notices"

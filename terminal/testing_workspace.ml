@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module S = Simulation
 
 type pane =

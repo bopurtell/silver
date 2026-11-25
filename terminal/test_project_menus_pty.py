@@ -449,7 +449,7 @@ def exercise(args, base):
     renderer.chmod(0o755)
     control = base / "simulation.json"
     control.write_text("{}")
-    (root / "hardcaml-workbench-simulation.sexp").write_text(sexp([
+    (root / "silver-simulation.sexp").write_text(sexp([
         ["schema_version", 1], ["provider_executable", sys.executable],
         ["provider_args", [str(ROOT / "scripts/fixtures/simulation_fault_provider.py"), "--control", str(control),
                            "--calls", str(base / "simulation-calls")]],
@@ -470,7 +470,7 @@ def exercise(args, base):
             local_actions(t, s)
     finally:
         s.stop()
-    local_projects(s, base, renderer, root / "hardcaml-workbench-simulation.sexp")
+    local_projects(s, base, renderer, root / "silver-simulation.sexp")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Sparse, terminal-independent presentation defaults. [None] inherits app policy. These
     never create providers, change binding, or carry backend evidence. *)

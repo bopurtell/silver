@@ -1,5 +1,5 @@
 open! Core
-module Config = Hardcaml_workbench_project_integration.Simulation_config
+module Config = Silver_project_integration.Simulation_config
 
 let invocation (config : Config.t) ~root ~environment args : Dune_adapter.Invocation.t =
   let argv =

@@ -127,6 +127,6 @@ prepare_managed_toolchain() {
     die 'could not install the pinned native stack in the managed switch'
   ( cd -- "$repo"
     opam install --switch=silver --yes --jobs="$jobs" --deps-only \
-      ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
+      ./silver_provider.opam ./silver.opam
   ) || die 'could not install Silver dependencies in the managed switch'
 }

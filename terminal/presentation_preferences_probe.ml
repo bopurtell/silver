@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module P = Terminal_presentation.Presentation_preferences
 module Host = Terminal_presentation.Workspace_host
 module W = Workspace

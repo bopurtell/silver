@@ -1,9 +1,9 @@
 # Native simulation provider API
 
-Public library/package: `hardcaml_workbench_provider`. Only Core, Core_unix and
+Public library/package: `silver_provider`. Only Core, Core_unix and
 ppx_jane are required. Tests remain independent executables; this is adapter plumbing.
 
-The actual public modules are `Hardcaml_workbench_provider.Wire`, `Validation`,
+The actual public modules are `Silver_provider.Wire`, `Validation`,
 and `Runner`. Wire exposes the simulation protocol types, Limits, Backend_id, Build_ref,
 Run_ref, Parameter, Case, Suite, Discovery, Declaration, Catalog, Asic_input, Selection, Progress,
 Case_status, Outcome and Provider.{Request,Artifact,Event}.
@@ -72,9 +72,9 @@ switch="${OPAM_SWITCH:-5.2.0+ox}"
 sdk="$(mktemp -d)"
 opam exec --switch="$switch" -- dune build \
   --build-dir "$sdk/build" -j 6 \
-  --only-packages hardcaml_workbench_provider @install @provider/test/runtest
+  --only-packages silver_provider @install @provider/test/runtest
 opam exec --switch="$switch" -- dune install \
-  --build-dir "$sdk/build" --prefix "$sdk" hardcaml_workbench_provider
+  --build-dir "$sdk/build" --prefix "$sdk" silver_provider
 export OCAMLPATH="$sdk/lib${OCAMLPATH:+:$OCAMLPATH}"
 ```
 

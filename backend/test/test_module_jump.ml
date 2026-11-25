@@ -1,7 +1,7 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Jump = Hardcaml_workbench_backend.Module_jump
+open Silver_protocol
+module Jump = Silver_backend.Module_jump
 open Jump.Resolution
 
 let require condition message = if not condition then failwith message

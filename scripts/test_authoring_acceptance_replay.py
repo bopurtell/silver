@@ -82,7 +82,7 @@ class ReplayTests(unittest.TestCase):
         commit = replay.commit_starter(snapshot, commit_receipts, inherited)
         self.assert_step("commit starter fixture", "existing repository",
                          lambda: replay.commit_starter(snapshot, commit_receipts, inherited))
-        for name in (".dev", "_flow_tools", "_build", "_flow_results", ".workbench"):
+        for name in (".dev", "_flow_tools", "_build", "_flow_results", ".silver"):
             directory = self.project / name
             directory.mkdir(exist_ok=True)
             (directory / "do-not-copy").write_text(name)
@@ -94,7 +94,7 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(info["fixture_commit"], commit)
         self.assertTrue((self.clone / ".git").is_dir())
         self.assertEqual(list(fake_repo.iterdir()), [fake_repo / "do-not-copy"])
-        for name in (".dev", "_flow_tools", "_build", "_flow_results", ".workbench"):
+        for name in (".dev", "_flow_tools", "_build", "_flow_results", ".silver"):
             self.assertFalse((self.clone / name).exists())
         other_receipts = self.base / "evidence again"
         other_receipts.mkdir()

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol.Simulation
+open Silver_protocol.Simulation
 
 (** Bounded whole-stdout discovery decode and structural validation. *)
 val parse_discovery : string -> Discovery.t Or_error.t

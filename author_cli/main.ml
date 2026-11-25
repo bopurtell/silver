@@ -1,10 +1,10 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module A = Authoring
-module Client = Hardcaml_workbench_native_http.Client
-module Service = Hardcaml_workbench_backend.Authoring_service
-module Discovery = Hardcaml_workbench_setup.Project_discovery
+module Client = Silver_native_http.Client
+module Service = Silver_backend.Authoring_service
+module Discovery = Silver_setup.Project_discovery
 
 let flags =
   let open Command.Let_syntax in

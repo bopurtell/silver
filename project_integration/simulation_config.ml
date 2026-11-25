@@ -1,5 +1,5 @@
 open! Core
-module Simulation = Hardcaml_workbench_protocol.Simulation
+module Simulation = Silver_protocol.Simulation
 
 type t =
   { schema_version : int
@@ -11,7 +11,7 @@ type t =
   }
 [@@deriving compare, equal, sexp]
 
-let filename = "hardcaml-workbench-simulation.sexp"
+let filename = "silver-simulation.sexp"
 
 let validate t =
   if t.schema_version <> 1 then failwith "Unsupported simulation configuration schema";

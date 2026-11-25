@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module Log_fetch = struct
   type t =
@@ -614,7 +614,7 @@ let%test_unit "empty log notices distinguish fetch, drain, and EOF" =
 ;;
 
 let%test_unit "middle truncation preserves location and final directory when it fits" =
-  let root = "/home/wayne/devel/jane/hardcaml_workbench/test/fixtures/example_project" in
+  let root = "/home/wayne/devel/jane/silver/test/fixtures/example_project" in
   [%test_result: string]
     (middle_truncate ~width:45 root)
     ~expect:"/home/wayne/devel/jane/har.../example_project";

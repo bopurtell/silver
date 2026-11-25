@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 type t = { service : Service.t }
 

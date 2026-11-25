@@ -28,7 +28,7 @@ that must fail simulation, run `python3 test/integration/mixed_hardcaml_bluespec
 from the repository root.
 
 If Silver is installed, run `ag` in the copied project. Its
-`.workbench/hardcaml-workbench.sexp` maps **Build** to Dune's `@rtl` and
+`.silver/silver.sexp` maps **Build** to Dune's `@rtl` and
 **Test** to `@runtest`. No wizard or simulation provider is needed; the VCD is
 a local Dune output, not a retained artifact in Silver's Testing workspace.
 

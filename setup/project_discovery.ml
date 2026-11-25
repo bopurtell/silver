@@ -1,7 +1,7 @@
 open! Core
 
 let marker = "dune-project"
-let silver_marker = Hardcaml_workbench_project_integration.Silver_manifest.relative_path
+let silver_marker = Silver_project_integration.Silver_manifest.relative_path
 
 (* Canonical absolute paths have far fewer components than this; the bound only guards
    against a pathological filesystem whose [dirname] never reaches [/]. *)

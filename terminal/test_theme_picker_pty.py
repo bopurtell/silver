@@ -58,7 +58,7 @@ def exercise(client, base):
     (project / "dune-project").write_text("(lang dune 3.10)\n(name theme_test)\n")
     env = dict(os.environ, HOME=str(base / "home"), XDG_STATE_HOME=str(state),
                XDG_CONFIG_HOME=str(base / "config"), XDG_RUNTIME_DIR=str(base / "runtime"))
-    preferences = state / "hardcaml-workbench" / "terminal"
+    preferences = state / "silver" / "terminal"
 
     def launch(evidence):
         evidence.mkdir()

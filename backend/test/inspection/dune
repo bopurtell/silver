@@ -8,9 +8,9 @@
   core_unix
   cryptokit
   yojson
-  hardcaml_workbench_backend
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -25,9 +25,9 @@
   core
   core_unix
   yojson
-  hardcaml_workbench_backend
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint

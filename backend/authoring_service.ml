@@ -1,7 +1,7 @@
 module Lock = Mutex
 open! Core
-module Authoring = Hardcaml_workbench_protocol.Authoring
-module Project_id = Hardcaml_workbench_protocol.Project_id
+module Authoring = Silver_protocol.Authoring
+module Project_id = Silver_protocol.Project_id
 module D = Authoring_destination
 open Authoring
 
@@ -64,7 +64,7 @@ let addition (op : Operation.t) =
 ;;
 
 let integrate (op : Operation.t) snapshot files ~register =
-  let module I = Hardcaml_workbench_project_integration in
+  let module I = Silver_project_integration in
   let prefix = D.design_dir op.name ^ "/" in
   let fresh = String.equal op.recipe starter_recipe in
   if fresh
@@ -80,7 +80,7 @@ let integrate (op : Operation.t) snapshot files ~register =
     then failwith ("Existing-project renderer omitted " ^ prefix ^ path));
   let target = prefix ^ "project.exe" in
   let config filename sexp =
-    { File.path = ".workbench/" ^ filename; contents = Sexp.to_string_hum sexp ^ "\n" }
+    { File.path = ".silver/" ^ filename; contents = Sexp.to_string_hum sexp ^ "\n" }
   in
   let asic =
     config

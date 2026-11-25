@@ -1,8 +1,8 @@
 open! Core
 open Async
-open Hardcaml_workbench_protocol
-module Share = Hardcaml_workbench_native_http.Editor_share
-module Client = Hardcaml_workbench_native_http.Client
+open Silver_protocol
+module Share = Silver_native_http.Editor_share
+module Client = Silver_native_http.Client
 
 type binding =
   { client : Client.t

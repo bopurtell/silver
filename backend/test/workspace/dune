@@ -5,8 +5,8 @@
   core
   core_unix
   core_unix.command_unix
-  hardcaml_workbench_backend
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint

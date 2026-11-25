@@ -9,7 +9,7 @@
 open! Core
 
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module Stored = struct
   type t =

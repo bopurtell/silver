@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let replace projects ~equal ~value =
   value :: List.filter projects ~f:(fun existing -> not (equal existing value))

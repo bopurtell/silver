@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Artifacts = Hardcaml_workbench_backend.Asic_artifacts
+open Silver_protocol
+module Artifacts = Silver_backend.Asic_artifacts
 module Reference = Asic_artifact.Reference
 
 let require condition message = if not condition then failwith message
@@ -509,7 +509,7 @@ let test_bounded_byte_memory () =
   let raw = String.make (16 * 1024 * 1024) 'x' in
   let root, summary = fixture ~extra:[ "max.gds", raw ] () in
   Exn.protect
-    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
+    ~finally:(fun () -> Silver_backend.Simulation_files.remove root)
     ~f:(fun () ->
       let reference = find (Artifacts.list ~summary) "max.gds" in
       let before = Stdlib.Gc.allocated_bytes () in

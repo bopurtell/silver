@@ -571,7 +571,7 @@ def exercise(test):
     test.check({p.name: p.read_bytes() for p in root.iterdir()} == original,
                'Initializer dry run leaves disposable Dune project byte-for-byte unchanged')
     test.command(test.args.setup, init, 'initialize')
-    manifest = root / '.workbench' / 'hardcaml-workbench.sexp'
+    manifest = root / '.silver' / 'silver.sexp'
     test.check(manifest.read_text() == dry
                and set(root.iterdir()) == {root / name for name in original} | {manifest.parent}
                and set(manifest.parent.iterdir()) == {manifest}

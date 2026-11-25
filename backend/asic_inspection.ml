@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Wire = Hardcaml_workbench_protocol.Asic_inspection
+open Silver_protocol
+module Wire = Silver_protocol.Asic_inspection
 module Public = Asic_public
 
 let index_limit = 2 * 1024 * 1024

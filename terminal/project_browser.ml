@@ -36,7 +36,7 @@ let catalog
   ?ip
   ?new_module
   ~libraries
-  (asic : Hardcaml_workbench_protocol.Asic.Snapshot.t option)
+  (asic : Silver_protocol.Asic.Snapshot.t option)
   =
   item
     "Project"
@@ -120,7 +120,7 @@ let objects t =
 let selected t = List.nth (objects t) t.object_index
 
 let receive_owner t ~chip ~parent = function
-  | Ok (Hardcaml_workbench_protocol.Authoring.Response.Owner_described desc) ->
+  | Ok (Silver_protocol.Authoring.Response.Owner_described desc) ->
     let children =
       profile_items
         chip

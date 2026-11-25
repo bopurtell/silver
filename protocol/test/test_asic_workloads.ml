@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Asic_workloads
 
 let%test_unit "captured workload queries retain every fence and ordered input" =

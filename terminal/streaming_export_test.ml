@@ -162,7 +162,7 @@ let%test_unit "timeout and owner cancellation clean unresolved fetch; late compl
 ;;
 
 let%test_unit "ASIC identity, missing/changed pages and declared limits" =
-  let open Hardcaml_workbench_protocol in
+  let open Silver_protocol in
   let reference : Asic_artifact.Reference.t =
     { id = "image"
     ; run = Asic_snapshot_fixture.run_a
@@ -207,7 +207,7 @@ let%test_unit "simulation streaming adapter publishes exact raw bytes and reject
                changed pages"
   =
   Thread_safe.block_on_async_exn (fun () ->
-    let module S = Hardcaml_workbench_protocol.Simulation in
+    let module S = Silver_protocol.Simulation in
     let bytes = "\000\255\128\r\n" in
     let artifact : S.Artifact.t =
       { id = "trace"
@@ -283,7 +283,7 @@ let%test_unit "simulation streaming adapter publishes exact raw bytes and reject
 
 let%test_unit "ASIC streaming adapter launches only exact verified local publication" =
   Thread_safe.block_on_async_exn (fun () ->
-    let open Hardcaml_workbench_protocol in
+    let open Silver_protocol in
     let bytes = "\137PNG\000\255\r\n" in
     let reference : Asic_artifact.Reference.t =
       { id = "image"

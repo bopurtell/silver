@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Bonsai_term
 module O = Overview_tiles
 
@@ -585,7 +585,7 @@ let%test_unit "typed compact facts fence run, availability and acceptance" =
 let%test_unit "compact evidence uses actual panel content bounds at accepted terminal \
                sizes"
   =
-  let module W = Hardcaml_workbench_workspaces in
+  let module W = Silver_workspaces in
   let d = W.Overview.definition in
   let kinds = List.map d.tiles ~f:(fun t -> t.W.Common.kind) in
   let appearance = Appearance.default in

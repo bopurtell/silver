@@ -1,8 +1,8 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Service = Hardcaml_workbench_backend.Service
-module Execution = Hardcaml_workbench_backend.Execution_module
+open Silver_protocol
+module Service = Silver_backend.Service
+module Execution = Silver_backend.Execution_module
 
 type t =
   { hello : V1.Hello.Response.t

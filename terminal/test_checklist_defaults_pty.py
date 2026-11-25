@@ -64,11 +64,11 @@ else:
     physical = root / "physical"
     shutil.copyfile(ROOT / "backend/test/fresh_provider.py", physical)
     physical.chmod(0o700)
-    (root / "hardcaml-workbench-asic.sexp").write_text(
+    (root / "silver-asic.sexp").write_text(
         f'((schema_version 1)(project_executable "{project}")(provider_executable "{physical}")'
         f'(results_root "{root}/results")(toolchain "{root}")(python ())(support_tools ())'
         '(pdk_root ())(stage_timeout_seconds ()))')
-    (root / "hardcaml-workbench-preparation.sexp").write_text(
+    (root / "silver-preparation.sexp").write_text(
         f'((schema_version 1)(build_target publisher.exe)(results_root "{root}/publication")'
         '(timeout_seconds 15))')
     (root / "generation").write_text("fresh-checklist")

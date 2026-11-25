@@ -292,7 +292,7 @@ def main() -> None:
                 process.kill()
                 process.wait()
         os.close(master)
-        metadata = os.path.join(runtime.name, "hardcaml-workbench", "daemon.sexp")
+        metadata = os.path.join(runtime.name, "silver", "daemon.sexp")
         if os.path.exists(metadata):
             with open(metadata, encoding="utf-8") as channel:
                 match = re.search(r"\(pid ([0-9]+)\)", channel.read())

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let fresh_intent ?(elaboration_only = false) id : Asic.Fresh.Intent.t =
   { id

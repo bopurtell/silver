@@ -10,7 +10,7 @@ type t =
   }
 [@@deriving compare, equal, sexp]
 
-let filename = "hardcaml-workbench-preparation.sexp"
+let filename = "silver-preparation.sexp"
 
 let validate t =
   if t.schema_version <> 1 then failwith "Unsupported preparation configuration schema";

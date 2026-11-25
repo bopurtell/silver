@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path, config_paths
 import shlex
 import shutil
 import subprocess
@@ -218,7 +219,7 @@ def prepare(args, base):
         destination = base / 'bin' / name
         require(not destination.exists(), 'Refusing to overwrite demo binary: ' + str(destination))
         shutil.copy2(source, destination)
-    config = root / 'hardcaml-workbench-asic.sexp'
+    config = config_path(root, 'silver-asic.sexp')
     original = config.read_bytes()
     (receipts / 'config-before.sexp').write_bytes(original)
     fields = parse(original.decode())
@@ -231,7 +232,8 @@ def prepare(args, base):
     after = inventory([root / EVIDENCE])
     save(receipts / 'inputs-after.json', after)
     require(before == after, 'Canonical evidence changed during verification')
-    config.write_text(sexp(fields) + '\n')
+    for path in config_paths(root, 'silver-asic.sexp'):
+        path.write_text(sexp(fields) + '\n')
     manifest.update(schema_version=1, synthetic=False, base=str(base), prepare_receipts=str(receipts),
                     project_executable=str(project), project_sha256=digest(project),
                     config_before_sha256=hashlib.sha256(original).hexdigest(), config_sha256=digest(config),
@@ -245,7 +247,7 @@ def seed(base, url, receipt_dir=None):
     manifest = json.loads((base / 'manifest.json').read_text())
     verify_binaries(base, manifest)
     root = Path(manifest['project_root'])
-    require(digest(root / 'hardcaml-workbench-asic.sexp') == manifest['config_sha256'], 'Demo config changed')
+    require(digest(config_path(root, 'silver-asic.sexp')) == manifest['config_sha256'], 'Demo config changed')
     require(digest(manifest['provider']) == manifest['provider_sha256'], 'Provider changed')
     require(digest(manifest['project_executable']) == manifest['project_sha256'], 'Project executable changed')
     for reference in manifest['hashes']:

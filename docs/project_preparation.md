@@ -127,7 +127,7 @@ No preparation result completes a physical checklist stage.
 
 ## Project configuration
 
-Opt in with `hardcaml-workbench-preparation.sexp` at the source root:
+Opt in with `.silver/silver-preparation.sexp` beneath the source root:
 
 ```scheme
 ((schema_version 1)

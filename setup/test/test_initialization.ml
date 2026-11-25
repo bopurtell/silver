@@ -1,7 +1,7 @@
 open! Core
-module Initialization = Hardcaml_workbench_setup.Initialization
-module Adoption = Hardcaml_workbench_setup.Asic_adoption
-module Asic_config = Hardcaml_workbench_project_integration.Asic_config
+module Initialization = Silver_setup.Initialization
+module Adoption = Silver_setup.Asic_adoption
+module Asic_config = Silver_project_integration.Asic_config
 
 let with_project f =
   let root = Filename_unix.temp_dir "workbench-init-test-" "" in
@@ -12,7 +12,7 @@ let with_project f =
         ~data:"(lang dune 3.22)\n";
       f root)
     ~finally:(fun () ->
-      let common = Filename.concat root ".workbench" in
+      let common = Filename.concat root ".silver" in
       if Sys_unix.file_exists_exn common
       then (
         List.iter (Sys_unix.ls_dir common) ~f:(fun name ->
@@ -36,13 +36,13 @@ let%test_unit "adoption records the existing executable without running or repla
     let source = "#!/bin/sh\ntouch \"$0.invoked\"\n" in
     Out_channel.write_all path ~data:source;
     Core_unix.chmod path ~perm:0o700;
-    let generic = Filename.concat root "hardcaml-workbench.sexp" in
+    let generic = Filename.concat root "silver.sexp" in
     Out_channel.write_all generic ~data:"existing generic configuration";
     assert (Result.is_ok (Adoption.check ~root));
-    assert (not (Sys_unix.file_exists_exn (Filename.concat root ".workbench")));
+    assert (not (Sys_unix.file_exists_exn (Filename.concat root ".silver")));
     assert (Result.is_ok (Adoption.adopt ~root ~executable:filename));
     let config_path =
-      Filename.concat (Filename.concat root ".workbench") Asic_config.filename
+      Filename.concat (Filename.concat root ".silver") Asic_config.filename
     in
     let contents = In_channel.read_all config_path in
     (match Or_error.ok_exn (Asic_config.parse_project contents) with
@@ -70,7 +70,7 @@ let%test_unit "invalid inputs and occupied legacy ASIC path leave project untouc
     assert (Result.is_error (Adoption.check ~root));
     assert (Result.is_error (Adoption.adopt ~root ~executable:"/bin/sh"));
     [%test_eq: string] (Core_unix.readlink path) "missing";
-    assert (not (Sys_unix.file_exists_exn (Filename.concat root ".workbench"))))
+    assert (not (Sys_unix.file_exists_exn (Filename.concat root ".silver"))))
 ;;
 
 let%test_unit "only direct project roots accepted by the opener can be initialized" =
@@ -105,7 +105,7 @@ let%test_unit "publication refuses a file or dangling symlink created after prep
          [%test_eq: string] (Core_unix.readlink path) (Filename.concat root "missing"));
       [%test_eq: string list]
         (List.sort (Sys_unix.ls_dir (Filename.dirname path)) ~compare:String.compare)
-        [ "hardcaml-workbench.sexp" ]))
+        [ "silver.sexp" ]))
 ;;
 
 let%test_unit "publishing the same plan twice preserves the complete first publication" =

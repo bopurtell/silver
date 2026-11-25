@@ -82,7 +82,7 @@ status, report availability and acceptance are distinct; `not_evaluated` remains
 
 ## Opt-in project configuration (schema 1)
 
-At the project root, create `hardcaml-workbench-asic.sexp`. This independent
+Create `.silver/silver-asic.sexp` beneath the project root. This independent
 record does not change the existing generic manifest grammar:
 
 ```scheme

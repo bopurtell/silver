@@ -16,10 +16,10 @@ import unittest
 
 
 BINARY = str(Path(sys.argv.pop(1)).resolve())
-MANIFEST = "hardcaml-workbench.sexp"
-COMMON_MANIFEST = Path(".workbench") / MANIFEST
-CONFIGS = [MANIFEST, "hardcaml-workbench-asic.sexp",
-           "hardcaml-workbench-simulation.sexp", "hardcaml-workbench-preparation.sexp"]
+MANIFEST = "silver.sexp"
+COMMON_MANIFEST = Path(".silver") / MANIFEST
+CONFIGS = [MANIFEST, "silver-asic.sexp",
+           "silver-simulation.sexp", "silver-preparation.sexp"]
 
 
 class InitializationTests(unittest.TestCase):
@@ -59,7 +59,7 @@ class InitializationTests(unittest.TestCase):
         self.invoke("--root", self.root)
         self.assertEqual((self.root / COMMON_MANIFEST).read_text(), preview.stdout)
         self.assertEqual(self.snapshot(), {**before, str(COMMON_MANIFEST): preview.stdout.encode()})
-        self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".workbench"})
+        self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".silver"})
 
     def test_explicit_options_and_relative_root(self):
         result = self.invoke(
@@ -200,7 +200,7 @@ class InitializationTests(unittest.TestCase):
                         self.assertIn("refusing to overwrite", result.stderr)
                 actual = target.read_bytes()
                 self.assertEqual(self.snapshot(), {**before, str(COMMON_MANIFEST): actual})
-                self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".workbench"})
+                self.assertEqual(set(p.name for p in self.root.iterdir()), {*before, ".silver"})
                 self.assertEqual(list(target.parent.iterdir()), [target])
                 target.unlink()
                 preview = self.invoke("--root", self.root, "--project-name",
@@ -220,23 +220,23 @@ class InitializationTests(unittest.TestCase):
         before = self.snapshot()
         preview = self.migrate("--dry-run")
         self.assertEqual(self.snapshot(), before)
-        self.assertFalse((self.root / ".workbench").exists())
+        self.assertFalse((self.root / ".silver").exists())
         self.assertIn("Create directory", preview.stdout)
         self.assertEqual(preview.stdout.count("Copy "), 4)
         for name in CONFIGS:
-            self.assertIn(f"{self.root / name} -> {self.root / '.workbench' / name}", preview.stdout)
+            self.assertIn(f"{self.root / name} -> {self.root / '.silver' / name}", preview.stdout)
         self.migrate()
         after = self.snapshot()
         for name in CONFIGS:
             self.assertEqual(after[name], before[name])
-            self.assertEqual(after[str(Path('.workbench') / name)], before[name])
+            self.assertEqual(after[str(Path('.silver') / name)], before[name])
         self.assertIn("No configuration copies needed", self.migrate().stdout)
         self.assertIn("No configuration copies needed", self.migrate("--dry-run").stdout)
         self.assertEqual(self.snapshot(), after)
 
     def test_migration_preflights_entire_set_and_accepts_equal_targets(self):
         self.seed_configs()
-        common = self.root / ".workbench"
+        common = self.root / ".silver"
         common.mkdir()
         last = common / CONFIGS[-1]
         last.write_bytes(b"conflicting bytes")
@@ -252,7 +252,7 @@ class InitializationTests(unittest.TestCase):
 
     def test_migration_rejects_unsafe_directories_and_entries(self):
         self.seed_configs()
-        common = self.root / ".workbench"
+        common = self.root / ".silver"
         external = self.base / "external"
         external.mkdir()
         for kind in ["file", "symlink", "dangling"]:
@@ -294,7 +294,7 @@ class InitializationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         for name, data in before.items():
             self.assertEqual((self.root / name).read_bytes(), data)
-        common = self.root / ".workbench"
+        common = self.root / ".silver"
         self.assertEqual((common / CONFIGS[0]).read_bytes(), before[CONFIGS[0]])
         self.assertFalse((common / CONFIGS[1]).exists())
         self.assertEqual(sorted(p.name for p in common.iterdir()), [CONFIGS[0]])
@@ -306,16 +306,16 @@ class InitializationTests(unittest.TestCase):
         target = self.root / CONFIGS[-1]
         target.mkdir()
         self.migrate(success=False)
-        self.assertFalse((self.root / ".workbench").exists())
+        self.assertFalse((self.root / ".silver").exists())
         target.rmdir()
         os.mkfifo(target)
         self.migrate(success=False)
-        self.assertFalse((self.root / ".workbench").exists())
+        self.assertFalse((self.root / ".silver").exists())
 
     def test_migration_empty_common_only_discovery_and_invalid_options(self):
         self.assertIn("No configuration copies needed", self.migrate().stdout)
-        self.assertFalse((self.root / ".workbench").exists())
-        common = self.root / ".workbench"
+        self.assertFalse((self.root / ".silver").exists())
+        common = self.root / ".silver"
         common.mkdir()
         (common / CONFIGS[2]).write_bytes(b"common-only provider identity")
         before = self.snapshot()
@@ -326,7 +326,7 @@ class InitializationTests(unittest.TestCase):
             self.assertEqual(self.snapshot(), before)
 
     def test_init_common_directory_safety_and_legacy_compatibility(self):
-        common = self.root / ".workbench"
+        common = self.root / ".silver"
         common.symlink_to(self.base, target_is_directory=True)
         self.invoke("--root", self.root, "--dry-run", success=False)
         self.invoke("--root", self.root, success=False)

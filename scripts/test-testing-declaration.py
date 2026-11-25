@@ -162,7 +162,7 @@ def project(args):
     config = [("schema_version", 1), ("provider_executable", str(wrapper)),
               ("provider_args", []), ("discovery_timeout_seconds", 10),
               ("run_timeout_seconds", 30)]
-    (root / "hardcaml-workbench-simulation.sexp").write_text(sexp(config), encoding="utf-8")
+    (root / "silver-simulation.sexp").write_text(sexp(config), encoding="utf-8")
     return root, source, env, provider, calls
 
 
@@ -296,7 +296,7 @@ def run_live(args):
     """Open the real project by cwd and verify the configured composite route."""
     root = args.example
     source = root / DECLARATION_FILE
-    config = root / ".workbench" / "hardcaml-workbench-simulation.sexp"
+    config = root / ".silver" / "silver-simulation.sexp"
     original, config_bytes = source.read_bytes(), config.read_bytes()
     settings = record(parse(config_bytes.decode()))
     assert any(Path(arg).name == "checkout_provider.py" for arg in settings["provider_args"]), (

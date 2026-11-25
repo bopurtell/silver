@@ -459,7 +459,7 @@ Only `test_provider.exe` links the shared provider library; the simulator/checke
 retains its standalone executable interface. Python adapters remain source-level
 conformance references. The former installed Python generation is preserved.
 
-Root configuration is `hardcaml-workbench-simulation.sexp`; installation ownership
+Project configuration is `.silver/silver-simulation.sexp`; installation ownership
 is `.dev/fifo-simulation-install.json`. Discovery/run never build or install.
 The explicit installer supports a bounded build or an already-verified executable
 and refuses unrelated/edited companion configuration. See the sibling's

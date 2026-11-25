@@ -1,6 +1,6 @@
 (test
  (name test_execution)
- (libraries core hardcaml_workbench_protocol)
+ (libraries core silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint

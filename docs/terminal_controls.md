@@ -357,8 +357,8 @@ registry layouts and provider evidence. It is loaded on interactive startup, not
 derived from historical runs or the last launched preview.
 
 Storage is **client-local and project/environment-scoped**, under
-`$XDG_STATE_HOME/hardcaml-workbench/terminal/launch-<digest>.sexp`, or
-`$HOME/.local/state/hardcaml-workbench/terminal/` when XDG_STATE_HOME is unset. The key
+`$XDG_STATE_HOME/silver/terminal/launch-<digest>.sexp`, or
+`$HOME/.local/state/silver/terminal/` when XDG_STATE_HOME is unset. The key
 uses the daemon's canonical project root plus the requested execution environment;
 no transient daemon or project ID enters it. Versioned records verify that key on
 load. Writes run off the UI thread, are serialized per client session, and use an

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** The editable stock spec and the protocol-owned Editor definition form one catalog; the
     registry and preset/restore commands share the Editor's layout. *)

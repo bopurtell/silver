@@ -2,5 +2,5 @@
     unit of design identity; see {!Build_ref} and {!Run_ref}. *)
 
 include Id.Make (struct
-    let module_name = "Hardcaml_workbench_protocol.Job_id"
+    let module_name = "Silver_protocol.Job_id"
   end)

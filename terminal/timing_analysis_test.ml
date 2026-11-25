@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Bonsai_term
 module O = Overview_tiles
 module H = Workspace_host
@@ -35,7 +35,7 @@ let%test_unit "asynchronous unsupported Timing feedback survives registry polls 
                draw"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let reason =
     "Stage preparation failed: Unsupported fresh endpoint: legacy/timing; press r to \
@@ -110,7 +110,7 @@ let analysis : Asic.Timing_analysis.t =
 
 let fixture () =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let summary = Option.value_exn (data.Host_view.summary Asic_snapshot_fixture.run_a) in
   let summary = { summary with timing_analysis = Some analysis; freshness = Validated } in
@@ -238,7 +238,7 @@ let%test_unit "hidden builtin follows exact resolved analysis without navigation
   let registry =
     W.apply
       initial
-      (Hardcaml_workbench_workspaces.Presets.startup_operation initial |> Option.value_exn)
+      (Silver_workspaces.Presets.startup_operation initial |> Option.value_exn)
     |> Result.ok
     |> Option.value_exn
   in
@@ -872,7 +872,7 @@ let%test_unit "persisted navigation and reuse retain exact analysis rather than 
                only run"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Timing.definition
+    Host_view.refinement_fixture Silver_workspaces.Timing.definition
   in
   let target =
     { target with stage = "timing"; execution_file = Some "/exact/frozen-source" }
@@ -923,7 +923,7 @@ let%test_unit "persisted navigation and reuse retain exact analysis rather than 
 let%test_unit "saved Timing row waits for the published reinspection lineage" =
   let _, data, _, summary = fixture () in
   let host, _, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Timing.definition
+    Host_view.refinement_fixture Silver_workspaces.Timing.definition
   in
   let tile = find "timing-paths" in
   let recomputed = { target with source_digest = String.make 64 'e' } in

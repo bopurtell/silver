@@ -149,7 +149,7 @@ class Session:
 
 
 def write_config(root, project, provider, results, tools=None, stage_timeout=None):
-    path = root / 'hardcaml-workbench-asic.sexp'
+    path = root / 'silver-asic.sexp'
     if path.exists():
         return False
     values = [['schema_version', '1'], ['project_executable', str(project)],

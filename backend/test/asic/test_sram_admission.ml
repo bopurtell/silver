@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Public = Hardcaml_workbench_backend.Asic_public
-module Service = Hardcaml_workbench_backend.Asic_service
+open Silver_protocol
+module Public = Silver_backend.Asic_public
+module Service = Silver_backend.Asic_service
 
 let require ok message = if not ok then failwith message
 let set j key value =
@@ -81,7 +81,7 @@ let () =
       (`Assoc [ "configuration_bytes", `String "{\"MACROS\":{\"undeclared\":{}}}" ]));
   (* Old providers still support their macro-free plans, including Signoff. *)
   admit ~metadata:(metadata `Null) ~selection:{ selection with endpoint = "signoff" } (`Assoc []);
-  let config : Hardcaml_workbench_project_integration.Asic_config.t =
+  let config : Silver_project_integration.Asic_config.t =
     { schema_version = 1; project_executable = "/fixture/project"
     ; provider_executable = "/fixture/provider"; results_root = "/fixture/results"
     ; toolchain = "/fixture/tools"; python = None; support_tools = None; pdk_root = None

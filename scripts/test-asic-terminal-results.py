@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+from isolated_example import config_path
 import re
 import signal
 import subprocess
@@ -79,7 +80,7 @@ def private_project(args, receipt, inputs):
     root.mkdir()
     (args.evidence / 'state').mkdir()
     (root / 'dune-project').write_text('(lang dune 3.17)\n(name terminal_results_acceptance)\n')
-    config = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
+    config = metrics.parse((config_path(args.example_root, 'silver-asic.sexp')).read_text())
     allocation = receipt['allocation']
     provider = receipt.get('config', {}).get('provider', field(config, 'provider_executable'))
     execution = receipt['execution_file']
@@ -114,7 +115,7 @@ def private_project(args, receipt, inputs):
     config = metrics.put(config, 'provider_executable', str(guard))
     config = metrics.put(config, 'project_executable', str(deny))
     config = metrics.put(config, 'results_root', receipt['config']['results_root'])
-    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(config) + '\n')
+    (root / 'silver-asic.sexp').write_text(native_execution.sexp(config) + '\n')
     return root, Path(provider)
 
 
@@ -308,7 +309,7 @@ def exercise(args):
     else:
         require(receipt.get('outcome', {}).get('status') == 'failed' and not receipt.get('execution_completed'), 'Failed mode needs a real failed execution receipt')
     watched = [receipt_path.parent, Path(receipt['config']['results_root']),
-               args.example_root / 'hardcaml-workbench-asic.sexp', Path(receipt['config']['provider'])]
+               config_path(args.example_root, 'silver-asic.sexp'), Path(receipt['config']['provider'])]
     if inputs:
         watched += [args.physical_evidence, Path(inputs['operation']), Path(inputs['operation_attempt']), Path(inputs['results']['path'])]
     before = dashboard.inventory(watched)

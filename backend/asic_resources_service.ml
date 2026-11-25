@@ -1,7 +1,7 @@
 open! Core
 open! Async
 module Inspection = Asic_inspection
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Asic_resources
 module P = Asic_public
 

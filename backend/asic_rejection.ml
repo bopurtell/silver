@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module Public = Asic_public
 
 (* Only a complete, provider-validated journal prefix proves rejection before

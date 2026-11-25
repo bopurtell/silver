@@ -273,7 +273,7 @@ class Acceptance:
             (self.base / name).mkdir(mode=0o700)
         root = self.base / 'project'
         (root / 'dune-project').write_text('(lang dune 3.22)\n(name hierarchy_acceptance)\n')
-        (root / 'hardcaml-workbench.sexp').write_text(
+        (root / 'silver.sexp').write_text(
             '(lang hardcaml-workbench 1)\n(project (name hierarchy-acceptance))\n'
             '(dune (driver ./hierarchy-driver.exe))\n')
         # Private adapter boundary: no real Dune command is ever executed. The

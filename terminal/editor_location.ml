@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
-module Location = Hardcaml_workbench_backend.Module_jump.Location
+module Location = Silver_backend.Module_jump.Location
 
 let parse ~project text =
   let number text =

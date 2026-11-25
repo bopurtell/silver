@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Config = Hardcaml_workbench_project_integration.Simulation_config
+open Silver_protocol
+module Config = Silver_project_integration.Simulation_config
 
 val discover
   :  Config.t

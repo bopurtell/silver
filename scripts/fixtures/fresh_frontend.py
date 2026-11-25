@@ -25,7 +25,7 @@ def setup(args, label, check, preparation=True, configure=None, cold=False, befo
           attach=True, use_switch=True):
     f = api.Fixture(args, label, check)
     if not preparation:
-        (f.root / 'hardcaml-workbench-preparation.sexp').unlink()
+        (f.root / 'silver-preparation.sexp').unlink()
     # Generic source operations still request -j20; normalize only this private
     # daemon's wrapper, so every actual nested build has the authorized -j6 bound.
     wrapper = f.base / 'bin/dune'

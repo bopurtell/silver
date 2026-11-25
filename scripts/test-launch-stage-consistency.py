@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import secrets
 import signal
 import subprocess
@@ -55,7 +56,7 @@ def inventory(args):
     allocation = json.loads(allocation_file.read_text().splitlines()[0])
     require(allocation == dict(allocation, **manifest['allocation']), 'Historical allocation agrees with prepared manifest')
     attempts.append(Path(allocation['attempt']))
-    paths = [args.real_demo / 'manifest.json', root / 'hardcaml-workbench-asic.sexp', provider, allocation_file]
+    paths = [args.real_demo / 'manifest.json', config_path(root, 'silver-asic.sexp'), provider, allocation_file]
     for attempt in attempts:
         paths += list(attempt.glob('*.json'))
     paths += [Path(item['path']) for item in manifest['hashes']]
@@ -173,11 +174,11 @@ def real_acceptance(args, manifest, references, check):
         ' print(json.dumps(j)); raise SystemExit(0)\n' +
         'os.execv(' + repr(manifest['provider']) + ',[' + repr(manifest['provider']) + ']+a)\n')
     wrapper.chmod(0o700)
-    config = composition.parse((Path(manifest['project_root']) / 'hardcaml-workbench-asic.sexp').read_text())
+    config = composition.parse((config_path(Path(manifest['project_root']), 'silver-asic.sexp')).read_text())
     for entry in config:
         if entry[0] == 'provider_executable': entry[1] = str(wrapper)
         if entry[0] == 'results_root': entry[1] = str(base / 'results')
-    (root / 'hardcaml-workbench-asic.sexp').write_text(sexp(config))
+    (root / 'silver-asic.sexp').write_text(sexp(config))
     daemon = PrivateDaemon(args, base)
     try:
         http = daemon.start()

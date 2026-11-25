@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import re
 import shutil
 import signal
@@ -254,7 +255,7 @@ def prepare(args, cfg):
         'sys.stdout.buffer.write(p.stdout)\nsys.stderr.buffer.write(p.stderr)\nsys.exit(p.returncode)\n')
     guard.chmod(0o700)
     private_cfg = put(cfg, 'provider_executable', str(guard))
-    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(private_cfg) + '\n')
+    (root / 'silver-asic.sexp').write_text(native_execution.sexp(private_cfg) + '\n')
     new_identity = mach([str(root), identity[1], [private_cfg]])
     old_prefix, new_prefix = 'asic-' + digest(old_identity), 'asic-' + digest(new_identity)
     copied = []
@@ -303,7 +304,7 @@ def synthesis_checkpoint(report):
 
 
 def exercise(args):
-    config = args.example_root / 'hardcaml-workbench-asic.sexp'
+    config = config_path(args.example_root, 'silver-asic.sexp')
     cfg = parse(config.read_text())
     watched = [args.source_state, config, Path(field(cfg, 'results_root')),
                Path(field(cfg, 'provider_executable'))]

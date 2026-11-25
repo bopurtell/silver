@@ -64,7 +64,7 @@ def private_session(args, base, *, parallel=False):
         ("run_timeout_seconds", 30)]
     if parallel:
         config.append(("max_parallel_runs", 2))
-    (root / "hardcaml-workbench-simulation.sexp").write_text(sexp(config))
+    (root / "silver-simulation.sexp").write_text(sexp(config))
     session = native.Session(args, base, root)
     session.env.update(HOME=str(base / "home"), XDG_CONFIG_HOME=str(base / "config"))
     return native, session, run_log

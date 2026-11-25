@@ -1,4 +1,4 @@
 (tests
  (names test_authoring test_bluespec_authoring test_starter)
- (libraries core core_unix hardcaml_workbench_backend hardcaml_workbench_protocol)
+ (libraries core core_unix silver_backend silver_protocol)
  (preprocess (pps ppx_jane)))

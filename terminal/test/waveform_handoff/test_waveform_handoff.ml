@@ -1,11 +1,11 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module T = Terminal_presentation.Testing_workspace
 module V = Terminal_presentation.Simulation_view
 module E = Terminal_presentation.Simulation_export
 module W = Terminal_presentation.Waveform_view
 module S = Simulation
-module Pins = Hardcaml_workbench_workspaces.Waveforms
+module Pins = Silver_workspaces.Waveforms
 module H = Terminal_presentation.Workspace_host
 module HV = Terminal_presentation.Host_view
 
@@ -102,7 +102,7 @@ let () =
     (Option.equal String.equal (T.selected_artifact mixed) (Some json.id));
   let host t =
     let h, _, find =
-      HV.refinement_fixture Hardcaml_workbench_workspaces.Testing.definition
+      HV.refinement_fixture Silver_workspaces.Testing.definition
     in
     let tile = find "simulation-artifacts" in
     let h = H.set_simulation { h with focus = Some tile.id } tile.id (T.view t) in

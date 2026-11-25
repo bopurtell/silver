@@ -13,8 +13,8 @@ import unittest
 
 
 BINARY = str(Path(sys.argv.pop(1)).resolve())
-CONFIG = "hardcaml-workbench-simulation.sexp"
-COMMON_CONFIG = Path(".workbench") / CONFIG
+CONFIG = "silver-simulation.sexp"
+COMMON_CONFIG = Path(".silver") / CONFIG
 CATALOG = ("((protocol_version 1)(suites(((id fifo)(label FIFO)(cases(((id directed)"
            "(label Directed))((id random)(label Random))))(parameters())(default_seed 7)))))")
 
@@ -157,7 +157,7 @@ class SimulationSetupTests(unittest.TestCase):
 
     def test_common_directory_symlink_rejected_without_provider_execution(self):
         provider = self.provider("exit 0")
-        (self.root / ".workbench").symlink_to(self.base, target_is_directory=True)
+        (self.root / ".silver").symlink_to(self.base, target_is_directory=True)
         self.invoke("init", "--root", self.root, "--provider-executable", provider, success=False)
         result = self.invoke("check", "--root", self.root, success=False)
         self.assertIn("symlink", result.stdout)

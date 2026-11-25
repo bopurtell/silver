@@ -603,7 +603,7 @@ def main():
         (root / 'dune').write_text('(rule (target publisher.exe) (deps publisher-source build-trigger) '
                                   '(action (run ' + sexp(sys.executable) + ' ' + sexp(str(fresh)) +
                                   ' build ' + sexp(str(root)) + ')))\n')
-        (root / 'hardcaml-workbench-preparation.sexp').write_text(sexp([
+        (root / 'silver-preparation.sexp').write_text(sexp([
             ['schema_version', 1], ['build_target', 'publisher.exe'],
             ['results_root', str(base / 'publication')], ['timeout_seconds', 30]]))
         for name in ('tmp', 'cache', 'data', 'runtime', 'opam-logs'):

@@ -1,8 +1,8 @@
 open! Core
 module I = Asic_inspection
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module P = Asic_public
-module W = Hardcaml_workbench_protocol.Asic_inspection
+module W = Silver_protocol.Asic_inspection
 module R = W.Reinspection
 module Timing = Asic_timing_analysis
 

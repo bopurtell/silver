@@ -1,6 +1,6 @@
 open! Core
-module Manifest = Hardcaml_workbench_project_integration.Manifest
-module Location = Hardcaml_workbench_project_integration.Config_location
+module Manifest = Silver_project_integration.Manifest
+module Location = Silver_project_integration.Config_location
 
 type t =
   { root : string

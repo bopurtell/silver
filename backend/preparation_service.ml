@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Preparation
-module Config = Hardcaml_workbench_project_integration.Preparation_config
-module Adapter = Hardcaml_workbench_adapters.Preparation_adapter
+module Config = Silver_project_integration.Preparation_config
+module Adapter = Silver_adapters.Preparation_adapter
 
 type attempt =
   { mutable value : Attempt.t
@@ -35,14 +35,14 @@ type t =
       Config.t
       -> root:string
       -> environment:V1.Environment_selection.t
-      -> Hardcaml_workbench_adapters.Dune_adapter.Invocation.t
+      -> Silver_adapters.Dune_adapter.Invocation.t
   ; emit :
       Config.t
       -> root:string
       -> environment:V1.Environment_selection.t
       -> selection:Selection.t
       -> expected_plan_identity:string option
-      -> Hardcaml_workbench_adapters.Dune_adapter.Invocation.t
+      -> Silver_adapters.Dune_adapter.Invocation.t
   }
 
 let create ?(build = Adapter.build) ?(emit = Adapter.emit) () =
@@ -76,10 +76,10 @@ let load_config root =
   let%map result =
     Monitor.try_with_or_error (fun () ->
       In_thread.run (fun () ->
-        Hardcaml_workbench_project_integration.Config_location.resolve
+        Silver_project_integration.Config_location.resolve
           ~root
           ~filename:Config.filename
-          ~max_bytes:Hardcaml_workbench_project_integration.Config_location.max_config_bytes
+          ~max_bytes:Silver_project_integration.Config_location.max_config_bytes
         |> Or_error.ok_exn
         |> Option.map ~f:(fun file ->
           Config.parse_string ~root file.contents |> Or_error.ok_exn)))

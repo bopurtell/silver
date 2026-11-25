@@ -4,7 +4,7 @@
     invocation and supplies completed command output to the parsing functions. *)
 
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module Invocation : sig
   type t =

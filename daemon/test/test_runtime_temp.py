@@ -39,7 +39,7 @@ def exercise(daemon, fixture, *, explicit):
   (run sh -c "printf '#!/bin/sh\\n#%s\\nprintf \\"%%s\\" \\"$TMPDIR\\" > emit-tmp\\nexit 2\\n' \\"$TMPDIR\\" > project.exe; chmod +x project.exe")))
 """
     )
-    (project / "hardcaml-workbench-preparation.sexp").write_text(
+    (project / "silver-preparation.sexp").write_text(
         f'((schema_version 1)(build_target project.exe)'
         f'(results_root {json.dumps(str(fixture / "results"))})(timeout_seconds 20))'
     )

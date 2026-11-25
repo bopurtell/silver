@@ -31,7 +31,7 @@ select the attempt and its waveform artifact; press **w** to inspect it. A
 plain Bazel test job gives you its process result; the structured run also
 retains the trace with the attempt.
 
-The starter's `.workbench/hardcaml-workbench-simulation.sexp` runs
+The starter's `.silver/silver-simulation.sexp` runs
 `simulation_provider.py` relative to the project root, so moving the checkout
 does not break the registration. If you copy the project to another host,
 check that `provider_executable` names Python 3 on that host.
@@ -86,12 +86,11 @@ module, flow, or test case in the checkout.
 | What is this Silver project called, and what should Build and Test launch? | `.silver/project.json`: a name and explicit Bazel labels. Dune-backed projects continue to use their existing integration. |
 | Which sources, dependencies and commands build the RTL or test? | The project's Bazel rules. Both labels work headlessly and Silver does not mirror their dependency graph. |
 | What is instantiated in the hardware? | The elaborated design. A build dependency might instantiate zero modules or hundreds; a Bazel package tree isn't an RTL hierarchy. |
-| Which suite, cases and seeds can the user run? | The simulation provider registered in `.workbench/`. Silver owns attempt identity, supervision and retained artifacts. |
+| Which suite, cases and seeds can the user run? | The simulation provider registered in `.silver/`. Silver owns attempt identity, supervision and retained artifacts. |
 | What does a physical flow do? | Its provider. Project intent can associate a target with a flow; the provider defines stages, validates inputs and interprets evidence. |
 
-`.silver/` is not a replacement for `.workbench/`, nor is `.dev/` required in a
-design checkout. Keep existing companion files where their resolvers expect
-them. Classic Bluespec is the Haskell-style `.bs` language compiled by `bsc`;
+`.silver/` holds both the Bazel project marker and companion integration files;
+`.dev/` is not required in a design checkout. Classic Bluespec is the Haskell-style `.bs` language compiled by `bsc`;
 using the installed compiler does not make the design a Cabal project.
 
 ## Which action elaborates the design?

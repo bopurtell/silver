@@ -1,9 +1,9 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Config = Hardcaml_workbench_project_integration.Simulation_config
-module Location = Hardcaml_workbench_project_integration.Config_location
-module Codec = Hardcaml_workbench_project_integration.Simulation_protocol
-module Adapter = Hardcaml_workbench_adapters.Simulation_adapter
+open Silver_protocol
+module Config = Silver_project_integration.Simulation_config
+module Location = Silver_project_integration.Config_location
+module Codec = Silver_project_integration.Simulation_protocol
+module Adapter = Silver_adapters.Simulation_adapter
 module Limits = Simulation.Limits
 
 let default_discovery_timeout_seconds = 10
@@ -304,7 +304,7 @@ let append_bounded buffer bytes ~length ~limit =
 (* Run one discovery process. Returns stdout, a bounded stderr tail and a failure reason
    if the process did not complete validly. *)
 let run_discovery
-  ~(invocation : Hardcaml_workbench_adapters.Dune_adapter.Invocation.t)
+  ~(invocation : Silver_adapters.Dune_adapter.Invocation.t)
   ~timeout_seconds
   =
   let stderr = Buffer.create 1024 in

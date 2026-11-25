@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Compact presentation over existing typed evidence. No IO, parsing producer JSON,
     guessed stage attribution, derived acceptance, or implicit requests. *)

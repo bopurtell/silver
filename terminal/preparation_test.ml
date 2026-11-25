@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module H = Workspace_host
 module O = Overview_tiles
@@ -47,7 +47,7 @@ let%test_unit "failure overview unwraps nested OCaml failure and keeps raw detai
   assert (String.equal (Presentation.failure_summary raw)
             "Final observation unavailable: missing preflight after rejected placement");
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let run = { (Asic_snapshot_fixture.run Asic_snapshot_fixture.run_a) with
     status = "observation_unavailable"; error = Some raw } in
@@ -80,7 +80,7 @@ let%test_unit "manual launch palette retains exact local stage receipt through \
                same-selection supersession and restaging"
   =
   let host, _, _ =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let first = Asic_snapshot_fixture.fresh_intent "local-receipt" in
   let foreign = { first with id = "other-client-same-selection-and-scope" } in
@@ -116,7 +116,7 @@ let%test_unit "selected run Elaboration uses durable workflow linkage, never lat
                preparation or matching plan"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let intent = Asic_snapshot_fixture.fresh_intent "linked" in
   let linked =
@@ -162,7 +162,7 @@ let%test_unit "fresh manual launch captures intent, preallocation progress cance
                workflow and late allocation keeps context guard"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let intent = Asic_snapshot_fixture.fresh_intent "manual" in
   let snapshot = { Asic_snapshot_fixture.snapshot with fresh_intent = Some intent } in
@@ -245,7 +245,7 @@ let%test_unit "emission and checklist distinguish unavailable from supported not
                requested, including no selected ASIC run"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let empty =
     { (Preparation_view.fixture_snapshot ()) with latest = None; history = [] }
@@ -405,7 +405,7 @@ let%test_unit "preparation input form captures exact selected inputs and rejects
                captured workspace"
   =
   let host, _, _ =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let capture = H.capture host |> Option.value_exn in
   let form capture =
@@ -445,7 +445,7 @@ let%test_unit "preparation tile keyboard inspection and history preserve stage l
                physical run isolation"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let tile = find "preparation" in
   let snapshot = Preparation_view.fixture_snapshot () in
@@ -590,7 +590,7 @@ let%test_unit "staged elaboration plan shares compact planned-run rendering and 
                exact expanded receipts for ready, stale, consumed and unavailable inputs"
   =
   let host, data, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let tile = find "planned-run" in
   let staged : Preparation.Staged.t =

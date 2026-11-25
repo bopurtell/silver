@@ -87,7 +87,7 @@ class IsolatedExampleTest(unittest.TestCase):
 
     def test_common_only_configs_rewritten_in_place(self):
         self.rewrite()
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         for name in (example.ASIC, example.PREPARATION):
             (self.root / name).rename(common / name)
@@ -102,7 +102,7 @@ class IsolatedExampleTest(unittest.TestCase):
 
     def test_identical_common_and_legacy_configs_stay_identical_after_rewrite(self):
         self.rewrite()
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         for name in (example.ASIC, example.PREPARATION):
             (common / name).write_bytes((self.root / name).read_bytes())
@@ -118,7 +118,7 @@ class IsolatedExampleTest(unittest.TestCase):
 
     def test_conflicting_locations_rejected_before_rewrite(self):
         self.rewrite()
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         legacy = self.root / example.ASIC
         before = legacy.read_bytes()
@@ -129,7 +129,7 @@ class IsolatedExampleTest(unittest.TestCase):
         self.assertEqual(before, legacy.read_bytes())
 
     def test_common_config_symlinks_rejected_by_reader(self):
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         (common / example.ASIC).symlink_to(self.base / 'missing')
         with self.assertRaisesRegex(example.SetupError, 'Symlink'):

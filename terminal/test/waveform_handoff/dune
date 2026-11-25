@@ -1,4 +1,4 @@
 (test
  (name test_waveform_handoff)
- (libraries core terminal_presentation hardcaml_workbench_protocol hardcaml_workbench_workspaces)
+ (libraries core terminal_presentation silver_protocol silver_workspaces)
  (preprocess (pps ppx_jane)))

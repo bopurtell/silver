@@ -14,8 +14,8 @@ import subprocess
 
 CATALOG = "hardcaml-asic-targets.json"
 SILVER_CONFIG = {
-    ".workbench/hardcaml-workbench-asic.sexp",
-    ".workbench/hardcaml-workbench-preparation.sexp",
+    ".silver/silver-asic.sexp",
+    ".silver/silver-preparation.sexp",
 }
 METRIC = "design__instance__count"
 FIXTURE_IDENTITY = "Silver acceptance fixture <silver-fixture@example.invalid>"

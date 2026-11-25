@@ -1,5 +1,5 @@
 open! Core
-module Integration = Hardcaml_workbench_project_integration
+module Integration = Silver_project_integration
 module Location = Integration.Config_location
 
 type copy =
@@ -55,7 +55,7 @@ let preview t =
   match t.copies with
   | [] -> "No configuration copies needed.\n"
   | copies ->
-    let directory = Filename.concat t.root ".workbench" in
+    let directory = Filename.concat t.root ".silver" in
     (if No_clobber.exists directory then "" else sprintf "Create directory %s\n" directory)
     ^ String.concat
         (List.map copies ~f:(fun copy ->
@@ -64,14 +64,8 @@ let preview t =
 
 let require_absent ~root ~filename =
   filesystem_result (fun () ->
-    let legacy = Location.legacy_path ~root ~filename in
-    let common = Location.preferred_path ~root ~filename in
     let occupied () =
-      if No_clobber.exists legacy
-      then Some legacy
-      else if No_clobber.exists common
-      then Some common
-      else None
+      List.find (Location.candidate_paths ~root ~filename) ~f:No_clobber.exists
     in
     let refuse path = Error (No_clobber.existing_error path) in
     match occupied () with
@@ -90,7 +84,7 @@ let require_absent ~root ~filename =
 
 let ensure_common_directory ~root =
   filesystem_result (fun () ->
-    let directory = Filename.concat root ".workbench" in
+    let directory = Filename.concat root ".silver" in
     (try Core_unix.mkdir ~perm:0o700 directory with
      | Core_unix.Unix_error (EEXIST, _, _) -> ());
     if not (Poly.equal (Core_unix.lstat directory).st_kind S_DIR)

@@ -33,20 +33,20 @@ rm -rf "$fixture/_build"
 rm -rf \
   "$integrated_fixture/_build" "$manifest_fixture/_build" \
   "$missing_driver_fixture/_build" "$invalid_manifest_fixture/_build"
-rm -f "$fixture/hardcaml-workbench.sexp"
+rm -f "$fixture/silver.sexp"
 rm -rf "$fixture/workbench"
 rm -rf "$manifest_fixture/workbench"
-cat >"$manifest_fixture/hardcaml-workbench.sexp" <<'EOF'
+cat >"$manifest_fixture/silver.sexp" <<'EOF'
 (lang hardcaml-workbench 1)
 (project (name manifest-only-fixture))
 (dune (build_alias @workbench-build) (test_alias @workbench-test))
 EOF
-cat >"$missing_driver_fixture/hardcaml-workbench.sexp" <<'EOF'
+cat >"$missing_driver_fixture/silver.sexp" <<'EOF'
 (lang hardcaml-workbench 1)
 (project (name missing-driver-fixture))
 (dune (driver ./workbench/missing_driver.exe))
 EOF
-cat >"$invalid_manifest_fixture/hardcaml-workbench.sexp" <<'EOF'
+cat >"$invalid_manifest_fixture/silver.sexp" <<'EOF'
 (lang hardcaml-workbench 99)
 (project (name invalid-manifest-fixture))
 (dune)
@@ -56,7 +56,7 @@ cat >"$initialized_fixture/dune-project" <<'EOF'
 (name installed_init_fixture)
 EOF
 
-metadata_path="$runtime/hardcaml-workbench/daemon.sexp"
+metadata_path="$runtime/silver/daemon.sexp"
 client="$prefix/bin/hardcaml-workbench"
 
 metadata_field() {
@@ -92,9 +92,9 @@ trap cleanup EXIT
 (
   cd "$repo_root"
   "$repo_root/scripts/with-switch.sh" dune build --build-dir "$build_dir" \
-    -j"$build_jobs" -p hardcaml_workbench @install
+    -j"$build_jobs" -p silver @install
   "$repo_root/scripts/with-switch.sh" dune install --build-dir "$build_dir" \
-    -j"$build_jobs" --prefix "$prefix" hardcaml_workbench
+    -j"$build_jobs" --prefix "$prefix" silver
 )
 
 # Keep toolchain lookup available to the broader checks, while installed application
@@ -119,15 +119,15 @@ grep -Fq "Jobs: 0" "$work_root/before-init.txt"
 "$prefix/bin/hardcaml-workbench-init" --root "$initialized_fixture" \
   --project-name installed-initialized --build-alias @saved-build --test-alias @saved-test \
   >"$work_root/initialize.txt"
-cp "$initialized_fixture/hardcaml-workbench.sexp" "$work_root/initialized-manifest.sexp"
+cp "$initialized_fixture/.silver/silver.sexp" "$work_root/initialized-manifest.sexp"
 if "$prefix/bin/hardcaml-workbench-init" --root "$initialized_fixture" \
   >"$work_root/reinitialize.txt" 2>&1; then
   echo "error: installed initializer unexpectedly clobbered a manifest" >&2
   exit 1
 fi
-cmp "$initialized_fixture/hardcaml-workbench.sexp" "$work_root/initialized-manifest.sexp"
-grep -Fq '(build_alias @saved-build)' "$initialized_fixture/hardcaml-workbench.sexp"
-grep -Fq '(test_alias @saved-test)' "$initialized_fixture/hardcaml-workbench.sexp"
+cmp "$initialized_fixture/.silver/silver.sexp" "$work_root/initialized-manifest.sexp"
+grep -Fq '(build_alias @saved-build)' "$initialized_fixture/.silver/silver.sexp"
+grep -Fq '(test_alias @saved-test)' "$initialized_fixture/.silver/silver.sexp"
 XDG_RUNTIME_DIR="$runtime" "$client" --plain --project-root "$initialized_fixture" \
   --environment inherited >"$work_root/initialized-before-reload.txt"
 grep -Fq "Integration: Generic_dune" "$work_root/initialized-before-reload.txt"
@@ -182,7 +182,7 @@ grep -Fq "Jobs: 0" "$outside/first.txt"
 XDG_RUNTIME_DIR="$runtime" \
   "$repo_root/scripts/test-terminal-resize.py" "$client" \
   --project-root "$fixture" --environment "opam:$switch" \
-  --expect-project-name hardcaml_workbench_fixture
+  --expect-project-name silver_fixture
 
 # A single attached terminal session must consume discovery events and render the result.
 XDG_RUNTIME_DIR="$runtime" \
@@ -194,7 +194,7 @@ XDG_RUNTIME_DIR="$explicit_runtime" "$client" --plain --connect "$first_endpoint
   --project-root "$fixture" --environment "opam:$switch" \
   >"$work_root/explicit-success.txt"
 grep -Fq "root=$fixture" "$work_root/explicit-success.txt"
-test ! -e "$explicit_runtime/hardcaml-workbench/daemon.sexp"
+test ! -e "$explicit_runtime/silver/daemon.sexp"
 
 # Submit without waiting, let that client exit, and observe the same daemon-owned job.
 XDG_RUNTIME_DIR="$runtime" "$client" --plain --project-root "$fixture" \
@@ -437,7 +437,7 @@ if XDG_RUNTIME_DIR="$explicit_runtime" "$client" --plain --connect http://127.0.
   echo "error: unreachable explicit endpoint unexpectedly succeeded" >&2
   exit 1
 fi
-test ! -e "$explicit_runtime/hardcaml-workbench/daemon.sexp"
+test ! -e "$explicit_runtime/silver/daemon.sexp"
 
 kill -TERM "$concurrent_pid"
 wait_dead "$concurrent_pid"

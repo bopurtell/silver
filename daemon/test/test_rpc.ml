@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Rpc = Hardcaml_workbench_rpc_server.Rpc_server
-module Service = Hardcaml_workbench_backend.Service
-module Dune = Hardcaml_workbench_adapters.Dune_adapter
+open Silver_protocol
+module Rpc = Silver_rpc_server.Rpc_server
+module Service = Silver_backend.Service
+module Dune = Silver_adapters.Dune_adapter
 
 let require condition message = if not condition then raise_s [%message message]
 
@@ -137,11 +137,11 @@ let test_legacy_asic_server () =
     ~finally:(fun () -> Cohttp_async.Server.close server)
     (fun () ->
       let client =
-        Hardcaml_workbench_native_http.Client.create
+        Silver_native_http.Client.create
           (sprintf "http://127.0.0.1:%d" (Cohttp_async.Server.listening_on server))
       in
       let%map response =
-        Hardcaml_workbench_native_http.Client.asic
+        Silver_native_http.Client.asic
           client
           { instance_id = "legacy-instance"
           ; project = Project_id.of_string "legacy-project"
@@ -209,11 +209,11 @@ let test_legacy_simulation_server () =
     ~finally:(fun () -> Cohttp_async.Server.close server)
     (fun () ->
       let client =
-        Hardcaml_workbench_native_http.Client.create
+        Silver_native_http.Client.create
           (sprintf "http://127.0.0.1:%d" (Cohttp_async.Server.listening_on server))
       in
       let%map response =
-        Hardcaml_workbench_native_http.Client.simulation
+        Silver_native_http.Client.simulation
           client
           { instance_id = "legacy-instance"
           ; project = Project_id.of_string "legacy-project"
@@ -352,10 +352,10 @@ let test_bazel_project ~simulation_fixture ~directory =
               (log.eof && String.equal text (sprintf "bazel %s %s\n" name label))
               "Bazel did not receive the declared arguments or stream its log")
       in
-      let common_config = Filename.concat root ".workbench" in
+      let common_config = Filename.concat root ".silver" in
       Core_unix.mkdir common_config;
       Out_channel.write_all
-        (Filename.concat common_config "hardcaml-workbench-simulation.sexp")
+        (Filename.concat common_config "silver-simulation.sexp")
         ~data:
           (sprintf
              "((schema_version 1)(provider_executable /usr/bin/python3)(provider_args (%s))\
@@ -860,11 +860,11 @@ let run ~build_jobs ~simulation_fixture () =
           ~finally:(fun () -> Cohttp_async.Server.close server)
           (fun () ->
             let client =
-              Hardcaml_workbench_native_http.Client.create
+              Silver_native_http.Client.create
                 (sprintf "http://127.0.0.1:%d" (Cohttp_async.Server.listening_on server))
             in
             let%map result =
-              Hardcaml_workbench_native_http.Client.preparation client preparation_request
+              Silver_native_http.Client.preparation client preparation_request
             in
             let received = Or_error.ok_exn result |> ok in
             require
@@ -911,7 +911,7 @@ let run ~build_jobs ~simulation_fixture () =
              ])
       in
       let timing_analysis : Asic.Timing_analysis.t =
-        Hardcaml_workbench_backend.Asic_timing_analysis.parse_for_attempt
+        Silver_backend.Asic_timing_analysis.parse_for_attempt
           ~attempt_id:"r"
           ~execution_file:"/public/execution.json"
           ~execution_sha256:(String.make 64 'b')
@@ -961,7 +961,7 @@ let run ~build_jobs ~simulation_fixture () =
         }
       in
       let normalized_digest =
-        Hardcaml_workbench_backend.Asic_public.digest
+        Silver_backend.Asic_public.digest
           (Sexp.to_string_mach (Asic.Summary.sexp_of_t summary))
       in
       let summary_blob =
@@ -975,9 +975,9 @@ let run ~build_jobs ~simulation_fixture () =
         (Filename.concat
            directory
            ("asic-"
-            ^ Hardcaml_workbench_backend.Asic_public.digest identity
+            ^ Silver_backend.Asic_public.digest identity
             ^ "-summary-v1-"
-            ^ Hardcaml_workbench_backend.Asic_public.digest summary.source_digest
+            ^ Silver_backend.Asic_public.digest summary.source_digest
             ^ ".summary.sexp"))
         ~data:(Sexp.to_string_mach summary_blob);
       let registry =
@@ -992,7 +992,7 @@ let run ~build_jobs ~simulation_fixture () =
       Out_channel.write_all
         (Filename.concat
            directory
-           ("asic-" ^ Hardcaml_workbench_backend.Asic_public.digest identity ^ ".sexp"))
+           ("asic-" ^ Silver_backend.Asic_public.digest identity ^ ".sexp"))
         ~data:(Sexp.to_string_mach registry);
       let%bind (_ : string) =
         post

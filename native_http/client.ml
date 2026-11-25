@@ -1,7 +1,7 @@
 open! Core
 open! Async
 module Runtime_error = Error
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 type t =
   { endpoint : Uri.t

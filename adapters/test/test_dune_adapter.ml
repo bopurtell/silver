@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_adapters
-open Hardcaml_workbench_protocol
+open Silver_adapters
+open Silver_protocol
 
 let%expect_test "selected environments produce complete argv" =
   let root = "/work/project" in
@@ -203,7 +203,7 @@ let%expect_test "workspace parser rejects unversioned shapes" =
 ;;
 
 let%test_unit "driver identities are scoped to their project session" =
-  let target : Hardcaml_workbench_project_integration.Driver_protocol.Target.t =
+  let target : Silver_project_integration.Driver_protocol.Target.t =
     { key = "counter"
     ; name = "Counter"
     ; top = "counter"
@@ -213,7 +213,7 @@ let%test_unit "driver identities are scoped to their project session" =
     }
   in
   let response
-    : Hardcaml_workbench_project_integration.Driver_protocol.Describe_response.t
+    : Silver_project_integration.Driver_protocol.Describe_response.t
     =
     { protocol_version = 1
     ; capabilities = [ "describe" ]

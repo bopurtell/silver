@@ -1,14 +1,14 @@
 (library
- (name hardcaml_workbench_backend)
+ (name silver_backend)
  (libraries
   async
   core
   core_unix
   cryptokit
   yojson
-  hardcaml_workbench_adapters
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_adapters
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint

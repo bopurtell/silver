@@ -1,6 +1,6 @@
 open! Core
 open! Async
-module Adapter = Hardcaml_workbench_adapters.Asic_adapter
+module Adapter = Silver_adapters.Asic_adapter
 
 let candidates ~override ~path =
   match override with
@@ -16,7 +16,7 @@ let candidates ~override ~path =
       List.map [ "hardcaml-asic-flow"; "hardcaml_asic" ] ~f:(Filename.concat dir))
 ;;
 
-let find ?(environment = Hardcaml_workbench_protocol.V1.Environment_selection.Inherit_daemon)
+let find ?(environment = Silver_protocol.V1.Environment_selection.Inherit_daemon)
     ~override ~path () =
   let rec loop = function
     | [] ->

@@ -53,9 +53,9 @@ class LookupTests(unittest.TestCase):
     def test_all_four_basenames_legacy_common_equal_and_byte_conflict(self):
         for name in location.BASENAMES:
             with self.subTest(name=name):
-                old, common = self.root / name, self.root / '.workbench' / name
+                old, common = self.root / location.legacy_name(name), self.root / '.silver' / name
                 self.assertEqual(location.copies(self.root, name), {})
-                self.assertEqual(location.destinations(self.root, name), (old,))
+                self.assertEqual(location.destinations(self.root, name), (common,))
                 old.write_bytes(b'same\x00bytes\n')
                 self.assertEqual(location.selected(self.root, name), old)
                 common.parent.mkdir(exist_ok=True)
@@ -72,7 +72,7 @@ class LookupTests(unittest.TestCase):
 
     def test_unsafe_common_never_falls_back(self):
         name = location.BASENAMES[0]
-        old, common = self.root / name, self.root / '.workbench' / name
+        old, common = self.root / location.legacy_name(name), self.root / '.silver' / name
         old.write_bytes(b'legacy')
         common.parent.mkdir()
         for kind in ('dangling', 'symlink', 'directory', 'fifo', 'large'):
@@ -106,11 +106,11 @@ class MainConsumers(unittest.TestCase):
 
     def common(self, duplicate=False):
         for kind in main.KINDS:
-            old = self.root / ('hardcaml-workbench-' + kind + '.sexp')
-            common = self.root / '.workbench' / old.name
-            self.file(common, old.read_bytes())
-            if not duplicate:
-                old.unlink()
+            name = 'silver-' + kind + '.sexp'
+            common = self.root / '.silver' / name
+            old = self.root / location.legacy_name(name)
+            if duplicate:
+                self.file(old, common.read_bytes())
 
     def test_common_only_prepare_publish_and_verify_preserve_root_meaning(self):
         self.common()
@@ -119,7 +119,7 @@ class MainConsumers(unittest.TestCase):
         main.verify_install(self.root, self.store, published=True)
         for kind in main.KINDS:
             path = main.companion(self.root, kind)
-            self.assertEqual(path.parent, self.root / '.workbench')
+            self.assertEqual(path.parent, self.root / '.silver')
             self.assertFalse((self.root / path.name).exists())
         fields = dict(main.parse(main.companion(self.root, 'asic').read_text()))
         self.assertEqual(fields['project_executable'], str(self.root / '_build/default' / main.TARGETS[0]))
@@ -132,8 +132,8 @@ class MainConsumers(unittest.TestCase):
         main.verify_install(self.root, self.store, published=True)
         for kind in main.KINDS:
             common = main.companion(self.root, kind)
-            self.assertEqual(common.parent, self.root / '.workbench')
-            self.assertEqual(common.read_bytes(), (self.root / common.name).read_bytes())
+            self.assertEqual(common.parent, self.root / '.silver')
+            self.assertEqual(common.read_bytes(), (self.root / location.legacy_name(common.name)).read_bytes())
             self.assertEqual(len(result['config_paths'][kind]), 2)
 
     def test_conflict_blocks_publish_before_any_write(self):
@@ -146,7 +146,7 @@ class MainConsumers(unittest.TestCase):
         self.assertFalse((self.store / 'publications').exists())
         self.assertEqual(common.read_bytes(), b'unknown edit')
         for kind in main.KINDS:
-            self.assertEqual((self.root / ('hardcaml-workbench-' + kind + '.sexp')).read_bytes(), self.originals[kind])
+            self.assertEqual((self.root / location.legacy_name('silver-' + kind + '.sexp')).read_bytes(), self.originals[kind])
 
     def test_dual_publication_partial_failure_restores_both_locations(self):
         self.common(duplicate=True)
@@ -165,7 +165,7 @@ class MainConsumers(unittest.TestCase):
         for kind in main.KINDS:
             common = main.companion(self.root, kind)
             self.assertEqual(common.read_bytes(), self.originals[kind])
-            self.assertEqual((self.root / common.name).read_bytes(), self.originals[kind])
+            self.assertEqual((self.root / location.legacy_name(common.name)).read_bytes(), self.originals[kind])
         self.assertFalse((self.store / 'publication-pending.json').exists())
 
 
@@ -181,47 +181,46 @@ class InstallerConsumers(unittest.TestCase):
 
     def test_common_only_owned_refresh_does_not_recreate_legacy(self):
         self.install()
-        common = self.root / '.workbench' / self.config.name
-        common.parent.mkdir()
-        self.config.rename(common)
+        common = self.config
+        legacy = self.root / location.legacy_name(common.name)
         result = self.install()
-        self.assertFalse(self.config.exists())
+        self.assertFalse(legacy.exists())
         self.assertEqual(installer.digest(common.read_bytes()), result['config_sha256'])
 
     def test_identical_duplicates_refresh_both(self):
         self.install()
-        common = self.root / '.workbench' / self.config.name
-        common.parent.mkdir()
-        common.write_bytes(self.config.read_bytes())
+        common = self.config
+        legacy = self.root / location.legacy_name(common.name)
+        legacy.write_bytes(common.read_bytes())
         result = self.install()
-        self.assertEqual(common.read_bytes(), self.config.read_bytes())
+        self.assertEqual(common.read_bytes(), legacy.read_bytes())
         self.assertEqual(installer.digest(common.read_bytes()), result['config_sha256'])
 
     def test_conflict_refused_before_build_or_receipt(self):
         self.install()
-        common = self.root / '.workbench' / self.config.name
-        common.parent.mkdir()
-        common.write_bytes(b'edited')
+        common = self.config
+        legacy = self.root / location.legacy_name(common.name)
+        legacy.write_bytes(b'edited')
         before = set(self.root.rglob('*'))
         with patch.object(installer.subprocess, 'run', side_effect=AssertionError('unexpected build')):
             with self.assertRaisesRegex(RuntimeError, 'Conflicting'):
                 self.install(['--build'])
         self.assertEqual(set(self.root.rglob('*')), before)
-        self.assertEqual(common.read_bytes(), b'edited')
+        self.assertEqual(legacy.read_bytes(), b'edited')
 
     def test_dual_refresh_failure_restores_owned_config_and_manifest(self):
         self.install()
-        common = self.root / '.workbench' / self.config.name
-        common.parent.mkdir()
-        old = self.config.read_bytes()
-        common.write_bytes(old)
+        common = self.config
+        legacy = self.root / location.legacy_name(common.name)
+        old = common.read_bytes()
+        legacy.write_bytes(old)
         ownership = self.root / '.dev/fifo-simulation-install.json'
         before = ownership.read_bytes()
         replace = installer.replace_bytes
         failed = False
         def fail(path, data):
             nonlocal failed
-            if path == self.config and not failed:
+            if path == legacy and not failed:
                 failed = True
                 raise OSError('injected duplicate refresh failure')
             return replace(path, data)
@@ -229,7 +228,7 @@ class InstallerConsumers(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'duplicate refresh failure'):
                 self.install()
         self.assertEqual(common.read_bytes(), old)
-        self.assertEqual(self.config.read_bytes(), old)
+        self.assertEqual(legacy.read_bytes(), old)
         self.assertEqual(ownership.read_bytes(), before)
 
 
@@ -243,10 +242,10 @@ class DevelopmentPublication(unittest.TestCase):
         self.old = self.generation('old', b'old')
         self.new = self.generation('new', b'new')
         dev.select_generation(self.store, self.old['generation'])
-        (self.project / '.workbench').mkdir()
+        (self.project / '.silver').mkdir()
         for kind in dev.CONFIGS:
             name = dev.config_name(kind)
-            for path in (self.project / name, self.project / '.workbench' / name):
+            for path in (self.project / location.legacy_name(name), self.project / '.silver' / name):
                 path.write_bytes(b'old')
         self.receipt = self.store / 'receipts/new'
         self.receipt.mkdir(parents=True)
@@ -285,17 +284,17 @@ class DevelopmentPublication(unittest.TestCase):
         with patch.object(dev, 'verify'):
             dev.publish(self.store, self.old, self.new, receipt)
         for kind in dev.CONFIGS:
-            self.assertEqual(dev.config_paths(self.project, kind)[0].parent, self.project / '.workbench')
+            self.assertEqual(dev.config_paths(self.project, kind)[0].parent, self.project / '.silver')
             for path in dev.config_paths(self.project, kind):
                 self.assertEqual(path.read_bytes(), b'new')
 
     def test_common_only_publication_does_not_recreate_root_copies(self):
         for kind in dev.CONFIGS:
-            (self.project / dev.config_name(kind)).unlink()
+            (self.project / location.legacy_name(dev.config_name(kind))).unlink()
         with patch.object(dev, 'verify'):
             dev.publish(self.store, self.old, self.new, self.receipt)
         for kind in dev.CONFIGS:
-            self.assertFalse((self.project / dev.config_name(kind)).exists())
+            self.assertFalse((self.project / location.legacy_name(dev.config_name(kind))).exists())
             self.assertEqual(dev.config_paths(self.project, kind)[0].read_bytes(), b'new')
 
     def test_development_verifier_selects_common_and_rejects_conflicts(self):
@@ -309,7 +308,7 @@ class DevelopmentPublication(unittest.TestCase):
         with patch.object(dev, 'require_source_layout'), patch.object(dev, 'verify_hashes'), \
              patch.object(dev, 'sha', side_effect=digest):
             dev.verify(manifest)
-            common = self.project / '.workbench' / dev.config_name('simulation')
+            common = self.project / '.silver' / dev.config_name('simulation')
             common.write_bytes(b'unknown edit')
             with self.assertRaisesRegex(RuntimeError, 'Conflicting'):
                 dev.verify(manifest)

@@ -18,6 +18,25 @@ type paths =
   ; log : string
   }
 
+(* Keep using an existing legacy directory until the user explicitly moves it.
+   Refuse split state rather than silently choose between two histories. *)
+let named_directory ~root ~suffix =
+  let path name =
+    let base = Filename.concat root name in
+    if String.is_empty suffix then base else Filename.concat base suffix
+  in
+  let canonical = path "silver" in
+  let legacy = path "hardcaml-workbench" in
+  let exists path =
+    try ignore (Core_unix.lstat path : Core_unix.stats); true with
+    | Core_unix.Unix_error (Core_unix.ENOENT, _, _) -> false
+  in
+  match exists canonical, exists legacy with
+  | true, true -> failwith (sprintf "Conflicting Silver state directories: %s and %s" canonical legacy)
+  | false, true -> legacy
+  | _ -> canonical
+;;
+
 let paths ?directory () =
   let nonempty_env name =
     Sys.getenv name
@@ -28,14 +47,14 @@ let paths ?directory () =
     | Some directory -> directory
     | None ->
       (match nonempty_env "XDG_RUNTIME_DIR" with
-       | Some root -> Filename.concat root "hardcaml-workbench"
+       | Some root -> named_directory ~root ~suffix:""
        | None ->
          let state_home =
            nonempty_env "XDG_STATE_HOME"
            |> Option.value_or_thunk ~default:(fun () ->
              Filename.concat (Sys_unix.home_directory ()) ".local/state")
          in
-         Filename.concat state_home "hardcaml-workbench")
+         named_directory ~root:state_home ~suffix:"")
   in
   { directory
   ; metadata = Filename.concat directory "daemon.sexp"

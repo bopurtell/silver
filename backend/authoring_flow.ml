@@ -2,7 +2,7 @@
     nor a client-supplied source directory participates in authoring. *)
 open! Core
 
-open Hardcaml_workbench_protocol.Authoring
+open Silver_protocol.Authoring
 module D = Authoring_destination
 module P = Asic_public
 module S = Authoring_starter

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Client UI preference, deliberately separate from provider runs and the daemon
     workspace registry. The stable project/environment key is checked on load. *)

@@ -2,8 +2,8 @@
  (name test_authoring_hosts)
  (modules test_authoring_hosts)
  (action (run %{test} %{exe:../main.exe}))
- (libraries async core yojson core_unix.command_unix hardcaml_workbench_backend hardcaml_workbench_protocol
-  hardcaml_workbench_native_http server_host)
+ (libraries async core yojson core_unix.command_unix silver_backend silver_protocol
+  silver_native_http server_host)
  (preprocess (pps ppx_jane)))
 
 (test
@@ -16,10 +16,10 @@
   cohttp-async
   core
   core_unix.command_unix
-  hardcaml_workbench_adapters
-  hardcaml_workbench_protocol
-  hardcaml_workbench_native_http
-  hardcaml_workbench_rpc_server)
+  silver_adapters
+  silver_protocol
+  silver_native_http
+  silver_rpc_server)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -34,10 +34,10 @@
   cohttp-async
   core
   core_unix.command_unix
-  hardcaml_workbench_protocol
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_native_http
-  hardcaml_workbench_rpc_server
+  silver_protocol
+  silver_project_integration
+  silver_native_http
+  silver_rpc_server
   yojson)
  (preprocess
   (pps ppx_jane))
@@ -57,10 +57,10 @@
   cohttp-async
   core
   core_unix.command_unix
-  hardcaml_workbench_backend
-  hardcaml_workbench_native_http
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol
-  hardcaml_workbench_rpc_server)
+  silver_backend
+  silver_native_http
+  silver_project_integration
+  silver_protocol
+  silver_rpc_server)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))

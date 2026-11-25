@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module C = Workspace_config
 module T = Workspace_template
 module R = C.Reference

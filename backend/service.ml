@@ -1,10 +1,10 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Adapter = Hardcaml_workbench_adapters.Dune_adapter
-module Bazel_adapter = Hardcaml_workbench_adapters.Bazel_adapter
-module Driver_adapter = Hardcaml_workbench_adapters.Project_driver_adapter
-module Integration = Hardcaml_workbench_project_integration
+open Silver_protocol
+module Adapter = Silver_adapters.Dune_adapter
+module Bazel_adapter = Silver_adapters.Bazel_adapter
+module Driver_adapter = Silver_adapters.Project_driver_adapter
+module Integration = Silver_project_integration
 open Project_integration.Component_status
 open Project_integration.Level
 

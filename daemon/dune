@@ -1,12 +1,12 @@
 (library
- (name hardcaml_workbench_rpc_server)
+ (name silver_rpc_server)
  (modules rpc_server)
  (libraries
   async
   cohttp-async
   core
-  hardcaml_workbench_backend
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -20,11 +20,11 @@
   cohttp-async
   core
   core_unix.command_unix
-  hardcaml_workbench_adapters
-  hardcaml_workbench_backend
-  hardcaml_workbench_native_http
-  hardcaml_workbench_protocol
-  hardcaml_workbench_rpc_server)
+  silver_adapters
+  silver_backend
+  silver_native_http
+  silver_protocol
+  silver_rpc_server)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -34,11 +34,11 @@
  (name main)
  (modules main)
  (public_name silver-daemon)
- (package hardcaml_workbench)
+ (package silver)
  (libraries core async core_unix.command_unix server_host)
  (preprocess (pps ppx_jane)))
 
 (install
- (package hardcaml_workbench)
+ (package silver)
  (section bin)
  (files (main.exe as hardcaml-workbench-daemon)))

@@ -1,6 +1,6 @@
 open! Core
 open Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Coalesce each read domain independently. A held ASIC or workspace response must not
     serialize the other domains, including an already-known tab's Simulation Get.

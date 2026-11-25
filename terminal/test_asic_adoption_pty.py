@@ -27,7 +27,7 @@ def exercise(client, base):
     source = f"#!/bin/sh\ntouch '{invoked}'\n"
     design.write_text(source)
     design.chmod(0o700)
-    config = project / ".workbench" / "hardcaml-workbench-asic.sexp"
+    config = project / ".silver" / "silver-asic.sexp"
     env = dict(os.environ, XDG_STATE_HOME=str(base / "state"))
     term = Terminal(SimpleNamespace(env=env, evidence=base),
                     argv=[str(client), "--standalone", "--project-root", str(project)],
@@ -95,7 +95,7 @@ def exercise_add(client, base, real_renderer=None):
                 os.write(term.master, b"\x1b[B")
             term.capture("manual-entry", ["Manual catalog entry", "hardcaml-asic-targets.json"])
             assert not (root / "asic_demo").exists()
-            assert not (root / ".workbench").exists()
+            assert not (root / ".silver").exists()
             if decision == "conflict":
                 collision = root / "asic_demo"
                 collision.mkdir()
@@ -104,14 +104,14 @@ def exercise_add(client, base, real_renderer=None):
             os.write(term.master, b"\x1b" if decision == "cancel" else b"a")
             if decision == "cancel":
                 term.capture("cancelled-preview", ["Preview cancelled"])
-                assert not (root / "asic_demo").exists() and not (root / ".workbench").exists()
+                assert not (root / "asic_demo").exists() and not (root / ".silver").exists()
                 os.write(term.master, b"\r")
             elif decision == "conflict":
                 # The absolute collision path can wrap inside a directory name.
                 # Check its contents below rather than matching a screen line.
                 term.capture("stale-preview", ["Stale_preview"])
                 assert rival.read_text() == "owned by another author\n"
-                assert not (root / ".workbench").exists()
+                assert not (root / ".silver").exists()
                 rival.unlink()
                 collision.rmdir()
                 os.write(term.master, b"\r")
@@ -119,7 +119,7 @@ def exercise_add(client, base, real_renderer=None):
                 term.capture("applied", ["ASIC starter added", "Skipped registration"])
         for file in files:
             assert (root / file["path"]).read_text() == file["contents"]
-        config = root / ".workbench/hardcaml-workbench-asic.sexp"
+        config = root / ".silver/silver-asic.sexp"
         assert "_build/default/asic_demo/project.exe" in config.read_text()
         assert catalog.read_text() == '{"custom":"preserve"}\n'
         assert marker.read_text() == "(lang dune 3.10)\n(name original)\n"

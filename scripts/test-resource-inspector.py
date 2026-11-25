@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import shutil
 import subprocess
 import sys
@@ -78,10 +79,10 @@ def protected(example):
                          e["destination_sha256"] for e in capture["entries"]}
     require(augmented == captured_expected, "Augmented bytes differ from original capture")
     files = dict(history, **augmented)
-    for name in ("hardcaml-workbench-asic.sexp", "hardcaml-workbench-preparation.sexp",
-                 "hardcaml-workbench-simulation.sexp", "asic-dependency.json",
+    for name in ("silver-asic.sexp", "silver-preparation.sexp",
+                 "silver-simulation.sexp", "asic-dependency.json",
                  ".dev/workbench-real-demo/manifest.json"):
-        files[name] = sha(example / name)
+        files[name] = sha(config_path(example, name) if name.endswith('.sexp') else example / name)
     pointers = {}
     for path in sorted((example / ".dev").glob("*/current")):
         require(path.is_symlink(), f"Unexpected current pointer type: {path}")

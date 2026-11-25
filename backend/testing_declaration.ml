@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let action : Module_jump.Action.t = { id = "declaration"; label = "Declaration" }
 
@@ -27,7 +27,7 @@ let offer ~project ~declarations ~suite_id ~case_id =
       String.equal declaration.Simulation.Declaration.suite_id suite_id
       && String.equal declaration.case_id case_id)
   with
-  | [ selection ] when Hardcaml_workbench_provider.Validation.valid_declaration selection
+  | [ selection ] when Silver_provider.Validation.valid_declaration selection
     -> Ok (List.hd_exn (Module_jump.offer provider ~project ~selection))
   | [] -> Error "The provider did not report a declaration for this test"
   | _ -> Error "The provider reported an invalid declaration for this test"

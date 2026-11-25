@@ -23,7 +23,7 @@ type timing =
   ; row_id : string option
   ; run : string option
   ; source_digest : string option
-  ; analysis : Hardcaml_workbench_protocol.Asic_inspection.Analysis_target.t option
+  ; analysis : Silver_protocol.Asic_inspection.Analysis_target.t option
   }
 
 (** [run] is the serialized stable run reference and [source_digest] identifies the
@@ -49,7 +49,7 @@ type t =
   ; active_window : string option
   ; workspaces : workspace list
   ; workloads : (string * Workloads_view.saved) list
-  ; testing_artifacts : (string * Hardcaml_workbench_protocol.Simulation.Artifact.t) list
+  ; testing_artifacts : (string * Silver_protocol.Simulation.Artifact.t) list
   }
 
 (** All operations raise on invalid data, following the other preference sidecars. IDs are
@@ -69,7 +69,7 @@ val with_workloads : t -> (string * Workloads_view.saved) list -> t
 
 val with_testing_artifacts
   :  t
-  -> (string * Hardcaml_workbench_protocol.Simulation.Artifact.t) list
+  -> (string * Silver_protocol.Simulation.Artifact.t) list
   -> t
 
 val encode : t -> string

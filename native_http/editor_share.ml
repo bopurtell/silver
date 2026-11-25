@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module Fs = struct
   type fd = Core_unix.File_descr.t

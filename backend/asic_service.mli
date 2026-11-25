@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 type t
 
@@ -67,7 +67,7 @@ module For_testing : sig
       Source build/emission is separately timed. Rejects timeouts outside
       [1..86400] and unknown endpoints before bounded integer arithmetic. *)
   val execution_budget_seconds
-    :  Hardcaml_workbench_project_integration.Asic_config.t
+    :  Silver_project_integration.Asic_config.t
     -> Asic.Selection.t
     -> float
 

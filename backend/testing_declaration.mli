@@ -1,4 +1,4 @@
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Offer “Declaration” for the exact stable suite/case in an observed catalog. Supply
     [declarations] from that same catalog snapshot. The offer captures the position and

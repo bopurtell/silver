@@ -11,7 +11,7 @@
     identifiers, not to demonstrate a working integration. *)
 
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Which hierarchy node is selected and which subtrees are open, for a fixture that opens
     the hierarchy inspector. *)

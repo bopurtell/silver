@@ -1,5 +1,5 @@
 open! Core
-include Hardcaml_workbench_provider.Wire
+include Silver_provider.Wire
 
 let rpc_path = "/api/v1/simulation"
 let automatic_discovery_capability = "simulation-ensure-discovered-v1"

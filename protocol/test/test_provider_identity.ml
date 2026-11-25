@@ -1,6 +1,6 @@
 open! Core
-module W = Hardcaml_workbench_provider.Wire
-module D = Hardcaml_workbench_protocol
+module W = Silver_provider.Wire
+module D = Silver_protocol
 
 (* These assignments deliberately require nominal type identity, rather than accepting
    equivalent encodings or a conversion between duplicated types. *)

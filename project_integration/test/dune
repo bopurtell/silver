@@ -4,8 +4,8 @@
   core
   core_unix
   core_unix.filename_unix
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (inline_tests

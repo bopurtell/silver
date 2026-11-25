@@ -26,7 +26,7 @@ type timing =
   ; row_id : string option
   ; run : string option [@sexp.option]
   ; source_digest : string option [@sexp.option]
-  ; analysis : Hardcaml_workbench_protocol.Asic_inspection.Analysis_target.t option
+  ; analysis : Silver_protocol.Asic_inspection.Analysis_target.t option
        [@sexp.option]
   }
 [@@deriving sexp]
@@ -49,7 +49,7 @@ type t =
   ; workspaces : workspace list
   ; workloads : (string * Workloads_view.saved) list
        [@sexp.default []] [@sexp_drop_default.equal]
-  ; testing_artifacts : (string * Hardcaml_workbench_protocol.Simulation.Artifact.t) list
+  ; testing_artifacts : (string * Silver_protocol.Simulation.Artifact.t) list
        [@sexp.default []] [@sexp_drop_default.equal]
   }
 [@@deriving sexp]

@@ -1,12 +1,12 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Simulation
 module Files = Simulation_files
 module Reducer = Simulation_reducer
-module Config = Hardcaml_workbench_project_integration.Simulation_config
-module Codec = Hardcaml_workbench_project_integration.Simulation_protocol
-module Adapter = Hardcaml_workbench_adapters.Simulation_adapter
+module Config = Silver_project_integration.Simulation_config
+module Codec = Silver_project_integration.Simulation_protocol
+module Adapter = Silver_adapters.Simulation_adapter
 
 module Record = struct
   type t =
@@ -133,7 +133,7 @@ let validate_record (record : Record.t) =
   let a = record.attempt in
   require
     (String.length record.submission_key <= Limits.key_bytes
-     && Hardcaml_workbench_project_integration.Driver_protocol.valid_key
+     && Silver_project_integration.Driver_protocol.valid_key
           record.submission_key)
     "Invalid durable submission key";
   require
@@ -281,7 +281,7 @@ let project t root =
         match
           Or_error.try_with (fun () ->
             require
-              (Hardcaml_workbench_project_integration.Driver_protocol.valid_key name)
+              (Silver_project_integration.Driver_protocol.valid_key name)
               "Invalid history directory";
             let dir = Filename.concat dir name in
             let record =
@@ -345,7 +345,7 @@ let project t root =
 ;;
 
 let load_config p =
-  Hardcaml_workbench_project_integration.Config_location.resolve
+  Silver_project_integration.Config_location.resolve
     ~root:p.root
     ~filename:Config.filename
     ~max_bytes:Limits.config_bytes
@@ -956,7 +956,7 @@ let handle t ~root ~environment ~schedule ~cancel ~verify_asic operation =
           in
           if String.length submission_key > Limits.key_bytes
              || not
-                  (Hardcaml_workbench_project_integration.Driver_protocol.valid_key
+                  (Silver_project_integration.Driver_protocol.valid_key
                      submission_key)
           then rpc_error Invalid_request "Invalid simulation submission key";
           (* Reservation lookup precedes all mutable catalog/config/evidence validation. *)

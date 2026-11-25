@@ -1,11 +1,11 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Terminal_presentation
 module H = Workspace_host
 
 let () =
   let flows, catalog_default =
-    Hardcaml_workbench_backend.Asic_public.flow_catalog
+    Silver_backend.Asic_public.flow_catalog
       (Yojson.Safe.from_file (Sys.get_argv ()).(1))
   in
   let snapshot = { Asic_snapshot_fixture.snapshot with flows; catalog_default } in
@@ -50,7 +50,7 @@ let () =
         (query ~snapshot "standard" "balanced")
         (Option.value (List.hd endpoints) ~default:"")));
   let host, _, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    Host_view.refinement_fixture Silver_workspaces.Overview.definition
   in
   let capture = H.capture host |> Option.value_exn in
   let enter argument query =

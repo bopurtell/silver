@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Cooperative kinds selected by the cluster plan. The legacy [simulation] pane is
     deliberately independent and is not recognized by [is_pane]. *)

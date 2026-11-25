@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Generic Build/Test feature boundary over the existing supervisor. *)
 type t

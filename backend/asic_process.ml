@@ -1,6 +1,6 @@
 open! Core
 open! Async
-module Invocation = Hardcaml_workbench_adapters.Dune_adapter.Invocation
+module Invocation = Silver_adapters.Dune_adapter.Invocation
 
 let stop ?(grace_seconds = 5.) ?(before_signal = ignore) process =
   (* Force Async's owned wait before signalling. Completed children need no signal;

@@ -87,7 +87,7 @@ def run(args, evidence):
         (evidence / name).mkdir()
     root = evidence / 'project'
     (root / 'dune-project').write_text('(lang dune 3.22)\n(name streaming_acceptance)\n')
-    (root / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([
+    (root / 'silver-simulation.sexp').write_text(wire.sexp([
         ('schema_version', 1), ('provider_executable', str(args.fifo_provider)),
         ('provider_args', ['--simulator', str(args.fifo_simulator)]),
         ('discovery_timeout_seconds', 30), ('run_timeout_seconds', 120)]))

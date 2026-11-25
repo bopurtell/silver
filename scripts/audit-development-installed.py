@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from isolated_example import config_path
 import stat
 import sys
 import traceback
@@ -148,11 +149,11 @@ def main():
             check(normalized(installed[key], installed) == normalized(tested[key], tested), 'runtime metadata agrees after explicit local path substitution: ' + key)
         configs = {}
         for kind in ('simulation', 'asic', 'preparation'):
-            path = Path(installed['project_root']) / ('hardcaml-workbench-' + kind + '.sexp')
+            path = config_path(Path(installed['project_root']), 'silver-' + kind + '.sexp')
             check(path.is_file() and not path.is_symlink(), 'installed config is regular ' + kind)
-            expected = generation / 'config' / path.name
+            expected = config_path(generation / 'config', 'silver-' + kind + '.sexp')
             check(sha(path) == sha(expected), 'installed config equals exact selected capture ' + kind)
-            check(normalized(native.parse(path.read_text()), installed) == normalized(native.parse((baseline / 'config' / path.name).read_text()), tested), 'config behavior matches native-tested after local paths: ' + kind)
+            check(normalized(native.parse(path.read_text()), installed) == normalized(native.parse(config_path(baseline / 'config', 'silver-' + kind + '.sexp').read_text()), tested), 'config behavior matches native-tested after local paths: ' + kind)
             configs[kind] = sha(path)
         report['regular_config_sha256'] = configs
         targets = {}

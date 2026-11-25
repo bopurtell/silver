@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_provider
+open Silver_provider
 open Wire
 
 let discovery : Discovery.t =

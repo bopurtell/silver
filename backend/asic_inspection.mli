@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Wire = Hardcaml_workbench_protocol.Asic_inspection
+open Silver_protocol
+module Wire = Silver_protocol.Asic_inspection
 
 val index_limit : int
 val detail_limit : int

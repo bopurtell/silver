@@ -1,6 +1,6 @@
 (library
- (name hardcaml_workbench_native_http)
- (libraries async cohttp-async core cryptokit hardcaml_workbench_protocol unix)
+ (name silver_native_http)
+ (libraries async cohttp-async core cryptokit silver_protocol unix)
  (foreign_stubs
   (language c)
   (names editor_share_fs))

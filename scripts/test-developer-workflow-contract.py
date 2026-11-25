@@ -157,7 +157,7 @@ class Contract(unittest.TestCase):
         source.parent.mkdir(parents=True)
         source.write_text('source')
         source.with_name('dune').write_text('dune')
-        config = project / 'hardcaml-workbench-preparation.sexp'
+        config = project / 'silver-preparation.sexp'
         config.write_text(w.sexp([['schema_version', 1], ['build_target', target]]))
         # Real captured helpers and their exact declared ownership-v1 roots.
         dirs = ['ip/controlled_fifo', 'asics/fifo_demo', 'asics/program_memory', 'asics/sram_budget',
@@ -542,7 +542,7 @@ class RecoveryContract(unittest.TestCase):
             environment={'HARDCAML_ASIC_SYNTHESIS_TASK_LIMIT': '6'}, max_jobs=2,
             provider_command=['retained-provider'], provider_commands={'suite':['retained-provider']},
             git_context=dict(real_git='/usr/bin/git',real_git_sha256=w.sha(Path('/usr/bin/git'))),
-            config_files={'hardcaml-workbench-preparation.sexp': 'same-preparation'},
+            config_files={'silver-preparation.sexp': 'same-preparation'},
             apps={key:dict(path=str(path), sha256=w.sha(path)) for key,path in (('daemon',old_daemon),('client',old_client))})
         self.write(generation / 'manifest.json', self.old)
         self.failed_dir = self.root / 'failed'
@@ -673,7 +673,7 @@ class RecoveryContract(unittest.TestCase):
         w.recovery.validate_transition(self.old,new,self.store)
         for key,value in [('source_files',{'source.ml':'changed'}), ('asic_files',{}), ('suite_sources',{}),
                           ('environment',{}), ('captured_files',{'sdk/lib/fixture':'changed'}),
-                          ('config_files',{'hardcaml-workbench-asic.sexp':'new-scope'}),
+                          ('config_files',{'silver-asic.sexp':'new-scope'}),
                           ('provider_command',['new-provider-scope'])]:
             with self.subTest(key=key), self.assertRaises(AssertionError):
                 w.recovery.validate_transition(self.old,dict(new,**{key:value}),self.store)
@@ -759,7 +759,7 @@ class RecoveryContract(unittest.TestCase):
         self.old['config_files'] = {}
         generation = Path(self.old['generation'])
         for kind in ('simulation','asic','preparation'):
-            name = 'hardcaml-workbench-'+kind+'.sexp'
+            name = 'silver-'+kind+'.sexp'
             data = 'retained companion '+kind+' '+str(generation)
             (project/name).write_text(data)
             captured = generation/'config'/name

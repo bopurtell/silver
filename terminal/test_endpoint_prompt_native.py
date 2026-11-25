@@ -59,7 +59,7 @@ assert args[:3]==['flow','list','--json']
 assert (args[3:5]==['--chip','engine'] and args[5]=='--variant' and args[6] in ('small','large')) if chips.exists() else not args[3:]
 print(''' + repr(catalog) + ''')
 ''')
-    preparation = session.root / 'hardcaml-workbench-preparation.sexp'
+    preparation = session.root / 'silver-preparation.sexp'
     preparation.write_text(native_execution.sexp([
         ['schema_version', '1'], ['build_target', 'never-built.exe'],
         ['results_root', str(base / 'emission')], ['timeout_seconds', '10']]))

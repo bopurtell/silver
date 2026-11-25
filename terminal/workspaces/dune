@@ -1,5 +1,5 @@
 (library
- (name hardcaml_workbench_workspaces)
+ (name silver_workspaces)
  (modules
   common
   definition
@@ -12,7 +12,7 @@
   testing
   waveforms
   presets)
- (libraries core hardcaml_workbench_protocol)
+ (libraries core silver_protocol)
  (preprocess
   (pps ppx_jane)))
 
@@ -35,12 +35,12 @@
 (executable
  (name export_presets)
  (modules export_presets)
- (libraries core hardcaml_workbench_workspaces))
+ (libraries core silver_workspaces))
 
 (library
- (name hardcaml_workbench_workspaces_test)
+ (name silver_workspaces_test)
  (modules test_workspaces)
- (libraries core hardcaml_workbench_protocol hardcaml_workbench_workspaces)
+ (libraries core silver_protocol silver_workspaces)
  (inline_tests
   (flags
    (-source-tree-root .)))

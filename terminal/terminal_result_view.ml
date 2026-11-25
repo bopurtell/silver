@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let supports = function
   | "timing" | "placement" | "cts" | "routing" | "checks" | "finalization" -> true

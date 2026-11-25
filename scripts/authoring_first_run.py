@@ -190,8 +190,8 @@ def first_run(project: Path, evidence: Path, tools: Path, env: dict, record, *, 
         created_files = sorted(str(path.relative_to(project)) for path in project.rglob("*")
                                if path.is_file() and "_build" not in path.relative_to(project).parts)
         require(set(created_files) == set(source_paths) | {
-            ".workbench/hardcaml-workbench-asic.sexp",
-            ".workbench/hardcaml-workbench-preparation.sexp",
+            ".silver/silver-asic.sexp",
+            ".silver/silver-preparation.sexp",
         }, f"Unexpected published starter files: {created_files}")
         # The provider needs a real HEAD for source provenance. The wrapper owns
         # repository creation and the exact source-only commit used for replay.

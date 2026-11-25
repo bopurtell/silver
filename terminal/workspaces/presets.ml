@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Canonical complete stock config, including the default window composition. *)
 let stock_config = Stock.config
@@ -60,7 +60,7 @@ let starters =
 (** Safe after Get, after import, on reconnect, and concurrently from multiple clients.
     The service atomically persists both defaults and their completion marker. *)
 let bootstrap =
-  Hardcaml_workbench_protocol.Workspace.Operation.Bootstrap
+  Silver_protocol.Workspace.Operation.Bootstrap
     (List.map starters ~f:(fun d ->
        (builtins d.Definition.id |> Or_error.ok_exn).template))
 ;;
@@ -78,7 +78,7 @@ let startup_operation ?selected (snapshot : Workspace.Snapshot.t) =
   else None
 ;;
 
-let for_arrangement (w : Hardcaml_workbench_protocol.Workspace.Arrangement.t) =
+let for_arrangement (w : Silver_protocol.Workspace.Arrangement.t) =
   Option.bind w.preset ~f:find
 ;;
 

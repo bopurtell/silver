@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol.Authoring
+open Silver_protocol.Authoring
 module D = Authoring_destination
 
 let fields keys = function

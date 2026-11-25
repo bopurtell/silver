@@ -1,6 +1,6 @@
 module Lock = Mutex
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module Reference = Asic_artifact.Reference
 module Public = Asic_public
 

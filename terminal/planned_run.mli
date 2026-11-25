@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Client-local intent fences over the daemon's single project preview. No effects. *)
 type t

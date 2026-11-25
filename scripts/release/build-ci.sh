@@ -30,10 +30,10 @@ unset OPAMROOT OPAMSWITCH OPAM_SWITCH
     ./install.sh --without-asic --jobs "$jobs" --prefix "$work/managed-prefix"
 )
 state="$work/data/silver"
-for file in META dune-package hardcaml_workbench_provider.cmxa; do
-  [[ -f $state/sdk/lib/hardcaml_workbench_provider/$file ]]
+for file in META dune-package silver_provider.cmxa; do
+  [[ -f $state/sdk/lib/silver_provider/$file ]]
 done
-[[ ! -e $work/managed-prefix/lib/hardcaml_workbench_provider ]]
+[[ ! -e $work/managed-prefix/lib/silver_provider ]]
 [[ ! -e $work/home/.opam ]]
 rm -rf -- "$work/managed-source"
 env -i PATH=/usr/bin:/bin HOME="$work/home" LC_ALL=C.UTF-8 \

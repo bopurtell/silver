@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol.Authoring
-module Engine = Hardcaml_workbench_backend.Authoring_service
-module Starter = Hardcaml_workbench_backend.Authoring_starter
+open Silver_protocol.Authoring
+module Engine = Silver_backend.Authoring_service
+module Starter = Silver_backend.Authoring_starter
 
 let ( / ) = Filename.concat
 
@@ -48,7 +48,7 @@ let () =
       assert (Result.is_error (Result.try_with (fun () -> Starter.parse text))));
   let root = Filename_unix.temp_dir "wb-starter" "" |> Filename_unix.realpath in
   Exn.protect
-    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
+    ~finally:(fun () -> Silver_backend.Simulation_files.remove root)
     ~f:(fun () ->
       let real = Sys.getenv "WORKBENCH_TEST_STARTER_RENDERER" in
       let exe = root / Starter.program in
@@ -85,8 +85,8 @@ let () =
       in
       let files =
         rendered
-        @ [ ".workbench/hardcaml-workbench-asic.sexp"
-          ; ".workbench/hardcaml-workbench-preparation.sexp"
+        @ [ ".silver/silver-asic.sexp"
+          ; ".silver/silver-preparation.sexp"
           ]
       in
       let fixture () =
@@ -150,10 +150,10 @@ let () =
       Core_unix.mkdir dir;
       fail Destination_denied (existing dir);
       Out_channel.write_all (dir / "dune-project") ~data:"(lang dune 3.17)\n";
-      Core_unix.mkdir (dir / ".workbench");
+      Core_unix.mkdir (dir / ".silver");
       let write rel = Out_channel.write_all (dir / rel) ~data:"preserve\n" in
       write "source.ml";
-      write ".workbench/other.sexp";
+      write ".silver/other.sexp";
       let install_existing paths =
         install
           ("[ \"$1\" = render-target ] || exit 2\ncat <<'END'\n"
@@ -165,15 +165,15 @@ let () =
       install_existing
         [ "asic_my-chip/chip.ml"; "asic_my-chip/project.ml"; "asic_my-chip/dune" ];
       let p = expect_preview (existing dir) in
-      let config = ".workbench/hardcaml-workbench-asic.sexp" in
+      let config = ".silver/silver-asic.sexp" in
       write config;
       fail Stale_preview (apply p);
       assert (not (Sys_unix.file_exists_exn (dir / "asic_my-chip")));
       fail Destination_denied (existing dir);
       Core_unix.unlink (dir / config);
-      write "hardcaml-workbench-preparation.sexp";
+      write "silver-preparation.sexp";
       fail Destination_denied (existing dir);
-      Core_unix.unlink (dir / "hardcaml-workbench-preparation.sexp");
+      Core_unix.unlink (dir / "silver-preparation.sexp");
       Core_unix.symlink ~target ~link_name:(dir / "asic_my-chip");
       fail Destination_denied (existing dir);
       Core_unix.unlink (dir / "asic_my-chip");
@@ -188,7 +188,7 @@ let () =
          assert (String.equal path "hardcaml-asic-targets.json")
        | r -> raise_s [%sexp (r : Response.t)]);
       List.iter
-        [ "source.ml"; ".workbench/other.sexp"; "hardcaml-asic-targets.json" ]
+        [ "source.ml"; ".silver/other.sexp"; "hardcaml-asic-targets.json" ]
         ~f:(fun path ->
           assert (String.equal (In_channel.read_all (dir / path)) "preserve\n"));
       assert (
@@ -227,7 +227,7 @@ let () =
                  { destination = dir
                  ; object_id = None
                  ; project =
-                     Some (Hardcaml_workbench_protocol.Project_id.of_string "open")
+                     Some (Silver_protocol.Project_id.of_string "open")
                  }
              })
       in
@@ -374,7 +374,7 @@ let () =
                   { target =
                       { destination = dest
                       ; project =
-                          Some (Hardcaml_workbench_protocol.Project_id.of_string "p")
+                          Some (Silver_protocol.Project_id.of_string "p")
                       ; object_id = None
                       }
                   ; name = "chip_b"
@@ -386,7 +386,7 @@ let () =
          | Applied { registration = Registered path; _ } ->
            assert (String.equal path "hardcaml-asic-targets.json")
           | r -> raise_s [%sexp (r : Response.t)]);
-         let module I = Hardcaml_workbench_project_integration in
+         let module I = Silver_project_integration in
          let moved = root / "relocated-checkout" in
          Core_unix.rename ~src:dest ~dst:moved;
          let dest = moved in

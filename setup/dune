@@ -1,5 +1,5 @@
 (library
- (name hardcaml_workbench_setup)
+ (name silver_setup)
  (modules
    asic_adoption
    bluespec_scaffold
@@ -15,9 +15,9 @@
   core_unix.filename_unix
   core_unix.signal_unix
   core_unix.sys_unix
-  hardcaml_workbench_adapters
-  hardcaml_workbench_project_integration
-   hardcaml_workbench_protocol
+  silver_adapters
+  silver_project_integration
+   silver_protocol
    yojson)
  (preprocess
   (pps ppx_jane))
@@ -52,8 +52,8 @@
  (name main)
  (modules main)
  (public_name silver-init)
- (package hardcaml_workbench)
- (libraries core core_unix.command_unix hardcaml_workbench_setup)
+ (package silver)
+ (libraries core core_unix.command_unix silver_setup)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -63,15 +63,15 @@
  (name simulation_main)
  (modules simulation_main)
  (public_name silver-simulation-setup)
- (package hardcaml_workbench)
- (libraries core core_unix.command_unix hardcaml_workbench_setup)
+ (package silver)
+ (libraries core core_unix.command_unix silver_setup)
  (preprocess
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
 
 (install
- (package hardcaml_workbench)
+ (package silver)
  (section bin)
  (files
   (main.exe as hardcaml-workbench-init)

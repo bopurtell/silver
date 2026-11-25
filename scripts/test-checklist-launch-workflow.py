@@ -52,7 +52,7 @@ def zoom(http, kind):
 def preference(base, selection, inherited=False):
     environment = 'Inherit_daemon' if inherited else '(Opam_switch ' + c.demo.switch_name() + ')'
     key = '(' + str(base / 'project') + ' ' + environment + ')' if inherited else '(' + str(base / 'project') + environment + ')'
-    directory = base / 'client-state/hardcaml-workbench/terminal'
+    directory = base / 'client-state/silver/terminal'
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / ('launch-' + hashlib.sha256(key.encode()).hexdigest() + '.sexp')
     path.write_text(sexp([['schema_version', '1'], ['project_key', key], ['selection', selection]]))
@@ -347,7 +347,7 @@ def synthetic_case(args, check):
               not field(f.snapshot(), 'workflows') and not f.events('emit-start'),
               'Manual r captures exact selected placement inputs with zero jobs/producers')
         # Failed replacement must invalidate the old still-unlaunched receipt.
-        prep = f.root / 'hardcaml-workbench-preparation.sexp'
+        prep = f.root / 'silver-preparation.sexp'
         original = prep.read_bytes()
         prep.unlink()
         t.key(b'j'); t.key(b'r')

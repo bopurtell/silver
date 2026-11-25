@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Asic_workloads
-module S = Hardcaml_workbench_backend.Asic_workloads_service
-module Service = Hardcaml_workbench_backend.Asic_service
+module S = Silver_backend.Asic_workloads_service
+module Service = Silver_backend.Asic_service
 let checks = ref 0
 let check b message = incr checks; if not b then failwith message
 let rejects f = check (Result.is_error (Or_error.try_with f)) "Expected rejection"
@@ -84,15 +84,15 @@ let pure () =
   check (String.equal r.digest e && String.equal r.json (raw j)) "Comparison rational JSON changed";
   rejects (fun () -> S.validate_response q (raw (replace j "axis" (str "hardware"))));
   rejects (fun () -> S.validate_response q (raw (replace j "truncated" (`Bool true))));
-  let bad=replace j "left" (replace (Hardcaml_workbench_backend.Asic_public.field "left" j) "source_digest" (str e)) in
+  let bad=replace j "left" (replace (Silver_backend.Asic_public.field "left" j) "source_digest" (str e)) in
   rejects (fun () -> S.validate_response q (raw bad));
-  let bad=replace j "right" (replace (Hardcaml_workbench_backend.Asic_public.field "right" j) "workload" (replace inspection "source_digest" (str e))) in
+  let bad=replace j "right" (replace (Silver_backend.Asic_public.field "right" j) "workload" (replace inspection "source_digest" (str e))) in
   rejects (fun () -> S.validate_response q (raw bad));
   let wrong=compare (Bundle "/l") (Bundle "/r") in
   rejects (fun () -> S.validate_response wrong (raw j));
   rejects (fun () -> S.check_targets wrong ~paths:["/other";"/r"] (raw j));
-  let row=List.hd_exn (Hardcaml_workbench_backend.Asic_public.list
-    (Hardcaml_workbench_backend.Asic_public.field "metrics" j)) in
+  let row=List.hd_exn (Silver_backend.Asic_public.list
+    (Silver_backend.Asic_public.field "metrics" j)) in
   rejects (fun () -> S.validate_response q (raw (replace j "metrics"
     (`List [replace row "right_minus_left_ratio" (obj ["numerator",`Int 0;"denominator",`Int 0])]))));
   rejects (fun () -> S.validate_response q (raw (replace j "metrics"
@@ -138,7 +138,7 @@ let cache () =
   check (Option.is_none (S.snapshot corrupt).cache_error) "Successful cache replacement did not repair error"
 ;;
 let integration () =
-  let module C=Hardcaml_workbench_project_integration.Asic_config in
+  let module C=Silver_project_integration.Asic_config in
   let root=Core_unix.mkdtemp "/tmp/workbench-workload-service-" |> Filename_unix.realpath in
   let file=Filename.concat root in
   let script=In_channel.read_all "provider.py" in
@@ -190,7 +190,7 @@ let integration () =
   check (Option.exists s.selected ~f:(fun r -> String.equal r.W.Response.digest e)
     && Option.is_none (List.hd_exn s.entries).error) "Public comparison invocation failed";
   let changed=replace j "left"
-    (replace (Hardcaml_workbench_backend.Asic_public.field "left" j) "source_digest" (str e)) in
+    (replace (Silver_backend.Asic_public.field "left" j) "source_digest" (str e)) in
   Out_channel.write_all (file "response.json") ~data:(raw changed);
   let%bind _=handle service (Workloads (pair_op true)) in
   let%bind s=wait service (pair_op true) in
@@ -316,7 +316,7 @@ let retained_payloads () =
   Option.iter (Sys.getenv "WORKBENCH_TEST_WORKLOAD_COMPARISON_JSON") ~f:(fun filename ->
     let bytes=In_channel.read_all filename in
     let j=Yojson.Safe.from_string bytes in
-    let module P=Hardcaml_workbench_backend.Asic_public in
+    let module P=Silver_backend.Asic_public in
     let side name =
       let s=P.field name j in
       let p=P.text (P.field "target" s) in

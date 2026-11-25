@@ -5,9 +5,9 @@
   async
   core
   core_unix
-  hardcaml_workbench_backend
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol
+  silver_backend
+  silver_project_integration
+  silver_protocol
   terminal_presentation)
  (preprocess
   (pps ppx_jane))

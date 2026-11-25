@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import re
 import shlex
 import shutil
@@ -40,7 +41,7 @@ class Terminal(dashboard.Terminal):
 
 def exercise(args):
     source = args.source_state.resolve()
-    config = args.example_root / 'hardcaml-workbench-asic.sexp'
+    config = config_path(args.example_root, 'silver-asic.sexp')
     cfg = record(native_execution.parse(config.read_text()))
     watched = [source, config, Path(cfg['results_root']), Path(cfg['provider_executable'])]
     before = dashboard.inventory(watched)

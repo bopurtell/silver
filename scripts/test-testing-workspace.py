@@ -85,7 +85,7 @@ def run(args):
         control.write_text(json.dumps(dict(mode=value)))
 
     mode('pass')
-    (root / 'hardcaml-workbench-simulation.sexp').write_text(sexp([
+    (root / 'silver-simulation.sexp').write_text(sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(HERE / 'fixtures/simulation_fault_provider.py'), '--control', str(control), '--calls', str(calls)]),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 90)]))

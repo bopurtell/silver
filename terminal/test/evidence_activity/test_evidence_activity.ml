@@ -1,10 +1,10 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Terminal_presentation
-module Service = Hardcaml_workbench_backend.Asic_service
-module Public = Hardcaml_workbench_backend.Asic_public
-module Config = Hardcaml_workbench_project_integration.Asic_config
+module Service = Silver_backend.Asic_service
+module Public = Silver_backend.Asic_public
+module Config = Silver_project_integration.Asic_config
 module H = Workspace_host
 
 let environment = V1.Environment_selection.Inherit_daemon
@@ -91,7 +91,7 @@ let summary_refresh () =
   Out_channel.write_all
     (prefix ^ "-summary-v1-" ^ Public.digest summary.source_digest ^ ".summary.sexp")
     ~data:(Sexp.to_string_mach blob);
-  Hardcaml_workbench_backend.Asic_inspection.save
+  Silver_backend.Asic_inspection.save
     ~state_dir
     ~identity
     { (Evidence_activity.Test.index ()) with execution_file = summary.execution_file };
@@ -116,7 +116,7 @@ let summary_refresh () =
       let%bind (_ : Asic.Snapshot.t) = handle service root (Refresh run) in
       let%bind () = wait_started (file "started") in
       let host, data, find =
-        Host_view.refinement_fixture Hardcaml_workbench_workspaces.Timing.definition
+        Host_view.refinement_fixture Silver_workspaces.Timing.definition
       in
       let session = find "live-status" in
       let render snapshot =
@@ -208,7 +208,7 @@ let summary_refresh () =
    Mutate the host while transport is outstanding, then deliver the old error. *)
 let asynchronous_receipts () =
   let initial, _, find =
-    Host_view.refinement_fixture Hardcaml_workbench_workspaces.Timing.definition
+    Host_view.refinement_fixture Silver_workspaces.Timing.definition
   in
   let tile = find "timing-detail" in
   let view =

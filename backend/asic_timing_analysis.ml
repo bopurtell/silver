@@ -1,6 +1,6 @@
 open! Core
 module Inspection = Asic_inspection
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module Public = Asic_public
 module Wire = Asic.Timing_analysis
 

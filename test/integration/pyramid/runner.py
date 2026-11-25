@@ -48,9 +48,10 @@ import unicodedata
 ENDPOINTS = ("elaboration", "synthesis", "floorplan", "placement", "cts", "routing", "timing", "signoff")
 PHYSICAL = ENDPOINTS[1:]
 DEFAULT_TIMEOUTS = dict(zip(ENDPOINTS, (900, 1800, 2700, 3600, 3600, 5400, 5400, 7200)))
-EXCLUDED = {".git", ".dev", ".workbench", "results", "_flow_results", "_flow_tools",
-            "hardcaml-workbench-simulation.sexp", "hardcaml-workbench-asic.sexp",
-            "hardcaml-workbench-preparation.sexp"}
+EXCLUDED = {".git", ".dev", ".silver", ".workbench", "results", "_flow_results", "_flow_tools",
+            "silver-simulation.sexp", "silver-asic.sexp",
+            "silver-preparation.sexp", "hardcaml-workbench-simulation.sexp",
+            "hardcaml-workbench-asic.sexp", "hardcaml-workbench-preparation.sexp"}
 
 
 def require(condition, message):
@@ -617,7 +618,7 @@ class Rung:
         self.result["source_manifest_sha256"] = digest(self.base / "source-identity.json")
         require(self.root.is_dir(), "copied project missing")
         if "project_name" in self.c:
-            manifest = self.root / "hardcaml-workbench.sexp"
+            manifest = self.root / "silver.sexp"
             manifest.write_text(private_manifest(self.c["project_name"]))
             self.result["project_manifest_sha256"] = digest(manifest)
         self.docker = shutil.which("docker", path=self.env["PATH"])
@@ -632,7 +633,7 @@ class Rung:
                 *[[k, [self.c[k]]] for k in ("python", "support_tools", "pdk_root")],
                 ["stage_timeout_seconds", [str(self.c.get("stage_timeout", 7200))]]]
         for name, content in (("preparation", prep), ("asic", asic)):
-            path = self.root / ("hardcaml-workbench-" + name + ".sexp")
+            path = self.root / ("silver-" + name + ".sexp")
             path.write_text(sexp(content) + "\n")
             self.result[name + "_config_sha256"] = digest(path)
         # Inherit_daemon resolves only this locked wrapper. Override the adapter's

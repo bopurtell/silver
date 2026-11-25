@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_project_integration
+open Silver_project_integration
 
 let with_root f =
   let root = Filename_unix.temp_dir "config-location-" "" |> Filename_unix.realpath in
@@ -233,4 +233,24 @@ let%test_unit "invalid new schema is selected without fallback and relative driv
     assert (Result.is_error (Manifest.parse_string (selected ()).contents));
     Out_channel.write_all old ~data:valid;
     assert (Result.is_error (Config_location.resolve ~root ~filename ~max_bytes:65536)))
+;;
+
+let%test_unit "legacy Silver branding in all locations and Bazel marker coexist" =
+  List.iter filenames ~f:(fun filename ->
+    with_root (fun root ->
+      let paths = Config_location.candidate_paths ~root ~filename in
+      let canonical = List.hd_exn paths in
+      Core_unix.mkdir_p (root ^/ ".silver");
+      Core_unix.mkdir_p (root ^/ ".workbench");
+      Out_channel.write_all (root ^/ ".silver/project.json") ~data:"{}";
+      let selected () =
+        Config_location.resolve ~root ~filename ~max_bytes:128
+        |> Or_error.ok_exn |> Option.value_exn
+      in
+      List.iter (List.rev paths) ~f:(fun path ->
+        Out_channel.write_all path ~data:"same";
+        assert (String.equal (selected ()).path path));
+      assert (String.equal (selected ()).path canonical);
+      Out_channel.write_all (List.last_exn paths) ~data:"conflict";
+      assert (Result.is_error (Config_location.resolve ~root ~filename ~max_bytes:128))))
 ;;

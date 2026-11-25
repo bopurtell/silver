@@ -1,6 +1,6 @@
 open! Core
 module Host = Workspace_host
-module Waveforms = Hardcaml_workbench_workspaces.Waveforms
+module Waveforms = Silver_workspaces.Waveforms
 module View = Waveform_view
 
 type action =
@@ -32,7 +32,7 @@ let key event input =
 let clear_view view = view |> View.clear_count |> View.clear_selection
 
 let navigation_changed (before : Host.t) (after : Host.t) =
-  let open Hardcaml_workbench_protocol.Workspace in
+  let open Silver_protocol.Workspace in
   let kind host = Option.map (Host.focused host) ~f:(fun tile -> tile.kind) in
   not (Option.equal Workspace_id.equal before.active after.active)
   || not (Option.equal Tile_id.equal before.focus after.focus)
@@ -87,7 +87,7 @@ let route (host : Host.t) ~quick ~editing_text ~identity_modal event =
 ;;
 
 let test_host () =
-  let open Hardcaml_workbench_protocol in
+  let open Silver_protocol in
   let s = Workspace.initial ~session_id:(Workspace.Session_id.of_string "waveform-routing") in
   let window = (List.hd_exn s.windows).id in
   let registry =
@@ -182,7 +182,7 @@ let%test_unit "transition keys belong only to focused Waves outside modals" =
 let%test_unit "leaving Waves discards its count; Signals applies and cancels a visual range" =
   let focus = test_host () in
   let waves = focus Waves and signals = focus Signals in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "attempt"
     ; case_id = None

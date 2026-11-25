@@ -1,11 +1,11 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Service = Hardcaml_workbench_backend.Service
-module Receipt = Hardcaml_workbench_backend.Preparation_receipt
-module Config = Hardcaml_workbench_project_integration.Preparation_config
-module Adapter = Hardcaml_workbench_adapters.Preparation_adapter
-module Dune = Hardcaml_workbench_adapters.Dune_adapter
+open Silver_protocol
+module Service = Silver_backend.Service
+module Receipt = Silver_backend.Preparation_receipt
+module Config = Silver_project_integration.Preparation_config
+module Adapter = Silver_adapters.Preparation_adapter
+module Dune = Silver_adapters.Dune_adapter
 
 let require condition message = if not condition then failwith message
 
@@ -341,7 +341,7 @@ let with_service ?(selected = selection) f =
         ~data:"#!/bin/sh\ntouch provider-was-invoked\nexit 99\n";
       Core_unix.chmod poison ~perm:0o700;
       Out_channel.write_all
-        (Filename.concat root "hardcaml-workbench-asic.sexp")
+        (Filename.concat root "silver-asic.sexp")
         ~data:
           (sprintf
              "((schema_version 1)(project_executable %s)(provider_executable \
@@ -376,7 +376,7 @@ let with_service ?(selected = selection) f =
 
 let config_location_fixture () =
   let root = Filename_unix.temp_dir "config-location-preparation-" "" in
-  let module Loader = Hardcaml_workbench_backend.Preparation_service in
+  let module Loader = Silver_backend.Preparation_service in
   let config : Config.t =
     { schema_version = 1
     ; build_target = "bin/project.exe"
@@ -385,7 +385,7 @@ let config_location_fixture () =
     }
   in
   let old = Filename.concat root Config.filename in
-  let common = Filename.concat (Filename.concat root ".workbench") Config.filename in
+  let common = Filename.concat (Filename.concat root ".silver") Config.filename in
   let bytes = Sexp.to_string_mach (Config.sexp_of_t config) in
   let check expected =
     let%map availability, loaded = Loader.load_config root in
@@ -420,7 +420,7 @@ let config_location_fixture () =
         ~data:
           (bytes
            ^ String.make
-               Hardcaml_workbench_project_integration.Config_location.max_config_bytes
+               Silver_project_integration.Config_location.max_config_bytes
                ' ');
       let%bind () = check false in
       Out_channel.write_all common ~data:"invalid";
@@ -954,7 +954,7 @@ let run_staging_fixture () =
        write_config ();
        (* Source-only project: discovery reads its existing executable. Changing
           the picker fences new requests but cannot retarget an existing receipt. *)
-       Core_unix.unlink (Filename.concat root "hardcaml-workbench-asic.sexp");
+       Core_unix.unlink (Filename.concat root "silver-asic.sexp");
        let source_cli = Config.source_executable config ~root in
        Core_unix.mkdir_p (Filename.dirname source_cli);
        Out_channel.write_all source_cli ~data:{|#!/bin/sh
@@ -967,7 +967,7 @@ esac
        Core_unix.chmod source_cli ~perm:0o700;
        let asic operation =
          let%bind _ = Service.asic service { instance_id; project; operation } >>| ok in
-         let%bind () = Hardcaml_workbench_backend.Asic_service.completion service.asic_service in
+         let%bind () = Silver_backend.Asic_service.completion service.asic_service in
          Service.asic service { instance_id; project; operation = Get } >>| ok
        in
        let%bind _ = stage ~selected:{ selection with chip_target = None } () >>| ok in
@@ -1079,7 +1079,7 @@ let run_fresh_fixture endpoint =
        let provider = Filename.concat root "fresh-provider.py" in
        Out_channel.write_all provider ~data:(In_channel.read_all "fresh_provider.py");
        Core_unix.chmod provider ~perm:0o700;
-       let module Asic_config = Hardcaml_workbench_project_integration.Asic_config in
+       let module Asic_config = Silver_project_integration.Asic_config in
        let asic_config : Asic_config.t =
          { schema_version = 1
          ; project_executable = Filename.concat root "provider"
@@ -1530,9 +1530,9 @@ let run_fresh_fixture endpoint =
        (* Restart the ASIC state owner without restarting the user's daemon. The direct
           service is a read-only reopen of this private fixture's registry. *)
        let state_dir = Filename.concat (Filename.dirname root) "logs-state" in
-       let reopened = Hardcaml_workbench_backend.Asic_service.create ~state_dir in
+       let reopened = Silver_backend.Asic_service.create ~state_dir in
        let%bind restored =
-         Hardcaml_workbench_backend.Asic_service.handle
+         Silver_backend.Asic_service.handle
            reopened
            ~root
            ~environment:Inherit_daemon
@@ -1556,21 +1556,21 @@ let run_fresh_fixture endpoint =
           && Option.is_some interrupted.elaboration_started_at)
          "Restart advertised unfinished preparation as owned/complete";
        let%bind replay =
-         Hardcaml_workbench_backend.Asic_service.handle
+         Silver_backend.Asic_service.handle
            reopened
            ~root
            ~environment:Inherit_daemon
            (Launch_fresh { key = "physical"; intent_id = physical.id })
        in
        let%bind unfinished_replay =
-         Hardcaml_workbench_backend.Asic_service.handle
+         Silver_backend.Asic_service.handle
            reopened
            ~root
            ~environment:Inherit_daemon
            (Launch_fresh { key = "unfinished"; intent_id = unfinished_input.id })
        in
        let%bind _ =
-         Hardcaml_workbench_backend.Asic_service.handle
+         Silver_backend.Asic_service.handle
            reopened
            ~root
            ~environment:Inherit_daemon
@@ -1582,7 +1582,7 @@ let run_fresh_fixture endpoint =
           && !builds = before_reopen
           && List.length (stages ()) = 5)
          "Restart replay reran a producer";
-       let%bind () = Hardcaml_workbench_backend.Asic_service.shutdown reopened in
+       let%bind () = Silver_backend.Asic_service.shutdown reopened in
        let%bind still_owned = asic Get in
        require
          (Asic.Fresh.Phase.equal (find still_owned "unfinished").phase Building)
@@ -1672,7 +1672,7 @@ let run_failed_log_fixture ~shutdown =
             String.is_substring s ~substring:"Job log write failed")
           && Option.is_none failed.emission_job
           && not
-               (Hardcaml_workbench_backend.Preparation_service.source_leased
+               (Silver_backend.Preparation_service.source_leased
                   service.preparation_service
                   root))
          "Log write failure hid the real exit or stranded the source lease";
@@ -1713,12 +1713,12 @@ let run_failed_log_fixture ~shutdown =
        require (not (Asic.Fresh.Workflow.source_queued held)) "Running build was queued";
        let state_dir = Filename.concat (Filename.dirname root) "logs-state" in
        let reopen () =
-         let reopened = Hardcaml_workbench_backend.Asic_service.create ~state_dir in
+         let reopened = Silver_backend.Asic_service.create ~state_dir in
          let%bind snapshot =
-           Hardcaml_workbench_backend.Asic_service.handle
+           Silver_backend.Asic_service.handle
              reopened ~root ~environment:Inherit_daemon Get >>| ok
          in
-         let%map () = Hardcaml_workbench_backend.Asic_service.shutdown reopened in
+         let%map () = Silver_backend.Asic_service.shutdown reopened in
          snapshot
        in
        let%bind restored = reopen () in
@@ -1805,7 +1805,7 @@ let run_fresh_probe_fixture ~shutdown =
        let provider = Filename.concat root "probe-provider.py" in
        Out_channel.write_all provider ~data:(In_channel.read_all "fresh_provider.py");
        Core_unix.chmod provider ~perm:0o700;
-       let module C = Hardcaml_workbench_project_integration.Asic_config in
+       let module C = Silver_project_integration.Asic_config in
        let provider_config : C.t =
          { schema_version = 1
          ; project_executable = Filename.concat root "provider"
@@ -1908,11 +1908,11 @@ let run_fresh_probe_fixture ~shutdown =
                "Shutdown did not signal its owned capability process";
              assert_no_downstream ();
              let reopened =
-               Hardcaml_workbench_backend.Asic_service.create
+               Silver_backend.Asic_service.create
                  ~state_dir:(Filename.concat (Filename.dirname root) "logs-state")
              in
              let%bind snapshot =
-               Hardcaml_workbench_backend.Asic_service.handle
+               Silver_backend.Asic_service.handle
                  reopened
                  ~root
                  ~environment:Inherit_daemon
@@ -1926,7 +1926,7 @@ let run_fresh_probe_fixture ~shutdown =
                (Asic.Fresh.Phase.equal restored.phase Cancelled
                 && Option.is_none restored.preparation_id)
                "Shutdown failed to retain cancelled pre-preparation workflow";
-             Hardcaml_workbench_backend.Asic_service.shutdown reopened)
+             Silver_backend.Asic_service.shutdown reopened)
            else (
              (* A second workflow owns a separate probe. Cancelling the first must not
                 cancel/coalesce the second through the shared metadata cache. *)

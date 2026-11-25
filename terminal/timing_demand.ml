@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (* A finite client intention, not a daemon queue. Only [step] may issue work; a receipt
    alone is not completion when the daemon accepted a pending read. *)

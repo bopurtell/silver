@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Bonsai_term
 module V = Host_view
 
@@ -13,7 +13,7 @@ let column line text =
 let%test_unit "actual Runs columns survive filtering, selection, scrolling and icon modes"
   =
   let host, data, find =
-    V.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    V.refinement_fixture Silver_workspaces.Overview.definition
   in
   let tile = find "run-selector" in
   let snapshot = Option.value_exn data.asic in
@@ -146,7 +146,7 @@ let%test_unit "Overview actual five-row tiles show exact selected and pinned exe
                scopes"
   =
   let host, data, find =
-    V.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    V.refinement_fixture Silver_workspaces.Overview.definition
   in
   let now = Time_ns.epoch in
   let snapshot = Option.value_exn data.asic in
@@ -337,7 +337,7 @@ let%test_unit "live Overview duration uses supplied clock; terminal run freezes;
                statuses retain semantics"
   =
   let host, data, find =
-    V.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition
+    V.refinement_fixture Silver_workspaces.Overview.definition
   in
   let snapshot = Option.value_exn data.asic in
   let live =
@@ -419,7 +419,7 @@ let%test_unit "Testing attempts paint duration on the list and advance with the 
                clock"
   =
   let host, data, find =
-    V.refinement_fixture Hardcaml_workbench_workspaces.Testing.definition
+    V.refinement_fixture Silver_workspaces.Testing.definition
   in
   let tile = find "simulation-attempts" in
   let now = Time_ns.epoch in

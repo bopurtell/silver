@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Authoring
-module Engine = Hardcaml_workbench_backend.Authoring_service
+module Engine = Silver_backend.Authoring_service
 
 let check yes message = if not yes then failwith message
 let unexpected r = raise_s [%message "Unexpected authoring response" (r : Response.t)]
@@ -11,7 +11,7 @@ let mkdir path = Core_unix.mkdir path ~perm:0o700
 let () =
   let base = Filename_unix.temp_dir "wb-authoring-" "" in
   Exn.protect
-    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove base)
+    ~finally:(fun () -> Silver_backend.Simulation_files.remove base)
     ~f:(fun () ->
       let base = Filename_unix.realpath base in
       let root = base / "permitted" in

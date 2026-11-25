@@ -135,11 +135,11 @@ class Terminal(harness.Terminal):
 
 def exercise(test):
     (test.root / 'dune-project').write_text('(lang dune 3.22)\n(name reconnect_fixture)\n')
-    (test.root / 'hardcaml-workbench.sexp').write_text(
+    (test.root / 'silver.sexp').write_text(
         '(lang hardcaml-workbench 1)\n(project (name "Project adoption acceptance"))\n'
         '(dune (build_alias @never-build) (test_alias @never-test))\n')
     calls = test.evidence / 'provider-calls.jsonl'
-    (test.root / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([
+    (test.root / 'silver-simulation.sexp').write_text(wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(Path(__file__).resolve()), '_provider', '--calls', str(calls)]),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 10)]))

@@ -631,9 +631,9 @@
       "acceptance/resource-measurements/accepted-live-01/run/supplemental/portable-replay/vvp-version.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "acceptance/resource-measurements/accepted-live-01/run/supplemental/restoration.json": "71842133d30d003b2086b507baa819d25f7e8d37fcdc13727556db0f49db0290",
       "acceptance/resource-measurements/accepted-live-01/run/verify.py": "c7a8c71e1f515a3c83e06f1bb5525519ff1041475a92da6fa90d4a6081d94324",
-      "hardcaml-workbench-asic.sexp": "703a4fce875c2e200505065dee2a60d67269588ec9d1f5579c48556739ee93b9",
-      "hardcaml-workbench-preparation.sexp": "79283e732c84024882274d77491a4f64cd7425aeec8f6aa557377d71004fdcd1",
-      "hardcaml-workbench-simulation.sexp": "d13a076e4344d5560011c367e53cb678f015c7c48ebdf443faae413b403836f7",
+      "silver-asic.sexp": "703a4fce875c2e200505065dee2a60d67269588ec9d1f5579c48556739ee93b9",
+      "silver-preparation.sexp": "79283e732c84024882274d77491a4f64cd7425aeec8f6aa557377d71004fdcd1",
+      "silver-simulation.sexp": "d13a076e4344d5560011c367e53cb678f015c7c48ebdf443faae413b403836f7",
       "asic-dependency.json": "90a5635e5a466d1c79ba4531b763c9effece3f8102f2bb388d26e234fd214eaf",
       ".dev/workbench-real-demo/manifest.json": "613a045dfcc815a9e1a674255a3b102f77c503c4daf75f2b9549382306806264"
     },

@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Simulation
-module Codec = Hardcaml_workbench_project_integration.Simulation_protocol
+module Codec = Silver_project_integration.Simulation_protocol
 
 type t =
   { mutable attempt : Attempt.t

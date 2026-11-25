@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** A finite, selected-first Timing intention. Dropping it stops future issuance; it never
     cancels daemon tasks. Call only from input/async scheduling edges. *)

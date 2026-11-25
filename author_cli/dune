@@ -1,9 +1,9 @@
 (executable
  (name main)
  (public_name silver-author)
- (package hardcaml_workbench)
- (libraries async core core_unix.command_unix hardcaml_workbench_backend
-  hardcaml_workbench_native_http hardcaml_workbench_protocol hardcaml_workbench_setup)
+ (package silver)
+ (libraries async core core_unix.command_unix silver_backend
+  silver_native_http silver_protocol silver_setup)
  (preprocess (pps ppx_jane)))
 
 (rule

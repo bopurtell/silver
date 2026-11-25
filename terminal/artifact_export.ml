@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let max_bytes = 16 * 1024 * 1024
 let page_limit = 64 * 1024

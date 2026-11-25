@@ -19,7 +19,7 @@ prefix="$HOME/.local"
 switch=5.2.0+ox
 example="$PWD/examples/cyclesim_counter"
 
-opam install --switch="$switch" ./hardcaml_workbench_provider.opam hardcaml
+opam install --switch="$switch" ./silver_provider.opam hardcaml
 opam exec --switch="$switch" -- dune build --root "$example" \
   counter.exe test_provider.exe
 
@@ -29,7 +29,7 @@ opam exec --switch="$switch" -- dune build --root "$example" \
 "$prefix/bin/ag" --project-root "$example" --environment "opam:$switch"
 ```
 
-`init` writes the local, ignored `.workbench/hardcaml-workbench-simulation.sexp`.
+`init` writes the local, ignored `.silver/silver-simulation.sexp`.
 It never overwrites existing configuration. If you move the checkout, update
 the executable path in that file or regenerate it after moving the old file
 aside. The provider finds `counter.exe` beside itself by default. Neither

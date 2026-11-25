@@ -1,8 +1,8 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Workspace
-module Service = Hardcaml_workbench_backend.Workspace_service
+module Service = Silver_backend.Workspace_service
 
 let require condition message = if not condition then failwith message
 

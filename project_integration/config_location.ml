@@ -34,7 +34,23 @@ let legacy_path ~root ~filename =
 
 let preferred_path ~root ~filename =
   check_filename filename;
-  Filename.concat (Filename.concat root ".workbench") filename
+  Filename.concat (Filename.concat root ".silver") filename
+;;
+
+let candidate_paths ~root ~filename =
+  let old_name =
+    String.chop_prefix filename ~prefix:"silver"
+    |> Option.map ~f:(fun suffix -> "hardcaml-workbench" ^ suffix)
+    |> Option.value ~default:filename
+  in
+  [ preferred_path ~root ~filename
+  ; legacy_path ~root ~filename
+  ; Filename.concat (Filename.concat root ".silver") old_name
+  ; Filename.concat (Filename.concat root ".workbench") filename
+  ; Filename.concat (Filename.concat root ".workbench") old_name
+  ; Filename.concat root old_name
+  ]
+  |> List.stable_dedup ~compare:String.compare
 ;;
 
 let require yes message = if not yes then failwith message
@@ -131,21 +147,19 @@ let resolve_with_hook ~root ~filename ~max_bytes ~on_event =
       in
       path, observed, file
     in
-    let common_path, common_stat, common = load Common (preferred_path ~root ~filename) in
-    let legacy_path, legacy_stat, legacy = load Legacy (legacy_path ~root ~filename) in
+    let observations =
+      List.mapi (candidate_paths ~root ~filename) ~f:(fun i path ->
+        load (if i = 0 then Common else Legacy) path)
+    in
     on_event Loaded_pair;
-    (* Recheck both observations, including absence. This is a bounded change-detection
-       fence, not an atomic snapshot: writers can still race after either check. *)
-    revalidate common_path common_stat;
-    revalidate legacy_path legacy_stat;
-    match common, legacy with
-    | Some common, Some legacy ->
-      require
-        (String.equal common.contents legacy.contents)
-        (sprintf "Conflicting configuration files: %s and %s differ" common.path legacy.path);
-      Some common
-    | Some value, None | None, Some value -> Some value
-    | None, None -> None)
+    List.iter observations ~f:(fun (path, stat, _) -> revalidate path stat);
+    match List.filter_map observations ~f:(fun (_, _, file) -> file) with
+    | [] -> None
+    | first :: rest ->
+      List.iter rest ~f:(fun other ->
+        require (String.equal first.contents other.contents)
+          (sprintf "Conflicting configuration files: %s and %s differ" first.path other.path));
+      Some first)
 ;;
 
 let resolve ~root ~filename ~max_bytes =

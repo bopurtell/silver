@@ -184,5 +184,6 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
   [terminal controls](docs/terminal_controls.md).
 - [Silver's own test suites](test/README.md).
 
-Existing `hardcaml-workbench` commands, `hardcaml_workbench*` OCaml packages and
-modules, and legacy configuration names remain supported.
+Legacy `hardcaml-workbench` command aliases and configuration files remain readable.
+The OCaml packages are now `silver`, `silver_provider` and `silver_web`;
+provider source should use `Silver_provider` and be rebuilt against the new SDK.

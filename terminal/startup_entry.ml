@@ -1,11 +1,11 @@
 open! Core
 open Async
 open Bonsai_term
-module Discovery = Hardcaml_workbench_setup.Project_discovery
-module Bluespec_scaffold = Hardcaml_workbench_setup.Bluespec_scaffold
-module Authoring = Hardcaml_workbench_protocol.Authoring
-module Service = Hardcaml_workbench_backend.Authoring_service
-module Destination_path = Hardcaml_workbench_backend.Authoring_destination
+module Discovery = Silver_setup.Project_discovery
+module Bluespec_scaffold = Silver_setup.Bluespec_scaffold
+module Authoring = Silver_protocol.Authoring
+module Service = Silver_backend.Authoring_service
+module Destination_path = Silver_backend.Authoring_destination
 module Host = Terminal_presentation.Workspace_host
 module Style = Terminal_presentation.Host_view
 module Panel = Terminal_presentation.Panel

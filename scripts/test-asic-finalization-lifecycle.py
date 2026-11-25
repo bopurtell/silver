@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import shutil
 import signal
 import stat
@@ -174,7 +175,7 @@ def prepare(args, receipt, inputs, acceptance):
     store = results / 'finalizations'
     store.mkdir()
     (root / 'dune-project').write_text('(lang dune 3.17)\n(name finalization_lifecycle_acceptance)\n')
-    cfg = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
+    cfg = metrics.parse((config_path(args.example_root, 'silver-asic.sexp')).read_text())
     provider = receipt['config']['provider']
     require(Path(provider).is_absolute() and Path(provider).is_file(), 'Exact adopted provider unavailable')
     allocation, execution = inputs['allocation'], inputs['execution_file']
@@ -230,7 +231,7 @@ os.execv(PROVIDER, [PROVIDER] + a)
     for key, value in (('provider_executable', str(relay)), ('project_executable', str(deny)),
                        ('results_root', str(results))):
         cfg = metrics.put(cfg, key, value)
-    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
+    (root / 'silver-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
     save(args.evidence / 'relay-policy.json', dict(provider=provider, sha256=sha256(provider), producer=producer))
     return root, store
 
@@ -452,7 +453,7 @@ def exercise(args):
     acceptance = acceptance_inputs(args) if args.accept or args.cancel else None
     watched = [args.inputs.parent, receipt_path.parent, Path(receipt['config']['results_root']),
                Path(receipt['config']['provider']).parent.parent,
-               args.example_root / 'hardcaml-workbench-asic.sexp', args.acceptance_evidence]
+               config_path(args.example_root, 'silver-asic.sexp'), args.acceptance_evidence]
     if acceptance:
         watched += [Path(acceptance[k]) for k in ('support_tools', 'precheck_python', 'testbench', 'replay_trace')]
     before = dashboard.inventory(watched)

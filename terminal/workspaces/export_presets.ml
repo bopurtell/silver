@@ -1,5 +1,5 @@
 let () =
-  let module P = Hardcaml_workbench_workspaces.Presets in
+  let module P = Silver_workspaces.Presets in
   match Array.to_list Sys.argv with
   | [ _; "--workspace-config" ] ->
     (match P.export_config () with

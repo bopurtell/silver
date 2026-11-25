@@ -30,7 +30,7 @@ def run(args, evidence):
         (evidence / name).mkdir()
     (project / 'dune-project').write_text('(lang dune 3.22)\n(name waveform_prepare)\n')
     (project / 'suite-id').write_text('waveform-fixture\n')
-    (project / 'hardcaml-workbench-simulation.sexp').write_text(handoff.wire.sexp([
+    (project / 'silver-simulation.sexp').write_text(handoff.wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(Path(handoff.__file__).resolve()), '_provider']),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 30)]))

@@ -171,24 +171,24 @@ if [[ $managed == true ]]; then
   # during opam provisioning: each dependency needs its own build directory.
   export DUNE_BUILD_DIR=_build_silver_managed
 fi
-packages=(hardcaml_workbench_provider hardcaml_workbench)
+packages=(silver_provider silver)
 deps_hint() {
   if [[ $managed == true ]]; then
     printf 'The managed toolchain is in %s; see the diagnostic above.\n' "$OPAMROOT" >&2
     return
   fi
-  printf 'If build dependencies are missing, install them in the selected switch with:\n  cd %q && opam install --switch=%q --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam\n' \
+  printf 'If build dependencies are missing, install them in the selected switch with:\n  cd %q && opam install --switch=%q --deps-only ./silver_provider.opam ./silver.opam\n' \
     "$repo" "$switch" >&2
   printf 'For the OxCaml switch and the Cobalt prerequisite, see docs/install.md.\n' >&2
 }
 "${run[@]}" dune --version >/dev/null || { deps_hint; die "dune is unavailable in switch '$switch'"; }
 printf 'Building native Silver in switch %s for %s\n' "$switch" "$prefix"
-"${run[@]}" dune build -j "$jobs" -p hardcaml_workbench_provider,hardcaml_workbench @install ||
+"${run[@]}" dune build -j "$jobs" -p silver_provider,silver @install ||
   { deps_hint; die 'native build failed; see the Dune diagnostic above'; }
 install_dirs=()
 if [[ $managed == true ]]; then
   install_dirs=(--libdir "$managed_sdk/lib" --libexecdir "$managed_sdk/lib")
-  if [[ -e $prefix/lib/hardcaml_workbench_provider ]]; then
+  if [[ -e $prefix/lib/silver_provider || -e $prefix/lib/hardcaml_workbench_provider ]]; then
     printf 'Warning: leaving the previously installed SDK under %s/lib untouched.\n' "$prefix" >&2
   fi
 fi
@@ -197,7 +197,7 @@ fi
 if [[ $managed == true ]]; then
   printf 'The managed OCaml simulation-provider SDK is private to %s/lib.\n' "$managed_sdk"
   printf 'For your own project, install the provider package in its compatible OCaml switch:\n'
-  printf '  opam install --switch=PROJECT_SWITCH %q\n' "$repo/hardcaml_workbench_provider.opam"
+  printf '  opam install --switch=PROJECT_SWITCH %q\n' "$repo/silver_provider.opam"
 else
   printf 'The OCaml simulation-provider SDK requires a compiler and dependencies compatible with switch %s.\n' "$switch"
 fi

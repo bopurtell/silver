@@ -9,7 +9,7 @@ test attempts: one pass and one intentional failure.
 
 ## Launch in two terminals
 
-The commands below use `$HOME/.local/state/hardcaml-workbench/synthetic-composition`
+The commands below use `$HOME/.local/state/silver/synthetic-composition`
 as a new persistent demo directory.
 Choose a different name if it already exists; preparation deliberately refuses to
 overwrite a prepared demo. The existing Workbench opam switch is required. Scripts
@@ -22,14 +22,14 @@ use `scripts/with-switch.sh`, respecting `OPAM_SWITCH` (default `5.2.0+ox`).
 ./scripts/with-switch.sh dune build -j2 --build-dir _build_workbench \
   daemon/main.exe terminal/main.exe terminal/workspaces/export_presets.exe
 
-mkdir -p "$HOME/.local/state/hardcaml-workbench"
+mkdir -p "$HOME/.local/state/silver"
 
 python3 -B scripts/synthetic-flow-demo.py prepare \
-  --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
+  --dir "$HOME/.local/state/silver/synthetic-composition"
 
 python3 -B scripts/synthetic-flow-demo.py daemon \
   --daemon _build_workbench/default/daemon/main.exe \
-  --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
+  --dir "$HOME/.local/state/silver/synthetic-composition"
 ```
 
 The daemon stays in the foreground. Its port is selected automatically and recorded
@@ -41,11 +41,11 @@ in the demo's discovery file; it has its own state directory.
 # From the same Silver checkout.
 python3 -B scripts/synthetic-flow-demo.py seed \
   --preset-export _build_workbench/default/terminal/workspaces/export_presets.exe \
-  --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
+  --dir "$HOME/.local/state/silver/synthetic-composition"
 
 python3 -B scripts/synthetic-flow-demo.py client \
   --client _build_workbench/default/terminal/main.exe \
-  --dir "$HOME/.local/state/hardcaml-workbench/synthetic-composition"
+  --dir "$HOME/.local/state/silver/synthetic-composition"
 ```
 
 Both commands discover this demo's exact daemon endpoint. Start with a terminal

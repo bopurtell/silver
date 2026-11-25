@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Asic_workloads
 module P = Asic_public
 module Storage = Asic_workloads_storage

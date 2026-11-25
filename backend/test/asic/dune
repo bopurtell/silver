@@ -7,10 +7,10 @@
   core
   core_unix
   core_unix.command_unix
-  hardcaml_workbench_adapters
-  hardcaml_workbench_backend
-  hardcaml_workbench_protocol
-  hardcaml_workbench_project_integration
+  silver_adapters
+  silver_backend
+  silver_protocol
+  silver_project_integration
   yojson)
  (preprocess
   (pps ppx_jane))
@@ -23,8 +23,8 @@
  (deps production_flow_list.json)
  (libraries
   core
-  hardcaml_workbench_backend
-  hardcaml_workbench_protocol
+  silver_backend
+  silver_protocol
   yojson)
  (preprocess
   (pps ppx_jane))
@@ -34,14 +34,14 @@
 (test
  (name test_finalization_eligibility)
  (modules test_finalization_eligibility)
- (libraries core hardcaml_workbench_backend yojson)
+ (libraries core silver_backend yojson)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))
 
 (test
  (name test_rejection)
  (modules test_rejection)
- (libraries core hardcaml_workbench_backend hardcaml_workbench_protocol)
+ (libraries core silver_backend silver_protocol)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))
 
@@ -49,6 +49,6 @@
  (name test_sram_admission)
  (modules test_sram_admission)
  (deps sram_scope.json)
- (libraries core hardcaml_workbench_backend hardcaml_workbench_project_integration hardcaml_workbench_protocol yojson)
+ (libraries core silver_backend silver_project_integration silver_protocol yojson)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))

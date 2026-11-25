@@ -15,7 +15,7 @@ Neither installation provisions the toolchain of a project you open.
   front-end-only Silver installation.
 - **Simulation:** The project must supply a compatible simulation provider, and
   any simulators or libraries it requires. Projects that compile an OCaml
-  provider may need the `hardcaml_workbench_provider` SDK.
+  provider may need the `silver_provider` SDK.
 - **ASIC:** Install [hardcaml_asic](https://github.com/LeEmperor/hardcaml_asic#install-the-provider)
   on the service host. Silver calls it as a separate process; a design that
   imports `Hardcaml_asic` also needs its compiled libraries in the project's
@@ -148,7 +148,7 @@ prepared compatible switch.
    eval "$(opam env --switch=5.2.0+ox --set-switch)"
    . scripts/release/toolchain.env
    opam pin add --yes cobalt "git+${SILVER_COBALT_REPOSITORY}#${SILVER_COBALT_COMMIT}" &&
-     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
+     opam install --yes --deps-only ./silver_provider.opam ./silver.opam
    ```
 
    For local Cobalt development, see [building both checkouts](cobalt_editor.md#build-and-verify)
@@ -175,7 +175,7 @@ From the Silver source checkout or extracted source tarball, with the project's
 compatible opam switch active:
 
 ```sh
-opam install ./hardcaml_workbench_provider.opam
+opam install ./silver_provider.opam
 ```
 
 This installs only the provider package and its dependencies into the selected

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (* Presentation of typed evidence times. Absolute times are always UTC to the minute and
    say so; ages are coarse (two units at most). A time ahead of this client's clock is

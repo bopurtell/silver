@@ -103,7 +103,7 @@ def upgrade_checks(base):
     require(upgraded['owner'] == demo.SIMULATION_INSTALL_OWNER and upgraded['sha256'] == owned['sha256'],
             'legacy ownership marker upgrades without changing the installed files')
     before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
-    config = root / 'hardcaml-workbench-simulation.sexp'
+    config = root / 'silver-simulation.sexp'
     original = config.read_bytes()
     config.write_text('USER CONFIGURATION - preserve me\n')
     try:
@@ -327,7 +327,7 @@ def native(base, args):
             'live structured progress')
         check(field(field(live, 'detail')[0], 'lifecycle') == 'Running',
               'flushed structured case progress visible while provider is running')
-        config = base / 'project/hardcaml-workbench-simulation.sexp'
+        config = base / 'project/silver-simulation.sexp'
         source = base / 'project/synthetic-provider/simulation_provider.py'
         saved_config, saved_source = config.read_bytes(), source.read_bytes()
         config.write_text(config.read_text().replace('"20"', '"19"'))
@@ -485,7 +485,7 @@ def native(base, args):
             attempts(client)
             details(client, pass_id)
         if not args.skip_pty:
-            navigation_files = list((base / 'client-state/hardcaml-workbench/terminal').glob('navigation-*.sexp'))
+            navigation_files = list((base / 'client-state/silver/terminal').glob('navigation-*.sexp'))
             require(len(navigation_files) == 1, 'Exactly one private project navigation sidecar')
             navigation = parse(navigation_files[0].read_text())
             active = field(navigation, 'active')[0]

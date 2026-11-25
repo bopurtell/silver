@@ -106,7 +106,7 @@ type snapshot =
   }
 [@@deriving equal, sexp_of]
 
-module Integration = Hardcaml_workbench_project_integration
+module Integration = Silver_project_integration
 
 let catalog = "hardcaml-asic-targets.json"
 let catalog_text s = Option.map s.catalog_state ~f:(fun (_, _, text) -> text)
@@ -173,7 +173,8 @@ let existing_project dir name ~configs_required =
   if Option.is_none marker then invalid "Expected existing dune-project at destination";
   absent dir (design_dir name);
   let configs =
-    [ Integration.Asic_config.filename; Integration.Preparation_config.filename ]
+    [ Integration.Asic_config.filename; Integration.Preparation_config.filename
+    ; "hardcaml-workbench-asic.sexp"; "hardcaml-workbench-preparation.sexp" ]
   in
   let configs_absent = ref true in
   let check_configs dir =
@@ -184,15 +185,17 @@ let existing_project dir name ~configs_required =
         if configs_required then absent dir name))
   in
   check_configs dir;
-  let common =
-    match stat dir ".workbench" with
+  let check_directory name =
+    match stat dir name with
     | None -> None
     | Some s when Poly.equal s.st_kind S_DIR ->
-      let path, via = child dir ".workbench" in
+      let path, via = child dir name in
       with_dir ~path ~via ~identity:(id s) (fun d _ -> check_configs d);
       Some (id s)
-    | Some _ -> invalid "Expected plain directory: .workbench"
+    | Some _ -> invalid ("Expected plain directory: " ^ name)
   in
+  let common = check_directory ".silver" in
+  ignore (check_directory ".workbench");
   ( marker
   , common
   , Option.map (regular catalog) ~f:(fun _ ->
@@ -626,7 +629,7 @@ let publish dir snapshot files ~on_mkdir ~on_create =
     let children = String.Table.create () in
     List.iter
       entries
-      ~f:(fun (parts, (file : Hardcaml_workbench_protocol.Authoring.File.t)) ->
+      ~f:(fun (parts, (file : Silver_protocol.Authoring.File.t)) ->
         match parts with
         | [ name ] ->
           write dir ~name ~contents:file.contents ~on_create:(fun () ->
@@ -638,7 +641,7 @@ let publish dir snapshot files ~on_mkdir ~on_create =
       let descend child = group child rel (List.rev data) in
       let key = String.concat ~sep:"/" rel in
       match
-        if String.equal key ".workbench" && Option.is_some snapshot.common
+        if String.equal key ".silver" && Option.is_some snapshot.common
         then snapshot.common
         else List.Assoc.find snapshot.directories key ~equal:String.equal
       with
@@ -650,6 +653,6 @@ let publish dir snapshot files ~on_mkdir ~on_create =
   group
     dir
     []
-    (List.map files ~f:(fun (f : Hardcaml_workbench_protocol.Authoring.File.t) ->
+    (List.map files ~f:(fun (f : Silver_protocol.Authoring.File.t) ->
        String.split f.path ~on:'/', f))
 ;;

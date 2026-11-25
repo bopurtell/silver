@@ -1,7 +1,7 @@
 open! Core
 open Bonsai_term
 open Bonsai.Let_syntax
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 module Location = Terminal_presentation.Editor_location.Location
 module Cobalt_location = Cobalt_hosted.Open_location

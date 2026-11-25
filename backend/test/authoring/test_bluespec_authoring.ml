@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Authoring
-module Engine = Hardcaml_workbench_backend.Authoring_service
+module Engine = Silver_backend.Authoring_service
 
 let ( / ) = Filename.concat
 let check condition message = if not condition then failwith message
@@ -10,7 +10,7 @@ let unexpected r = raise_s [%message "Unexpected authoring response" (r : Respon
 let () =
   let root = Filename_unix.temp_dir "silver-bluespec-authoring-" "" |> Filename_unix.realpath in
   Exn.protect
-    ~finally:(fun () -> Hardcaml_workbench_backend.Simulation_files.remove root)
+    ~finally:(fun () -> Silver_backend.Simulation_files.remove root)
     ~f:(fun () ->
       Core_unix.mkdir (root / ".silver");
       let manifest = root / ".silver/project.json" in

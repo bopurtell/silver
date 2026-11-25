@@ -1,12 +1,12 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Backend = Hardcaml_workbench_backend
+open Silver_protocol
+module Backend = Silver_backend
 module Public = Backend.Asic_public
 module Parser = Backend.Asic_timing_analysis
 module Service = Backend.Asic_service
 module Inspection = Backend.Asic_inspection
-module Config = Hardcaml_workbench_project_integration.Asic_config
+module Config = Silver_project_integration.Asic_config
 module Timing = Asic.Timing_analysis
 
 let require condition message = if not condition then failwith message

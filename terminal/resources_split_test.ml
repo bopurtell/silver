@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module P = Hardcaml_workbench_workspaces
+open Silver_protocol
+module P = Silver_workspaces
 module H = Workspace_host
 module W = Workspace
 

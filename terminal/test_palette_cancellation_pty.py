@@ -373,7 +373,7 @@ def preallocation(client, daemon, base):
     tools.mkdir()
     (root / "dune-project").write_text("(lang dune 3.22)\n")
     equipment(root, tools, [("watched", "main")])
-    preparation = root / "hardcaml-workbench-preparation.sexp"
+    preparation = root / "silver-preparation.sexp"
     preparation.write_text(preparation.read_text().replace("(timeout_seconds 15)",
                                                            "(timeout_seconds 45)"))
     dune = tools / "dune"

@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Manifest = Hardcaml_workbench_project_integration.Silver_manifest
+open Silver_protocol
+module Manifest = Silver_project_integration.Silver_manifest
 
 let action_invocation (manifest : Manifest.t) ~root ~environment action
   : Dune_adapter.Invocation.t

@@ -9,7 +9,7 @@ also work without Silver.
 - [Install Silver](install.md) and [open a project or attach to a daemon](project_workflows.md).
 - [Start a Classic Bluespec project](bluespec_classic.md) with Bazel, Verilator and Rust.
 - [Manage a project](project_management.md) or [connect an existing project](existing_project_setup.md).
-- [Migrate root companion files to `.workbench/`](migration_guides/project-configuration.md).
+- [Migrate root companion files to `.silver/`](migration_guides/project-configuration.md).
 - Try the [Cyclesim counter](../examples/cyclesim_counter/README.md) or
   [synthetic flow demo](synthetic_flow.md) without physical EDA tools.
 

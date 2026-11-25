@@ -144,7 +144,7 @@ def make_project(root):
     config = [["schema_version", "1"], ["provider_executable", sys.executable],
               ["provider_args", [str(source / "simulation_provider.py")]],
               ["discovery_timeout_seconds", "10"], ["run_timeout_seconds", "90"]]
-    (root / "hardcaml-workbench-simulation.sexp").write_text(sexp(config) + "\n")
+    (root / "silver-simulation.sexp").write_text(sexp(config) + "\n")
     return source / "hold"
 
 
@@ -309,7 +309,7 @@ def exercise(args, base, mode):
                COLORTERM="truecolor", LC_ALL="C.UTF-8", PYTHONNOUSERSITE="1")
     for key in ("COBALT_SILVER_SHARE_FIXTURE", "HARDCAML_WORKBENCH_DIAGNOSTICS"):
         env.pop(key, None)
-    runtime = dirs["XDG_RUNTIME_DIR"] / "hardcaml-workbench"
+    runtime = dirs["XDG_RUNTIME_DIR"] / "silver"
     state = base / "deliberately-nondefault-state"
     cobalt_argv = [args.cobalt, "--no-lsp", code]
     silver_exe = base / "ag"

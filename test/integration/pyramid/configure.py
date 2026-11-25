@@ -71,9 +71,12 @@ def read_current(path, max_bytes=64 * 1024):
 
 def current_companion(root, kind):
     """Common wins only when both copies have identical bytes, before parsing."""
-    name = "hardcaml-workbench-" + kind + ".sexp"
+    name = "silver-" + kind + ".sexp"
+    legacy = "hardcaml-workbench-" + kind + ".sexp"
     max_bytes = (16 if kind == "simulation" else 64) * 1024
-    found = {path: raw for path in (root / ".workbench" / name, root / name)
+    found = {path: raw for path in (root / ".silver" / name, root / name,
+                                    root / ".silver" / legacy, root / ".workbench" / name,
+                                    root / ".workbench" / legacy, root / legacy)
              if (raw := read_current(path, max_bytes=max_bytes)) is not None}
     require(found, "missing prepared main setup input: current config " + name)
     require(len(set(found.values())) == 1,
@@ -125,8 +128,11 @@ def derive(example_root, evidence_root, flow, profile, outer_build_lock=None, cu
     require((generation / "lib").is_dir() and (sdk / "lib").is_dir(), "missing installed SDK libraries")
 
     def companion(kind):
-        path = selection / "config" / ("hardcaml-workbench-" + kind + ".sexp")
-        raw = read(path)
+        directory = selection / "config"
+        paths = [directory / (prefix + kind + ".sexp") for prefix in ("silver-", "hardcaml-workbench-")]
+        found = [(path, read(path)) for path in paths if path.exists()]
+        require(found and len({raw for _, raw in found}) == 1, "missing or conflicting captured companion: " + kind)
+        path, raw = found[0]
         require(inputs[str(path)] == install["config_sha256"][kind], "prepared companion identity mismatch: " + kind)
         value = runner.parse(raw.decode())
         require(isinstance(value, list) and all(isinstance(p, list) and len(p) == 2 for p in value),

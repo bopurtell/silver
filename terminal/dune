@@ -1,5 +1,5 @@
 (install
- (package hardcaml_workbench)
+ (package silver)
  (section bin)
  (files (main.exe as hardcaml-workbench)))
 
@@ -82,9 +82,9 @@
   core_unix
   core_unix.filename_unix
   core_unix.sys_unix
-  hardcaml_workbench_protocol
-  hardcaml_workbench_backend
-  hardcaml_workbench_workspaces
+  silver_protocol
+  silver_backend
+  silver_workspaces
   bonsai_term
   notty-community
   cryptokit
@@ -100,7 +100,7 @@
 (executable
  (name presentation_preferences_probe)
  (modules presentation_preferences_probe)
- (libraries core terminal_presentation hardcaml_workbench_protocol)
+ (libraries core terminal_presentation silver_protocol)
  (preprocess
    (pps ppx_jane)))
 
@@ -110,20 +110,20 @@
  (deps ../backend/test/asic/production_flow_list.json)
  (action (run %{test} %{dep:../backend/test/asic/production_flow_list.json}))
  (libraries core yojson bonsai_term terminal_presentation
-  hardcaml_workbench_protocol hardcaml_workbench_backend hardcaml_workbench_workspaces)
+  silver_protocol silver_backend silver_workspaces)
  (preprocess (pps ppx_jane)))
 
 (test
  (name workloads_handoff_probe)
  (modules workloads_handoff_probe)
- (libraries async core core_unix terminal_presentation hardcaml_workbench_backend
-  hardcaml_workbench_protocol)
+ (libraries async core core_unix terminal_presentation silver_backend
+  silver_protocol)
  (preprocess (pps ppx_jane)))
 
 (executable
  (name streaming_memory_probe)
  (modules streaming_memory_probe)
- (libraries core async core_unix terminal_presentation hardcaml_workbench_protocol cryptokit)
+ (libraries core async core_unix terminal_presentation silver_protocol cryptokit)
  (preprocess
   (pps ppx_jane)))
 
@@ -141,8 +141,8 @@
   core
   async
   terminal_presentation
-  hardcaml_workbench_protocol
-  hardcaml_workbench_workspaces)
+  silver_protocol
+  silver_workspaces)
  (preprocess
   (pps ppx_jane)))
 
@@ -176,7 +176,7 @@
  (modules main startup_entry editor_workspace shared_terminal shared_terminal_view
   project_sharing share_wizard)
  (public_name ag)
- (package hardcaml_workbench)
+ (package silver)
  (libraries
   server_host
   async
@@ -188,10 +188,10 @@
   core
   core_unix
   core_unix.command_unix
-  hardcaml_workbench_native_http
-  hardcaml_workbench_backend
-  hardcaml_workbench_protocol
-   hardcaml_workbench_setup
+  silver_native_http
+  silver_backend
+  silver_protocol
+   silver_setup
    notty-community
    silver_editor
    terminal_presentation)

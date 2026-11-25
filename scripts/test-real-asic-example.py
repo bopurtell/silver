@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import pty
 import signal
 import struct
@@ -61,7 +62,7 @@ def run(args):
     for name in ('discovery', 'state', 'client-state', 'config'):
         (evidence / name).mkdir()
     print('Evidence: ' + str(evidence), flush=True)
-    watched = [root / demo.EVIDENCE, root / 'hardcaml-workbench-asic.sexp',
+    watched = [root / demo.EVIDENCE, config_path(root, 'silver-asic.sexp'),
                Path(manifest['provider']).parent.parent, Path(manifest['project_executable']),
                root / '.dev/asic/current/receipt.json', base / 'results']
     before = demo.inventory(watched)

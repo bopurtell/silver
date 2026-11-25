@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Fresh endpoints do not imply an occurrence in the selected historical execution. *)
 type intent =

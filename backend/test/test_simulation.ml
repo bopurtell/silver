@@ -1,13 +1,13 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Simulation
-module Service = Hardcaml_workbench_backend.Service
-module Files = Hardcaml_workbench_backend.Simulation_files
-module Store = Hardcaml_workbench_backend.Simulation_service
-module Reducer = Hardcaml_workbench_backend.Simulation_reducer
-module Config = Hardcaml_workbench_project_integration.Simulation_config
-module Codec = Hardcaml_workbench_project_integration.Simulation_protocol
+module Service = Silver_backend.Service
+module Files = Silver_backend.Simulation_files
+module Store = Silver_backend.Simulation_service
+module Reducer = Silver_backend.Simulation_reducer
+module Config = Silver_project_integration.Simulation_config
+module Codec = Silver_project_integration.Simulation_protocol
 
 let require condition message = if not condition then failwith message
 
@@ -244,7 +244,7 @@ let review_store ~root ~state_dir ~config ~catalog =
   let p = Store.project store root in
   let legacy = Filename.concat root Config.filename in
   let common =
-    Hardcaml_workbench_project_integration.Config_location.preferred_path
+    Silver_project_integration.Config_location.preferred_path
       ~root
       ~filename:Config.filename
   in
@@ -356,7 +356,7 @@ let review_store ~root ~state_dir ~config ~catalog =
       (Sexp.to_string_mach (Config.sexp_of_t { config with run_timeout_seconds = 3 }));
     ignore
       (prepare (Job_id.of_string "changed-before-reservation")
-       : Hardcaml_workbench_backend.Simulation_task.t);
+       : Silver_backend.Simulation_task.t);
     failwith "Changed config was accepted"
   in
   let%bind changed = handle schedule_changed operation in
@@ -371,7 +371,7 @@ let review_store ~root ~state_dir ~config ~catalog =
       Files.mkdir (Filename.concat (Filename.concat p.dir name) "record.sexp"));
     ignore
       (prepare (Job_id.of_string "write-failure")
-       : Hardcaml_workbench_backend.Simulation_task.t);
+       : Silver_backend.Simulation_task.t);
     failwith "Reservation storage failure was accepted"
   in
   let%bind failed = handle schedule_full operation in
@@ -394,7 +394,7 @@ let review_store ~root ~state_dir ~config ~catalog =
   let%bind () = held in
   let schedule_drain ~name:_ ~config:_ ~reservation:_ ~prepare =
     let job = Job_id.of_string "review-drain" in
-    let task : Hardcaml_workbench_backend.Simulation_task.t = prepare job in
+    let task : Silver_backend.Simulation_task.t = prepare job in
     let entry =
       List.find_exn (Hashtbl.data p.entries) ~f:(fun e ->
         Job_id.equal e.Store.record.attempt.job job)
@@ -451,7 +451,7 @@ let review_store ~root ~state_dir ~config ~catalog =
   in
   let terminal_failure ~name:_ ~config:_ ~reservation:_ ~prepare =
     let job = Job_id.of_string "terminal-write-failure" in
-    let task : Hardcaml_workbench_backend.Simulation_task.t = prepare job in
+    let task : Silver_backend.Simulation_task.t = prepare job in
     let entry =
       List.find_exn (Hashtbl.data p.entries) ~f:(fun e ->
         Job_id.equal e.Store.record.attempt.job job)
@@ -1029,7 +1029,7 @@ let tests fixture =
       require
         (match source.operation with
          | Service.Simulation_task task ->
-           phys_equal task Hardcaml_workbench_backend.Simulation_task.released
+           phys_equal task Silver_backend.Simulation_task.released
          | _ -> false)
         "Terminal job retained its reducer/artifact callbacks";
       for index = 1 to 120 do

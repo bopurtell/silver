@@ -213,7 +213,7 @@ def run(args, evidence, result, cleanup):
     root = evidence / 'project'
     write(root / 'dune-project', '(lang dune 3.22)\n(name viewer_ssh_locality)\n')
     write(root / 'suite-id', 'fixture\n')
-    write(root / 'hardcaml-workbench-simulation.sexp', handoff.wire.sexp([
+    write(root / 'silver-simulation.sexp', handoff.wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(ROOT / 'terminal/test_waveform_handoff_pty.py'), '_provider']),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 30)]))

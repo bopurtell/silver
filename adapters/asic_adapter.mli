@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Config = Hardcaml_workbench_project_integration.Asic_config
+open Silver_protocol
+module Config = Silver_project_integration.Asic_config
 
 val invocation
   :  root:string

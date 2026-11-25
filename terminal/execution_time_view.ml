@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let duration seconds =
   let n = Float.to_int (Float.round_down seconds) in

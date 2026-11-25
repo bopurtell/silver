@@ -1,10 +1,10 @@
 (library
- (name hardcaml_workbench_adapters)
+ (name silver_adapters)
  (libraries
   core
   core_unix
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint

@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-open Hardcaml_workbench_workspaces
+open Silver_protocol
+open Silver_workspaces
 
 let kinds d = List.map d.Definition.tiles ~f:(fun t -> t.Common.kind)
 

@@ -112,10 +112,10 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
                            "--kind=version", package, version], commands)
         for cmd in commands[-4:]:
             self.assertEqual(cmd[:3], ["exec", "--switch=silver", "--"])
-        self.assertIn("hardcaml_workbench_provider,hardcaml_workbench", commands[-2])
+        self.assertIn("silver_provider,silver", commands[-2])
         self.assertIn("@install", commands[-2])
         self.assertEqual(commands[-1][-4:], ["--prefix", str(self.root / ".local"),
-                                             "hardcaml_workbench_provider", "hardcaml_workbench"])
+                                             "silver_provider", "silver"])
         for option in ("--libdir", "--libexecdir"):
             self.assertEqual(commands[-1][commands[-1].index(option) + 1],
                              str(state / "sdk/lib"))
@@ -189,7 +189,7 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
         self.assertFalse(self.log.exists())
 
     def test_managed_preserves_preexisting_public_sdk(self):
-        sdk = self.root / ".local/lib/hardcaml_workbench_provider"
+        sdk = self.root / ".local/lib/silver_provider"
         sdk.mkdir(parents=True)
         (sdk / "META").write_text("existing developer SDK")
         result = self.invoke("--without-asic")
@@ -272,7 +272,7 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
         self.env["BUILD_FAIL"] = "1"
         r = self.invoke("--switch", "developer")
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("--deps-only ./hardcaml_workbench_provider.opam", r.stderr)
+        self.assertIn("--deps-only ./silver_provider.opam", r.stderr)
         self.assertFalse(any("install" in cmd for cmd in self.commands()))
 
     def test_bad_option_before_build(self):

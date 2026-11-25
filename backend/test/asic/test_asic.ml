@@ -1,12 +1,12 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Service = Hardcaml_workbench_backend.Asic_service
-module Config = Hardcaml_workbench_project_integration.Asic_config
-module Public = Hardcaml_workbench_backend.Asic_public
-module Evidence_file = Hardcaml_workbench_backend.Asic_evidence_file
-module Owned_process = Hardcaml_workbench_backend.Asic_process
-module Adapter = Hardcaml_workbench_adapters.Asic_adapter
+open Silver_protocol
+module Service = Silver_backend.Asic_service
+module Config = Silver_project_integration.Asic_config
+module Public = Silver_backend.Asic_public
+module Evidence_file = Silver_backend.Asic_evidence_file
+module Owned_process = Silver_backend.Asic_process
+module Adapter = Silver_adapters.Asic_adapter
 
 let require condition message = if not condition then failwith message
 let environment = V1.Environment_selection.Inherit_daemon
@@ -2279,7 +2279,7 @@ let sram_workflow_fixtures root state_dir =
 ;;
 
 let provider_discovery_fixture root =
-  let module D = Hardcaml_workbench_backend.Asic_provider_discovery in
+  let module D = Silver_backend.Asic_provider_discovery in
   let provider = Filename.concat root "hardcaml_asic" in
   let bad = Filename.concat root "hardcaml-asic-flow" in
   let%bind () = In_thread.run (fun () ->
@@ -2542,7 +2542,7 @@ let main () =
         (Filename.concat root Config.filename)
         ~data:(Sexp.to_string (Config.sexp_of_t config));
       Out_channel.write_all
-        (Filename.concat root "hardcaml-workbench-preparation.sexp")
+        (Filename.concat root "silver-preparation.sexp")
         ~data:
           (sprintf
              "((schema_version 1)(build_target fixture.exe)(results_root \
@@ -2825,7 +2825,7 @@ let main () =
       let%bind warm_reports = reports root in
       require (warm_reports = initial_reports) "Warm switch queried provider report";
       let%bind () = Service.shutdown service in
-      let common_dir = Filename.concat root ".workbench" in
+      let common_dir = Filename.concat root ".silver" in
       Core_unix.mkdir common_dir;
       let legacy_config = Filename.concat root Config.filename in
       let common_config = Filename.concat common_dir Config.filename in
@@ -2844,7 +2844,7 @@ let main () =
       let%bind () = Service.shutdown invalid in
       Out_channel.write_all common_config ~data:config_bytes;
       Core_unix.unlink legacy_config;
-      let preparation_name = "hardcaml-workbench-preparation.sexp" in
+      let preparation_name = "silver-preparation.sexp" in
       Core_unix.rename
         ~src:(Filename.concat root preparation_name)
         ~dst:(Filename.concat common_dir preparation_name);

@@ -1,5 +1,5 @@
 open! Core
-module Project_discovery = Hardcaml_workbench_setup.Project_discovery
+module Project_discovery = Silver_setup.Project_discovery
 
 (* Trees live directly under /tmp rather than TMPDIR: under Dune, TMPDIR can be inside
    this repository's _build, whose own dune-project would become an enclosing root. *)

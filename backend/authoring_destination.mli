@@ -53,7 +53,7 @@ val materialize : on_mkdir:(string -> unit) -> dir -> snapshot -> (dir -> 'a) ->
 val publish
   :  dir
   -> snapshot
-  -> Hardcaml_workbench_protocol.Authoring.File.t list
+  -> Silver_protocol.Authoring.File.t list
   -> on_mkdir:(string -> unit)
   -> on_create:(string -> unit)
   -> unit

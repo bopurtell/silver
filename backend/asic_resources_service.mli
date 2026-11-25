@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Bounded derived cache, independent of physical run registration. Descriptor/index
     persistence is Workbench-owned; restored evidence is always unverified. *)

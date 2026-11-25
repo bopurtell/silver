@@ -26,7 +26,7 @@ let hex bytes = String.concat_map bytes ~f:(fun c -> sprintf "%02x" (Char.to_int
 
 let view_frames trace ~bytes ~start =
   let _, last = W.time_bounds trace in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "probe-vcd"
     ; attempt_id = "probe-attempt"
     ; case_id = Some "probe"

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let run : Run_ref.t =
   { backend = Backend_id.of_string "asic"; id = "run:1"; build = None; label = None }

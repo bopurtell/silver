@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Bounded, tile-local presentation. Only typed daemon pages are accepted; paths are
     metadata, never terminal-host filenames. *)

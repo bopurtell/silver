@@ -1,7 +1,7 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-open Hardcaml_workbench_native_http
+open Silver_protocol
+open Silver_native_http
 
 let main () =
   match Array.to_list (Sys.get_argv ()) with

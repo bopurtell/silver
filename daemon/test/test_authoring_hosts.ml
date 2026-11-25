@@ -1,7 +1,7 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Client = Hardcaml_workbench_native_http.Client
+open Silver_protocol
+module Client = Silver_native_http.Client
 
 let exercise ~endpoint ~root ~outside =
   let client = Client.create endpoint in
@@ -354,7 +354,7 @@ let run daemon () =
   Core_unix.mkdir connected;
   Monitor.protect
     ~finally:(fun () ->
-      In_thread.run (fun () -> Hardcaml_workbench_backend.Service.remove_tree_sync dir))
+      In_thread.run (fun () -> Silver_backend.Service.remove_tree_sync dir))
     (fun () ->
       let%bind endpoint =
         Server_host.start_standalone

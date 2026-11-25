@@ -1,13 +1,13 @@
 open! Core
 open Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module H = Terminal_presentation.Workspace_host
 module N = Terminal_presentation.Navigation_preferences
 module T = Terminal_presentation.Testing_workspace
 module Timing = Terminal_presentation.Timing_workspace
 module L = Terminal_presentation.Retained_hydration
 module W = Workspace
-module P = Hardcaml_workbench_workspaces
+module P = Silver_workspaces
 
 let registry () =
   let apply snapshot mutation =

@@ -45,7 +45,7 @@ chmod +x tools/python3
 env -i PATH="$prefix/bin:$work/tools:/usr/bin:/bin" HOME="$work/home" LC_ALL=C.UTF-8 \
   ag init --bluespec 'classic project'
 test -s 'classic project/.silver/project.json'
-test -s 'classic project/.workbench/hardcaml-workbench-simulation.sexp'
+test -s 'classic project/.silver/silver-simulation.sexp'
 test -s 'classic project/Counter.bs'
 test -s 'classic project/simulation_provider.py'
 (

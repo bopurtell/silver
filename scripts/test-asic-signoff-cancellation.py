@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import shutil
 import signal
 import subprocess
@@ -107,7 +108,7 @@ def exercise(args):
         source = args.example_root / relative
         require(source.is_file() and not source.is_symlink(), 'Missing/nonregular source input: ' + str(source))
         source_paths.append(source)
-    config_path = args.example_root / 'hardcaml-workbench-asic.sexp'
+    config_path = config_path(args.example_root, 'silver-asic.sexp')
     cfg = metrics.parse(config_path.read_text())
     provider = Path(field(cfg, 'provider_executable')).resolve()
     source_git = args.example_root / '.git'
@@ -237,7 +238,7 @@ def exercise(args):
         cfg = metrics.put(cfg, 'project_executable', str(args.project))
         cfg = metrics.put(cfg, 'results_root', str(args.evidence / 'results'))
         cfg = metrics.put(cfg, 'stage_timeout_seconds', ['2400'])
-        (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
+        (root / 'silver-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
         session = Session(args, args.evidence, root)
         session.deadline = work_end
         for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES'):

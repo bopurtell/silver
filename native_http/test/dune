@@ -1,6 +1,7 @@
 (executable
  (name editor_share_probe)
- (libraries async core hardcaml_workbench_native_http hardcaml_workbench_protocol)
+ (modules editor_share_probe)
+ (libraries async core silver_native_http silver_protocol)
  (preprocess
   (pps ppx_jane)))
 
@@ -8,3 +9,8 @@
  (alias runtest)
  (deps test_editor_share.py)
  (action (run python3 -B %{dep:test_editor_share.py} %{exe:editor_share_probe.exe})))
+
+(test
+ (name test_runtime_paths)
+ (modules test_runtime_paths)
+ (libraries core core_unix silver_native_http))

@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module S = Simulation
 
 let identity (a : S.Artifact.t) =

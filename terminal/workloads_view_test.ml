@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module V = Workloads_view
 module W = Asic_workloads
 
@@ -177,7 +177,7 @@ let%test_unit "receipt admission floors reject old same-key failure polls" =
 
 let%test_unit "production host keys import forms rendering and tile lifetimes" =
   let module H = Workspace_host in
-  let module P = Hardcaml_workbench_workspaces in
+  let module P = Silver_workspaces in
   let definition = P.Presets.find "workloads" |> Option.value_exn in
   let host, data, find = Host_view.refinement_fixture definition in
   let tile = find "workloads" in
@@ -241,7 +241,7 @@ let%test_unit "workload navigation roundtrips without granting validation or res
                layout"
   =
   let module H = Workspace_host in
-  let module P = Hardcaml_workbench_workspaces in
+  let module P = Silver_workspaces in
   let host, _, find =
     Host_view.refinement_fixture (P.Presets.find "workloads" |> Option.value_exn)
   in

@@ -408,7 +408,7 @@ sys.exit(p.returncode)
     for key, value in (('provider_executable', str(guard)), ('project_executable', str(deny)),
                        ('results_root', str(base / 'results'))):
         cfg = metrics.put(cfg, key, value)
-    (root / 'hardcaml-workbench-asic.sexp').write_text(metrics.mach(cfg) + '\n')
+    (root / 'silver-asic.sexp').write_text(metrics.mach(cfg) + '\n')
     new = metrics.mach([str(root), identity[1], [cfg]])
     new_prefix = 'asic-' + metrics.digest(new)
     copied = []

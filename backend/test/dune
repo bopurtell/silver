@@ -1,14 +1,14 @@
 (test
  (name test_artifact_file)
  (modules test_artifact_file)
- (libraries core core_unix cryptokit hardcaml_workbench_backend)
+ (libraries core core_unix cryptokit silver_backend)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))
 
 (test
  (name test_module_jump)
  (modules test_module_jump)
- (libraries async core hardcaml_workbench_backend hardcaml_workbench_protocol)
+ (libraries async core silver_backend silver_protocol)
  (preprocess (pps ppx_jane))
  (lint (pps ppx_js_style)))
 
@@ -20,10 +20,10 @@
   core
   core_unix
   core_unix.command_unix
-  hardcaml_workbench_adapters
-  hardcaml_workbench_backend
-  hardcaml_workbench_setup
-  hardcaml_workbench_protocol)
+  silver_adapters
+  silver_backend
+  silver_setup
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (lint
@@ -37,9 +37,9 @@
   core
   core_unix
   core_unix.command_unix
-  hardcaml_workbench_backend
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane))
  (deps simulation_provider_fixture.py)
@@ -56,9 +56,9 @@
   core_unix
   core_unix.command_unix
   yojson
-  hardcaml_workbench_backend
-  hardcaml_workbench_adapters
-  hardcaml_workbench_project_integration
-  hardcaml_workbench_protocol)
+  silver_backend
+  silver_adapters
+  silver_project_integration
+  silver_protocol)
  (preprocess
   (pps ppx_jane)))

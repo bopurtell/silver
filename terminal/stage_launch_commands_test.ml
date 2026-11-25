@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module H = Workspace_host
 module W = Workspace
 module C = Stage_launch_commands
@@ -68,8 +68,8 @@ let fixture () =
       (Mutate
          { expected_revision = registry.revision
          ; mutation =
-             Hardcaml_workbench_workspaces.Definition.apply
-               Hardcaml_workbench_workspaces.Overview.definition
+             Silver_workspaces.Definition.apply
+               Silver_workspaces.Overview.definition
                ~workspace:overview.id
          })
     |> Result.ok
@@ -284,7 +284,7 @@ let%test_unit "chip picker, Overview and launch all use the catalog target, neve
     | _ -> assert false
   in
   check_picker keyboard;
-  let _, data, _ = Host_view.refinement_fixture Hardcaml_workbench_workspaces.Overview.definition in
+  let _, data, _ = Host_view.refinement_fixture Silver_workspaces.Overview.definition in
   let click h ~width row =
     Host_view.select_body_row h data tile ~width ~height:10 ~row
   in

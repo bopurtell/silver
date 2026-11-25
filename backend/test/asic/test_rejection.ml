@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Rejection = Hardcaml_workbench_backend.Asic_rejection
-module Public = Hardcaml_workbench_backend.Asic_public
+open Silver_protocol
+module Rejection = Silver_backend.Asic_rejection
+module Public = Silver_backend.Asic_public
 
 let require condition message = if not condition then failwith message
 let stream = "9e6e0de93bd1497c88f502aa9b2d1c23"

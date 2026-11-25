@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Workspace
 module Host = Workspace_host
 module T = Tile_presentation

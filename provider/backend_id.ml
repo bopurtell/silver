@@ -3,5 +3,5 @@
     does not revise the protocol schema. *)
 
 include Id.Make (struct
-    let module_name = "Hardcaml_workbench_protocol.Backend_id"
+    let module_name = "Silver_protocol.Backend_id"
   end)

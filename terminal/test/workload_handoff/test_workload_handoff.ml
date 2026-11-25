@@ -2,12 +2,12 @@
    without changing case, result identity, or selected inputs. *)
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module T = Terminal_presentation
 module V = T.Workloads_view
 module W = Asic_workloads
 module S = Simulation
-module Backend = Hardcaml_workbench_backend.Simulation_service
+module Backend = Silver_backend.Simulation_service
 
 let checks = ref 0
 let failures = ref []
@@ -64,7 +64,7 @@ let snapshot query digest marker =
   in
   let json = document digest result marker in
   ignore
-    (Hardcaml_workbench_backend.Asic_workloads_service.validate_response query json
+    (Silver_backend.Asic_workloads_service.validate_response query json
      : W.Response.t);
   let s : W.Snapshot.t =
     { entries = [ descriptor ]
@@ -154,7 +154,7 @@ let digest_and_selection () =
     "comparison fixture passes production backend workload digest admission"
     (Result.is_ok
        (Or_error.try_with (fun () ->
-          Hardcaml_workbench_backend.Asic_workloads_service.validate_response
+          Silver_backend.Asic_workloads_service.validate_response
             (Option.value_exn paired.query)
             pair_json)));
   let descriptor : W.Descriptor.t =
@@ -484,7 +484,7 @@ let state_and_layout () =
   let module H = T.Workspace_host in
   let host, data, find =
     T.Host_view.refinement_fixture
-      (Hardcaml_workbench_workspaces.Presets.find "workloads" |> Option.value_exn)
+      (Silver_workspaces.Presets.find "workloads" |> Option.value_exn)
   in
   let tile = find "workloads" in
   let local = H.local host tile.id in
@@ -545,7 +545,7 @@ let metadata_and_locator () =
   in
   let json = add_locator response.json (`String bundle) in
   ignore
-    (Hardcaml_workbench_backend.Asic_workloads_service.validate_response
+    (Silver_backend.Asic_workloads_service.validate_response
        (Option.value_exn t.query)
        json
      : W.Response.t);
@@ -615,7 +615,7 @@ let metadata_and_locator () =
         "invalid additive locator fails backend admission"
         (Result.is_error
            (Or_error.try_with (fun () ->
-              Hardcaml_workbench_backend.Asic_workloads_service.validate_response
+              Silver_backend.Asic_workloads_service.validate_response
                 (Option.value_exn valid.query)
                 (add_locator response.json locator)))));
   let result_state, _ = V.input valid ~asic:with_locator ~filter:"" Back in

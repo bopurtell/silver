@@ -8,7 +8,7 @@
     would not be noticed until then. *)
 
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Values are printed with a label, so a block that asserts on several of them stays
     readable and a diff says which one moved. *)

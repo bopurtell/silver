@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Shared, immutable structural evidence. Build once per loaded artifact, then share
     between independent consumers. This is a display index, not protocol validation;

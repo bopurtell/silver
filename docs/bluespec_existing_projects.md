@@ -84,5 +84,5 @@ Older Silver releases may reject the new field, so leave it out if you
 still use those releases and do not need it.
 
 This field only enables Classic Bluespec authoring. Import resolution is
-owned by Bazel and BSC; leave the `.workbench/` simulation configuration
+owned by Bazel and BSC; leave the `.silver/` simulation configuration
 unchanged.

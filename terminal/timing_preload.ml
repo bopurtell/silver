@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** A bounded, level-triggered planner. Candidates are recomputed from current exact
     workspace bindings; there is deliberately no backlog of obsolete selections. An

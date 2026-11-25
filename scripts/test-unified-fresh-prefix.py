@@ -72,13 +72,13 @@ class Fixture:
                                   ' build ' + sexp(str(root)) + ')))\n')
         prep = [['schema_version', 1], ['build_target', 'publisher.exe'],
                 ['results_root', str(self.base / 'publication')], ['timeout_seconds', 180]]
-        (root / 'hardcaml-workbench-preparation.sexp').write_text(sexp(prep))
+        (root / 'silver-preparation.sexp').write_text(sexp(prep))
         self.config = [['schema_version', 1], ['project_executable', str(root / 'pinned')],
                        ['provider_executable', str(root / 'provider')], ['results_root', str(self.base / 'results')],
                        ['toolchain', str(root)], ['python', [str(root / 'configured-python')]],
                        ['support_tools', [str(root / 'configured-support')]], ['pdk_root', [str(root / 'configured-pdk')]],
                        ['stage_timeout_seconds', ['45']]]
-        (root / 'hardcaml-workbench-asic.sexp').write_text(sexp(self.config))
+        (root / 'silver-asic.sexp').write_text(sexp(self.config))
         # The daemon uses Inherit_daemon, so its Dune resolves to this private wrapper.
         # with-switch runs inside the wrapper after flock acquisition, never outside it.
         wrapper = self.base / 'bin/dune'
@@ -328,7 +328,7 @@ def http_acceptance(f):
         # Capture fences: literal inherited ASIC config and provider bytes are provenance.
         for kind in ('config', 'provider'):
             intent = f.stage()
-            path = f.root / ('hardcaml-workbench-asic.sexp' if kind == 'config' else 'provider')
+            path = f.root / ('silver-asic.sexp' if kind == 'config' else 'provider')
             original = path.read_bytes()
             path.write_bytes(original.replace(b'"45"', b'"44"') if kind == 'config'
                              else original + b'\n# generation drift\n')
@@ -344,7 +344,7 @@ def http_acceptance(f):
             finally:
                 path.write_bytes(original)
         # Failed staging invalidates old unlaunched intent, and missing prep cannot bypass.
-        prep = f.root / 'hardcaml-workbench-preparation.sexp'
+        prep = f.root / 'silver-preparation.sexp'
         original = prep.read_bytes()
         prep.unlink()
         try:
@@ -422,7 +422,7 @@ def pty_acceptance(f):
                                  '(geometry ((x 0) (y 56) (width 100) (height 18))))' % sexp(field(overview, 'id')))
         planned_tile = field(field(registry, 'tiles')[-1], 'id')
         tiles_before = field(registry, 'tiles')
-        config_before = (f.root / 'hardcaml-workbench-asic.sexp').read_bytes()
+        config_before = (f.root / 'silver-asic.sexp').read_bytes()
         reference = [['attempt', str(f.base / 'results/synthetic-reference')], ['stream_id', 'synthetic-reference']]
         f.http.rpc('(Register %s)' % sexp(reference), wait=False)
         historical = wait(lambda: next(iter(field(f.snapshot(), 'runs')), None), 'historical registration')
@@ -581,7 +581,7 @@ def pty_acceptance(f):
                 'Real async launch finishes its captured workflow without stealing a changed selected-run context')
         final_workspace = f.http.rpc(domain='workspace')
         f.check(field(final_workspace, 'tiles') == tiles_before and
-                (f.root / 'hardcaml-workbench-asic.sexp').read_bytes() == config_before,
+                (f.root / 'silver-asic.sexp').read_bytes() == config_before,
                 'Fresh UI routes preserve saved tile membership/bindings and configured provider/tool selections')
         save(f.base / 'final-workspace.json', final_workspace)
     finally:
@@ -594,7 +594,7 @@ def pty_acceptance(f):
 
 def no_asic_acceptance(f):
     try:
-        (f.root / 'hardcaml-workbench-asic.sexp').unlink()
+        (f.root / 'silver-asic.sexp').unlink()
         f.start()
         f.launch('source-only', only=True)
         w = f.done('source-only')

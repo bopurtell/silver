@@ -53,7 +53,7 @@ def run(args):
     for path, raw in original.items():
         if path != args.preferences:
             (base / 'state' / path.name).write_bytes(raw)
-    pref = base / 'client-state/hardcaml-workbench/terminal' / args.preferences.name
+    pref = base / 'client-state/silver/terminal' / args.preferences.name
     pref.parent.mkdir(parents=True)
     pref.write_bytes(original[args.preferences])
     # Bypass Client.__init__: do not Open_project on the user's daemon.

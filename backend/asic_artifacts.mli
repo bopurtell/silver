@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Explicit synchronous filesystem work; callers should schedule off the event loop.
     Raises on invalid evidence. No provider calls or writes. At most 32 entries, each at

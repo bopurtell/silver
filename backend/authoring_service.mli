@@ -1,5 +1,5 @@
 open! Core
-module Authoring = Hardcaml_workbench_protocol.Authoring
+module Authoring = Silver_protocol.Authoring
 
 type t
 

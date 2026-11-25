@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Successful detail LRU. Limits are per project, independent of snapshot publications.
     Bytes count canonical serialized Detail payloads, excluding heap/key overhead. Either

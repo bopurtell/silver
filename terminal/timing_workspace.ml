@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 type pane =
   | Paths
@@ -810,7 +810,7 @@ let%test_unit "retained attachment preserves intent until index and attaches onl
 let%test_unit "Timing investigation layout fits 120x40 without a default vertical \
                checklist"
   =
-  let module P = Hardcaml_workbench_workspaces in
+  let module P = Silver_workspaces in
   let definition = P.Timing.definition in
   let kinds = List.map definition.tiles ~f:(fun tile -> tile.P.Common.kind) in
   assert (not (List.mem kinds "stage-checklist" ~equal:String.equal));
@@ -840,7 +840,7 @@ let%test_unit "Timing investigation layout fits 120x40 without a default vertica
 ;;
 
 let%test_unit "Timing weighted layout remains bounded at narrow and roomy sizes" =
-  let module P = Hardcaml_workbench_workspaces in
+  let module P = Silver_workspaces in
   let definition = P.Timing.definition in
   let kinds = List.map definition.tiles ~f:(fun tile -> tile.P.Common.kind) in
   List.iter [ 30; 60; 79; 80; 96; 120; 180 ] ~f:(fun width ->

@@ -1,7 +1,7 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Http = Hardcaml_workbench_native_http
+open Silver_protocol
+module Http = Silver_native_http
 module Baseline_fixture = Terminal_presentation.Baseline_fixture
 module Presentation = Terminal_presentation.Presentation
 module Build_tool = Presentation.Build_tool
@@ -38,12 +38,12 @@ module Waveform_data = Terminal_presentation.Waveform_data
 module Waveform_view = Terminal_presentation.Waveform_view
 module Waveform_routing = Terminal_presentation.Waveform_routing
 module Waveform_preferences = Terminal_presentation.Waveform_preferences
-module Waveforms = Hardcaml_workbench_workspaces.Waveforms
+module Waveforms = Silver_workspaces.Waveforms
 module Resources_view = Terminal_presentation.Resources_view
 module Workloads_view = Terminal_presentation.Workloads_view
 module Planned_run = Terminal_presentation.Planned_run
 module Stage_action = Terminal_presentation.Stage_action
-module Jump = Hardcaml_workbench_backend.Module_jump
+module Jump = Silver_backend.Module_jump
 
 let console_limit = 500
 let minimum_width = 68
@@ -943,7 +943,7 @@ let preference_context session =
     | _, Some home -> Filename.concat home ".local/state"
     | _ -> failwith "No XDG_STATE_HOME or HOME for terminal preferences"
   in
-  let state_directory = Filename.concat state_directory "hardcaml-workbench/terminal" in
+  let state_directory = Http.Runtime.named_directory ~root:state_directory ~suffix:"terminal" in
   project_key, state_directory
 ;;
 
@@ -1781,7 +1781,7 @@ let restore_default_layout session (captured : Host.capture) ticket workspace de
                     Mutate
                       { expected_revision = captured.revision
                       ; mutation =
-                          Hardcaml_workbench_workspaces.Definition.restore
+                          Silver_workspaces.Definition.restore
                             definition
                             ~workspace
                       }
@@ -2643,13 +2643,13 @@ let add_default_tiles session (registry : Workspace.Snapshot.t) workspace =
   | Some definition ->
     mutate_workspace
       session
-      (Hardcaml_workbench_workspaces.Definition.apply definition ~workspace:workspace.id)
+      (Silver_workspaces.Definition.apply definition ~workspace:workspace.id)
 ;;
 
 let initialize_host_layout session =
   let operation =
     Option.bind session.host.registry ~f:(fun snapshot ->
-      Hardcaml_workbench_workspaces.Presets.startup_operation
+      Silver_workspaces.Presets.startup_operation
         ?selected:session.workspace_config
         snapshot)
   in
@@ -5852,7 +5852,7 @@ let declaration_command session =
            | Some suite_id, Some case_id
              when List.exists (Simulation_catalog.visible_cases catalog) ~f:(fun c ->
                String.equal c.id case_id) ->
-             Hardcaml_workbench_backend.Testing_declaration.offer
+             Silver_backend.Testing_declaration.offer
                ~project:project.id ~declarations:(Simulation_catalog.declarations catalog)
                ~suite_id ~case_id
            | _ -> Error "Select a test in the Testing catalog first")
@@ -6366,7 +6366,7 @@ let open_timing_workspace ?analysis ?(separate = false) session ~(run : Run_ref.
         return None
       | None ->
         let template =
-          (Hardcaml_workbench_workspaces.Presets.builtins "timing" |> Or_error.ok_exn)
+          (Silver_workspaces.Presets.builtins "timing" |> Or_error.ok_exn)
             .template
         in
         let%bind () =
@@ -6970,7 +6970,7 @@ let resource_tile ?(kind = "resources") session ~current =
                  (Instantiate_template
                     { window = active.window
                     ; template =
-                        (Hardcaml_workbench_workspaces.Presets.builtins kind
+                        (Silver_workspaces.Presets.builtins kind
                          |> Or_error.ok_exn)
                           .template
                     })
@@ -7866,7 +7866,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
               (Instantiate_template
                  { window = active.window
                  ; template =
-                     (Hardcaml_workbench_workspaces.Presets.builtins "testing"
+                     (Silver_workspaces.Presets.builtins "testing"
                       |> Or_error.ok_exn)
                        .template
                  })
@@ -7988,7 +7988,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       | Choose_chip_source | Choose_chip_library | Enter_chip_directory | Map_chip _
       | Toggle_chip _ | Select_created_chip _ | Name_starter _ | Preview_starter _ | Finish_starter _
       | Setup_asic | Adopt_asic _) as action ->
-      let module Adoption = Hardcaml_workbench_setup.Asic_adoption in
+      let module Adoption = Silver_setup.Asic_adoption in
       (match session.local_project_files, session.opened with
        | local, Some opened when local || (match action with
            | Setup_project | Setup_asic | Adopt_asic _ -> false
@@ -12626,7 +12626,7 @@ let command =
                    | Some () -> failwith "Workspace configuration exceeds 4 MiB"
                    | None -> Buffer.contents buffer)
                in
-               let module P = Hardcaml_workbench_workspaces.Presets in
+               let module P = Silver_workspaces.Presets in
                let config =
                  P.decode text |> Or_error.bind ~f:P.resolve |> Or_error.ok_exn
                in
@@ -12926,7 +12926,7 @@ let init_command =
              then (
                Core.eprintf "Usage: ag init --bluespec [DIR]\n%!";
                Stdlib.exit 2);
-             match Hardcaml_workbench_setup.Bluespec_scaffold.create ~destination with
+             match Silver_setup.Bluespec_scaffold.create ~destination with
              | Ok root ->
                Core.printf "Initialized Bluespec Classic project in %s\n%!" root
              | Error message ->

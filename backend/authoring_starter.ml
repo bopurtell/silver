@@ -1,6 +1,6 @@
 module U = Unix
 open! Core
-module File = Hardcaml_workbench_protocol.Authoring.File
+module File = Silver_protocol.Authoring.File
 
 let program = "hardcaml-asic-starter"
 let max_output = 256 * 1024

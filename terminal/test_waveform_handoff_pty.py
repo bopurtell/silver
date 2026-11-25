@@ -289,7 +289,7 @@ def run(args, evidence):
         (evidence / name).mkdir()
     root = evidence / 'project'
     (root / 'dune-project').write_text('(lang dune 3.22)\n(name handoff)\n')
-    (root / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([
+    (root / 'silver-simulation.sexp').write_text(wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(Path(__file__).resolve()), '_provider']),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 30)]))

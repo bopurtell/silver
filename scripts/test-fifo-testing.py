@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import shutil
 import signal
 import struct
@@ -131,9 +132,10 @@ def standalone(args, evidence):
     install_root = isolated / 'install-root'
     (install_root / 'scripts').mkdir(parents=True)
     shutil.copytree(args.root / 'simulation', install_root / 'simulation')
+    shutil.copytree(args.root / 'integration/workbench', install_root / 'integration/workbench')
     helper = install_root / 'scripts/install-fifo-simulation.py'
     shutil.copy2(args.root / 'scripts' / helper.name, helper)
-    config = install_root / 'hardcaml-workbench-simulation.sexp'
+    config = install_root / 'silver-simulation.sexp'
     helper_command = [sys.executable, str(helper), '--simulator', str(args.simulator)]
     config.write_bytes(b'UNRELATED CONFIG\n')
     refusal = subprocess.run(helper_command, capture_output=True, timeout=10)
@@ -142,6 +144,7 @@ def standalone(args, evidence):
     config.unlink()
     subprocess.run(helper_command, capture_output=True, check=True, timeout=10)
     require((install_root / '.dev/fifo-simulation-install.json').exists(), 'persistent install manifest')
+    config = config_path(install_root, 'silver-simulation.sexp')
     config.write_bytes(config.read_bytes() + b'\n')
     edited = config.read_bytes()
     refusal = subprocess.run(helper_command, capture_output=True, timeout=10)
@@ -245,7 +248,7 @@ def cooperative(session, evidence, expected, passed):
         check(field(captured, 'discovery_digest') == field(current, 'discovery_digest')[0] and
               field(detail, 'project_root') == str(session.root) and not field(detail, 'parent'),
               'catalog launch captures exact discovery digest, actual project root and no fabricated parent')
-        config = native.record(native.parse((session.root / 'hardcaml-workbench-simulation.sexp').read_text()))
+        config = native.record(native.parse((config_path(session.root, 'silver-simulation.sexp')).read_text()))
         check(field(captured, 'provider_executable') == config['provider_executable'] and
               field(captured, 'provider_args') == config['provider_args'] and
               field(captured, 'environment') == 'Inherit_daemon', 'captured persistent genuine provider and environment')

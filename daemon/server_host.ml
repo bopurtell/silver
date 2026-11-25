@@ -1,8 +1,8 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Rpc_server = Hardcaml_workbench_rpc_server.Rpc_server
-module Service = Hardcaml_workbench_backend.Service
+open Silver_protocol
+module Rpc_server = Silver_rpc_server.Rpc_server
+module Service = Silver_backend.Service
 
 let application_version = "0.1.0"
 let default_cache_entries = 64
@@ -56,7 +56,7 @@ let start_with_state_lock
   ~inspection_detail_cache_bytes
   ()
   =
-  Hardcaml_workbench_backend.Inspection_detail_cache.validate_limits
+  Silver_backend.Inspection_detail_cache.validate_limits
     ~entries:inspection_detail_cache_entries
     ~bytes:inspection_detail_cache_bytes;
   let instance_id = instance_id () in
@@ -71,16 +71,16 @@ let start_with_state_lock
           |> Option.value
                ~default:(Filename.concat (Sys_unix.home_directory ()) ".local/state")
         in
-        Filename.concat home "hardcaml-workbench/state")
+        Silver_native_http.Runtime.named_directory ~root:home ~suffix:"state")
   in
   if not (Filename.is_absolute state_dir) then failwith "--state-dir must be absolute";
   let state_paths =
-    Hardcaml_workbench_native_http.Runtime.paths ~directory:state_dir ()
+    Silver_native_http.Runtime.paths ~directory:state_dir ()
   in
-  let%bind () = Hardcaml_workbench_native_http.Runtime.ensure_directory state_paths in
+  let%bind () = Silver_native_http.Runtime.ensure_directory state_paths in
   let%bind.Deferred.Result state_lock =
     let%map lock =
-      Hardcaml_workbench_native_http.Runtime.try_acquire_lifetime_lock state_paths
+      Silver_native_http.Runtime.try_acquire_lifetime_lock state_paths
     in
     Result.of_option lock ~error:{ state_dir }
   in
@@ -98,12 +98,12 @@ let start_with_state_lock
   in
   let service = Or_error.ok_exn service in
   let rpc = Rpc_server.create ~application_version ~instance_id ~service in
-  let paths = Hardcaml_workbench_native_http.Runtime.paths ?directory:discovery_dir () in
+  let paths = Silver_native_http.Runtime.paths ?directory:discovery_dir () in
   let%bind lifetime_lock =
     match discovery_dir with
     | None -> return (Ok None)
     | Some _ ->
-      let%map lock = Hardcaml_workbench_native_http.Runtime.acquire_lifetime_lock paths in
+      let%map lock = Silver_native_http.Runtime.acquire_lifetime_lock paths in
       Or_error.map lock ~f:Option.some
   in
   let lifetime_lock = Or_error.ok_exn lifetime_lock in
@@ -114,18 +114,18 @@ let start_with_state_lock
     match discovery_dir with
     | None -> return ()
     | Some _ ->
-      let metadata : Hardcaml_workbench_native_http.Runtime.Metadata.t =
+      let metadata : Silver_native_http.Runtime.Metadata.t =
         { endpoint
         ; instance_id = V1.Daemon_instance_id.to_string instance_id
         ; pid = Core_unix.getpid () |> Pid.to_int
         }
       in
-      let client = Hardcaml_workbench_native_http.Client.create endpoint in
-      let%bind hello = Hardcaml_workbench_native_http.Client.hello client in
+      let client = Silver_native_http.Client.create endpoint in
+      let%bind hello = Silver_native_http.Client.hello client in
       let hello = Or_error.ok_exn hello in
       if not (V1.Daemon_instance_id.equal hello.instance_id instance_id)
       then raise_s [%message "daemon readiness probe returned the wrong instance"];
-      Hardcaml_workbench_native_http.Runtime.publish_metadata paths metadata
+      Silver_native_http.Runtime.publish_metadata paths metadata
   in
   Shutdown.at_shutdown ~here:[%here] (fun () ->
     let%bind () = Service.shutdown service in
@@ -150,7 +150,7 @@ let start_with_state_lock
 
 let state_lock_failure { state_dir } =
   Error.tag
-    (Hardcaml_workbench_native_http.Runtime.lifetime_lock_held_error ())
+    (Silver_native_http.Runtime.lifetime_lock_held_error ())
     ~tag:("cannot open Silver state at " ^ state_dir)
 ;;
 

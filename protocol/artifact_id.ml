@@ -2,5 +2,5 @@
     identifier; the artifact's filesystem location stays private to the backend. *)
 
 include Id.Make (struct
-    let module_name = "Hardcaml_workbench_protocol.Artifact_id"
+    let module_name = "Silver_protocol.Artifact_id"
   end)

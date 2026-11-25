@@ -1,5 +1,5 @@
 open! Core
-module Files = Hardcaml_workbench_backend.Simulation_files
+module Files = Silver_backend.Simulation_files
 
 let require yes message = if not yes then failwith message
 let max_bytes = 64 * 1024 * 1024
@@ -145,7 +145,7 @@ let () =
             ~f:(fun () ->
               let mutated = ref false in
               rejects (fun () ->
-                Hardcaml_workbench_backend.Artifact_file.scan
+                Silver_backend.Artifact_file.scan
                   fd
                   ~max_bytes
                   ~offset:0

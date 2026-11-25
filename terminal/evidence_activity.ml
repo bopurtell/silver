@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (* Scope: daemon operations count only when an open inspector currently wants their exact
    key (its run/domain/stage index, or its requested row detail), or when they are an

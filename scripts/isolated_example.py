@@ -10,7 +10,7 @@ Add --clone-from /source/hardcaml_asic_example --revision HEAD --rewrite to crea
 a disposable, detached checkout of committed source (never copies dirty files).
 The destination must not exist. No branches, source index operations or commits
 are made. An existing explicit task copy needs no Git operations.
-Configs may live in .workbench/ or at the legacy project root. If both exist,
+Configs may live in .silver/ or at the legacy project root. If both exist,
 their bytes must match; rewrite preserves their locations and equality.
 
 --env-file is a COMPLETE captured string->string environment, not an overlay.
@@ -47,10 +47,10 @@ import tempfile
 
 REPO = Path(__file__).resolve().parent.parent
 OWNER = Path('/home/wayne/devel/jane/hardcaml_asic_example')
-PROTECTED = (OWNER, REPO.parent / 'hardcaml_asic', REPO.parent / 'hardcaml_workbench')
-ASIC = 'hardcaml-workbench-asic.sexp'
-PREPARATION = 'hardcaml-workbench-preparation.sexp'
-SIMULATION = 'hardcaml-workbench-simulation.sexp'
+PROTECTED = (OWNER, REPO.parent / 'hardcaml_asic', REPO.parent / 'silver')
+ASIC = 'silver-asic.sexp'
+PREPARATION = 'silver-preparation.sexp'
+SIMULATION = 'silver-simulation.sexp'
 STATE = '.isolated-example'
 FIELDS = {
     ASIC: {'schema_version', 'project_executable', 'provider_executable',
@@ -194,10 +194,14 @@ def parse_sexp(text):
 
 def config_paths(root, name):
     """Match Config_location: common first, legacy allowed only if byte-identical."""
-    common = no_symlink_components(root / '.workbench')
-    require(not common.exists() or common.is_dir(), f'Not a config directory: {common}')
-    paths = [no_symlink_components(common / name),
-             no_symlink_components(root / name)]
+    for dirname in ('.silver', '.workbench'):
+        directory = no_symlink_components(root / dirname)
+        require(not directory.exists() or directory.is_dir(), f'Not a config directory: {directory}')
+    old = name.replace('silver', 'hardcaml-workbench', 1)
+    paths = [no_symlink_components(root / subdir / basename)
+             for subdir, basename in (('.silver', name), ('', name),
+                                      ('.silver', old), ('.workbench', name),
+                                      ('.workbench', old), ('', old))]
     present = []
     for path in paths:
         if path.exists():
@@ -205,10 +209,16 @@ def config_paths(root, name):
             require(stat.S_ISREG(info.st_mode) and info.st_size <= 65536,
                     f'Config must be a regular file of at most 65536 bytes: {path}')
             present.append(path)
-    if len(present) == 2:
-        require(present[0].read_bytes() == present[1].read_bytes(),
-                f'Conflicting configuration files: {present[0]} and {present[1]} differ')
+    for other in present[1:]:
+        require(present[0].read_bytes() == other.read_bytes(),
+                f'Conflicting configuration files: {present[0]} and {other} differ')
     return present
+
+
+def config_path(root, name):
+    paths = config_paths(root, name)
+    require(bool(paths), f'Missing configuration: {root / name}')
+    return paths[0]
 
 
 def read_config(root, name):
@@ -471,7 +481,8 @@ def setup(args):
         for name, config in configs.items():
             if config is not None:
                 # Keep identical duplicates identical; preserve the source layout.
-                for path in config_paths(root, name) or [root / name]:
+                for path in config_paths(root, name) or [root / ".silver" / name]:
+                    path.parent.mkdir(mode=0o700, exist_ok=True)
                     atomic_write(path, sexp([[k, v] for k, v in config.items()]) + '\n')
         atomic_write(state / 'environment.json', json.dumps(env, indent=2, sort_keys=True) + '\n')
         receipt = {'schema_version': 1, 'project_root': str(root),

@@ -61,7 +61,7 @@ def prepare(directory=None, manual=False, delay=1.5):
               ['provider_executable', str(wrapper)], ['results_root', str(results)],
               ['toolchain', str(root)], ['python', []], ['support_tools', []],
               ['pdk_root', []], ['stage_timeout_seconds', []]]
-    (root / 'hardcaml-workbench-asic.sexp').write_text(sexp(config) + '\n')
+    (root / 'silver-asic.sexp').write_text(sexp(config) + '\n')
     runs = provider.seed(results)
     provider.save(base / 'manifest.json', dict(synthetic=True, label=provider.LABEL,
         project_root=str(root), results_root=str(results), runs=runs))
@@ -89,7 +89,7 @@ def install_simulation(base):
     config = [['schema_version', '1'], ['provider_executable', str(Path(sys.executable).resolve())],
               ['provider_args', [str(source / 'simulation_provider.py')]],
               ['discovery_timeout_seconds', '10'], ['run_timeout_seconds', '20']]
-    files = {root / 'hardcaml-workbench-simulation.sexp': (sexp(config) + '\n').encode()}
+    files = {root / 'silver-simulation.sexp': (sexp(config) + '\n').encode()}
     for name in ('simulation_provider.py', 'simulation_wire.py'):
         files[source / name] = (REPO / 'demo/synthetic_flow' / name).read_bytes()
     hashes = {}

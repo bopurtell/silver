@@ -12,6 +12,7 @@ import json
 import math
 import os
 from pathlib import Path
+from isolated_example import config_path
 import re
 import signal
 import stat
@@ -96,7 +97,7 @@ def prepare(args, inputs, receipt, operation):
     for name in ('state', 'results', 'daemon-tmp', 'client-tmp', 'config', 'home'):
         (args.evidence / name).mkdir(mode=0o700)
     (root / 'dune-project').write_text('(lang dune 3.17)\n(name retained_asic_investigation)\n')
-    cfg = metrics.parse((args.example_root / 'hardcaml-workbench-asic.sexp').read_text())
+    cfg = metrics.parse((config_path(args.example_root, 'silver-asic.sexp')).read_text())
     policy = dict(provider=str(args.provider), execution=inputs['execution_file'],
                   allocation=inputs['allocation'], attempt=str(Path(operation['results']['path']).parent),
                   selections=[[d, DEFAULTS[d]] for d in args.domains] + [['timing', 'synthesis']],
@@ -161,7 +162,7 @@ sys.exit(result.returncode)
     for key, value in (('provider_executable', str(relay)), ('project_executable', str(deny)),
                        ('results_root', str(args.evidence / 'results'))):
         cfg = metrics.put(cfg, key, value)
-    (root / 'hardcaml-workbench-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
+    (root / 'silver-asic.sexp').write_text(native_execution.sexp(cfg) + '\n')
     return root
 
 
@@ -371,7 +372,7 @@ def exercise(args):
             and operation['execution']['sha256'] == sha256(inputs['execution_file']), 'Exact accepted execution required')
     watched = [args.inputs.parent, Path(receipt['config']['results_root']), args.operation.parent,
                args.provider.parent.parent, Path(receipt['config']['provider']).parent.parent,
-               args.source_state, args.example_root / 'hardcaml-workbench-asic.sexp']
+               args.source_state, config_path(args.example_root, 'silver-asic.sexp')]
     before = dashboard.inventory(watched)
     save(args.evidence / 'files-before.json', before)
     outcome = dict(status='failed', checks=[])

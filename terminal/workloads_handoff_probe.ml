@@ -1,7 +1,7 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Backend = Hardcaml_workbench_backend.Simulation_service
+open Silver_protocol
+module Backend = Silver_backend.Simulation_service
 module T = Terminal_presentation.Testing_workspace
 module V = Terminal_presentation.Simulation_view
 module S = Simulation
@@ -234,7 +234,7 @@ let main () =
     let module H = Terminal_presentation.Workspace_host in
     let module HV = Terminal_presentation.Host_view in
     let host, _, find =
-      HV.refinement_fixture Hardcaml_workbench_workspaces.Testing.definition
+      HV.refinement_fixture Silver_workspaces.Testing.definition
     in
     let tile = find "simulation-artifacts" in
     let host =

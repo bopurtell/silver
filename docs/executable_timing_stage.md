@@ -125,7 +125,7 @@ python3 -B /home/wayne/devel/jane/silver/scripts/real-asic-example-demo.py clien
   --dir /home/wayne/devel/jane/hardcaml_asic_example/.dev/workbench-real-demo
 ```
 
-The daemon reads the project's root `hardcaml-workbench-asic.sexp`. Its executable
+The daemon reads the project's `.silver/silver-asic.sexp`. Its executable
 bindings now select provider generation `a078e900a856409d86540156f2783cce` and the
 new project driver in receipt
 `executable-timing-deployment-20261021-db26c92ca69345568abd281d4338db76`.

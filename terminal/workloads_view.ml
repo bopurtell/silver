@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module E = Evidence_style
 module W = Asic_workloads
 

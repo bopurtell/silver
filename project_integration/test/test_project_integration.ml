@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-open Hardcaml_workbench_project_integration
+open Silver_protocol
+open Silver_project_integration
 
 let manifest body = Manifest.parse_string body
 

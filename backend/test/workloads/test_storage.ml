@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module S = Hardcaml_workbench_backend.Asic_workloads_service
-module Storage = Hardcaml_workbench_backend.Asic_workloads_storage
-module Service = Hardcaml_workbench_backend.Asic_service
+open Silver_protocol
+module S = Silver_backend.Asic_workloads_service
+module Storage = Silver_backend.Asic_workloads_storage
+module Service = Silver_backend.Asic_service
 module W = Asic_workloads
 let checks=ref 0
 let check b message = incr checks; if not b then failwith message
@@ -62,7 +62,7 @@ let descriptor_failure_cleanup () =
   let storage = Storage.create root in
   let identity = "malformed-cache" in
   let malformed =
-    "asic-workloads-" ^ Hardcaml_workbench_backend.Asic_public.digest identity ^ ".sexp"
+    "asic-workloads-" ^ Silver_backend.Asic_public.digest identity ^ ".sexp"
   in
   Out_channel.write_all (Filename.concat root malformed) ~data:"not valid sexp)";
   let fd_count () = List.length (Sys_unix.ls_dir "/proc/self/fd") in
@@ -89,7 +89,7 @@ let rewrite_cache ?old_key ?new_key file original wrong =
     | Atom s when String.equal s old_key -> Atom new_key
     | List xs -> List (List.map xs ~f:rewrite) | s -> s in
   let items=rewrite items in
-  let checksum=Hardcaml_workbench_backend.Asic_public.digest (Sexp.to_string_mach items) in
+  let checksum=Silver_backend.Asic_public.digest (Sexp.to_string_mach items) in
   Sexp.List (List.map fields ~f:(function
     | Sexp.List [Atom "items";_] -> Sexp.List [Atom "items";items]
     | List [Atom "checksum";_] -> Sexp.List [Atom "checksum";Atom checksum] | x -> x))
@@ -221,7 +221,7 @@ let comparison_restore () =
         "Coherent comparison target/workload rebind restored another document")
 ;;
 let service_race () =
-  let module C=Hardcaml_workbench_project_integration.Asic_config in
+  let module C=Silver_project_integration.Asic_config in
   let root=temporary () in
   let project=Filename.concat root "project" and outside=Filename.concat root "outside" and retained=Filename.concat root "retained" in
   mkdir project;mkdir outside;mkdir retained;

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Workspace
 
 let initial () = W.initial ~session_id:(W.Session_id.of_string "preset-test")

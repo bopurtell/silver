@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let version = 1
 let max_stdout_bytes = 1024 * 1024

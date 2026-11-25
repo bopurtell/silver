@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module S = Hardcaml_workbench_backend.Asic_resources_service
+open Silver_protocol
+module S = Silver_backend.Asic_resources_service
 module W = Asic_resources
-module P = Hardcaml_workbench_backend.Asic_public
+module P = Silver_backend.Asic_public
 let checks = ref 0
 let require b message = incr checks; if not b then failwith message
 let rejects f = require (Result.is_error (Or_error.try_with f)) "Expected resource rejection"
@@ -33,10 +33,10 @@ let real_provider () =
   match Sys.getenv "WORKBENCH_TEST_RESOURCE_PROVIDER",Sys.getenv "WORKBENCH_TEST_RESOURCE_ROOT" with
   | Some executable,Some retained ->
     let retained=Filename_unix.realpath retained in
-    let invocation : Hardcaml_workbench_adapters.Dune_adapter.Invocation.t =
+    let invocation : Silver_adapters.Dune_adapter.Invocation.t =
       {executable;argv=[executable;"resource-inspect";retained;"--kind";"coarse_run";"--json"];
        cwd=Filename.dirname retained;environment=V1.Environment_selection.Inherit_daemon} in
-    let%map output=Hardcaml_workbench_backend.Asic_process.run_with_status ~accept_evidence_failure:true
+    let%map output=Silver_backend.Asic_process.run_with_status ~accept_evidence_failure:true
       ~max_stdout_bytes:(2*1024*1024) ~max_record_bytes:(2*1024*1024) ~seconds:30.
       ~cancel:(Deferred.never ()) ~on_process:ignore ~on_line:(fun _ -> Deferred.unit) invocation in
     let src={ (source (W.Target.Coarse_run retained)) with path=retained } in
@@ -55,8 +55,8 @@ let real_provider () =
   | _ -> Deferred.unit
 ;;
 let integration () =
-  let module Service=Hardcaml_workbench_backend.Asic_service in
-  let module Config=Hardcaml_workbench_project_integration.Asic_config in
+  let module Service=Silver_backend.Asic_service in
+  let module Config=Silver_project_integration.Asic_config in
   let root=Core_unix.mkdtemp "/tmp/workbench-resource-service-" |> Filename_unix.realpath in
   let file name=Filename.concat root name in
   let executable=file "provider" and companion=file "hardcaml-asic-experimental-resource-inspect" in
@@ -351,19 +351,19 @@ let main () =
       require (String.equal (P.text (P.field "verdict" parsed)) verdict) "Consistent resource process result rejected");
     List.iter [1,"pass";1,"not_evaluated";0,"fail";2,"fail";0,"unknown"] ~f:(fun (exit_code,verdict) ->
       rejects (fun () -> S.parse_process_result {stdout=Yojson.Safe.to_string (replace (obj (common query_name)) "verdict" (str verdict));exit_code})));
-  let invocation : Hardcaml_workbench_adapters.Dune_adapter.Invocation.t =
+  let invocation : Silver_adapters.Dune_adapter.Invocation.t =
     {executable="/bin/sh";argv=["/bin/sh";"-c";"printf '{\"verdict\":\"fail\"}'; exit 1"];cwd=root;environment=V1.Environment_selection.Inherit_daemon} in
-  let run accept=Hardcaml_workbench_backend.Asic_process.run ~accept_evidence_failure:accept ~seconds:5.
+  let run accept=Silver_backend.Asic_process.run ~accept_evidence_failure:accept ~seconds:5.
     ~cancel:(Deferred.never ()) ~on_process:ignore ~on_line:(fun _ -> Deferred.unit) invocation in
   let%bind output=run true in
   require (String.equal output "{\"verdict\":\"fail\"}") "CLI1 usable JSON lost";
-  let%bind with_status=Hardcaml_workbench_backend.Asic_process.run_with_status ~accept_evidence_failure:true ~seconds:5.
+  let%bind with_status=Silver_backend.Asic_process.run_with_status ~accept_evidence_failure:true ~seconds:5.
     ~cancel:(Deferred.never ()) ~on_process:ignore ~on_line:(fun _ -> Deferred.unit) invocation in
   require (with_status.exit_code=1 && String.equal with_status.stdout output) "Resource process erased accepted exit1 status";
   let%bind rejected=Monitor.try_with (fun () -> run false) in
   require (Result.is_error rejected) "Generic nonzero commands silently accepted";
   let noisy={invocation with argv=["/bin/sh";"-c";"printf '%05000d' 0"]} in
-  let budget ~max_stdout_bytes ~max_record_bytes=Hardcaml_workbench_backend.Asic_process.run
+  let budget ~max_stdout_bytes ~max_record_bytes=Silver_backend.Asic_process.run
     ~max_stdout_bytes ~max_record_bytes ~seconds:5. ~cancel:(Deferred.never ())
     ~on_process:ignore ~on_line:(fun _ -> Deferred.unit) noisy in
   let%bind rejected=Monitor.try_with (fun () -> budget ~max_stdout_bytes:4096 ~max_record_bytes:8192) in

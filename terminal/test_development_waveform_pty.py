@@ -51,7 +51,7 @@ def main():
         (evidence / name).mkdir()
     project = evidence / 'project'
     (project / 'dune-project').write_text('(lang dune 3.22)\n(name waveform_replay)\n')
-    (project / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([
+    (project / 'silver-simulation.sexp').write_text(wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(Path(__file__).resolve()), '_provider', '--vcd', str(args.vcd), '--media-type', args.media_type]),
         ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 30)]))

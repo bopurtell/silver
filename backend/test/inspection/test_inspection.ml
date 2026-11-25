@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Inspection = Hardcaml_workbench_backend.Asic_inspection
-module Public = Hardcaml_workbench_backend.Asic_public
-module Service = Hardcaml_workbench_backend.Asic_service
+open Silver_protocol
+module Inspection = Silver_backend.Asic_inspection
+module Public = Silver_backend.Asic_public
+module Service = Silver_backend.Asic_service
 
 let require condition message = if not condition then failwith message
 
@@ -371,7 +371,7 @@ let service_tests () =
       [%sexp
         (root : string)
         , (environment : V1.Environment_selection.t)
-        , (None : Hardcaml_workbench_project_integration.Asic_config.t option)]
+        , (None : Silver_project_integration.Asic_config.t option)]
   in
   let index = parse response in
   let index =
@@ -489,7 +489,7 @@ let service_tests () =
 ;;
 
 let observation_generation_tests () =
-  let module Config = Hardcaml_workbench_project_integration.Asic_config in
+  let module Config = Silver_project_integration.Asic_config in
   let root, registered, response, _ = fixture () in
   let response =
     replace

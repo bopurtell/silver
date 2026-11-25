@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let cancellable (operation : Asic.Pending.t) =
   Plain_rpc.active operation && Option.is_none operation.error

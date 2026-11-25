@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Pure project catalog. Browsing never launches or changes an investigation. *)
 type t

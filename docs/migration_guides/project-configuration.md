@@ -1,18 +1,18 @@
 # Project configuration directory — WB-049
 
-Implemented 2026-11-11. Integration configuration now belongs in `.workbench/`
+Integration configuration now belongs in `.silver/`
 beneath the project root. Schemas and basenames remain separate:
 
 ```text
-.workbench/hardcaml-workbench.sexp
-.workbench/hardcaml-workbench-asic.sexp
-.workbench/hardcaml-workbench-simulation.sexp
-.workbench/hardcaml-workbench-preparation.sexp
+.silver/silver.sexp
+.silver/silver-asic.sexp
+.silver/silver-simulation.sexp
+.silver/silver-preparation.sexp
 ```
 
 Only these four files are migrated. Layout templates, personal XDG state, caches,
 provider registries and canonical run evidence are not moved. The project root
-remains the Dune project root, not `.workbench/`.
+remains the Dune project root, not `.silver/`.
 
 ## Lookup and compatibility
 
@@ -29,16 +29,18 @@ Symlinks and nonregular files are rejected. Files are bounded to 64 KiB; simulat
 retains its stricter 16 KiB loader limit. Reads detect observed filesystem changes,
 but do not provide atomic snapshots against concurrent editors.
 
-Legacy lookup has no scheduled removal. New generic and simulation initialization
-writes to `.workbench/`, refusing existing configuration at either location.
+Both `silver*.sexp` and `hardcaml-workbench*.sexp` are recognized in `.silver/`,
+`.workbench/`, and at the project root. Every existing copy must be byte-identical.
+New initialization writes to `.silver/`, refusing existing configuration at any location.
+The unrelated Bazel `.silver/project.json` is retained.
 
 ## Explicit migration
 
 Use a newly built/installed initializer:
 
 ```sh
-hardcaml-workbench-init --root /absolute/project --migrate-configs --dry-run
-hardcaml-workbench-init --root /absolute/project --migrate-configs
+silver-init --root /absolute/project --migrate-configs --dry-run
+silver-init --root /absolute/project --migrate-configs
 ```
 
 `--discover-project` can replace `--root` when invoked within a project. Migration
@@ -53,8 +55,8 @@ originals and completed copies remain usable; fix the issue and rerun. Publicati
 uses Linux `/proc/self/fd` and no-replace hard links, requiring filesystem hard-link
 support. New files have mode 0600 and a new directory 0700.
 
-After checking the result, explicitly remove obsolete root copies when ready.
-Until then, edits must keep both copies byte-identical; whitespace differences also
+After checking the result, explicitly remove obsolete legacy copies when ready.
+Until then, edits must keep all copies byte-identical; whitespace differences also
 conflict. Rollback before further edits can remove the new copies and use the
 retained originals. No automatic deletion or provider-registry transfer occurs.
 
@@ -92,3 +94,14 @@ python3 -B scripts/test-config-migration.py --init /path/to/setup/main.exe
 ```
 
 Real EDA and live project migration are not part of these tests.
+
+## Local state and SDK
+
+New runtime and personal-state directories use `silver` under the relevant XDG
+root. Existing `hardcaml-workbench` state is used in place when no corresponding
+Silver directory exists. If both exist, resolve the conflict explicitly before
+starting Silver; stop running daemons before moving any state.
+
+The package/module `hardcaml_workbench_provider` / `Hardcaml_workbench_provider`
+is now `silver_provider` / `Silver_provider`. Rebuild providers against the new
+SDK; the simulation wire protocol and generic manifest language tag are unchanged.

@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol.Simulation
+open Silver_protocol.Simulation
 
 let require yes message = if not yes then failwith message
 

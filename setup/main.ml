@@ -1,7 +1,7 @@
 open! Core
-module Initialization = Hardcaml_workbench_setup.Initialization
-module Project_discovery = Hardcaml_workbench_setup.Project_discovery
-module Config_migration = Hardcaml_workbench_setup.Config_migration
+module Initialization = Silver_setup.Initialization
+module Project_discovery = Silver_setup.Project_discovery
+module Config_migration = Silver_setup.Config_migration
 
 let report_error message =
   eprintf "silver-init: %s\n%!" message;
@@ -12,8 +12,8 @@ let command =
   Command.basic
     ~summary:"Initialize Silver in an existing Dune directory"
     ~readme:(fun () ->
-      "Creates .workbench/hardcaml-workbench.sexp without replacing existing files.\n\
-       --migrate-configs copies the four legacy configuration basenames into .workbench/,\n\
+      "Creates .silver/silver.sexp without replacing existing files.\n\
+       --migrate-configs copies the four legacy configuration basenames into .silver/,\n\
        retaining originals. Equal destinations are skipped; differing files and unsafe\n\
        paths are errors. --dry-run lists every proposed copy without writing.\n\
        Choose the root with exactly one of --root or --discover-project.\n\
@@ -48,7 +48,7 @@ let command =
          no_arg
          ~doc:" preview initialization or migration without writing files"
      and migrate_configs =
-       flag "--migrate-configs" no_arg ~doc:" copy legacy configs into .workbench/"
+       flag "--migrate-configs" no_arg ~doc:" copy legacy configs into .silver/"
      in
      fun () ->
        let root =

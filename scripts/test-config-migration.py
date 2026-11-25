@@ -15,8 +15,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--init', required=True, type=Path)
 options, remaining = parser.parse_known_args()
 INIT = options.init.resolve(strict=True)
-NAMES = ('hardcaml-workbench.sexp', 'hardcaml-workbench-asic.sexp',
-         'hardcaml-workbench-simulation.sexp', 'hardcaml-workbench-preparation.sexp')
+NAMES = ('silver.sexp', 'silver-asic.sexp',
+         'silver-simulation.sexp', 'silver-preparation.sexp')
 
 
 class MigrationCLI(unittest.TestCase):
@@ -51,7 +51,7 @@ class MigrationCLI(unittest.TestCase):
         output = self.run_init('--migrate-configs', '--dry-run')
         for name in NAMES:
             self.assertIn(str(self.root / name), output)
-            self.assertIn(str(self.root / '.workbench' / name), output)
+            self.assertIn(str(self.root / '.silver' / name), output)
         self.assertEqual(self.snapshot(), before)
 
     def test_copy_retains_exact_originals_and_is_idempotent(self):
@@ -61,17 +61,33 @@ class MigrationCLI(unittest.TestCase):
         for name, data in self.payloads.items():
             self.assertEqual((self.root / name).read_bytes(), data)
             self.assertEqual((self.root / name).stat().st_ino, originals[name])
-            common = self.root / '.workbench' / name
+            common = self.root / '.silver' / name
             self.assertEqual(common.read_bytes(), data)
             self.assertNotEqual(common.stat().st_ino, originals[name])
         before = self.snapshot()
         self.run_init('--migrate-configs')
         self.assertEqual(self.snapshot(), before)
 
+    def test_old_branding_and_bazel_marker_coexist(self):
+        legacy = self.root / '.workbench'
+        legacy.mkdir()
+        common = self.root / '.silver'
+        common.mkdir()
+        marker = common / 'project.json'
+        marker.write_text('{}')
+        for name, data in self.payloads.items():
+            (legacy / name.replace('silver', 'hardcaml-workbench', 1)).write_bytes(data)
+        self.run_init('--migrate-configs')
+        self.assertEqual(marker.read_text(), '{}')
+        for name, data in self.payloads.items():
+            self.assertEqual((common / name).read_bytes(), data)
+        (legacy / 'hardcaml-workbench.sexp').write_text('conflict')
+        self.run_init('--migrate-configs', success=False)
+
     def test_conflict_preflights_whole_set_before_writes(self):
         self.populate()
-        (self.root / '.workbench').mkdir()
-        conflict = self.root / '.workbench' / NAMES[-1]
+        (self.root / '.silver').mkdir()
+        conflict = self.root / '.silver' / NAMES[-1]
         conflict.write_bytes(self.payloads[NAMES[-1]] + b'\n')
         before = self.snapshot()
         for flags in (('--migrate-configs', '--dry-run'), ('--migrate-configs',)):
@@ -82,7 +98,7 @@ class MigrationCLI(unittest.TestCase):
 
     def test_unsafe_common_directory_and_dangling_file_fail_closed(self):
         self.populate()
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.symlink_to(self.root / 'missing', target_is_directory=True)
         before = self.snapshot()
         self.run_init('--migrate-configs', success=False)
@@ -98,7 +114,7 @@ class MigrationCLI(unittest.TestCase):
         before = self.snapshot()
         self.run_init('--migrate-configs')
         self.assertEqual(self.snapshot(), before)
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         for name, data in self.payloads.items():
             (common / name).write_bytes(data)
@@ -108,7 +124,7 @@ class MigrationCLI(unittest.TestCase):
 
     def test_initializer_writes_common_and_refuses_either_existing_location(self):
         self.run_init('--driver', './app/driver.exe')
-        common = self.root / '.workbench' / NAMES[0]
+        common = self.root / '.silver' / NAMES[0]
         self.assertIn(b'./app/driver.exe', common.read_bytes())
         self.assertFalse((self.root / NAMES[0]).exists())
         before = self.snapshot()

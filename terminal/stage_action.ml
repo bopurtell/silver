@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 let required value ~none = Option.value_map value ~default:(Error none) ~f:(fun x -> Ok x)
 

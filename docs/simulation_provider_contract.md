@@ -25,7 +25,7 @@ This clarification changes no frozen wire schema or execution behavior.
 ## Configuration and process invocation
 
 **Native OCaml adapter support delivered 2026-10-18:** the separately packaged
-`hardcaml_workbench_provider` library exposes `Wire`, `Validation` and synchronous
+`silver_provider` library exposes `Wire`, `Validation` and synchronous
 `Runner` helpers. It is recommended for OCaml adapters, not required by this
 language-neutral contract. Only the project-owned `test_provider.exe` links it;
 standalone test executables, arguments, reports and checkers remain project-owned.
@@ -38,7 +38,7 @@ To preview, write or check a project's configuration, see
 For a native adapter, `provider_executable` names its absolute installed executable
 and `provider_args` may be empty. The Python configuration below remains valid.
 
-Opt-in root file `hardcaml-workbench-simulation.sexp`, independent of the generic
+Opt-in project file `.silver/silver-simulation.sexp`, independent of the generic
 manifest and ASIC config. The five fields below are required; unknown fields are errors:
 
 ```sexp

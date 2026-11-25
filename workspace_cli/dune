@@ -1,21 +1,21 @@
 (executable
  (name main)
  (public_name silver-workspace)
- (package hardcaml_workbench)
+ (package silver)
  (libraries
   async
   core
   core_unix.command_unix
-  hardcaml_workbench_native_http
-  hardcaml_workbench_protocol
-  hardcaml_workbench_workspaces)
+  silver_native_http
+  silver_protocol
+  silver_workspaces)
  (preprocess
   (pps ppx_jane))
  (lint
   (pps ppx_js_style)))
 
 (install
- (package hardcaml_workbench)
+ (package silver)
  (section bin)
   (files (main.exe as hardcaml-workbench-workspace)))
 

@@ -1,10 +1,10 @@
 open! Core
 open! Async
 module Inspection = Asic_inspection
-open Hardcaml_workbench_protocol
-module Inspection_wire = Hardcaml_workbench_protocol.Asic_inspection
-module Config = Hardcaml_workbench_project_integration.Asic_config
-module Adapter = Hardcaml_workbench_adapters.Asic_adapter
+open Silver_protocol
+module Inspection_wire = Silver_protocol.Asic_inspection
+module Config = Silver_project_integration.Asic_config
+module Adapter = Silver_adapters.Asic_adapter
 module Public = Asic_public
 
 let failure_message exn = Exn.to_string (Monitor.extract_exn exn)
@@ -355,10 +355,10 @@ let persist t p =
 ;;
 
 let load_config_file ~root ~filename parse =
-  Hardcaml_workbench_project_integration.Config_location.resolve
+  Silver_project_integration.Config_location.resolve
     ~root
     ~filename
-    ~max_bytes:Hardcaml_workbench_project_integration.Config_location.max_config_bytes
+    ~max_bytes:Silver_project_integration.Config_location.max_config_bytes
   |> Or_error.ok_exn
   |> Option.map ~f:(fun file -> parse file.contents |> Or_error.ok_exn)
 ;;
@@ -694,7 +694,7 @@ let project_executable p =
   | Some config -> return config.project_executable
   | None ->
     In_thread.run (fun () ->
-      let module C = Hardcaml_workbench_project_integration.Preparation_config in
+      let module C = Silver_project_integration.Preparation_config in
       let c = load_config_file ~root:p.root ~filename:C.filename (C.parse_string ~root:p.root)
         |> Option.value_exn ~message:"No project executable configured" in
       C.source_executable c ~root:p.root)
@@ -2591,7 +2591,7 @@ let load_inspection_detail
 let fresh_scope ?(physical = true) p =
   In_thread.run (fun () ->
     let module Preparation_config =
-      Hardcaml_workbench_project_integration.Preparation_config
+      Silver_project_integration.Preparation_config
     in
     let preparation =
       load_config_file

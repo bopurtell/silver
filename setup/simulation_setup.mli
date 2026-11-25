@@ -1,14 +1,14 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** Simulation provider setup assistance.
 
-    Generates [.workbench/hardcaml-workbench-simulation.sexp] from explicit provider
+    Generates [.silver/silver-simulation.sexp] from explicit provider
     inputs, and checks a configured project by running provider discovery once. Provider
     executables and their build instructions remain project-owned: nothing here builds,
     installs or searches [PATH] for a provider, and no test is ever launched. *)
 
-module Config = Hardcaml_workbench_project_integration.Simulation_config
+module Config = Silver_project_integration.Simulation_config
 
 val default_discovery_timeout_seconds : int
 val default_run_timeout_seconds : int

@@ -1,7 +1,7 @@
 open! Core
-module Config = Hardcaml_workbench_project_integration.Simulation_config
-module Location = Hardcaml_workbench_project_integration.Config_location
-module Manifest = Hardcaml_workbench_project_integration.Silver_manifest
+module Config = Silver_project_integration.Simulation_config
+module Location = Silver_project_integration.Config_location
+module Manifest = Silver_project_integration.Silver_manifest
 
 let python3 () =
   let path = Option.value (Sys.getenv "PATH") ~default:"/usr/bin:/bin" in
@@ -77,8 +77,8 @@ let create ~destination =
       Result.all_unit
         (List.map
            ((root ^/ Project_discovery.marker)
-            :: Location.legacy_path ~root ~filename:Config.filename
-            :: List.map files ~f:fst)
+            :: (Location.candidate_paths ~root ~filename:Config.filename
+                @ List.map files ~f:fst))
            ~f:require_absent)
     in
     List.iter directories ~f:(fun path ->

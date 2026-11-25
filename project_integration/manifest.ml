@@ -9,7 +9,7 @@ type t =
 [@@deriving compare, equal, sexp]
 
 let version = 1
-let filename = "hardcaml-workbench.sexp"
+let filename = "silver.sexp"
 let default_build_alias = "@all"
 let default_test_alias = "@runtest"
 let error field message = Error (sprintf "%s: %s" field message)

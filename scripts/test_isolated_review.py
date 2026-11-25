@@ -93,7 +93,7 @@ assert pathlib.Path(sys.argv[0]).parent.name == 'bin'
         self.assertFalse((self.base / 'sessions').exists())
 
     def test_check_uses_common_config_location(self):
-        common = self.root / '.workbench'
+        common = self.root / '.silver'
         common.mkdir()
         for name in (setup.ASIC, setup.PREPARATION):
             (self.root / name).rename(common / name)

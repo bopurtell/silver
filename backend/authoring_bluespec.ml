@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol.Authoring
+open Silver_protocol.Authoring
 
 let provider = "silver-bluespec-classic"
 let version = "1"

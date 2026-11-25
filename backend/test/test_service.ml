@@ -1,9 +1,9 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Adapter = Hardcaml_workbench_adapters.Dune_adapter
-module Service = Hardcaml_workbench_backend.Service
-module Integration = Hardcaml_workbench_project_integration
+open Silver_protocol
+module Adapter = Silver_adapters.Dune_adapter
+module Service = Silver_backend.Service
+module Integration = Silver_project_integration
 
 let instance_id = V1.Daemon_instance_id.of_string "service-test"
 let short_timeout = Time_float.Span.of_sec 4.
@@ -183,7 +183,7 @@ let test_project_opening ~root ~log_dir =
 ;;
 
 let test_initialize_after_open ~root ~log_dir =
-  let module Initialization = Hardcaml_workbench_setup.Initialization in
+  let module Initialization = Silver_setup.Initialization in
   let%bind created = Service.create ~instance_id ~log_dir () in
   let service = Or_error.ok_exn created in
   Monitor.protect
@@ -1235,7 +1235,7 @@ let test_source_provenance ~root ~log_dir:_ =
 ;;
 
 let test_driver_discovery ~root ~log_dir =
-  let module Initialization = Hardcaml_workbench_setup.Initialization in
+  let module Initialization = Silver_setup.Initialization in
   let plan =
     Initialization.prepare ~root ~project_name:"discovery-test" ~driver:"./driver.exe" ()
     |> Result.ok_or_failwith

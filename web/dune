@@ -1,7 +1,7 @@
 (executable
  (name main)
  (modes byte)
- (libraries bonsai bonsai_web core hardcaml_workbench_protocol js_of_ocaml)
+ (libraries bonsai bonsai_web core silver_protocol js_of_ocaml)
  (preprocess
   (pps ppx_jane))
  (lint

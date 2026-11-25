@@ -9,7 +9,7 @@ type t
     root first with {!Project_discovery.discover}). The default project name is the root's
     basename. Options use the existing manifest parser's validation rules. Any existing
     entry at either legacy or common manifest path, including a dangling symlink, is an
-    error. New manifests use [.workbench/]; embedded paths remain root-relative. *)
+    error. New manifests use [.silver/]; embedded paths remain root-relative. *)
 val prepare
   :  root:string
   -> ?project_name:string

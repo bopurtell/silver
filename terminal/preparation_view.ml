@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module O = Overview_tiles
 
 module Rtl_scope = struct

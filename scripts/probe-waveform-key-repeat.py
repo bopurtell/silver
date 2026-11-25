@@ -149,7 +149,7 @@ def setup(args, directory, source):
         (directory / name).mkdir()
     root = directory / 'project'
     (root / 'dune-project').write_text('(lang dune 3.22)\n(name waveform_key_repeat_probe)\n')
-    (root / 'hardcaml-workbench-simulation.sexp').write_text(wire.sexp([
+    (root / 'silver-simulation.sexp').write_text(wire.sexp([
         ('schema_version', 1), ('provider_executable', sys.executable),
         ('provider_args', [str(HERE / 'test-embedded-waveform.py'), '_provider',
                            '--fixture', str(source), '--calls', str(directory / 'calls.jsonl')]),

@@ -41,16 +41,16 @@ def setup(base, *, extra_profile=False):
         schema_version=1, default_target="fifo_demo", targets=chips)))
     subprocess.run(["dune", "build", "--root", ".", "-j", "2", *(c["executable"] for c in chips)],
                    cwd=root, check=True)
-    (root / "hardcaml-workbench-asic.sexp").write_text(sexp([
+    (root / "silver-asic.sexp").write_text(sexp([
         ["schema_version", 1], ["project_executable", "_build/default/" + chips[0]["executable"]],
         ["results_root", "_flow_results/workbench/asic"], ["toolchain", "_flow_tools"],
         ["python", []], ["support_tools", []], ["pdk_root", []], ["stage_timeout_seconds", []]]))
-    (root / "hardcaml-workbench-preparation.sexp").write_text(sexp([
+    (root / "silver-preparation.sexp").write_text(sexp([
         ["schema_version", 1], ["build_target", chips[0]["executable"]],
         ["results_root", "_flow_results/workbench/preparation"], ["timeout_seconds", 30]]))
     control = base / "simulation.json"
     control.write_text("{}")
-    (root / "hardcaml-workbench-simulation.sexp").write_text(sexp([
+    (root / "silver-simulation.sexp").write_text(sexp([
         ["schema_version", 1], ["provider_executable", sys.executable],
         ["provider_args", [str(ROOT / "scripts/fixtures/simulation_fault_provider.py"), "--control", str(control),
                            "--calls", str(base / "simulation-calls")]],

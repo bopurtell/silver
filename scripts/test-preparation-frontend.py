@@ -68,7 +68,7 @@ def acceptance(t, check, http, runs, presets, args):
     driver.chmod(0o700)
     (root / 'dune').write_text('(rule (target rtl-driver.exe) (deps rtl-driver.py) '
                              '(action (copy %{deps} %{target})))\n')
-    (root / 'hardcaml-workbench.sexp').write_text(
+    (root / 'silver.sexp').write_text(
         '(lang hardcaml-workbench 1)\n(project (name generic-rtl-preparation))\n(dune (driver ./rtl-driver.exe))\n')
     t.command('Refresh hardware integration')
     def generic_job():
@@ -100,7 +100,7 @@ def acceptance(t, check, http, runs, presets, args):
     with (root / 'dune').open('a') as dune:
         dune.write('(rule (target publisher.exe) (deps publisher.py) '
                              '(action (progn (echo "Exact preparation build log") (copy %{deps} %{target}))))\n')
-    (root / 'hardcaml-workbench-preparation.sexp').write_text(
+    (root / 'silver-preparation.sexp').write_text(
         sexp([['schema_version', 1], ['build_target', 'publisher.exe'],
               ['results_root', str(t.base / 'publication')], ['timeout_seconds', 90]]))
     (root / 'preparation-mode').write_text('success')
@@ -133,7 +133,7 @@ def acceptance(t, check, http, runs, presets, args):
     t.open_palette('Launch and view planned run')
     # Identical selection is insufficient evidence of receipt ownership: replace
     # it under a genuinely different captured preparation configuration scope.
-    prep_path = root / 'hardcaml-workbench-preparation.sexp'
+    prep_path = root / 'silver-preparation.sexp'
     original_config = prep_path.read_bytes()
     different_scope = c.parse(original_config.decode())
     next(pair for pair in different_scope if pair[0] == 'timeout_seconds')[1] = '91'

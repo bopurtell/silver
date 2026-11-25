@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module V = Resources_view
 module R = Asic_resources
 
@@ -109,7 +109,7 @@ let%test_unit "Overview Resources preview keeps a compact headline and aligns ta
 
 let%test_unit "stock framed Resources preview spends one cell on each horizontal edge" =
   let module H = Workspace_host in
-  let module P = Hardcaml_workbench_workspaces in
+  let module P = Silver_workspaces in
   let host, data, find =
     Host_view.refinement_fixture_with (fun initial ->
       Workspace.apply initial (Initialize_config P.Presets.stock_config)
@@ -379,7 +379,7 @@ let%test_unit "linked inventory is equally compact before and after opening; sin
 let%test_unit "production tile uses saved source chip rather than current planning chip" =
   let module H = Workspace_host in
   let definition =
-    Hardcaml_workbench_workspaces.Presets.find "resources" |> Option.value_exn
+    Silver_workspaces.Presets.find "resources" |> Option.value_exn
   in
   let host, data, find = Host_view.refinement_fixture definition in
   let tile = find "resources" in

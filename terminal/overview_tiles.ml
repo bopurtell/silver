@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 open Bonsai_term
 
 (** Pure utility tiles. Only explicit per-stage observations fill in a checklist;

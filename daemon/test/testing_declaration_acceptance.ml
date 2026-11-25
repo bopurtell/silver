@@ -1,14 +1,14 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
-module Backend = Hardcaml_workbench_backend
+open Silver_protocol
+module Backend = Silver_backend
 module Jump = Backend.Module_jump
 module Testing = Backend.Testing_declaration
 module Service = Backend.Service
 module Files = Backend.Simulation_files
-module Rpc = Hardcaml_workbench_rpc_server.Rpc_server
-module Client = Hardcaml_workbench_native_http.Client
-module Config = Hardcaml_workbench_project_integration.Simulation_config
+module Rpc = Silver_rpc_server.Rpc_server
+module Client = Silver_native_http.Client
+module Config = Silver_project_integration.Simulation_config
 
 let require condition message = if not condition then failwith message
 

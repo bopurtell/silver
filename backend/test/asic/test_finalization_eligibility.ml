@@ -1,5 +1,5 @@
 open! Core
-module Service = Hardcaml_workbench_backend.Asic_service.For_testing
+module Service = Silver_backend.Asic_service.For_testing
 
 let replace j key value =
   match j with
@@ -69,7 +69,7 @@ let execution stages =
     ]
 ;;
 
-let field key j = Hardcaml_workbench_backend.Asic_public.field key j
+let field key j = Silver_backend.Asic_public.field key j
 
 let report ?(physical = "synthesis") execution =
   `Assoc
@@ -78,7 +78,7 @@ let report ?(physical = "synthesis") execution =
     ; ( "checkpoints"
       , `List
           (List.map
-             (Hardcaml_workbench_backend.Asic_public.list (field "artifacts" execution))
+             (Silver_backend.Asic_public.list (field "artifacts" execution))
              ~f:(fun reference -> `Assoc [ "reference", reference ])) )
     ]
 ;;
@@ -154,7 +154,7 @@ let () =
     rejected ("missing " ^ key) (fun () -> validate (replace synthesis key (`List []))));
   let occurrence =
     List.hd_exn
-      (Hardcaml_workbench_backend.Asic_public.list (field "occurrences" synthesis))
+      (Silver_backend.Asic_public.list (field "occurrences" synthesis))
   in
   List.iter
     [ "status", `String "failed"

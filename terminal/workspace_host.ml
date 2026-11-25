@@ -1,7 +1,7 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 module W = Workspace
-module P = Hardcaml_workbench_workspaces
+module P = Silver_workspaces
 module T = Tile_presentation
 
 (** Only presentation state lives here. Registry writes are effects returned to the
@@ -111,7 +111,7 @@ type action =
   | Share_with_cobalt
   | Editor_prompt of Project_id.t
   | Editor_open of Editor_location.Location.t
-  | Module_jump of Hardcaml_workbench_backend.Module_jump.Offer.t
+  | Module_jump of Silver_backend.Module_jump.Offer.t
   | Browse_chip_profiles of string
   | Setup_project
   | Setup_asic

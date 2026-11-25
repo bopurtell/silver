@@ -14,7 +14,7 @@ type t =
   }
 [@@deriving compare, equal, sexp]
 
-let filename = "hardcaml-workbench-asic.sexp"
+let filename = "silver-asic.sexp"
 
 let validate t =
   if t.schema_version <> 1 then failwith "Unsupported ASIC configuration schema";

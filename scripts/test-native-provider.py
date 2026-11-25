@@ -181,7 +181,7 @@ def daemon_acceptance(args, commands, expected, evidence):
         root = directory / 'project'
         (root / 'dune-project').write_text('(lang dune 3.22)\n(name provider_acceptance)\n')
         command = commands[kind]['native']
-        (root / 'hardcaml-workbench-simulation.sexp').write_text(sexp([
+        (root / 'silver-simulation.sexp').write_text(sexp([
             ('schema_version', 1), ('provider_executable', command[0]), ('provider_args', command[1:]),
             ('discovery_timeout_seconds', 10), ('run_timeout_seconds', 90)]))
         session = helper.Session(args, directory, root)

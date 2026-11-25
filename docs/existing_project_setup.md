@@ -87,7 +87,7 @@ Open the Dune project locally with `ag`. Press **Space c c** and choose
 and review the proposed files before applying. To connect a design that already
 exists, choose **Import existing ASIC design…** and enter the path to its already-built
 design CLI (absolute or relative to the project root). **Esc** cancels; **Enter**
-writes `.workbench/hardcaml-workbench-asic.sexp`. Neither opening the form nor
+writes `.silver/silver-asic.sexp`. Neither opening the form nor
 saving it builds or runs the design. Existing ASIC configuration is never replaced;
 no generic manifest is required. The configuration uses the selected environment's
 provider, `<root>/_flow_tools`, and `<root>/_flow_results/workbench/asic`. Reopen in
@@ -107,7 +107,7 @@ name defaults to its directory name. Optional flags are `--project-name NAME`,
 Driver and alias syntax is validated through the existing manifest parser; targets
 need not exist yet. The initializer performs no build, driver or provider execution.
 
-The only published file is `hardcaml-workbench.sexp`, in the existing version-1
+The only published file is `.silver/silver.sexp`, in the existing version-1
 format. Publication is atomic and refuses any existing destination, including a
 symlink. It never replaces an existing configuration or edits build/VCS files.
 Temporary files are cleaned on ordinary failure. Filesystems must support local
@@ -203,7 +203,7 @@ The existing palette's appearance preset, color scheme/intensity, icon, density,
 chrome, tile-header and tile-appearance actions now save their explicit choices. Normal terminal
 exit waits for queued writes. Preferences use a separate versioned
 `presentation-<digest>.sexp` under
-`${XDG_STATE_HOME:-$HOME/.local/state}/hardcaml-workbench/terminal/`, keyed by
+`${XDG_STATE_HOME:-$HOME/.local/state}/silver/terminal/`, keyed by
 canonical project root and execution environment.
 
 Schema version 2 (WB-019) adds independent `main_hints` and `palette_hints` choices

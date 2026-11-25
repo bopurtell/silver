@@ -85,7 +85,7 @@ def exercise(client, service, base):
                HARDCAML_WORKBENCH_DIAGNOSTICS=str(base / "diagnostics"),
                PYTHONDONTWRITEBYTECODE="1")
     session = SimpleNamespace(env=env, evidence=base / "evidence")
-    runtime = base / "runtime/hardcaml-workbench"
+    runtime = base / "runtime/silver"
     registry = runtime / "editor-shares/v1"
     preferences = base / "config/silver/editor-share-remembered-v1"
 
@@ -97,7 +97,7 @@ def exercise(client, service, base):
             config = [("schema_version", 1), ("provider_executable", sys.executable),
                       ("provider_args", [str(Path(__file__).resolve()), "_provider"]),
                       ("discovery_timeout_seconds", 10), ("run_timeout_seconds", 10)]
-            (root / "hardcaml-workbench-simulation.sexp").write_text(sexp(config))
+            (root / "silver-simulation.sexp").write_text(sexp(config))
         return root
 
     alpha = project("alpha", simulation=True)

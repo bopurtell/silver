@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** These are the daemon's machine operation identifiers/states, not log messages or
     provider execution-status prose. Query completion is not run completion. *)

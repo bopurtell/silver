@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Public = Hardcaml_workbench_backend.Asic_public
+open Silver_protocol
+module Public = Silver_backend.Asic_public
 
 let require ok message = if not ok then failwith message
 

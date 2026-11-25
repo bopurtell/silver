@@ -23,7 +23,7 @@ type editing =
 
 type t =
   { project : string
-  ; artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t
+  ; artifact : Silver_protocol.Simulation.Artifact.t
   ; loaded : loaded
   ; filter : string
   ; editing : editing option
@@ -72,7 +72,7 @@ let create ~project artifact =
 
 let same t ~project artifact =
   String.equal t.project project
-  && Hardcaml_workbench_protocol.Simulation.Artifact.equal t.artifact artifact
+  && Silver_protocol.Simulation.Artifact.equal t.artifact artifact
 ;;
 
 let clear_count t =
@@ -1361,7 +1361,7 @@ let render_session
 ;;
 
 let picker_candidates ~attempt ~case_id artifacts =
-  List.filter artifacts ~f:(fun (a : Hardcaml_workbench_protocol.Simulation.Artifact.t) ->
+  List.filter artifacts ~f:(fun (a : Silver_protocol.Simulation.Artifact.t) ->
     String.equal a.attempt_id attempt
     && Option.equal String.equal a.case_id case_id
     && Simulation_export.vcd_media a)
@@ -1373,8 +1373,8 @@ let picker_candidates ~attempt ~case_id artifacts =
    locating/marking its picker row, never for transport validation, lifetime fencing,
    cache reuse or deciding whether bytes may be opened. *)
 let picker_matches_pin
-  ~(pinned : Hardcaml_workbench_protocol.Simulation.Artifact.t)
-  (artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t)
+  ~(pinned : Silver_protocol.Simulation.Artifact.t)
+  (artifact : Silver_protocol.Simulation.Artifact.t)
   =
   String.equal pinned.attempt_id artifact.attempt_id
   && String.equal pinned.id artifact.id
@@ -1604,7 +1604,7 @@ let render
 
 module%test Counts = struct
   let loading =
-    let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+    let artifact : Silver_protocol.Simulation.Artifact.t =
       { id = "counts"
       ; attempt_id = "attempt"
       ; case_id = None
@@ -1802,7 +1802,7 @@ let%test_unit "connected original-event rails, compressed direction, pulses and 
        #35 1! b1101 @ x% #36 0! b1110 @ 0% #45 1! b1111 @ #99"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "rails"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -1849,7 +1849,7 @@ let%test_unit "connected original-event rails, compressed direction, pulses and 
 ;;
 
 let%test_unit "inclusive-start X/Z recovery is undirected but binary edges retain corners" =
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "recovery"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -1940,7 +1940,7 @@ let%test_unit "exact cursor, clamped pan, selection and explicit X lane marker" 
        1!\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "vcd"
     ; attempt_id = "attempt"
     ; case_id = Some "case"
@@ -1977,7 +1977,7 @@ let%test_unit "mixed X Z unset and known lanes preserve exact row geometry and v
        1$ z% b1010 ' #5 1! #10 b0 # 0% b0011 & #20 0!"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "mixed"
     ; attempt_id = "attempt"
     ; case_id = Some "case"
@@ -2063,7 +2063,7 @@ let%test_unit "binary rendering, bounded zoom/resize and frozen artifact identit
        b1110 !\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "vcd"
     ; attempt_id = "attempt"
     ; case_id = Some "case"
@@ -2116,7 +2116,7 @@ let%test_unit "80x24 shows bus value and Back even with long artifact metadata" 
        b00000 !\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = String.make 100 'a' ^ "-artifact-tail"
     ; attempt_id = String.make 100 't' ^ "-attempt-tail"
     ; case_id = Some (String.make 100 'c' ^ "-case-tail")
@@ -2201,7 +2201,7 @@ let%test_unit "cached navigation reload preserves selection, time, filter and va
        b0 !\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "vcd"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -2267,7 +2267,7 @@ let%test_unit "wide integer raster fills the plot and preserves a regular clock"
        ^ String.concat changes)
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "clock"
     ; attempt_id = "attempt"
     ; case_id = Some "regular clock"
@@ -2331,7 +2331,7 @@ let%test_unit "wide integer raster fills the plot and preserves a regular clock"
 ;;
 
 let%test_unit "waveform uses Workbench frames, palette and compact inspectable metadata" =
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "artifact-very-long-id"
     ; attempt_id = "attempt-very-long-id"
     ; case_id = Some "case"
@@ -2436,7 +2436,7 @@ let%test_unit "independent Signals never hides disabled names; Space is reserved
        0!\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "captured-attempt"
     ; case_id = Some "case"
@@ -2515,7 +2515,7 @@ let%test_unit "Signals visual range marks filtered rows, bulk toggles, and survi
        1!\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "captured-attempt"
     ; case_id = Some "case"
@@ -2579,7 +2579,7 @@ let%test_unit "Signals visual range marks filtered rows, bulk toggles, and survi
 let%test_unit "picker retains missing pin marker and cursor without matching changed \
                digest"
   =
-  let pinned : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let pinned : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "attempt"
     ; case_id = Some "case"
@@ -2613,7 +2613,7 @@ let%test_unit "picker retains missing pin marker and cursor without matching cha
   assert (picker_initial_index ~pinned candidates = 1);
   (* The presentation relaxation must not make an unavailable observation equal to the
      captured artifact for model reuse or identity verification. *)
-  assert (not (Hardcaml_workbench_protocol.Simulation.Artifact.equal pinned missing));
+  assert (not (Silver_protocol.Simulation.Artifact.equal pinned missing));
   assert (not (same (create ~project:"project" pinned) ~project:"project" missing));
   assert (Or_error.is_error (Simulation_export.identity missing))
 ;;
@@ -2669,7 +2669,7 @@ let%test_unit "filter word boundaries and actual native deletion key encodings" 
     Poly.equal
       (edit_key (Key_press { key = Backspace; mods = [ Ctrl; Shift ] }))
       (Some Delete_word));
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -2711,7 +2711,7 @@ let%test_unit "inline columns use display cells; stacked and paging preserve exa
        ^ " \"\n#100\n")
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "attempt"
     ; case_id = Some "captured-case"
@@ -2814,7 +2814,7 @@ let%test_unit "inline columns use display cells; stacked and paging preserve exa
 let%test_unit "resolved quiet policy hides idle hints but keeps prompts, errors and \
                Session metadata"
   =
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "trace"
     ; attempt_id = "captured-attempt"
     ; case_id = Some "captured-case"
@@ -2897,7 +2897,7 @@ let%test_unit "narrow Session keeps literal four/four attempt ID and concise met
   assert (String.equal (abbreviate_attempt "sim-0123456789abcdef") "sim-…cdef");
   assert (String.equal (abbreviate_attempt "abcdefghij") "abcdefghij");
   assert (String.equal (abbreviate_attempt "short") "short");
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "artifact"
     ; attempt_id = "sim-0123456789abcdef"
     ; case_id = Some "first"
@@ -2980,7 +2980,7 @@ let%test_unit "native cursor is exact at transitions and preserves every glyph i
        0!\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "cursor"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -3159,7 +3159,7 @@ let%test_unit "compressed cells, offscreen pan, huge times, bounds and render \
        1!\n"
     |> Or_error.ok_exn
   in
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "huge"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -3292,7 +3292,7 @@ let%test_unit "compressed cells, offscreen pan, huge times, bounds and render \
 ;;
 
 let%test_unit "default clock extent, explicit Fit and resize retain original ticks" =
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "extent"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -3362,7 +3362,7 @@ let%test_unit "short inferred clock labels its clipped target rather than achiev
   assert (Int64.equal start 0L && Int64.equal span 50L);
   assert (String.is_substring basis ~substring:"8-cycle target (clipped to trace)");
   assert (not (String.is_substring basis ~substring:"8 cycles"));
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "short"
     ; attempt_id = "attempt"
     ; case_id = None
@@ -3391,7 +3391,7 @@ let%test_unit "short inferred clock labels its clipped target rather than achiev
 ;;
 
 let%test_unit "wide alias lanes share the renderer budget; distinct X/Z lanes do not" =
-  let artifact : Hardcaml_workbench_protocol.Simulation.Artifact.t =
+  let artifact : Silver_protocol.Simulation.Artifact.t =
     { id = "wide-lanes"
     ; attempt_id = "attempt"
     ; case_id = None

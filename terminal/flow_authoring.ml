@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (* The owner is data carried by the wizard, independent of launch selection. *)
 type intent =

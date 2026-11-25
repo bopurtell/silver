@@ -1,6 +1,6 @@
 open! Core
-open Hardcaml_workbench_protocol
-module Driver_protocol = Hardcaml_workbench_project_integration.Driver_protocol
+open Silver_protocol
+module Driver_protocol = Silver_project_integration.Driver_protocol
 
 let describe_invocation ~root ~environment ~driver =
   Dune_adapter.invocation

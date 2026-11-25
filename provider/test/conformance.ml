@@ -1,5 +1,5 @@
 open! Core
-open Hardcaml_workbench_provider
+open Silver_provider
 module W = Wire
 module F = Frozen_wire
 

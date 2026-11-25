@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from isolated_example import config_path
 import subprocess
 import sys
 import time
@@ -47,7 +48,7 @@ def main():
 
     try:
         for kind in ('simulation', 'asic', 'preparation'):
-            path = args.root / ('hardcaml-workbench-' + kind + '.sexp')
+            path = config_path(args.root, 'silver-' + kind + '.sexp')
             check(path.is_file() and not path.is_symlink(), 'private current-closure regular config ' + kind)
         session.start()
         discovered = session.discover()

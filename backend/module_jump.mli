@@ -1,6 +1,6 @@
 open! Core
 open! Async
-open Hardcaml_workbench_protocol
+open Silver_protocol
 
 (** A module-owned jump hook. The backend correlates resolutions with invocations but does
     not choose a candidate, open an editor, or decide which request is current. *)
