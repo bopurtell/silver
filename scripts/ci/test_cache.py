@@ -271,6 +271,35 @@ def workflow_steps():
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_automatic_and_manual_triggers(self):
+        # Match the small top-level trigger block without a YAML dependency.
+        triggers = re.search(r"(?m)^on:\n((?: +[^\n]*\n)+)",
+                             WORKFLOW.read_text()).group(1)
+        self.assertEqual(re.findall(r"(?m)^  (\w+):", triggers),
+                         ["pull_request", "push", "workflow_dispatch"])
+        self.assertRegex(triggers, r"(?m)^  pull_request:\s*\n  push:")
+        self.assertRegex(triggers,
+                         r"(?m)^  push:\n    branches:\n      - oxcaml\n"
+                         r"  workflow_dispatch:")
+        self.assertRegex(triggers, r"(?m)^      cold:\n"
+                         r"(?:        [^\n]*\n)*?        type: boolean\n"
+                         r"        default: false$")
+
+    def test_only_superseded_runs_of_the_same_pr_are_cancelled(self):
+        workflow = WORKFLOW.read_text()
+        concurrency = re.search(r"(?m)^concurrency:\n((?: +[^\n]*\n)+)",
+                                workflow).group(1)
+        # A PR uses its stable number; every push/manual invocation (including
+        # reruns) uses its own unique group, so it cannot displace another run.
+        self.assertIn(
+            "  group: ${{ github.event_name == 'pull_request' && "
+            "format('silver-native-pr-{0}', github.event.pull_request.number) || "
+            "format('silver-native-run-{0}-{1}', github.run_id, github.run_attempt) }}",
+            concurrency)
+        self.assertIn(
+            "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+            concurrency)
+
     def test_only_managed_state_is_cached_before_unconditional_source_tests(self):
         steps = workflow_steps()
         restore = next(i for i, s in enumerate(steps) if "uses: actions/cache/restore@" in s)
@@ -290,9 +319,15 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(re.findall(r"(?m)^          key: (.+)$", steps[i]),
                              ["${{ steps.setup.outputs.key }}"])
             self.assertNotIn("restore-keys:", steps[i])
-        self.assertIn("!inputs.cold", steps[restore])
-        self.assertIn("!inputs.cold", steps[save])
-        self.assertIn("steps.restore.outputs.cache-hit != 'true'", steps[save])
+        # All normal runs may restore the exact cache. Cold dispatches bypass
+        # both cache actions; only non-PR oxcaml runs may publish a miss.
+        self.assertEqual(re.findall(r"(?m)^        if: (.+)$", steps[restore]),
+                         ["${{ !(github.event_name == 'workflow_dispatch' && inputs.cold) }}"])
+        self.assertEqual(re.findall(r"(?m)^        if: (.+)$", steps[save]),
+                         ["${{ github.event_name != 'pull_request' && "
+                          "github.ref == 'refs/heads/oxcaml' && "
+                          "!(github.event_name == 'workflow_dispatch' && inputs.cold) && "
+                          "steps.restore.outputs.cache-hit != 'true' }}"])
 
 
 if __name__ == "__main__":

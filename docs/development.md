@@ -38,24 +38,27 @@ The fixture uses an explicitly selected compatible switch, and the native
 application script exercises an isolated install. See
 [terminal baselines](../test/baselines/terminal/README.md) before updating captures.
 
-## Manual native CI on GitHub Actions
+## Native CI on GitHub Actions
 
-Once `.github/workflows/ci.yml` is on the default branch, open **Actions**,
-select **Silver native CI**, choose **Run workflow**, and select the branch
-to test. The runner reuses the pinned OxCaml switch and native dependencies
+**Silver native CI** runs on pull requests and pushes to `oxcaml`. Updating
+a PR cancels its superseded run. You can also start a run from **Actions →
+Silver native CI → Run workflow** and select a branch.
+The runner reuses the pinned OxCaml switch and native dependencies
 when there is an exact cache hit; otherwise it provisions them from scratch.
 Each run builds the Silver packages from the selected revision and runs both
 `@test-local` and `@test-api`. Silver's `_build` directory is not cached.
 
-Leave **Benchmark a cold provisioning** unchecked for both runs. Checking it
-skips both restore and save; use that only for a separate cold benchmark.
-To measure the benefit, dispatch once to populate the cache, then dispatch
+Pull requests can restore an eligible cache. Only runs on the `oxcaml` branch
+save a new cache. For manual cache comparisons, leave **Benchmark a cold
+provisioning** unchecked for both runs; checking it skips both restore and save.
+To measure the benefit, dispatch on `oxcaml` after a cache-key change, then dispatch
 again on the same branch after a Silver-only source change. (Running twice
 at the same revision also tests reuse.) Check the first log for a cache miss
 and successful save, and the second for an exact hit and no provisioning.
 Compare **total job time**, including cache transfer, as well as the individual
-build and test times. For reference, the [first uncached run](https://github.com/bopurtell/silver/actions/runs/45603339552)
-took 73m 28s, of which 48m 29s was provisioning.
+build and test times. On the same revision, a [cold run](https://github.com/bopurtell/silver/actions/runs/45691162363)
+took 53m 44s and a [warm run](https://github.com/bopurtell/silver/actions/runs/45707984213)
+took 22m 26s.
 
 ## Inline expect-test prerequisite
 

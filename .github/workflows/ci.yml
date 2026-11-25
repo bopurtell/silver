@@ -1,6 +1,10 @@
 name: Silver native CI
 
 on:
+  pull_request:
+  push:
+    branches:
+      - oxcaml
   workflow_dispatch:
     inputs:
       cold:
@@ -10,6 +14,12 @@ on:
 
 permissions:
   contents: read
+
+# Only newer runs for the same PR supersede each other. Pushes and manual
+# benchmarks run independently, even when they select the same revision.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('silver-native-pr-{0}', github.event.pull_request.number) || format('silver-native-run-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   native:
@@ -65,7 +75,7 @@ jobs:
           echo "key=silver-native-v1-linux-amd64-$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Restore exact managed toolchain
         id: restore
-        if: ${{ !inputs.cold }}
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.cold) }}
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/silver-ci-data/silver
@@ -88,8 +98,10 @@ jobs:
             silver-native-ci bash scripts/ci/container.sh provision
       # Save the compiled switch once, before any application builds/tests.
       # The cache action creates/compresses the archive directly (no extra tar).
+      # PRs can restore base/default-branch caches but do not publish their own
+      # merge-ref-scoped copies. Only trusted oxcaml branch runs populate caches.
       - name: Save successfully provisioned managed toolchain
-        if: ${{ !inputs.cold && steps.restore.outputs.cache-hit != 'true' }}
+        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/oxcaml' && !(github.event_name == 'workflow_dispatch' && inputs.cold) && steps.restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/silver-ci-data/silver
