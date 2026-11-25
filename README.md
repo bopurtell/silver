@@ -1,5 +1,7 @@
 # Silver
 
+[![Native build and test status on oxcaml](https://github.com/bopurtell/silver/actions/workflows/ci.yml/badge.svg?branch=oxcaml)](https://github.com/bopurtell/silver/actions/workflows/ci.yml?query=branch%3Aoxcaml)
+
 Silver is a terminal workbench for hardware projects. It runs project builds and
 simulation suites, launches configured ASIC flows, and lets you inspect
 waveforms, synthesis results, timing paths, and other run evidence without
