@@ -94,27 +94,13 @@ design checkout. Keep existing companion files where their resolvers expect
 them. Classic Bluespec is the Haskell-style `.bs` language compiled by `bsc`;
 using the installed compiler does not make the design a Cabal project.
 
-## Physical design and hierarchy: proposed next boundaries
+## Which action elaborates the design?
 
-The starter covers front-end compilation and simulation. For ASIC integration,
-the intended next handoff is a **declared RTL file set**: top, generated RTL,
-required primitive sources, includes/defines and provenance. The physical
-target adds a wrapper, pinout and authored timing constraints. BSC schedules
-explain rule and method behavior; they do not specify clock periods or timing
-exceptions.
+Use **Build** (`b` in the workbench). In the starter, it runs `bazel build
+//:rtl`; BSC elaborates the configured top and emits Verilog. Use **Testing**
+when you also want to run the Rust checker and retain its waveform.
 
-`hardcaml_asic` currently constructs a `Chip_target` from Hardcaml interfaces
-and a circuit constructor; its `source_inputs` inventory does not import HDL.
-`hardcaml-asic-flow run` expects a validated implementation bundle, and the
-named Classic flow checks for a single `src/<top>.v`. The proposed extension
-is an external-RTL importer in the provider, initially for its existing
-macro-free TT/IHP target. It should work for handwritten Verilog as well as
-BSC. Silver should neither synthesize a dummy Hardcaml circuit nor construct a
-provider bundle by imitating its manifest.
-
-The same RTL file set could feed a Vivado flow with project-owned XDC and Tcl.
-For hardware emulation, separate building an image from running a workload on
-that image. Neither flow is part of this starter. A future Bazel catalog rule
-could expose related tests and implementation targets as one declared output;
-automatic graph discovery and elaborated hardware hierarchy would still be
-separate features.
+The ASIC Stage Checklist's **Elaboration** row prepares a `hardcaml_asic`
+implementation bundle. It does not launch BSC. The Classic starter supports
+front-end builds and simulation, not ASIC physical design, FPGA implementation
+or hardware emulation.
