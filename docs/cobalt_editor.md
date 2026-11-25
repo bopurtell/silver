@@ -136,7 +136,7 @@ export OCAMLPATH="/absolute/path/to/cobalt/_build/install/default/lib${OCAMLPATH
 opam exec -- dune build -j 4 terminal/main.exe @terminal/test-editor-pty \
   @terminal/test-editor-palette-pty @terminal/test-editor-config-pty \
   @terminal/test-editor-clipboard-pty
-./install.sh --without-asic
+./install.sh --without-asic --switch "$(opam switch show)"
 ```
 
 See [Install Silver](install.md) for other installation modes and dependencies.

@@ -9,23 +9,24 @@ independent conformance references, not requirements for using the example.
 ## Build, configure, and open
 
 Install [Silver](../../README.md#install-and-open-silver) first (`--without-asic`
-is sufficient). Its installer also installs `hardcaml_workbench_provider`. From
-the Silver checkout, use the same opam switch and installation prefix (the
-defaults are shown below):
+is sufficient). Prepare a compatible project switch with Hardcaml and the
+[provider SDK](../../docs/install.md#install-the-ocaml-provider-sdk). From
+the Silver source checkout, select that switch and the app's installation prefix
+(example values below):
 
 ```sh
 prefix="$HOME/.local"
 switch=5.2.0+ox
 example="$PWD/examples/cyclesim_counter"
 
-OCAMLPATH="$prefix/lib${OCAMLPATH:+:$OCAMLPATH}" \
-  opam exec --switch="$switch" -- dune build --root "$example" \
+opam install --switch="$switch" ./hardcaml_workbench_provider.opam hardcaml
+opam exec --switch="$switch" -- dune build --root "$example" \
   counter.exe test_provider.exe
 
 "$prefix/bin/silver-simulation-setup" init --root "$example" \
   --provider-executable "$example/_build/default/test_provider.exe"
-"$prefix/bin/silver-simulation-setup" check --root "$example"
-"$prefix/bin/ag" --project-root "$example"
+"$prefix/bin/silver-simulation-setup" check --root "$example" --environment "opam:$switch"
+"$prefix/bin/ag" --project-root "$example" --environment "opam:$switch"
 ```
 
 `init` writes the local, ignored `.workbench/hardcaml-workbench-simulation.sexp`.

@@ -8,11 +8,18 @@ Usage: ./install.sh [--prefix DIR] [--switch NAME] [--jobs N] [--asic-provider P
 Install Silver from a source checkout/tarball or a prebuilt binary tarball.
 The public launcher is ag. An unrelated existing PREFIX/bin/ag is not overwritten.
   --prefix DIR   Installation directory (default: $SILVER_PREFIX, $PREFIX, or ~/.local)
-  --switch NAME  Source only: existing switch (default: $OPAM_SWITCH or current switch)
+  --switch NAME  Source only: use an existing switch, without installing dependencies
+                 ($OPAM_SWITCH is also an explicit override)
   --jobs N       Source only: parallel jobs ($SILVER_BUILD_JOBS, $HCW_BUILD_JOBS, or 4)
 
+The default source install builds in Silver's private opam root
+(${XDG_DATA_HOME:-$HOME/.local/share}/silver/opam), switch silver.
+It installs the release-pinned compiler and dependencies there, not in your
+current switch. The managed OCaml SDK stays private; install the provider
+package in your project's switch to build project-specific providers.
+SILVER_OPAM_DISABLE_SANDBOXING=1 opts out of opam build sandboxing when
+initializing the private root (only for environments that cannot use it).
 The Ubuntu 26.04 x86_64 binary tarball installs commands only, without opam.
-Use the source installer for the OCaml simulation-provider SDK.
 
   --asic-provider PATH   Require this absolute executable for install preflight
   --without-asic         Skip provider preflight for a generic Silver installation
@@ -143,10 +150,13 @@ if [[ $binary == true ]]; then
   exit 0
 fi
 
-command -v opam >/dev/null || die 'opam is missing from PATH; install opam and select an existing OCaml switch'
+command -v opam >/dev/null || die 'opam is missing from PATH; install opam first'
+managed=false
 if [[ -z $switch ]]; then
-  switch=$(opam switch show) && [[ -n $switch ]] ||
-    die 'no selected opam switch; list existing switches with "opam switch list" and pass --switch NAME'
+  managed=true
+  switch=silver
+  source "$repo/scripts/release/managed-toolchain.sh"
+  prepare_managed_toolchain
 fi
 # Relative local switch names, like relative prefixes, are relative to the caller.
 case $switch in /*) ;; .|..|*/*) switch=$PWD/$switch ;; esac
@@ -155,9 +165,18 @@ run=(opam exec "--switch=$switch" --)
   die "cannot use OCaml in switch '$switch'; check 'opam switch list' and pass --switch NAME"
 
 cd -- "$repo"
-unset DESTDIR
+unset DESTDIR DUNE_WORKSPACE
+if [[ $managed == true ]]; then
+  # Do not share the developer's Dune build tree, and don't use this setting
+  # during opam provisioning: each dependency needs its own build directory.
+  export DUNE_BUILD_DIR=_build_silver_managed
+fi
 packages=(hardcaml_workbench_provider hardcaml_workbench)
 deps_hint() {
+  if [[ $managed == true ]]; then
+    printf 'The managed toolchain is in %s; see the diagnostic above.\n' "$OPAMROOT" >&2
+    return
+  fi
   printf 'If build dependencies are missing, install them in the selected switch with:\n  cd %q && opam install --switch=%q --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam\n' \
     "$repo" "$switch" >&2
   printf 'For the OxCaml switch and the Cobalt prerequisite, see docs/install.md.\n' >&2
@@ -166,6 +185,20 @@ deps_hint() {
 printf 'Building native Silver in switch %s for %s\n' "$switch" "$prefix"
 "${run[@]}" dune build -j "$jobs" -p hardcaml_workbench_provider,hardcaml_workbench @install ||
   { deps_hint; die 'native build failed; see the Dune diagnostic above'; }
-"${run[@]}" dune install --root . -j "$jobs" --prefix "$prefix" "${packages[@]}" ||
+install_dirs=()
+if [[ $managed == true ]]; then
+  install_dirs=(--libdir "$managed_sdk/lib" --libexecdir "$managed_sdk/lib")
+  if [[ -e $prefix/lib/hardcaml_workbench_provider ]]; then
+    printf 'Warning: leaving the previously installed SDK under %s/lib untouched.\n' "$prefix" >&2
+  fi
+fi
+"${run[@]}" dune install --root . -j "$jobs" "${install_dirs[@]}" --prefix "$prefix" "${packages[@]}" ||
   die "install failed; check the diagnostic above and choose a writable --prefix"
+if [[ $managed == true ]]; then
+  printf 'The managed OCaml simulation-provider SDK is private to %s/lib.\n' "$managed_sdk"
+  printf 'For your own project, install the provider package in its compatible OCaml switch:\n'
+  printf '  opam install --switch=PROJECT_SWITCH %q\n' "$repo/hardcaml_workbench_provider.opam"
+else
+  printf 'The OCaml simulation-provider SDK requires a compiler and dependencies compatible with switch %s.\n' "$switch"
+fi
 finish

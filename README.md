@@ -20,8 +20,8 @@ and stop if a block reports an error.
 ### Prerequisites
 
 - **Silver:** The prebuilt release targets Ubuntu 26.04 LTS on x86-64. A source
-  build uses a compatible OxCaml opam switch and Silver's native dependencies,
-  including Cobalt. See the [installation guide](docs/install.md).
+  installation automatically prepares a private OxCaml switch and Silver's
+  dependencies, including Cobalt. See the [installation guide](docs/install.md).
 - **Projects:** The machine running the Silver service needs the project's build
   environment: Dune for Hardcaml, or Bazel and the Classic Bluespec toolchain
   for the [Bluespec starter](docs/bluespec_classic.md). Simulation needs the project's configured
@@ -65,34 +65,21 @@ If there isn't one yet, [build from source](#build-from-source) instead.
    This skips the install-time ASIC provider check; you can still configure
    ASIC projects later.
 
-### Set up OxCaml
+### Build from source
 
-You need this for a source build or to build the ASIC example, but not just
-to install the prebuilt app. If your project already has a compatible opam
-switch, activate that switch instead.
+The installer builds Silver in its own OxCaml environment, without modifying
+your project's opam switch. The first build takes longer and uses additional
+disk space; later installations reuse that environment.
 
-1. On Ubuntu, install the build tools and initialize opam:
+1. On Ubuntu, install the host build tools:
 
    ```sh
    sudo apt update &&
-     sudo apt install -y autoconf build-essential ca-certificates curl git libgmp-dev \
-       libsqlite3-dev opam pkg-config python3 rsync unzip zlib1g-dev &&
-     opam init --yes --no-setup
+     sudo apt install -y autoconf bubblewrap build-essential bzip2 ca-certificates curl git gzip \
+       libgmp-dev libsqlite3-dev opam pkg-config python3 rsync unzip xz-utils zlib1g-dev
    ```
 
-2. Create the OxCaml switch if it doesn't exist, then activate it:
-
-   ```sh
-   (opam switch list --short | grep -Fxq '5.2.0+ox' ||
-     opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default) &&
-     eval "$(opam env --switch=5.2.0+ox --set-switch)"
-   ```
-
-### Build from source
-
-With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
-
-1. Clone and enter the repository. To build a published version instead, use
+2. Clone and enter the repository. To build a published version instead, use
    the [source tarball download commands](docs/install.md#download-the-source-tarball)
    in place of this step.
 
@@ -100,18 +87,14 @@ With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
    git clone https://github.com/bopurtell/silver.git && cd silver
    ```
 
-2. Install Cobalt and the remaining Silver dependencies:
-
-   ```sh
-   opam pin add --yes cobalt 'git+https://github.com/bopurtell/cobalt.git#649485d702304babcf3554cd4c6eca0d352d503d' &&
-     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
-   ```
-
-3. Build and install Silver:
+3. Prepare the private switch, build and install Silver:
 
    ```sh
    ./install.sh --without-asic
    ```
+
+   Developers who already have the dependencies in a compatible switch can
+   [build using that existing switch](docs/install.md#use-an-existing-switch).
 
 ### Open a project
 
@@ -148,7 +131,7 @@ The [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example)
 repository contains a FIFO design with a `standard` flow and a `balanced` profile.
 This walkthrough runs synthesis on that design; it does not require any saved runs.
 
-1. In the example's [OxCaml environment](#set-up-oxcaml), install
+1. In the example's [project OxCaml environment](docs/install.md#set-up-oxcaml), install
    `hardcaml_asic` if you don't already have a compatible provider:
 
    ```sh

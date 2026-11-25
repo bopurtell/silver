@@ -1,7 +1,7 @@
 # Install Silver
 
 Choose the prebuilt Ubuntu archive for the native terminal app and daemon, or
-build from source to get the app and the OCaml simulation provider SDK.
+build from source in a private OxCaml environment managed by the installer.
 Neither installation provisions the toolchain of a project you open.
 
 ## Project prerequisites
@@ -64,15 +64,14 @@ To install a specific version manually:
 
 ## Build from source
 
-1. Follow [Set up OxCaml](../README.md#set-up-oxcaml) if you don't already
-   have a compatible switch. If the switch already exists, activate it:
+1. Install the host build dependencies. On Ubuntu:
 
    ```sh
-   eval "$(opam env --switch=5.2.0+ox --set-switch)"
+   sudo apt update &&
+     sudo apt install -y autoconf bubblewrap build-essential bzip2 ca-certificates curl git gzip \
+       libgmp-dev libsqlite3-dev opam pkg-config python3 rsync unzip xz-utils zlib1g-dev
    ```
 
-   To reproduce the release build environment, see the exact versions and repository
-   revisions in [`scripts/release/toolchain.env`](../scripts/release/toolchain.env).
 2. [Download the source tarball](#download-the-source-tarball) or clone
    the development checkout:
 
@@ -80,32 +79,108 @@ To install a specific version manually:
    git clone https://github.com/bopurtell/silver.git && cd silver
    ```
 
-3. Make a compatible [Cobalt](https://github.com/bopurtell/cobalt) build available
-   to Dune in that switch. Silver embeds `cobalt.hosted` and `cobalt.terminal`;
-   a standalone Cobalt executable does not provide those libraries. For
-   example, install Cobalt and the remaining Silver dependencies with:
-
-   ```sh
-   opam pin add --yes cobalt 'git+https://github.com/bopurtell/cobalt.git#649485d702304babcf3554cd4c6eca0d352d503d' &&
-     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
-   ```
-4. Build and install from the source directory:
+3. Run the source installer:
 
    ```sh
    ./install.sh --without-asic
    ```
 
    Omit `--without-asic` to check for a compatible ASIC provider at install
-   time. Use `--switch NAME` to select an existing switch,
+   time. Use `--switch NAME` to [select an existing switch](#use-an-existing-switch),
    `--prefix DIR` for a different install location, or `--jobs N` to set
    build parallelism. Installing Silver into the default user prefix (`~/.local`)
    does not require `sudo`.
-5. Add the default prefix to `PATH` and verify the installed command:
+4. Add the default prefix to `PATH` and verify the installed command:
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
    command -v ag
    ```
+
+The installer prepares OxCaml, Cobalt and the native build dependencies
+using the versions and repository revisions in
+[`scripts/release/toolchain.env`](../scripts/release/toolchain.env).
+It does not need your project switch to be active. The first build involves
+compiling the compiler and libraries, so allow time and disk space.
+Rerunning the installer with matching toolchain pins reuses the private
+toolchain. Launch `ag` directly
+from your project's usual shell; the private compiler is not required to
+run Silver.
+
+The managed opam root is separate from `~/.opam`; by default it lives under
+`${XDG_DATA_HOME:-$HOME/.local/share}/silver`. Silver's managed SDK also stays
+in that private area, rather than replacing any project SDK under `~/.local/lib`.
+
+When an update changes the toolchain pins, the installer reports the private
+directory that needs to be moved aside before rebuilding. This avoids mixing
+compiler or library versions. You can retain the old directory as a backup.
+
+## Set up OxCaml
+
+Hardware projects that use OCaml need their own project switch, separate from
+Silver's build switch. If you already have a compatible switch, activate it
+instead of creating another.
+
+1. Install the host build dependencies listed above, then initialize your
+   normal opam root:
+
+   ```sh
+   opam init --yes --no-setup
+   ```
+
+2. Create and activate an OxCaml switch for your projects:
+
+   ```sh
+   (opam switch list --short | grep -Fxq '5.2.0+ox' ||
+     opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default) &&
+     eval "$(opam env --switch=5.2.0+ox --set-switch)"
+   ```
+
+## Use an existing switch
+
+Developers working on Silver or Cobalt can skip provisioning and use a
+prepared compatible switch.
+
+1. Activate your switch. From the Silver source directory, make Cobalt and
+   the remaining native dependencies available:
+
+   ```sh
+   eval "$(opam env --switch=5.2.0+ox --set-switch)"
+   . scripts/release/toolchain.env
+   opam pin add --yes cobalt "git+${SILVER_COBALT_REPOSITORY}#${SILVER_COBALT_COMMIT}" &&
+     opam install --yes --deps-only ./hardcaml_workbench_provider.opam ./hardcaml_workbench.opam
+   ```
+
+   For local Cobalt development, see [building both checkouts](cobalt_editor.md#build-and-verify)
+   instead of pinning the release revision.
+2. Run the installer explicitly with that switch:
+
+   ```sh
+   ./install.sh --without-asic --switch 5.2.0+ox
+   ```
+
+The explicit-switch route builds with the dependencies already available to
+that switch rather than provisioning or upgrading it. Setting `OPAM_SWITCH`
+explicitly is another way to select that route; merely activating a project
+switch does not change the installer's managed default.
+
+## Install the OCaml provider SDK
+
+The SDK is independent of the Silver application. If your hardware project
+compiles a native simulation provider, install the SDK with the project's
+compiler and libraries, not Silver's private application build switch.
+This is optional for ordinary Silver use and works with the binary install too.
+
+From the Silver source checkout or extracted source tarball, with the project's
+compatible opam switch active:
+
+```sh
+opam install ./hardcaml_workbench_provider.opam
+```
+
+This installs only the provider package and its dependencies into the selected
+project switch. It does not require Cobalt or rebuild Silver. For an isolated
+SDK prefix instead, see [the provider library guide](../provider/README.md#building-and-checking).
 
 ### Download the source tarball
 

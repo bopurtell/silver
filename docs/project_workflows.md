@@ -108,9 +108,8 @@ silver-author new-module helper --library ip/accum --apply
 ## Configure the ASIC example simulation suites
 
 1. Install the [hardcaml_asic provider](https://github.com/LeEmperor/hardcaml_asic#install-the-provider)
-   and the Silver OCaml provider SDK. A [Silver source install](install.md#build-from-source)
-   installs the SDK as `hardcaml_workbench_provider`; use a switch compatible
-   with the SDK build when compiling the example.
+   and the [Silver OCaml provider SDK](install.md#install-the-ocaml-provider-sdk)
+   in the example's own compatible switch.
 2. In a checkout of [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example),
    run `./bootstrap.sh` in that environment. It provisions the flow tools and
    configures the example's ASIC and simulation providers.

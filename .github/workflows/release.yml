@@ -27,7 +27,7 @@ jobs:
             exit 1
           fi
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")"
-      - name: Build and verify source installation and package both archives
+      - name: Verify managed and explicit-switch source installations; package both archives
         shell: bash
         run: |
           mkdir "$RUNNER_TEMP/silver-dist"

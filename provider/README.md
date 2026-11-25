@@ -56,10 +56,11 @@ the `Wire.Discovery` type and launch selection are unchanged.
 No generic seed-to-PRNG mapping is imposed. Projects must preserve their existing
 full uint64 interpretation; do not convert through a signed OCaml int or float.
 
-The [Silver source installer](../docs/install.md#build-from-source) installs the provider
-library alongside the application. When building an external adapter, set
-`OCAMLPATH` to include the installation's `lib` directory. The commands below
-also let you build and install just the library into a private prefix, without
+The [SDK installation guide](../docs/install.md#install-the-ocaml-provider-sdk)
+installs this package into the project's own switch, independently of the
+Silver application. When building an external adapter against a private SDK
+prefix, set `OCAMLPATH` to include that prefix's `lib` directory. The commands
+below build and install just the library into a private prefix, without
 changing the opam switch or installing the application.
 
 ## Building and checking
