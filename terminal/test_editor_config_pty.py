@@ -24,7 +24,7 @@ def exercise(client, base):
     state = base / "state"
     env = dict(os.environ, HOME=str(base / "home"), XDG_CONFIG_HOME=str(config_root),
                XDG_STATE_HOME=str(state), XDG_RUNTIME_DIR=str(base / "runtime"))
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     alpha, beta = (base / name for name in ("alpha", "beta"))
     for root in (alpha, beta):

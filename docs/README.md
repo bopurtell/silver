@@ -1,12 +1,13 @@
 # Silver documentation
 
-Silver opens independent Hardcaml projects, runs their configured commands, and
+Silver opens hardware projects, runs their configured commands, and
 lets you inspect execution and hardware evidence. Project and provider commands
 also work without Silver.
 
 ## Get started
 
 - [Install Silver](install.md) and [open a project or attach to a daemon](project_workflows.md).
+- [Start a Classic Bluespec project](bluespec_classic.md) with Bazel, Verilator and Rust.
 - [Manage a project](project_management.md) or [connect an existing project](existing_project_setup.md).
 - [Migrate root companion files to `.workbench/`](migration_guides/project-configuration.md).
 - Try the [Cyclesim counter](../examples/cyclesim_counter/README.md) or

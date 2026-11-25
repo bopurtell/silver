@@ -115,10 +115,14 @@ let read path ~observed ~max_bytes ~on_event =
       contents)
 ;;
 
+let effective_limit max_bytes =
+  require (max_bytes >= 0 && max_bytes < Int.max_value) "Invalid configuration byte limit";
+  Int.min max_bytes max_config_bytes
+;;
+
 let resolve_with_hook ~root ~filename ~max_bytes ~on_event =
   Or_error.try_with (fun () ->
-    require (max_bytes >= 0 && max_bytes < Int.max_value) "Invalid configuration byte limit";
-    let max_bytes = Int.min max_bytes max_config_bytes in
+    let max_bytes = effective_limit max_bytes in
     let load location path =
       let observed = inspect_safely path in
       let file =
@@ -146,6 +150,17 @@ let resolve_with_hook ~root ~filename ~max_bytes ~on_event =
 
 let resolve ~root ~filename ~max_bytes =
   resolve_with_hook ~root ~filename ~max_bytes ~on_event:ignore
+;;
+
+let read_optional ~path ~max_bytes =
+  Or_error.try_with (fun () ->
+    let max_bytes = effective_limit max_bytes in
+    let observed = inspect_safely path in
+    let contents =
+      Option.map observed ~f:(fun observed -> read path ~observed ~max_bytes ~on_event:ignore)
+    in
+    revalidate path observed;
+    contents)
 ;;
 
 module For_testing = struct

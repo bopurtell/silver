@@ -34,6 +34,10 @@ val resolve
   -> max_bytes:int
   -> resolved option Or_error.t
 
+(** Read a single explicit absolute configuration path, with the same symlink,
+    regular-file and change-detection checks as [resolve]. *)
+val read_optional : path:string -> max_bytes:int -> string option Or_error.t
+
 module For_testing : sig
   type event =
     | Opened of string

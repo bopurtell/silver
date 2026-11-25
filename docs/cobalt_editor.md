@@ -45,7 +45,8 @@ The shipped layout shows the source pane and Problems in a bottom band:
 ```lisp
 ((schema_version 1)
  (layout ((views ((Problems Band)))))
- (theme inherit))
+ (theme inherit)
+ (clipboard auto))
 ```
 
 Use `(layout ((views ())))` for the source pane alone. To also show History
@@ -68,6 +69,32 @@ previews. An explicit Cobalt theme such as `abyss` affects only the editor.
 Neither choice overwrites Silver's presentation preferences or changes its layout.
 Restart Silver to reload the file; if it is unreadable or malformed, Silver
 leaves it alone, displays a notice, and uses the shipped defaults.
+
+## Yanking and the system clipboard
+
+Normal `yy`, Visual `y`, and other commands that replace Cobalt's unnamed
+register also copy its text to the system clipboard. `p` always uses Cobalt's
+internal register, even if the clipboard transport fails. The host uses its
+own local environment, never the project's or a remote daemon's environment.
+
+The user-owned `editor.sexp` supports `(clipboard auto)` (the default),
+`(clipboard osc52)`, and `(clipboard disabled)`. In `auto` Silver tries
+`wl-copy` on Wayland, then `xclip` for X11 when `DISPLAY` is available. It
+uses OSC 52 when neither transport succeeds, or when SSH session variables
+are present. The helpers are optional; no editor configuration change is
+required for the default.
+
+If terminal paste is stale, check Silver's clipboard notice. For local
+Wayland/X11 check `WAYLAND_DISPLAY`/`DISPLAY`, that the desktop is reachable,
+and that `wl-copy`/`xclip` is installed on the Silver client's PATH. An
+`OSC 52 sent; terminal acceptance unknown` notice means Silver requested a
+write, not that the terminal accepted it. Enable clipboard writes in your
+terminal's settings and, under tmux, check `tmux show-options -g set-clipboard`
+(`on` permits application OSC 52 writes); check terminal clipboard
+capabilities if multiplexer forwarding still fails. Use the terminal's
+ordinary clipboard paste shortcut to paste into another program. Force
+`osc52` if your desired clipboard belongs to the terminal rather than to
+the Silver host, or choose `disabled` to keep yanks entirely internal.
 
 ## Use standalone Cobalt with Silver
 
@@ -107,7 +134,8 @@ leaves the switch unchanged. From the Silver checkout:
 ```sh
 export OCAMLPATH="/absolute/path/to/cobalt/_build/install/default/lib${OCAMLPATH:+:$OCAMLPATH}"
 opam exec -- dune build -j 4 terminal/main.exe @terminal/test-editor-pty \
-  @terminal/test-editor-palette-pty @terminal/test-editor-config-pty
+  @terminal/test-editor-palette-pty @terminal/test-editor-config-pty \
+  @terminal/test-editor-clipboard-pty
 ./install.sh --without-asic
 ```
 

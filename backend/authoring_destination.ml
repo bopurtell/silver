@@ -5,6 +5,7 @@ open! Core
    destination; O_EXCL also protects individual outputs at creation time. *)
 exception Invalid of string
 exception Changed of string
+exception Unsupported_bluespec_project
 
 let invalid msg = raise (Invalid msg)
 let changed msg = raise (Changed msg)
@@ -101,7 +102,7 @@ type snapshot =
   ; library_inputs : ((int * int) * Time_ns.t * string) list
   ; directories : (string * (int * int)) list
   ; dune : ((int * int) * Time_ns.t * string) option
-  ; flow_inputs : (string list * ((int * int) * Time_ns.t * string) option) list
+  ; inputs : (string list * ((int * int) * Time_ns.t * string) option) list
   }
 [@@deriving equal, sexp_of]
 
@@ -202,6 +203,8 @@ let existing_project dir name ~configs_required =
 type addition =
   | Ip of string
   | Module of string list * string
+  | Bazel_ip of string
+  | Bazel_module of string list * string
   | Flow of
       { inputs : string list list
       ; output : string list option
@@ -226,13 +229,35 @@ let module_directory path =
     parts)
 ;;
 
+let read_bazel_manifest dir =
+  let module Manifest = Integration.Silver_manifest in
+  let directory = Filename.dirname Manifest.relative_path in
+  let filename = Filename.basename Manifest.relative_path in
+  let path, via = child dir directory in
+  match inspect via with
+  | None -> None
+  | Some s when Poly.equal s.st_kind S_DIR ->
+    let identity = id s in
+    with_dir ~path ~via ~identity (fun dir _ ->
+      Option.map (inspect (snd (child dir filename))) ~f:(fun _ ->
+        let entry =
+          read_regular ~limit:Integration.Config_location.max_config_bytes dir filename
+        in
+        identity, [ directory; filename ], entry))
+  | Some _ -> invalid ("Expected plain directory: " ^ path)
+;;
+
 let addition_project dir addition =
+  let bazel =
+    match addition with
+    | Bazel_ip _ | Bazel_module _ -> true
+    | Ip _ | Module _ | Flow _ -> false
+  in
   let regular dir name =
     match inspect (snd (child dir name)) with
     | Some s when Poly.equal s.st_kind S_REG -> id s
     | _ -> invalid ("Expected regular file: " ^ name)
   in
-  let marker = regular dir "dune-project" in
   let absent dir name =
     if Option.is_some (inspect (snd (child dir name)))
     then changed ("Conflict: " ^ fst (child dir name))
@@ -244,12 +269,49 @@ let addition_project dir addition =
       let path, via = child dir p in
       (match inspect via with
        | Some s when Poly.equal s.st_kind S_DIR ->
-         let rel = rel @ [ p ] in
-         with_dir ~path ~via ~identity:(id s) (fun d _ ->
-           walk d ((String.concat ~sep:"/" rel, id s) :: dirs) rel rest finish)
+          let rel = rel @ [ p ] in
+          with_dir ~path ~via ~identity:(id s) (fun d _ ->
+            if bazel
+               && List.exists
+                    [ "MODULE.bazel"; "REPO.bazel"; "WORKSPACE.bazel"; "WORKSPACE" ]
+                    ~f:(fun marker -> Option.is_some (inspect (snd (child d marker))))
+            then invalid ("Authoring cannot cross a nested Bazel repository: " ^ path);
+            walk d ((String.concat ~sep:"/" rel, id s) :: dirs) rel rest finish)
        | _ -> invalid ("Expected plain directory: " ^ path))
   in
-  let flow_inputs = ref [] in
+  let captured_inputs = ref [] in
+  let marker =
+    if not bazel
+    then (
+      (match addition with
+       | Ip _ | Module _ when Option.is_some (read_bazel_manifest dir) ->
+         changed "Project build system changed"
+       | _ -> ());
+      regular dir "dune-project")
+    else (
+      let module Manifest = Integration.Silver_manifest in
+      let manifest_identity, path, entry =
+        match read_bazel_manifest dir with
+        | Some manifest -> manifest
+        | None -> invalid ("Expected " ^ Manifest.relative_path)
+      in
+      let _, _, text = entry in
+      let manifest =
+        match Manifest.parse_string text with
+        | Ok manifest -> manifest
+        | Error reason -> invalid (Manifest.relative_path ^ ": " ^ reason)
+      in
+      let has_starter_layout () =
+        List.for_all Manifest.bluespec_starter_files ~f:(fun name ->
+          match inspect (snd (child dir name)) with
+          | Some s -> Poly.equal s.st_kind S_REG
+          | None -> false)
+      in
+      if not (Manifest.is_bluespec_classic manifest ~has_starter_layout)
+      then raise Unsupported_bluespec_project;
+      captured_inputs := (path, Some entry) :: !captured_inputs;
+      manifest_identity)
+  in
   let directories, dune =
     match addition with
     | Flow { inputs; output } ->
@@ -268,7 +330,7 @@ let addition_project dir addition =
              with_dir ~path ~via ~identity:(id s) (fun d _ -> probe d prefix rest finish)
            | _ -> invalid ("Expected plain directory: " ^ path))
       in
-      flow_inputs
+       captured_inputs
       := List.map inputs ~f:(fun parts ->
            ( parts
            , probe dir [] parts (fun d n ->
@@ -281,7 +343,7 @@ let addition_project dir addition =
            : unit option));
       ( List.sort (Hashtbl.to_alist dirs) ~compare:(Comparable.lift String.compare ~f:fst)
       , None )
-    | Ip name ->
+    | Ip name | Bazel_ip name ->
       if Option.is_none (inspect (snd (child dir "ip")))
       then [], None
       else
@@ -292,13 +354,36 @@ let addition_project dir addition =
       walk dir [] [] parts (fun d dirs ->
         absent d (name ^ ".ml");
         dirs, Some (read_regular ~limit:65536 d "dune"))
+    | Bazel_module (parts, name) ->
+      walk dir [] [] parts (fun d dirs ->
+        absent d (Authoring_bluespec.filename name);
+        absent d (Authoring_bluespec.package_name name ^ ".bsv");
+        let build =
+          if Option.is_some (inspect (snd (child d "BUILD.bazel")))
+          then "BUILD.bazel"
+          else (
+             captured_inputs := (parts @ [ "BUILD.bazel" ], None) :: !captured_inputs;
+            "BUILD")
+        in
+        let entry = read_regular ~opaque_if_large:true d build in
+         captured_inputs := (parts @ [ build ], Some entry) :: !captured_inputs;
+        dirs, None)
   in
-  Some marker, directories, dune, !flow_inputs
+  Some marker, directories, dune, !captured_inputs
 ;;
 
 let input_text s parts =
-  List.Assoc.find_exn s.flow_inputs parts ~equal:(List.equal String.equal)
+  List.Assoc.find_exn s.inputs parts ~equal:(List.equal String.equal)
   |> Option.map ~f:(fun (_, _, text) -> text)
+;;
+
+let bazel_library s parts =
+  List.find_map [ "BUILD.bazel"; "BUILD" ] ~f:(fun name ->
+    List.find_map s.inputs ~f:(fun (path, entry) ->
+      if List.equal String.equal path (parts @ [ name ])
+      then Option.map entry ~f:(fun (_, _, text) -> String.concat ~sep:"/" path, text)
+      else None))
+  |> Option.value_exn
 ;;
 
 let manual_modules snapshot =
@@ -344,15 +429,39 @@ let library_inputs dir parts =
 
 let library_text s = List.map s.library_inputs ~f:(fun (_, _, text) -> text)
 
-let visit ?existing ?addition ?library ?(configs_required = true) (root : root) parts f =
-  let rec walk dir dh parts =
-    match parts with
-    | [] ->
-      let marker, common, catalog_state, configs_absent, directories, dune, flow_inputs =
+let walk_destination (root : root) parts ~found ~missing =
+  let rec walk dir dh = function
+    | [] -> found dir dh
+    | name :: rest as parts ->
+      let path, via = child dir name in
+      (match inspect via with
+       | None -> missing dir parts
+       | Some s when Poly.equal s.st_kind S_DIR ->
+         with_dir ~path ~via ~identity:(id s) (fun d h -> walk d h rest)
+       | Some _ -> invalid "Destination component is not a plain directory")
+  in
+  with_dir ~path:root.path ~via:root.path ~identity:root.identity (fun d h ->
+    walk d h parts)
+;;
+
+let source_project root parts =
+  walk_destination
+    root
+    parts
+    ~found:(fun dir _ -> dir.identity, Option.is_some (read_bazel_manifest dir))
+    ~missing:(fun _ _ -> invalid "Existing project root not found")
+;;
+
+let visit ?existing ?addition ?library ?(configs_required = true) root parts f =
+  walk_destination
+    root
+    parts
+    ~found:(fun dir dh ->
+      let marker, common, catalog_state, configs_absent, directories, dune, inputs =
         match addition, existing with
         | Some addition, _ ->
-          let marker, directories, dune, flow_inputs = addition_project dir addition in
-          marker, None, None, false, directories, dune, flow_inputs
+          let marker, directories, dune, inputs = addition_project dir addition in
+          marker, None, None, false, directories, dune, inputs
         | None, None ->
           require_empty dh;
           None, None, None, true, [], None, []
@@ -375,34 +484,25 @@ let visit ?existing ?addition ?library ?(configs_required = true) (root : root) 
         ; library_inputs = Option.value_map library ~default:[] ~f:(library_inputs dir)
         ; directories
         ; dune
-        ; flow_inputs
-        }
-    | name :: rest ->
-      let path, via = child dir name in
-      (match inspect via with
-       | None ->
-         if Option.is_some existing || Option.is_some addition
-         then invalid "Existing Dune project root not found";
-         f
-           dir
-           { ancestor = dir.identity
-           ; destination_ctime = None
-           ; missing = parts
-           ; marker = None
-           ; common = None
-           ; catalog_state = None
-           ; configs_absent = true
-           ; library_inputs = []
-           ; directories = []
-           ; dune = None
-           ; flow_inputs = []
-           }
-       | Some s when Poly.equal s.st_kind S_DIR ->
-         with_dir ~path ~via ~identity:(id s) (fun d h -> walk d h rest)
-       | Some _ -> invalid "Destination component is not a plain directory")
-  in
-  with_dir ~path:root.path ~via:root.path ~identity:root.identity (fun d h ->
-    walk d h parts)
+        ; inputs
+        })
+    ~missing:(fun dir parts ->
+      if Option.is_some existing || Option.is_some addition
+      then invalid "Existing project root not found";
+      f
+        dir
+        { ancestor = dir.identity
+        ; destination_ctime = None
+        ; missing = parts
+        ; marker = None
+        ; common = None
+        ; catalog_state = None
+        ; configs_absent = true
+        ; library_inputs = []
+        ; directories = []
+        ; dune = None
+        ; inputs = []
+        })
 ;;
 
 let rec mkdir_missing ~on_mkdir dir missing f =

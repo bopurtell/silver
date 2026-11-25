@@ -25,7 +25,7 @@ OCAMLPATH="$prefix/lib${OCAMLPATH:+:$OCAMLPATH}" \
 "$prefix/bin/silver-simulation-setup" init --root "$example" \
   --provider-executable "$example/_build/default/test_provider.exe"
 "$prefix/bin/silver-simulation-setup" check --root "$example"
-"$prefix/bin/silver" --project-root "$example"
+"$prefix/bin/ag" --project-root "$example"
 ```
 
 `init` writes the local, ignored `.workbench/hardcaml-workbench-simulation.sexp`.
@@ -100,7 +100,7 @@ Using the installed Silver commands and the prebuilt counter:
 prefix="$HOME/.local"
 opam exec --switch="${OPAM_SWITCH:-5.2.0+ox}" -- python3 scripts/test-native-simulation.py \
   --daemon "$prefix/bin/silver-daemon" \
-  --client "$prefix/bin/silver" \
+  --client "$prefix/bin/ag" \
   --counter "$PWD/examples/cyclesim_counter/_build/default/counter.exe"
 ```
 

@@ -267,7 +267,7 @@ def main() -> None:
                 restored_hierarchy += read_available(master, 0.1)
             if b"HARDWARE HIERARCHY" not in restored_hierarchy:
                 raise RuntimeError("compact hierarchy pane could not scroll back to its header")
-        os.write(master, b"q")
+        os.write(master, b"Q")
         process.wait(timeout=5)
         if process.returncode != 0:
             raise RuntimeError(f"client exited with status {process.returncode}")

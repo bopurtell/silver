@@ -6,6 +6,7 @@ usage() {
 Usage: ./install.sh [--prefix DIR] [--switch NAME] [--jobs N] [--asic-provider PATH | --without-asic]
 
 Install Silver from a source checkout/tarball or a prebuilt binary tarball.
+The public launcher is ag. An unrelated existing PREFIX/bin/ag is not overwritten.
   --prefix DIR   Installation directory (default: $SILVER_PREFIX, $PREFIX, or ~/.local)
   --switch NAME  Source only: existing switch (default: $OPAM_SWITCH or current switch)
   --jobs N       Source only: parallel jobs ($SILVER_BUILD_JOBS, $HCW_BUILD_JOBS, or 4)
@@ -75,9 +76,45 @@ if [[ -z $prefix ]]; then
 fi
 [[ $prefix == /* ]] || prefix=$PWD/$prefix
 
+# Never execute an unknown existing launcher to identify it. Both previous
+# installations and current ones install the legacy entrypoint from the same
+# executable; identical bytes (or a symlink to that executable) establish the
+# relationship before Dune/binary installation replaces the legacy entrypoint.
+legacy=$prefix/bin/hardcaml-workbench
+launcher=$prefix/bin/ag
+old_launcher=$prefix/bin/silver
+entry_exists() { [[ -e $1 || -L $1 ]]; }
+same_launcher() { [[ -f $1 && -x $1 && -f $legacy && -x $legacy ]] && cmp -s -- "$1" "$legacy"; }
+if entry_exists "$launcher" && { [[ -L $launcher ]] || ! same_launcher "$launcher"; }; then
+  die "refusing to overwrite existing $launcher (possibly The Silver Searcher); choose another prefix or move it explicitly"
+fi
+old_identity=
+if entry_exists "$old_launcher"; then
+  if same_launcher "$old_launcher"; then
+    # Keep the old file identity so a replacement between preflight and
+    # cleanup cannot be silently removed. No content is deleted on build failure.
+    old_identity=$(stat -c '%d:%i:%s:%y' -- "$old_launcher")
+  else
+    printf 'Warning: leaving unrecognized %s untouched.\n' "$old_launcher" >&2
+  fi
+fi
+
 finish() {
-  printf 'Installed Silver. From a Dune project, run: %q\n' "$prefix/bin/silver"
-  if [[ $(type -P silver || :) != "$prefix/bin/silver" ]]; then
+  if [[ -n $old_identity ]]; then
+    if [[ $(stat -c '%d:%i:%s:%y' -- "$old_launcher" 2>/dev/null || :) == "$old_identity" ]]; then
+      rm -- "$old_launcher" || die "could not remove previous Silver launcher $old_launcher"
+      printf 'Removed previous Silver launcher: %s\n' "$old_launcher"
+    elif entry_exists "$old_launcher"; then
+      printf 'Warning: previous Silver launcher changed during installation; leaving %s untouched.\n' "$old_launcher" >&2
+    fi
+  fi
+  printf 'Installed Silver. From a project directory, run: %q\n' "$launcher"
+  printf 'To create a Bluespec Classic starter (requires python3): %q init --bluespec DIR\n' "$launcher"
+  if [[ $(type -P ag || :) != "$launcher" ]]; then
+    other=$(type -P ag || :)
+    if [[ -n $other ]]; then
+      printf 'Warning: another ag is on PATH (%s); use the absolute launcher path or adjust PATH intentionally.\n' "$other" >&2
+    fi
     printf 'To launch this installation by name, put its bin directory first on PATH:\n  export PATH=%q:"$PATH"\n' "$prefix/bin"
   fi
 }

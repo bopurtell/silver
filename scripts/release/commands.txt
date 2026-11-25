@@ -1,4 +1,4 @@
-silver hardcaml-workbench
+ag hardcaml-workbench
 silver-author
 silver-daemon hardcaml-workbench-daemon
 silver-init hardcaml-workbench-init

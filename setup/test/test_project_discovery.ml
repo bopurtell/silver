@@ -103,6 +103,40 @@ let%test_unit "a non-regular dune-project is not a marker" =
     assert (Result.is_error (Project_discovery.explicit_root inner)))
 ;;
 
+let%test_unit "a nested Silver marker wins over an enclosing Dune project" =
+  with_tree (fun base ->
+    let inner = base ^/ "classic" in
+    let deep = inner ^/ "rtl" ^/ "lib" in
+    mkdir_p deep;
+    mkdir_p (inner ^/ ".silver");
+    touch (base ^/ "dune-project");
+    Out_channel.write_all
+      (inner ^/ ".silver" ^/ "project.json")
+      ~data:
+        "{\"schema_version\":1,\"name\":\"classic\",\"build_label\":\"//:rtl\",\"test_label\":\"//:simulation\"}\n";
+    let discovered = discover_exn deep in
+    [%test_eq: string] discovered.root inner;
+    [%test_eq: string] discovered.marker ".silver/project.json";
+    [%test_eq: string option] discovered.enclosing (Some base);
+    [%test_eq: (string, string) Result.t]
+      (Project_discovery.explicit_root inner)
+      (Ok inner);
+    assert (
+      String.is_substring
+        (Project_discovery.describe discovered ~explicit_flag:"--project-root")
+        ~substring:".silver/project.json"))
+;;
+
+let%test_unit "a directory named project.json is not a Silver marker" =
+  with_tree (fun base ->
+    let root = base ^/ "plain" in
+    mkdir_p (root ^/ ".silver" ^/ "project.json");
+    expect_error
+      root
+      ~containing:[ "ignored non-regular .silver/project.json"; "--project-root DIR" ];
+    assert (Result.is_error (Project_discovery.explicit_root root)))
+;;
+
 let%test_unit "no marker yields a bounded diagnostic naming the start and the escape \
                hatch"
   =

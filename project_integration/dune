@@ -5,7 +5,8 @@
   core_unix
   core_unix.filename_unix
   hardcaml_workbench_protocol
-  hardcaml_workbench_provider)
+  hardcaml_workbench_provider
+  yojson)
  (preprocess
   (pps ppx_jane))
  (lint

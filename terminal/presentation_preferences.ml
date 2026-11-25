@@ -46,6 +46,8 @@ type t =
   ; main_hints : bool option [@sexp.option]
   ; browser_hints : bool option [@sexp.option]
   ; palette_hints : bool option [@sexp.option]
+  ; quit_confirm : bool option [@sexp.option]
+  ; quit_default_yes : bool option [@sexp.option]
   ; timing_preload : bool option [@sexp.option]
   ; timing_preload_details : int option [@sexp.option]
   ; quick_launch_view : bool option [@sexp.option]
@@ -77,6 +79,7 @@ let path ~state_directory ~project_key =
    [true]; their stock layout/default migration is independent of this preference. *)
 (* The current schema also adds the optional Timing detail count. A missing field inherits the
    current default; a saved zero remains index-only. *)
+(* Quit confirmation choices are optional too: older project preferences inherit both true. *)
 let schema_version = 6
 
 let appearance_of_overrides (o : T.overrides) ~tile ~workspace ~kind =
@@ -107,6 +110,8 @@ let capture ~project_key (host : Host.t) =
   ; main_hints = Some host.main_hints
   ; browser_hints = Option.some_if host.browser_hints true (* absent in older files: off *)
   ; palette_hints = Some host.palette_hints
+  ; quit_confirm = Some host.quit_confirm
+  ; quit_default_yes = Some host.quit_default_yes
   ; timing_preload = Some host.timing_preload
   ; timing_preload_details = Some host.timing_preload_details
   ; quick_launch_view = Some host.quick_launch_view
@@ -290,6 +295,8 @@ let apply t (host : Host.t) =
     ; main_hints = Option.value t.main_hints ~default:true
     ; browser_hints = Option.value t.browser_hints ~default:false
     ; palette_hints = Option.value t.palette_hints ~default:true
+    ; quit_confirm = Option.value t.quit_confirm ~default:true
+    ; quit_default_yes = Option.value t.quit_default_yes ~default:true
     ; timing_preload = Option.value t.timing_preload ~default:true
     ; timing_preload_details =
         Option.value (Option.filter t.timing_preload_details ~f:Timing_preload.valid_detail_count)
@@ -344,6 +351,25 @@ let%test_unit "quick launch legacy preferences default to view and explicit no-v
   assert (not (restore stored).quick_launch_view);
   assert (restore { stored with quick_launch_view = None }).quick_launch_view;
   assert (restore { stored with quick_launch_view = Some true }).quick_launch_view
+;;
+
+let%test_unit "quit preferences are independent and absent fields inherit yes confirmation" =
+  let project_key = "quit/project" in
+  let restore stored = apply (decode ~project_key (encode stored)) Host.empty in
+  List.iter [ true; false ] ~f:(fun quit_confirm ->
+    List.iter [ true; false ] ~f:(fun quit_default_yes ->
+      let host =
+        { Host.empty with quit_confirm; quit_default_yes; quit_selection = Some No }
+      in
+      let restored = restore (capture ~project_key host) in
+      assert (Bool.equal restored.quit_confirm quit_confirm);
+      assert (Bool.equal restored.quit_default_yes quit_default_yes);
+      assert (Option.is_none restored.quit_selection)));
+  let old =
+    { (capture ~project_key Host.empty) with quit_confirm = None; quit_default_yes = None }
+  in
+  let restored = restore old in
+  assert (restored.quit_confirm && restored.quit_default_yes)
 ;;
 
 let%test_unit "compression scope round trips, guards, sparse resets and schema 5 preload" =

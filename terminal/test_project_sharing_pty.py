@@ -75,7 +75,7 @@ def daemon(exe, env, *args):
 
 
 def exercise(client, service, base):
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     for name in ("config", "state", "runtime", "home", "cache", "tmp", "unbound", "evidence"):
         (base / name).mkdir(mode=0o700)

@@ -1,0 +1,18 @@
+package Counter (Counter(..), mkCounter) where
+
+interface Counter =
+  step :: Bool -> Bool -> Action {-# arg_names = [clear, enable] #-}
+  count :: Bit 8
+
+{-# properties mkCounter = { synthesize, alwaysReady } #-}
+mkCounter :: Module Counter
+mkCounter = module
+  value :: Reg (Bit 8) <- mkReg 0
+
+  interface
+    -- Clear takes priority; otherwise an enabled step increments modulo 256.
+    step clear enable =
+      if clear then value := 0
+      else if enable then value := value + 1
+      else noAction
+    count = value

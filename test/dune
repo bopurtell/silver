@@ -13,7 +13,7 @@
   (package hardcaml_workbench))
  (action
   (run python3 -B %{dep:integration/standalone.py}
-   ../../install/%{context_name}/bin/silver
+   ../../install/%{context_name}/bin/ag
    ../../install/%{context_name}/bin/silver-daemon)))
 
 (alias

@@ -2,15 +2,22 @@
 
 ## Open or set up a project
 
-1. Run `silver` inside a Dune project to open the nearest project root. To
-   specify another root, use `silver --project-root /path/to/project`.
+For a new design, start `ag` outside a project and choose **New Project…**.
+From an open local project use **Project → New Project…**. Choose a starter
+and destination. The choice sets up the initial files and tools; it does not
+restrict the languages you can use inside the design. To script creation of
+the Classic Bluespec starter, use `ag init --bluespec` instead. See
+[Build and simulate Classic Bluespec](bluespec_classic.md).
+
+1. Run `ag` inside a configured Silver or Dune project to open the nearest project root. To
+   specify another root, use `ag --project-root /path/to/project`.
 2. For an unconfigured project, open the command palette with **Space c c**
    and choose **Set up project…**. Choose **Add ASIC starter…** to add design
    files without replacing existing sources, or **Import existing ASIC design…**
    to connect a built design executable by reference.
 3. Review the preview before applying. Neither action launches an ASIC run.
 
-Outside a Dune project, Silver opens a project setup dialog. It can open an
+Outside a recognized project, Silver opens a project setup dialog. It can open an
 existing Dune project or create a project with its first chip target. Press
 **Esc** to dismiss it or **p** to reopen it. Creating an ASIC starter requires
 `hardcaml-asic-starter` on `PATH`; importing an existing design does not.
@@ -23,6 +30,35 @@ standalone session can own the same project state at a time. If `TMPDIR` is
 unset, Silver creates private per-session scratch space under
 `${XDG_CACHE_HOME:-$HOME/.cache}/silver-runtime` and removes it on clean
 shutdown. The project's Dune build and configured results paths are separate.
+
+If opening a project reports that its state is in use, return to the other
+Silver terminal, save any edits, and press **q** from the workbench. Then
+reopen the project. This can happen even after deleting and recreating the
+project directory: the state belongs to the canonical project **path**.
+On Linux, `lslocks -o PID,COMMAND,PATH` shows which process holds the
+`lifetime.lock` shown in the error; `ps -p PID -o tty,args` identifies its
+terminal. The kernel releases the lock when that process exits. Don't delete
+the lock file: its presence alone doesn't mean it's locked.
+
+## Mixed-language designs
+
+Choose the starter for the **top-level workflow**, not for every IP block.
+The [mixed Hardcaml/Bluespec example](../examples/mixed_hardcaml_bluespec/README.md)
+exercises this path from Silver's ordinary Build and Test actions.
+For example, a Dune project can run BSC on a Classic Bluespec block and
+instantiate the emitted Verilog module from a Hardcaml top using
+`Hardcaml.Instantiation.create`. Match the emitted port names, widths,
+clock/reset polarity and any method ready/enable signals. The build rule
+for a whole-chip simulation must supply *both* the Hardcaml-generated RTL
+and the child RTL (plus any BSC primitives) to Verilator.
+
+One build system can own that dependency graph; a Bluespec file does not
+require a second Silver project or even a Bazel workspace. Conversely,
+instantiating an external module does not give Cyclesim a behavioral model
+or add its HDL to an ASIC implementation bundle. A verification suite may
+use a different host language from the design. SystemVerilog sources can
+participate where the project's toolchain accepts them; this wizard does
+not currently generate a standalone SystemVerilog starter.
 
 ## Edit project files
 
@@ -78,7 +114,7 @@ silver-author new-module helper --library ip/accum --apply
 2. In a checkout of [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example),
    run `./bootstrap.sh` in that environment. It provisions the flow tools and
    configures the example's ASIC and simulation providers.
-3. Run `silver`. Open **Testing** and select the **Controlled FIFO** or
+3. Run `ag`. Open **Testing** and select the **Controlled FIFO** or
    **Memory workloads** suite when discovery completes. See the
    [Testing workspace guide](testing_workspace.md) for running and inspecting
    individual cases.
@@ -97,7 +133,7 @@ silver-author new-module helper --library ip/accum --apply
    appears on the daemon host:
 
    ```sh
-   silver --connect http://127.0.0.1:8080 --project-root /path/on/host
+   ag --connect http://127.0.0.1:8080 --project-root /path/on/host
    ```
 
 Quitting the attached client leaves the daemon and its jobs running.

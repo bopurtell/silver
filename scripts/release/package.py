@@ -86,8 +86,9 @@ def command_table(source):
     entries = [name for row in rows for name in row]
     if (not rows or any(not 1 <= len(row) <= 2 for row in rows)
             or len(entries) != len(set(entries))
-            or any(not re.fullmatch(r"(silver|hardcaml-workbench)(-[a-z-]+)?", e)
-                   for e in entries)):
+            or any(not re.fullmatch(r"ag|silver-[a-z-]+|hardcaml-workbench(?:-[a-z-]+)?", e)
+                   for e in entries)
+            or ["ag", "hardcaml-workbench"] not in rows):
         raise ValueError("invalid release command table")
     return rows
 

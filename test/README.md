@@ -18,7 +18,7 @@ Start with [the ownership guide and source map](../docs/testing.md).
 | `@test-api` | daemon/test | Native local HTTP/RPC server integration |
 | `@test-support` | test/support | Shared PTY/screen helper contracts and compatibility imports |
 | `@test-native-smoke` | terminal waveform handoff | Opt-in synthetic daemon/client HTTP/PTY integration |
-| `@test-native-standalone` | installed `silver` and persistent daemon | Opt-in project discovery, locking, retained state and PTY quit/reattach lifecycle |
+| `@test-native-standalone` | installed `ag` and persistent daemon | Opt-in project discovery, locking, retained state and PTY quit/reattach lifecycle |
 | `@test-local` | contracts + presentation + backend + setup + support | Aggregate; **excludes API, native smoke and real EDA** |
 
 Shared-support tests participate in `@runtest`; native smoke is opt-in.
@@ -43,6 +43,29 @@ flock /tmp/opencode/workbench-build.lock \
 ```
 
 ## Opt-in real fresh-prefix tests
+
+### Classic Bluespec front end
+
+With the worktree's Silver installed and the [Bluespec starter
+toolchain](../examples/bluespec_classic/README.md) on `PATH`:
+
+```sh
+python3 scripts/test-bluespec-frontend.py
+python3 terminal/test_bluespec_pty.py
+python3 test/integration/bluespec_fifo.py
+python3 test/integration/bluespec_ip.py --author "$(command -v silver-author)"
+```
+
+The first starts with an empty directory, launches project actions and checks
+both correct and mutated RTL through the real daemon, including retained
+waveform data after restart. The second exercises the local terminal, Cobalt,
+Testing, and the waveform viewer. The third builds a separately synthesized
+child backed by BSC's FIFO primitive and checks the FIFO data in the trace.
+The last authors reusable IP, imports it in the design and proves that
+changing only the dependency changes the Verilator result.
+None requires an ASIC toolchain.
+
+### ASIC flow
 
 For the real FIFO 64 MiB export and retained ASIC GDS handoff, use the
 [streaming export acceptance runner](../docs/streaming_export_acceptance.md).

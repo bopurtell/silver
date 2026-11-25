@@ -19,7 +19,7 @@ MODALS = (COBALT_PALETTE, SILVER_PALETTE)
 
 
 def exercise(client, base):
-    launcher = base / "silver"
+    launcher = base / "ag"
     launcher.symlink_to(client)
     root = base / "project"
     root.mkdir()
@@ -104,7 +104,9 @@ def exercise(client, base):
         see("cancelled", EDITOR_TAB, "Cobalt focus", dirty, absent=MODALS)
         assert caret() == before, (before, caret())
 
-        editor_palette("ed", "Switch to Editor", "silver-editor")
+        # Cobalt also offers a native editor-workspace restore action. Exercise
+        # Silver's explicit command rather than relying on an ambiguous "ed".
+        editor_palette("Switch to Editor", "Silver: Switch to Editor", "silver-editor")
         send(b"\r")
         see("editor-ran", EDITOR_TAB, "Cobalt focus", dirty, absent=MODALS)
         assert caret() == before, (before, caret())

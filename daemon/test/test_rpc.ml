@@ -246,12 +246,202 @@ let wait_for_terminal_snapshot rpc instance_id job_id =
   | `Timeout -> failwith "timed out waiting for RPC job"
 ;;
 
-let run ~build_jobs () =
+let test_bazel_project ~simulation_fixture ~directory =
+  let instance_id = V1.Daemon_instance_id.of_string "bazel-rpc" in
+  let root = Filename.concat directory "project" in
+  let config = Filename.concat root ".silver" in
+  List.iter [ root; config ] ~f:(fun path -> Core_unix.mkdir path);
+  let manifest = Filename.concat config "project.json" in
+  let%bind service =
+    Service.create ~instance_id ~log_dir:(Filename.concat directory "logs") ()
+    >>| Or_error.ok_exn
+  in
+  let rpc = Rpc.create ~application_version:"test" ~instance_id ~service in
+  Monitor.protect
+    ~finally:(fun () -> Service.shutdown service)
+    (fun () ->
+      let open_root root =
+        let%map body =
+          post
+            rpc
+            "/api/v1/open-project"
+            (V1.Open_project.Request.sexp_of_t { instance_id; root; environment = Inherit_daemon })
+        in
+        decode_exn V1.Open_project.Response.t_of_sexp body
+      in
+      let require_invalid result message =
+        require
+          (match result with
+           | Error (error : V1.Error.t) -> V1.Error.Kind.equal error.kind Invalid_request
+           | Ok _ -> false)
+          message
+      in
+      Out_channel.write_all (Filename.concat root "MODULE.bazel") ~data:"";
+      let%bind missing = open_root root in
+      require_invalid missing "A Bazel root without explicit Silver configuration opened";
+      Out_channel.write_all
+        manifest
+        ~data:{|{"schema_version":1,"name":"demo","build_label":"--flag","test_label":"//:simulation"}|};
+      let%bind invalid = open_root root in
+      require_invalid invalid "Invalid Bazel label was accepted";
+      Out_channel.write_all
+        manifest
+        ~data:{|{"schema_version":1,"name":"Bazel demo","build_label":"//:rtl","test_label":"//:simulation"}|};
+      let%bind result = open_root root in
+      let opened = ok result in
+      let project = opened.project.id in
+      require
+        (String.equal opened.project.name "Bazel demo"
+         && not (V1.Environment_summary.uses_dune opened.environment)
+         && List.is_empty opened.workspace.contexts
+         && List.is_empty opened.workspace.items)
+        "Explicit Bazel project exposed Dune metadata";
+      let%bind repeated = open_root (Filename.concat root ".") in
+       require
+         (Project_id.equal (ok repeated).project.id project)
+         "Canonical Bazel root did not reuse its session";
+       Out_channel.write_all
+         manifest
+         ~data:{|{"schema_version":1,"name":"Bazel demo","language":"bluespec-classic","build_label":"//:rtl","test_label":"//:simulation"}|};
+       let%bind enabled = open_root root in
+       let enabled = ok enabled in
+       require
+         (Project_id.equal enabled.project.id project
+          && V1.Dune_workspace.Inspection.supports_bluespec_authoring enabled.workspace)
+         "Explicit Bluespec language was not advertised by the existing session";
+       Out_channel.write_all
+         manifest
+         ~data:{|{"schema_version":1,"name":"Bazel demo","build_label":"//:rtl","test_label":"//:simulation"}|};
+       let%bind disabled = open_root root in
+       require
+         (not (V1.Dune_workspace.Inspection.supports_bluespec_authoring (ok disabled).workspace))
+         "Generic Bazel project still advertised Classic authoring after removing the language";
+       let%bind () =
+        Deferred.List.iter
+          [ V1.Dune_action.Build, "build", "//:rtl", Job.State.Complete, 0
+          ; Test, "test", "//:simulation", Failed, 7
+          ]
+          ~how:`Sequential
+          ~f:(fun (action, name, label, state, exit_code) ->
+            let%bind body =
+              post
+                rpc
+                "/api/v1/submit-job"
+                (V1.Submit_job.Request.sexp_of_t
+                   { instance_id; project; action; submission_key = name })
+            in
+            let submitted = decode_exn V1.Submit_job.Response.t_of_sexp body |> ok in
+            let job = submitted.job.id in
+            let%bind finished = wait_for_terminal_snapshot rpc instance_id job in
+            let final = List.find_exn finished.jobs ~f:(fun j -> Job_id.equal j.id job) in
+            require
+              (Job.Kind.equal final.kind { namespace = "bazel"; name }
+               && Job.State.equal final.state state
+               && Option.equal Job.Exit_status.equal final.exit_status (Some (Exited exit_code)))
+              "Bazel command did not preserve job kind and process exit status";
+            let%map body =
+              post
+                rpc
+                "/api/v1/read-log"
+                (V1.Read_log.Request.sexp_of_t
+                   { instance_id; job; offset = 0; max_records = 20; max_bytes = 4096 })
+            in
+            let log = decode_exn V1.Read_log.Response.t_of_sexp body |> ok in
+            let text = String.concat (List.map log.records ~f:(fun record -> record.data)) in
+            require
+              (log.eof && String.equal text (sprintf "bazel %s %s\n" name label))
+              "Bazel did not receive the declared arguments or stream its log")
+      in
+      let common_config = Filename.concat root ".workbench" in
+      Core_unix.mkdir common_config;
+      Out_channel.write_all
+        (Filename.concat common_config "hardcaml-workbench-simulation.sexp")
+        ~data:
+          (sprintf
+             "((schema_version 1)(provider_executable /usr/bin/python3)(provider_args (%s))\
+              (discovery_timeout_seconds 5)(run_timeout_seconds 5))"
+             (Sexp.to_string_mach (Atom simulation_fixture)));
+      let simulation operation =
+        let%map body =
+          post
+            rpc
+            Simulation.rpc_path
+            (Simulation.Request.sexp_of_t { instance_id; project; operation })
+        in
+        decode_exn Simulation.Response.t_of_sexp body |> ok
+      in
+      let%bind pending = simulation Ensure_discovered in
+      require pending.configured "Bazel project did not resolve simulation configuration";
+      let%bind () =
+        match pending.discovery_job with
+        | None -> return ()
+        | Some job -> Deferred.ignore_m (wait_for_terminal_snapshot rpc instance_id job)
+      in
+      let%bind catalog = simulation Get in
+      require (Option.is_none catalog.discovery_error) "Bazel project discovery failed";
+      let%bind launched =
+        simulation
+          (Launch
+             { submission_key = "bazel-simulation"
+             ; discovery_digest = Option.value_exn catalog.discovery_digest
+             ; selection =
+                 { suite = "demo"
+                 ; cases = [ "one" ]
+                 ; seed = "42"
+                 ; parameters = [ "mode", "pass" ]
+                 ; asic_inputs = []
+                 }
+             })
+      in
+      let attempt = Option.value_exn launched.detail in
+      let%bind (_ : V1.Snapshot.Payload.t) = wait_for_terminal_snapshot rpc instance_id attempt.job in
+      let%map observed = simulation (Observe attempt.id) in
+      let observed = Option.value_exn observed.detail in
+      require
+        (Simulation.Outcome.equal observed.outcome Passed
+         && not (List.is_empty observed.artifacts))
+        "Bazel project could not run a discovered simulation")
+;;
+
+let run_bazel_test ~simulation_fixture =
+  let directory = Filename_unix.temp_dir "silver-bazel-rpc-" "" in
+  let bin = Filename.concat directory "bin" in
+  Core_unix.mkdir bin;
+  let bazel = Filename.concat bin "bazel" in
+  Out_channel.write_all
+    bazel
+    ~data:
+      {|#!/bin/sh
+[ "$#" = 2 ] && [ -f .silver/project.json ] && [ ! -e dune-project ] || exit 42
+printf 'bazel %s %s\n' "$1" "$2"
+case "$1 $2" in
+  'build //:rtl') exit 0 ;;
+  'test //:simulation') exit 7 ;;
+  *) exit 42 ;;
+esac
+|};
+  Core_unix.chmod bazel ~perm:0o700;
+  Monitor.protect
+    ~finally:(fun () -> In_thread.run (fun () -> remove_tree directory))
+    (fun () ->
+      (* No Dune on PATH, including for any subprocesses started during opening/discovery. *)
+      let%map result =
+        Process.run
+          ~env:(`Extend [ "PATH", bin ])
+          ~prog:(Filename_unix.realpath Stdlib.Sys.executable_name)
+          ~args:[ "-bazel-directory"; directory; "-simulation-fixture"; simulation_fixture ]
+          ()
+      in
+      ignore (Or_error.ok_exn result : string))
+;;
+
+let run ~build_jobs ~simulation_fixture () =
   (* One private project, with Build and Test awaited sequentially. Keep the
      nested Dune allocation independent of the outer test runner's [-j]. *)
   require (build_jobs >= 1 && build_jobs <= 2) "RPC test build jobs must be 1 or 2";
   let%bind () = test_legacy_asic_server () in
   let%bind () = test_legacy_simulation_server () in
+  let%bind () = run_bazel_test ~simulation_fixture in
   let instance_id = V1.Daemon_instance_id.of_string "instance-1" in
   let directory = Filename_unix.temp_dir "hardcaml-workbench-rpc-test-" "" in
   let project_root = Filename.concat directory "project" in
@@ -1097,9 +1287,20 @@ let run ~build_jobs () =
 let command =
   Command.async
     ~summary:"Test V1 RPC behavior"
-    (let%map_open.Command build_jobs =
-       flag "-build-jobs" (optional_with_default 1 int) ~doc:"N nested Dune jobs (1 or 2)"
-     in
-     run ~build_jobs)
+     (let%map_open.Command build_jobs =
+        flag "-build-jobs" (optional_with_default 1 int) ~doc:"N nested Dune jobs (1 or 2)"
+      and simulation_fixture =
+        flag
+          "-simulation-fixture"
+          (optional_with_default "backend/test/simulation_provider_fixture.py" string)
+          ~doc:"PATH simulation provider fixture"
+      and bazel_directory =
+        flag "-bazel-directory" (optional string) ~doc:"DIR private Bazel test fixture"
+      in
+      let simulation_fixture = Filename_unix.realpath simulation_fixture in
+      fun () ->
+        match bazel_directory with
+        | None -> run ~build_jobs ~simulation_fixture ()
+        | Some directory -> test_bazel_project ~simulation_fixture ~directory)
 ;;
 let () = Command_unix.run command

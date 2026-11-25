@@ -2,6 +2,7 @@ open! Core
 open! Async
 open Hardcaml_workbench_protocol
 module Adapter = Hardcaml_workbench_adapters.Dune_adapter
+module Bazel_adapter = Hardcaml_workbench_adapters.Bazel_adapter
 module Driver_adapter = Hardcaml_workbench_adapters.Project_driver_adapter
 module Integration = Hardcaml_workbench_project_integration
 open Project_integration.Component_status
@@ -42,6 +43,7 @@ type project_session =
   ; mutable project : Project.t
   ; mutable summary : V1.Environment_summary.t
   ; mutable workspace : V1.Dune_workspace.Inspection.t
+  ; mutable bazel_manifest : Integration.Silver_manifest.t option
   ; mutable manifest : Integration.Manifest.t option
   ; mutable build_alias : string
   ; mutable test_alias : string
@@ -281,18 +283,35 @@ let authoring t ({ instance_id; operation } : V1.Authoring_call.Request.t) =
   match Result.bind (check_instance t instance_id) ~f:(fun () -> check_authoring_project t operation) with
   | Error _ as e -> return e
   | Ok () ->
-    let project_identity =
+    let project_session =
       match operation with
       | Describe_owner { project; _ }
       | New_flow { owner = { project; _ }; _ }
       | Duplicate_profile { owner = { project; _ }; _ }
       | Preview_chip { target = { project = Some project; _ }; _ } ->
-        Option.map (Hashtbl.find t.projects project) ~f:(fun s -> s.root_identity)
+        Hashtbl.find t.projects project
+      | Preview { target = { project = Some project; destination; _ }; _ } ->
+        Option.filter (Hashtbl.find t.projects project) ~f:(fun s ->
+          (* Existing Dune recipes may intentionally target a subdirectory. Bazel
+             source recipes must stay bound to the opened project root. *)
+          Option.is_some s.bazel_manifest || String.equal destination s.root)
       | _ -> None
     in
+    let project_identity = Option.map project_session ~f:(fun s -> s.root_identity) in
+    let bazel_project =
+      Option.exists project_session ~f:(fun s -> Option.is_some s.bazel_manifest)
+    in
     Throttle.enqueue t.authoring_queue (fun () ->
-      if t.shutting_down then return (error Conflict "daemon is shutting down")
-       else In_thread.run (fun () -> Ok (Authoring_service.handle ?project_identity t.authoring_service operation)))
+      if t.shutting_down
+      then return (error Conflict "daemon is shutting down")
+      else
+        In_thread.run (fun () ->
+          Ok
+            (Authoring_service.handle
+               ?project_identity
+               ~bazel_project
+               t.authoring_service
+               operation)))
 ;;
 
 let emit t event =
@@ -550,15 +569,23 @@ let canonical_project_root root =
       let root = Filename_unix.realpath root in
       if not (Sys_unix.is_directory_exn root)
       then failwith "project root is not a directory";
-      let dune_project = Filename.concat root "dune-project" in
-      (match Sys_unix.file_exists dune_project with
-       | `Yes -> ()
-       | `No | `Unknown -> failwith "project root must directly contain dune-project");
-      (match (Core_unix.stat dune_project).st_kind with
-       | S_REG -> ()
-       | _ -> failwith "dune-project is not a regular file");
+      let bazel_manifest = Integration.Silver_manifest.load ~root |> Or_error.ok_exn in
+      if Option.is_none bazel_manifest
+      then (
+        let dune_project = Filename.concat root "dune-project" in
+        (match Sys_unix.file_exists dune_project with
+         | `Yes -> ()
+         | `No | `Unknown ->
+           failwith "project root must directly contain dune-project or .silver/project.json");
+        match (Core_unix.stat dune_project).st_kind with
+        | S_REG -> ()
+        | _ -> failwith "dune-project is not a regular file");
       let stat = Core_unix.stat root in
-      root, (stat.st_dev, stat.st_ino)))
+      let bluespec_authoring =
+        Option.is_some bazel_manifest
+        && Integration.Silver_manifest.supports_bluespec_authoring ~root
+      in
+      root, (stat.st_dev, stat.st_ino), bazel_manifest, bluespec_authoring))
   >>| Result.map_error ~f:(fun exn -> Exn.to_string exn)
 ;;
 
@@ -613,6 +640,140 @@ let mint_project_id t =
        t.next_project_id)
 ;;
 
+let project_payload (session : project_session) : V1.Open_project.Payload.t =
+  { project = session.project; environment = session.summary; workspace = session.workspace }
+;;
+
+let register_project t (session : project_session) =
+  Hashtbl.set t.projects_by_key ~key:session.key ~data:session;
+  Hashtbl.set t.projects ~key:session.project.id ~data:session;
+  emit t (Project_upsert session.project);
+  Ok (project_payload session)
+;;
+
+let bazel_integration : Project_integration.t =
+  { level = Manifest
+  ; manifest = Available { version = Some Integration.Silver_manifest.version }
+  ; driver = Absent
+  }
+;;
+
+let open_bazel_project
+  t
+  ~key
+  ~root
+  ~root_identity
+  ~environment
+  (manifest : Integration.Silver_manifest.t)
+  =
+  let project : Project.t =
+    { id = mint_project_id t
+    ; root = Project_root.of_absolute_path root
+    ; name = manifest.name
+    ; integration = bazel_integration
+    ; targets = []
+    ; configurations = []
+    }
+  in
+  register_project
+    t
+    { key
+    ; root
+    ; root_identity
+    ; dune_name = ""
+    ; environment
+    ; project
+    ; summary = Adapter.environment_summary environment ~dune_version:""
+    ; workspace = { contexts = []; items = [] }
+    ; bazel_manifest = Some manifest
+    ; manifest = None
+    ; build_alias = ""
+    ; test_alias = ""
+    ; driver = None
+    ; driver_description = None
+    }
+;;
+
+let open_dune_project ?prog_search_path t ~key ~root ~root_identity ~environment =
+  let%bind probe =
+    opening_command_output ?prog_search_path t (Adapter.probe_invocation ~root environment)
+  in
+  match probe |> Result.bind ~f:Adapter.parse_probe_output with
+  | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
+  | Error message -> return (error Unsupported_operation message)
+  | Ok dune_version ->
+    let%bind inspection =
+      opening_command_output ?prog_search_path t (Adapter.inspect_invocation ~root environment)
+    in
+    (match inspection |> Result.bind ~f:Adapter.parse_workspace with
+     | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
+     | Error message -> return (error Internal_failure message)
+     | Ok workspace ->
+       let%bind dune_name = project_name root in
+       let%map manifest_load = load_manifest root in
+       let name, manifest, build_alias, test_alias, driver, integration =
+         match manifest_load with
+         | Manifest_absent ->
+           ( dune_name
+           , None
+           , Integration.Manifest.default_build_alias
+           , Integration.Manifest.default_test_alias
+           , None
+           , Project_integration.generic_dune )
+         | Manifest_invalid reason ->
+           ( dune_name
+           , None
+           , Integration.Manifest.default_build_alias
+           , Integration.Manifest.default_test_alias
+           , None
+           , { Project_integration.level = Generic_dune
+             ; manifest = Unusable { reason }
+             ; driver = Absent
+             } )
+         | Manifest_valid manifest ->
+           let driver_status =
+             Option.value_map manifest.driver ~default:Absent ~f:(fun _ ->
+               Unusable { reason = "driver discovery has not started" })
+           in
+           ( manifest.project_name
+           , Some manifest
+           , manifest.build_alias
+           , manifest.test_alias
+           , manifest.driver
+           , { Project_integration.level = Manifest
+             ; manifest = Available { version = Some Integration.Manifest.version }
+             ; driver = driver_status
+             } )
+       in
+       let summary = Adapter.environment_summary environment ~dune_version in
+       let project : Project.t =
+         { id = mint_project_id t
+         ; root = Project_root.of_absolute_path root
+         ; name
+         ; integration
+         ; targets = []
+         ; configurations = []
+         }
+       in
+       register_project
+         t
+         { key
+         ; root
+         ; root_identity
+         ; dune_name
+         ; environment
+         ; project
+         ; summary
+         ; workspace
+         ; bazel_manifest = None
+         ; manifest
+         ; build_alias
+         ; test_alias
+         ; driver
+         ; driver_description = None
+         })
+;;
+
 let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Open_project.Request.t) =
   match check_instance t instance_id with
   | Error _ as error -> return error
@@ -621,104 +782,33 @@ let open_project ?prog_search_path t ({ instance_id; root; environment } : V1.Op
     let%bind canonical = canonical_project_root root in
     (match canonical with
      | Error message -> return (error Invalid_request message)
-     | Ok (root, root_identity) ->
+     | Ok _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
+     | Ok (root, root_identity, bazel_manifest, bluespec_authoring) ->
        let key = root ^ "\000" ^ environment_key environment in
-       (match Hashtbl.find t.projects_by_key key with
+       let%map response =
+         match Hashtbl.find t.projects_by_key key with
         | Some session when not (Poly.equal session.root_identity root_identity) ->
           return (error Conflict "Open project directory was replaced; restart the session")
-        | Some session ->
-          return
-            (Ok
-               { V1.Open_project.Payload.project = session.project
-               ; environment = session.summary
-               ; workspace = session.workspace
-               })
+        | Some session
+          when not
+                 (Bool.equal (Option.is_some session.bazel_manifest) (Option.is_some bazel_manifest))
+          ->
+          return (error Conflict "The project build system changed; restart the session")
+        | Some session -> return (Ok (project_payload session))
         | None ->
-          let%bind probe =
-            opening_command_output ?prog_search_path t (Adapter.probe_invocation ~root environment)
-          in
-          (match probe |> Result.bind ~f:Adapter.parse_probe_output with
-           | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
-           | Error message -> return (error Unsupported_operation message)
-           | Ok dune_version ->
-             let%bind inspection =
-               opening_command_output ?prog_search_path t (Adapter.inspect_invocation ~root environment)
-             in
-             (match inspection |> Result.bind ~f:Adapter.parse_workspace with
-              | _ when t.shutting_down -> return (error Conflict "daemon is shutting down")
-              | Error message -> return (error Internal_failure message)
-              | Ok workspace ->
-                let%bind dune_name = project_name root in
-                let%map manifest_load = load_manifest root in
-                let name, manifest, build_alias, test_alias, driver, integration =
-                  match manifest_load with
-                  | Manifest_absent ->
-                    ( dune_name
-                    , None
-                    , Integration.Manifest.default_build_alias
-                    , Integration.Manifest.default_test_alias
-                    , None
-                    , Project_integration.generic_dune )
-                  | Manifest_invalid reason ->
-                    ( dune_name
-                    , None
-                    , Integration.Manifest.default_build_alias
-                    , Integration.Manifest.default_test_alias
-                    , None
-                    , { Project_integration.level = Generic_dune
-                      ; manifest = Unusable { reason }
-                      ; driver = Absent
-                      } )
-                  | Manifest_valid manifest ->
-                    let driver_status =
-                      Option.value_map manifest.driver ~default:Absent ~f:(fun _ ->
-                        Unusable { reason = "driver discovery has not started" })
-                    in
-                    ( manifest.project_name
-                    , Some manifest
-                    , manifest.build_alias
-                    , manifest.test_alias
-                    , manifest.driver
-                    , { Project_integration.level = Manifest
-                      ; manifest =
-                          Available { version = Some Integration.Manifest.version }
-                      ; driver = driver_status
-                      } )
-                in
-                let summary = Adapter.environment_summary environment ~dune_version in
-                let project : Project.t =
-                  { id = mint_project_id t
-                  ; root = Project_root.of_absolute_path root
-                  ; name
-                  ; integration
-                  ; targets = []
-                  ; configurations = []
-                  }
-                in
-                let session =
-                  { key
-                  ; root
-                  ; root_identity
-                  ; dune_name
-                  ; environment
-                  ; project
-                  ; summary
-                  ; workspace
-                  ; manifest
-                  ; build_alias
-                  ; test_alias
-                  ; driver
-                  ; driver_description = None
-                  }
-                in
-                Hashtbl.set t.projects_by_key ~key ~data:session;
-                Hashtbl.set t.projects ~key:project.id ~data:session;
-                emit t (Project_upsert session.project);
-                Ok
-                  { V1.Open_project.Payload.project = session.project
-                  ; environment = session.summary
-                  ; workspace = session.workspace
-                  }))))
+          (match bazel_manifest with
+           | Some manifest ->
+             return (open_bazel_project t ~key ~root ~root_identity ~environment manifest)
+           | None -> open_dune_project ?prog_search_path t ~key ~root ~root_identity ~environment)
+       in
+       Result.map response ~f:(fun (opened : V1.Open_project.Payload.t) ->
+         if bluespec_authoring
+         then
+           { opened with
+             workspace =
+               V1.Dune_workspace.Inspection.advertise_bluespec_authoring opened.workspace
+           }
+         else opened))
 ;;
 
 let update_job t entry job =
@@ -1393,15 +1483,21 @@ let run_supervised t entry ~on_finished =
            match entry.operation with
            | Simulation_task task -> task.invocation
            | Dune_action action ->
-             (match t.action_invocation with
-              | None ->
+             (match session.bazel_manifest, t.action_invocation with
+              | Some manifest, _ ->
+                Bazel_adapter.action_invocation
+                  manifest
+                  ~root:session.root
+                  ~environment:session.environment
+                  action
+              | None, None ->
                 Adapter.action_invocation
                   ~build_alias:session.build_alias
                   ~test_alias:session.test_alias
                   ~root:session.root
                   ~environment:session.environment
                   action
-              | Some invocation ->
+              | None, Some invocation ->
                 invocation ~root:session.root ~environment:session.environment action)
            | Driver_describe ->
              t.driver_invocation
@@ -1678,9 +1774,10 @@ let enqueue_job t entry =
   run_next t root
 ;;
 
-let action_kind = function
-  | V1.Dune_action.Build -> { Job.Kind.namespace = "dune"; name = "build" }
-  | Test -> { namespace = "dune"; name = "test" }
+let action_kind session (action : V1.Dune_action.t) : Job.Kind.t =
+  let namespace = if Option.is_some session.bazel_manifest then "bazel" else "dune" in
+  let name = match action with Build -> "build" | Test -> "test" in
+  { namespace; name }
 ;;
 
 let mint_job_id t =
@@ -1719,7 +1816,7 @@ let submit_job
           let job =
             Job.create
               ~id
-              ~kind:(action_kind action)
+              ~kind:(action_kind session action)
               ~project
               ~created_at:(Timestamp.of_time_ns (Time_ns.now ()))
           in
@@ -1955,6 +2052,19 @@ let refresh_integration t ({ instance_id; project } : V1.Refresh_integration.Req
   | Ok () ->
     (match Hashtbl.find t.projects project with
      | None -> return (error Not_found "project is not open")
+     | Some session when Option.is_some session.bazel_manifest ->
+       let%map manifest =
+         In_thread.run (fun () -> Integration.Silver_manifest.load ~root:session.root)
+       in
+       (match manifest with
+        | _ when t.shutting_down -> error Conflict "daemon is shutting down"
+        | Error reason -> error Invalid_request (Error.to_string_hum reason)
+        | Ok None -> error Invalid_request "Bazel project requires .silver/project.json"
+        | Ok (Some manifest) ->
+          session.bazel_manifest <- Some manifest;
+          session.project <- { session.project with name = manifest.name };
+          emit t (Project_upsert session.project);
+          Ok { V1.Refresh_integration.Payload.job = None })
      | Some session ->
        (match active_driver_job t session with
         | Some _ ->

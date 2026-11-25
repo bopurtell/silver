@@ -8,7 +8,8 @@
 
 (rule
  (alias runtest)
- (deps test_cli.py test_flow_renderer.py ../terminal/ip_starter_fixture.py)
+ (deps test_cli.py test_flow_renderer.py ../terminal/ip_starter_fixture.py
+  (source_tree ../examples/bluespec_classic))
  (action
   (run python3 -B %{dep:test_cli.py} %{exe:main.exe} %{exe:../daemon/main.exe}
-   %{dep:../terminal/ip_starter_fixture.py})))
+   %{dep:../terminal/ip_starter_fixture.py} ../examples/bluespec_classic)))

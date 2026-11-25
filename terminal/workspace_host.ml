@@ -59,7 +59,9 @@ type starter =
   | Asic_starter
   | Empty_ip
   | Sample_ip
+  | Bluespec_ip
   | Module_in of string
+  | Bluespec_module_in of string
   | Chip of Authoring.Chip_source.t * bool
 
 let starter_recipe = function
@@ -68,7 +70,9 @@ let starter_recipe = function
   | Asic_starter -> Authoring.add_to_project_recipe
   | Empty_ip -> Authoring.ip_empty_recipe
   | Sample_ip -> Authoring.ip_sample_recipe
+  | Bluespec_ip -> Authoring.ip_empty_recipe
   | Module_in _ -> Authoring.module_recipe
+  | Bluespec_module_in _ -> Authoring.module_recipe
   | Chip _ -> Authoring.chip_recipe
 ;;
 
@@ -209,7 +213,10 @@ type action =
   | Synthesis_sort of Synthesis.Sort.t
   | Synthesis_cycle_sort
   | Synthesis_clear_filter
+  | Set_quit_confirm of bool
+  | Set_quit_default_yes of bool
   | Exit
+  | Force_exit
   | Simulation of W.Tile_id.t * Simulation.Operation.t
   | Simulation_form of W.Tile_id.t * string * Simulation.Suite.t * string
   | Simulation_edit of W.Tile_id.t * string * string * Simulation_view.Form.t
@@ -268,7 +275,7 @@ type argument =
   | Editor_file of Project_id.t
   | Design_executable
   | Starter_name of starter
-  | Module_directory
+  | Module_directory of Presentation.Build_tool.t
   | Chip_directory
   | Chip_mapping of string
   | Starter_wait of unit ref
@@ -331,6 +338,11 @@ type fresh_launch_origin =
   ; chip_target : Asic.Chip_target.t option
   }
 
+type quit_choice =
+  | Yes
+  | No
+[@@deriving equal]
+
 type t =
   { registry : W.Snapshot.t option
   ; active : W.Workspace_id.t option
@@ -348,6 +360,9 @@ type t =
   ; main_hints : bool
   ; browser_hints : bool
   ; palette_hints : bool
+  ; quit_confirm : bool
+  ; quit_default_yes : bool
+  ; quit_selection : quit_choice option
   ; timing_preload : bool
   ; timing_preload_details : int
   ; quick_launch_view : bool
@@ -391,6 +406,9 @@ let empty =
   ; main_hints = true
   ; browser_hints = false
   ; palette_hints = true
+  ; quit_confirm = true
+  ; quit_default_yes = true
+  ; quit_selection = None
   ; timing_preload = true
   ; timing_preload_details = Timing_preload.default_details
   ; quick_launch_view = true
@@ -1429,7 +1447,7 @@ let receive t (s : W.Snapshot.t) =
     in
     let notice =
       match t.palette with
-       | Some { argument = Some (Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory); _ } ->
+       | Some { argument = Some (Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _); _ } ->
         t.notice
       | _ ->
         (* Stage preparation finishes asynchronously, between registry polls and draws.
@@ -2654,17 +2672,31 @@ let workspace_lifecycle_commands (registry : W.Snapshot.t) (workspace : W.Arrang
 ;;
 
 let project_entry_commands =
-  [ command "project.new" "New Project…" "create local dune project" (Project_entry `New)
-  ; command "project.open" "Open Project…" "open existing local dune root" (Project_entry `Open)
+  [ command "project.new" "New Project…" "create local project Hardcaml Dune Bluespec Bazel"
+      (Project_entry `New)
+  ; command
+      "project.open"
+      "Open Project…"
+      "open existing local project root Dune Silver Bazel"
+      (Project_entry `Open)
   ]
 ;;
 
-let library_authoring_commands dir =
+let library_authoring_commands ?(build_tool = Presentation.Build_tool.Dune) dir =
+  let starter =
+    match build_tool with
+    | Dune -> Module_in dir
+    | Bazel -> Bluespec_module_in dir
+  in
   [ command "library.new-module" ("New Module… · " ^ Artifact_view.safe dir)
-      "new module" (Name_starter (Module_in dir))
-  ; command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
-      "from IP library" (Map_chip dir)
+      "new module" (Name_starter starter)
   ]
+  @ (match build_tool with
+     | Dune ->
+       [ command "library.new-chip" ("New Chip Target… · " ^ Artifact_view.safe dir)
+           "from IP library" (Map_chip dir)
+       ]
+     | Bazel -> [])
 ;;
 
 let chip_commands (s : Asic.Snapshot.t) =
@@ -4285,7 +4317,12 @@ let presentation_commands t (tile : W.Tile.t) =
       { o with decimal_places = Some places })
 ;;
 
-let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
+let catalog
+  ?(build_tool = Presentation.Build_tool.Dune)
+  t
+  ~(project : Project.t option)
+  ~(jobs : Job.t list)
+  =
   let needs_project =
     if Option.is_none project
     then Some "Restart client with --project-root ROOT or --discover-project"
@@ -4325,13 +4362,13 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         ?unavailable:needs_project
         "project.build"
         "Build project"
-        "dune build"
+        (Presentation.Build_tool.namespace build_tool ^ " build")
         Build
     ; command
          ?unavailable:needs_project
          "project.test"
          "Run project tests"
-         "generic dune test"
+         ("generic " ^ Presentation.Build_tool.namespace build_tool ^ " test")
          Test
     ; command
         ?unavailable:needs_project
@@ -4420,7 +4457,28 @@ let catalog t ~(project : Project.t option) ~(jobs : Job.t list) =
         "Layout: Requested tile sizes"
         "shelf preferred geometry"
         (Set_layout_mode Preferred)
-    ; command "host.exit" "Exit client" "quit" Exit
+    ; command "host.exit" "Exit client (q)" "quit" Exit
+    ; command "host.exit.force" "Exit client immediately (Q)" "force quit" Force_exit
+    ; command
+        "host.quit.confirm"
+        ("Quit: Confirm with dialog (q)" ^ if t.quit_confirm then " (selected)" else "")
+        "exit confirmation settings preference"
+        (Set_quit_confirm true)
+    ; command
+        "host.quit.immediate"
+        ("Quit: Immediately on q" ^ if t.quit_confirm then "" else " (selected)")
+        "exit confirmation off settings preference"
+        (Set_quit_confirm false)
+    ; command
+        "host.quit.default-yes"
+        ("Quit: Initially select Yes" ^ if t.quit_default_yes then " (selected)" else "")
+        "exit confirmation default choice settings preference"
+        (Set_quit_default_yes true)
+    ; command
+        "host.quit.default-no"
+        ("Quit: Initially select No" ^ if t.quit_default_yes then "" else " (selected)")
+        "exit confirmation default choice settings preference"
+        (Set_quit_default_yes false)
     ]
     @ List.init (Timing_preload.max_details + 1) ~f:(fun count ->
       command
@@ -5304,7 +5362,9 @@ let global_palette_aliases =
   ; "verify evidence", verify_evidence_command_id
   ; "cancel all", cancel_all_flows_command_id
   ; "stop all", cancel_all_flows_command_id
-  ; "theme", choose_theme_id
+   ; "theme", choose_theme_id
+   ; "quit", "host.exit"
+   ; "force quit", "host.exit.force"
   ; "close term", "terminal.close"
   ; "restart term", "terminal.restart"
   ; "term center", "terminal.center"
@@ -5506,6 +5566,18 @@ let ranked_matches p =
 
 let matches p = List.map (ranked_matches p) ~f:(fun result -> result.Palette_search.item)
 
+let%test_unit "exact quit aliases select exit before quit preference commands" =
+  let registry = W.initial ~session_id:(W.Session_id.of_string "quit-alias") in
+  let host = receive empty registry in
+  let commands = catalog host ~project:None ~jobs:[] in
+  let palette = capture_global_palette host ~commands |> Option.value_exn in
+  let choices query = matches { palette with query } in
+  let quit = choices "quit" in
+  assert (String.equal (List.hd_exn quit).id "host.exit");
+  assert (List.exists quit ~f:(fun c -> String.equal c.id "host.quit.immediate"));
+  assert (String.equal (List.hd_exn (choices "force quit")).id "host.exit.force")
+;;
+
 let theme_picker (p : palette) =
   match p.argument with
   | Some (Theme_picker picker) -> Some picker
@@ -5594,20 +5666,34 @@ let chip_assumptions (source : Authoring.Chip_source.t) =
        ])
 ;;
 
-let starter_preview_lines ?source (p : Authoring.Preview.t) =
+let starter_preview_lines
+  ?source
+  ?(build_tool = Presentation.Build_tool.Dune)
+  (p : Authoring.Preview.t)
+  =
   let flow = List.mem [ Authoring.new_flow_recipe; Authoring.duplicate_profile_recipe ]
       p.operation.recipe ~equal:String.equal in
+  let recipe =
+    match build_tool with
+    | Dune -> p.operation.recipe
+    | Bazel ->
+      if String.equal p.operation.recipe Authoring.module_recipe
+      then "Bluespec Classic module"
+      else "Bluespec Classic IP library"
+  in
   (if flow then [ "Owner chip: " ^ Option.value p.operation.target.object_id ~default:"unknown"
                 ; (if Option.exists p.registration ~f:(fun edit -> edit.manual)
                    then "Manual registration required; no source will be written."
                    else "This module registers on successful build.") ] else [])
-  @ [ "Recipe: " ^ p.operation.recipe
+   @ [ "Recipe: " ^ recipe
   ; "Provider: " ^ p.provider ^ " " ^ p.version
   ; "Name: " ^ p.operation.name
   ; "Destination: " ^ p.operation.target.destination
   ]
   @ Option.value_map p.operation.target.object_id ~default:[] ~f:(fun dir ->
-    if flow then [] else [ "Library: " ^ dir ])
+     if flow
+     then []
+     else [ (match build_tool with Dune -> "Library: " | Bazel -> "Bazel package: ") ^ dir ])
   @ Option.value_map source ~default:[] ~f:chip_assumptions
   @ (if String.equal p.operation.recipe Authoring.chip_recipe
      then [ if Option.is_some p.registration then "Catalog registration: on"
@@ -5618,8 +5704,11 @@ let starter_preview_lines ?source (p : Authoring.Preview.t) =
   @ Option.value_map p.registration ~default:[] ~f:(fun edit ->
     let label =
       if String.equal p.operation.recipe Authoring.module_recipe
-      then "Manual Dune edit: "
-      else if edit.manual then "Manual catalog entry (paste into): "
+       then
+         (match build_tool with
+          | Dune -> "Manual Dune edit: "
+          | Bazel -> if edit.manual then "Manual Bazel edit: " else "Proposed Bazel edit: ")
+       else if edit.manual then "Manual catalog entry (paste into): "
       else if flow then "Build registration: "
       else "Proposed registration: "
     in
@@ -5654,6 +5743,64 @@ type input =
   | Focus_previous
   | Paste_start
   | Paste_end
+
+let begin_quit t =
+  if t.quit_confirm
+  then { t with quit_selection = Some (if t.quit_default_yes then Yes else No) }, false
+  else t, true
+;;
+
+let quit_input t input =
+  match t.quit_selection with
+  | None -> t, false
+  | Some selection ->
+    let select choice = { t with quit_selection = Some choice }, false in
+    let finish choice =
+      { t with quit_selection = None; paste = false }, equal_quit_choice choice Yes
+    in
+    (match input with
+     | Paste_start -> { t with paste = true }, false
+     | Paste_end -> { t with paste = false }, false
+     | _ when t.paste -> t, false
+     | Enter -> finish selection
+     | Escape | Character ('n' | 'N') -> finish No
+     | Character ('y' | 'Y') -> finish Yes
+     | Previous | Character ('h' | 'k') -> select Yes
+     | Next | Character ('l' | 'j') -> select No
+     | Focus | Focus_previous ->
+       select (if equal_quit_choice selection Yes then No else Yes)
+     | _ -> t, false)
+;;
+
+let%test_unit "quit selection is modal, defaults to yes and never confirms paste" =
+  let t, should_exit = begin_quit empty in
+  assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some Yes));
+  let select t input choice =
+    let t, should_exit = quit_input t input in
+    assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some choice));
+    t
+  in
+  let no = select t Next No in
+  let yes = select no Focus Yes in
+  let yes = select yes (Character 'q') Yes in
+  let yes = select yes (Character 'Q') Yes in
+  let dismissed, should_exit = quit_input no Enter in
+  assert (not should_exit && Option.is_none dismissed.quit_selection);
+  let dismissed, should_exit = quit_input yes Escape in
+  assert (not should_exit && Option.is_none dismissed.quit_selection);
+  let _, should_exit = quit_input yes Enter in
+  assert should_exit;
+  let pasted, _ = quit_input t Paste_start in
+  let pasted = select pasted (Character 'y') Yes in
+  let pasted = select pasted Enter Yes in
+  let pasted, _ = quit_input pasted Paste_end in
+  let _, should_exit = quit_input pasted (Character 'y') in
+  assert should_exit;
+  let t, should_exit = begin_quit { empty with quit_default_yes = false } in
+  assert (not should_exit && Option.equal equal_quit_choice t.quit_selection (Some No));
+  let t, should_exit = begin_quit { empty with quit_confirm = false } in
+  assert (should_exit && Option.is_none t.quit_selection)
+;;
 
 type effect =
   | Execute of capture * action
@@ -5798,7 +5945,7 @@ let finalization_form t =
         | Design_executable
         | Starter_name _
         | Flow_field _
-        | Chip_directory | Chip_mapping _ | Module_directory
+        | Chip_directory | Chip_mapping _ | Module_directory _
         | Workload_path
         | Workload_bundle _
         | Acceptance _
@@ -6599,7 +6746,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                    ( Finalization_attempt _
                     | Resource_path _
                     | Editor_file _
-                    | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                     | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ | Starter_wait _ | Starter_preview _ | Starter_result _
                    | Workload_path
                    | Workload_bundle _
                    | Acceptance _
@@ -6642,7 +6789,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
           else if String.is_empty (String.strip p.query)
                   && not
                        (Option.exists p.argument ~f:(function
-                           | Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory -> true
+                            | Simulation_selection _ | Catalog_configuration _ | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ -> true
                          | _ -> false))
           then
             ( { t with
@@ -6657,7 +6804,7 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                       ( Finalization_attempt _
                        | Resource_path _
                        | Editor_file _
-                        | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory | Starter_wait _ | Starter_preview _ | Starter_result _
+                         | Design_executable | Flow_field _ | Starter_name _ | Chip_directory | Chip_mapping _ | Module_directory _ | Starter_wait _ | Starter_preview _ | Starter_result _
                       | Workload_path
                       | Workload_bundle _
                       | Acceptance _
@@ -6691,10 +6838,13 @@ let input ?(menu_height = 24) ?palette_capacity t event ~commands : t * effect =
                     if not (String.equal p.query "ui_in:uo_out:comb8")
                     then failwith "Enter the supported mapping explicitly: ui_in:uo_out:comb8";
                     Name_starter (Chip (Ip { library_directory = directory; mapping = p.query }, true))
-                  | Module_directory ->
+                   | Module_directory tool ->
                     if String.is_empty (String.strip p.query) || Filename.is_absolute p.query
                     then failwith "Enter a project-relative library directory";
-                    Name_starter (Module_in p.query)
+                     Name_starter
+                       (match tool with
+                        | Dune -> Module_in p.query
+                        | Bazel -> Bluespec_module_in p.query)
                  | Design_executable ->
                    if String.is_empty (String.strip p.query)
                    then failwith "Enter an existing ASIC design executable";

@@ -63,6 +63,7 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
         self.assertEqual(commands[-1][-4:], ["--prefix", str(self.root / ".local"),
                                              "hardcaml_workbench_provider", "hardcaml_workbench"])
         self.assertIn("export PATH=", r.stdout)
+        self.assertIn("/bin/ag", r.stdout)
         self.assertIn(f"Compatible ASIC provider: {self.provider}", r.stdout)
 
     def test_incompatible_cli_and_generic_mode(self):
@@ -135,6 +136,34 @@ echo '{"cli_contract":{"version":4,"capabilities":{"namedflow1":true}}}'
         for args in [("--jobs", "0"), ("--prefix",), ("--typo",)]:
             self.assertNotEqual(self.invoke(*args).returncode, 0)
         self.assertFalse(self.log.exists())
+
+    def test_launcher_collision_rejected_before_build(self):
+        bin_dir = self.root / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        launcher = bin_dir / "ag"
+        launcher.write_text("#!/bin/sh\nexit 12\n")
+        launcher.chmod(0o755)
+        result = self.invoke("--without-asic")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to overwrite", result.stderr)
+        self.assertFalse(self.log.exists())
+        self.assertEqual(launcher.read_text(), "#!/bin/sh\nexit 12\n")
+
+    def test_old_launcher_removal_waits_for_successful_install(self):
+        bin_dir = self.root / ".local/bin"
+        bin_dir.mkdir(parents=True)
+        old = bin_dir / "silver"
+        legacy = bin_dir / "hardcaml-workbench"
+        for launcher in (old, legacy):
+            launcher.write_text("#!/bin/sh\n# launcher fixture\n")
+            launcher.chmod(0o755)
+        self.env["BUILD_FAIL"] = "1"
+        self.assertNotEqual(self.invoke("--without-asic").returncode, 0)
+        self.assertTrue(old.exists())
+        del self.env["BUILD_FAIL"]
+        result = self.invoke("--without-asic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(old.exists())
 
 
 if __name__ == "__main__":

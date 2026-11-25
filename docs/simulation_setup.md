@@ -16,8 +16,9 @@ silver-simulation-setup init --discover-project \
 Use `--root /path/to/project` instead to name the root explicitly. The provider
 path must be absolute; no `PATH` lookup is performed. If it takes arguments
 before `discover` or `run`, repeat `--provider-arg ARG` in the order they are
-needed. For example, a Python provider can name the Python interpreter as the
-executable and pass the absolute script path as a provider argument.
+needed. For example, a Python provider can use an absolute Python interpreter
+path as the executable and pass the script's project-relative path as an
+argument. Silver launches the provider from the project root.
 
 The preview shows the destination, rendered fields, and whether the executable
 is present. Remove `--dry-run` to write the file. Existing files and symlinks

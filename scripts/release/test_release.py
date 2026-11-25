@@ -14,6 +14,11 @@ import package
 
 
 class PackagingTests(unittest.TestCase):
+    def test_command_table_has_only_new_public_launcher(self):
+        rows = package.command_table(package.REPO)
+        self.assertIn(["ag", "hardcaml-workbench"], rows)
+        self.assertNotIn("silver", [name for row in rows for name in row])
+
     def test_version_tag_and_asset_names(self):
         self.assertEqual(
             package.names("v0.12.3"),
@@ -71,7 +76,7 @@ class BinaryInstallerTests(unittest.TestCase):
         self.payload.mkdir(parents=True)
         self.path = self.root / "tools"
         self.path.mkdir()
-        for tool in ("bash", "dirname", "uname", "mkdir", "install", "ln"):
+        for tool in ("bash", "dirname", "uname", "mkdir", "install", "ln", "cmp", "stat", "rm"):
             (self.path / tool).symlink_to(shutil.which(tool))
         self.installed = self.root / "prefix with spaces"
         self.env = {"PATH": str(self.path), "HOME": str(self.root),
@@ -100,12 +105,70 @@ class BinaryInstallerTests(unittest.TestCase):
         self.assertEqual(self.invoke("--without-asic").returncode, 0)
         shutil.rmtree(self.extract)
         self.assertFalse((self.installed / "lib").exists())
+        self.assertFalse((self.installed / "bin/silver").exists())
         for name, *aliases in self.rows:
             command = self.installed / "bin" / name
             self.assertFalse(command.is_symlink())
             self.assertEqual(subprocess.check_output([command, "--help"], text=True).strip(), name)
             for alias in aliases:
                 self.assertEqual((command.parent / alias).readlink(), Path(name))
+
+    def test_unrelated_ag_is_not_overwritten_and_path_collision_warns(self):
+        bin_dir = self.installed / "bin"
+        bin_dir.mkdir(parents=True)
+        launcher = bin_dir / "ag"
+        unrelated = b"#!/bin/sh\nexit 11\n"
+        launcher.write_bytes(unrelated)
+        launcher.chmod(0o755)
+        result = self.invoke("--without-asic")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to overwrite", result.stderr)
+        self.assertEqual(launcher.read_bytes(), unrelated)
+        launcher.unlink()
+        launcher.symlink_to(bin_dir / "missing")
+        self.assertNotEqual(self.invoke("--without-asic").returncode, 0)
+        self.assertTrue(launcher.is_symlink())
+        launcher.unlink()
+        (self.path / "ag").write_bytes(unrelated)
+        (self.path / "ag").chmod(0o755)
+        result = self.invoke("--without-asic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("another ag is on PATH", result.stderr)
+        self.assertEqual((self.path / "ag").read_bytes(), unrelated)
+
+    def test_upgrade_removes_matching_old_launcher_only(self):
+        bin_dir = self.installed / "bin"
+        bin_dir.mkdir(parents=True)
+        legacy = bin_dir / "hardcaml-workbench"
+        old = bin_dir / "silver"
+        contents = "#!/bin/sh\n# previous installed Silver\n"
+        legacy.write_text(contents)
+        legacy.chmod(0o755)
+        shutil.copy2(legacy, old)
+        result = self.invoke("--without-asic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(old.exists())
+        self.assertIn("Removed previous Silver launcher", result.stdout)
+        self.assertEqual(legacy.readlink(), Path("ag"))
+
+        old.write_text("#!/bin/sh\n# separate unrelated silver\n")
+        old.chmod(0o755)
+        result = self.invoke("--without-asic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("leaving unrecognized", result.stderr)
+        self.assertIn("unrelated silver", old.read_text())
+
+    def test_upgrade_from_legacy_binary_alias(self):
+        bin_dir = self.installed / "bin"
+        bin_dir.mkdir(parents=True)
+        old = bin_dir / "silver"
+        old.write_text("#!/bin/sh\n# previous binary release\n")
+        old.chmod(0o755)
+        (bin_dir / "hardcaml-workbench").symlink_to("silver")
+        result = self.invoke("--without-asic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(old.exists())
+        self.assertEqual((bin_dir / "hardcaml-workbench").readlink(), Path("ag"))
 
     def test_incomplete_or_unloadable_payload_does_not_write_to_prefix(self):
         cmd = self.payload / "silver-daemon"

@@ -49,23 +49,27 @@ def isolated(base):
 
 def run(silver, daemon, base):
     env = isolated(base / "client")
+    assert silver.name == "ag", silver
+    assert daemon.name == "silver-daemon", daemon
+    assert not os.path.lexists(silver.with_name("silver")), "install tree still publishes the retired launcher"
     for prefix in ("silver", "hardcaml-workbench"):
         for suffix in ("", "-daemon", "-init", "-simulation-setup", "-workspace"):
-            name = prefix + suffix
+            name = "ag" if prefix == "silver" and not suffix else prefix + suffix
             help_text = subprocess.check_output([silver.with_name(name), "--help"],
                                                 env=env, text=True, timeout=15)
             assert name in help_text, (name, help_text)
             if not suffix:
                 summary = help_text.splitlines()[0]
                 if prefix == "silver":
-                    assert "nearest Dune project" in summary, summary
+                    assert "nearest Silver Bazel or Dune project" in summary, summary
+                    assert "ag init --bluespec" in help_text, help_text
                 else:
                     assert summary == "Connect to Silver", summary
     # Run the lifecycle with only the primary command on the client side.
     client_bin = base / "client-bin"
     client_bin.mkdir()
-    (client_bin / "silver").symlink_to(silver)
-    silver = client_bin / "silver"
+    (client_bin / "ag").symlink_to(silver)
+    silver = client_bin / "ag"
     outer = project(base / "outer")
     inner = project(outer / "inner")
     nested = inner / "src"
@@ -94,12 +98,12 @@ def run(silver, daemon, base):
         try:
             term.capture("ready", ["Overview"])
             yield
-            os.write(term.master, b"q")
+            os.write(term.master, b"Q")
             deadline = time.monotonic() + 15
             while term.process.poll() is None:
                 screen = term.drain(.15, allow_exit=True)
-                assert time.monotonic() < deadline, f"q did not exit:\n{screen}"
-            assert term.process.returncode == 0, "q did not exit cleanly"
+                assert time.monotonic() < deadline, f"Q did not exit:\n{screen}"
+            assert term.process.returncode == 0, "Q did not exit cleanly"
         finally:
             term.close()
 
@@ -115,11 +119,14 @@ def run(silver, daemon, base):
     with tui():
         conflict = client("--api", "--workspace-operation", "Get", "--project-root", alias, ok=False)
         assert len(conflict.splitlines()) == 1 and conflict.startswith("(Error("), conflict
-        assert "(kind " in conflict and "lock" in conflict.lower(), conflict
+        # State contention now uses an actionable public diagnostic instead of
+        # leaking the underlying lifetime-lock exception.
+        assert "(kind Conflict)" in conflict and "Another Silver session" in conflict, conflict
+        assert str(inner) in conflict and "State directory:" in conflict, conflict
         other = client("--plain", "--project-root", outer)
         assert f"root={outer}\n" in other, other
 
-    # A fresh process can acquire the lock after q. Mutate the real registry
+    # A fresh process can acquire the lock after Q. Mutate the real registry
     # and read it across another restart via the checkout's symlink.
     state = workspace("Get")
     revision = re.search(r"\(revision (\d+)\)", state)[1]
@@ -140,7 +147,7 @@ def run(silver, daemon, base):
     server = base / "server"
     server_env = isolated(server)
     remote = project(server / "remote-project")
-    # Hold a real build across the attached client's q, then allow it to
+    # Hold a real build across the attached client's Q, then allow it to
     # finish. This distinguishes preserving the listener from preserving work.
     release = server / "release"
     (remote / "dune").write_text(
@@ -171,13 +178,13 @@ def run(silver, daemon, base):
             with tui(*args, cwd=base):
                 submitted = client("--plain", *args, "--action", "build", cwd=base)
                 assert "Submitted build job " in submitted, submitted
-            assert process.poll() is None, "attached q stopped the persistent daemon"
+            assert process.poll() is None, "attached Q stopped the persistent daemon"
             release.touch()
             output = remote / "_build/default/survived"
             deadline = time.monotonic() + 20
             while not output.exists() and time.monotonic() < deadline:
                 time.sleep(.05)
-            assert output.read_text() == "done", "remote job did not survive attached q"
+            assert output.read_text() == "done", "remote job did not survive attached Q"
             status = client("--plain", *args, cwd=base)
             assert f"Instance: {instance}\n" in status and f"root={remote}\n" in status, status
         finally:
@@ -196,4 +203,4 @@ if __name__ == "__main__":
     # Preserve the installed command name when Dune uses symlinks.
     with tempfile.TemporaryDirectory(prefix="silver-lifecycle-") as tmp:
         run(*(Path(p).absolute() for p in sys.argv[1:]), Path(tmp).resolve())
-    print("Installed silver standalone and persistent attach lifecycle passed")
+    print("Installed ag standalone and persistent attach lifecycle passed")

@@ -1,6 +1,6 @@
 # Silver
 
-Silver is a terminal workbench for Hardcaml projects. It runs Dune builds and
+Silver is a terminal workbench for hardware projects. It runs project builds and
 simulation suites, launches configured ASIC flows, and lets you inspect
 waveforms, synthesis results, timing paths, and other run evidence without
 leaving the terminal.
@@ -22,8 +22,9 @@ and stop if a block reports an error.
 - **Silver:** The prebuilt release targets Ubuntu 26.04 LTS on x86-64. A source
   build uses a compatible OxCaml opam switch and Silver's native dependencies,
   including Cobalt. See the [installation guide](docs/install.md).
-- **Projects:** The machine running the Silver service needs Dune and the
-  project's usual build environment. Simulation needs the project's configured
+- **Projects:** The machine running the Silver service needs the project's build
+  environment: Dune for Hardcaml, or Bazel and the Classic Bluespec toolchain
+  for the [Bluespec starter](docs/bluespec_classic.md). Simulation needs the project's configured
   simulation provider and any tools it invokes.
 - **ASIC flows:** The service host also needs a compatible
   [hardcaml_asic provider](https://github.com/LeEmperor/hardcaml_asic#install-the-provider).
@@ -114,22 +115,31 @@ With [OxCaml set up](#set-up-oxcaml), run the steps below in the same shell.
 
 ### Open a project
 
+Starting from an empty directory? Launch Silver with `ag` and choose **New Project…**
+to select a starter and destination. For headless creation of a [Classic
+Bluespec design with Rust verification](docs/bluespec_classic.md), run
+`ag init --bluespec`.
+
 1. Add the default install directory to `PATH` and check the installed command.
    Keep the `export` line in your shell configuration if you want it in new terminals.
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
+
+   If that resolves to The Silver Searcher instead of this workbench, use the
+   installed absolute path (`$HOME/.local/bin/ag`) or adjust `PATH`.
 
 2. In your project's normal build environment, open a terminal in the project directory:
 
    ```sh
-   silver
+   ag
    ```
 
-3. Press **Space c c** to open the command palette. Press **q** from the
-   workbench to quit. For jobs that should survive quitting, use
+3. Press **Space c c** to open the command palette. To quit from the
+   workbench, press **q**, then **Enter** to confirm the default **Yes**.
+   For jobs that should survive quitting, use
    [a persistent daemon](docs/project_workflows.md#attach-to-a-persistent-daemon).
 
 ## Try the ASIC example
@@ -166,7 +176,7 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
 4. Launch Silver from the example directory, then open **Overview**.
 
    ```sh
-   silver
+   ag
    ```
 
 5. In **Planned Run**, check **Launch chip**. The example's default is

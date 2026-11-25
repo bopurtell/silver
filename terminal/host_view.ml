@@ -185,6 +185,7 @@ type data =
   ; summary : Run_ref.t -> Asic.Summary.t option
   ; status : string
   ; environment : string
+  ; build_tool : Presentation.Build_tool.t
   ; asic_lines : string list
   ; asic : Asic.Snapshot.t option
   }
@@ -836,6 +837,7 @@ let utility_rows ?(now = Time_ns.now ()) host data tile =
         (Preparation_view.rows
            ~snapshot:host.preparation
            ~jobs:data.jobs
+           ~build_tool:data.build_tool
            ~project:(Option.map data.project ~f:(fun p -> p.Project.id))
            ~rtl_scope:host.preparation_rtl_scope
            ~cursor:local.cursor
@@ -1934,6 +1936,12 @@ let simulation_view_rows_with_selection ?indicator_frames ?now host data tile ~w
   |> List.map ~f:(fun (selected, (_, view)) -> selected, view)
 ;;
 
+let execution_jobs ~kind jobs =
+  if String.equal kind "project-tests"
+  then List.filter jobs ~f:(Presentation.Build_tool.is_job "test")
+  else jobs
+;;
+
 let execution_annotations host data (tile : W.Tile.t) =
   let row = Simulation_view.row in
   let local = H.local host tile.id in
@@ -1959,11 +1967,8 @@ let execution_annotations host data (tile : W.Tile.t) =
     Presentation.execution_job_label ?simulation job
   in
   let project_tests = String.equal tile.kind "project-tests" in
-  let jobs =
-    List.filter data.jobs ~f:(fun job ->
-      (not project_tests)
-      || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
-  in
+  let test_jobs_label = Presentation.Build_tool.name data.build_tool ^ " test jobs" in
+  let jobs = execution_jobs ~kind:tile.kind data.jobs in
   let selected job =
     Option.equal String.equal local.cursor (Some (Job_id.to_string job.Job.id))
   in
@@ -1973,7 +1978,7 @@ let execution_annotations host data (tile : W.Tile.t) =
       (List.map jobs ~f:(fun job -> Job_id.to_string job.Job.id))
   in
   (if H.compact_summary host tile
-   then [ row (if project_tests then "Dune test jobs" else "Process results only") ]
+   then [ row (if project_tests then test_jobs_label else "Process results only") ]
    else
      List.map
        [ (if project_tests
@@ -1981,7 +1986,7 @@ let execution_annotations host data (tile : W.Tile.t) =
           else "Project execution attempts")
         ; "Environment: " ^ data.environment
         ; (if project_tests
-           then "Dune test jobs: process results only"
+           then test_jobs_label ^ ": process results only"
            else "Case details / progress: unavailable (generic command runner)")
        ]
        ~f:row)
@@ -2253,13 +2258,7 @@ let rows host data tile ~width ~height =
          else String.make (Int.max 0 (status_width - cell_width label)) ' ')
       ^ endpoint)
   in
-  let jobs =
-    if String.equal tile.kind "project-tests"
-    then
-      List.filter data.jobs ~f:(fun job ->
-        String.equal job.kind.namespace "dune" && String.equal job.kind.name "test")
-    else data.jobs
-  in
+  let jobs = execution_jobs ~kind:tile.kind data.jobs in
   let selected =
     Option.bind local.cursor ~f:(fun id ->
       List.find jobs ~f:(fun job -> String.equal (Job_id.to_string job.id) id))
@@ -2361,7 +2360,10 @@ let rows host data tile ~width ~height =
            [ project.name
            ; Project_root.to_absolute_path project.root
            ; "Environment: " ^ data.environment
-           ])
+           ]
+           @ (match data.build_tool with
+              | Dune -> []
+              | Bazel -> [ "Build tool: Bazel" ]))
        | "navigation" ->
          [ "Space c c: searchable commands"
          ; "Tab / Shift-Tab: next / previous tile"
@@ -4332,6 +4334,65 @@ let render_workspace
     |> box ~width:dimensions.width ~height:dimensions.height
 ;;
 
+let quit_geometry ~hints ({ Dimensions.width; height } : Dimensions.t) =
+  let rows = if hints then 3 else 2 in
+  let w = Int.min width (if hints then 44 else 30)
+  and h = Int.min height (rows + 4) in
+  let geometry =
+    Panel.geometry ~framed:(w >= 18 && h >= 4) ~width:w ~height:h
+      ~horizontal_padding:(if w >= 17 then 1 else 0)
+      ~vertical_padding:(if h >= rows + 4 then 1 else 0)
+  in
+  (width - w) / 2, (height - h) / 2, w, h, geometry
+;;
+
+let quit_button_origin (g : Panel.geometry) =
+  if g.content_width >= 13 && g.content_height >= 2
+  then Some ((g.content_width - 13) / 2, 1)
+  else None
+;;
+
+let quit_hit ~hints dimensions ~x ~y =
+  let left, top, _, _, g = quit_geometry ~hints dimensions in
+  Option.bind (quit_button_origin g) ~f:(fun (button_x, button_y) ->
+    let x = x - left - g.border - g.horizontal_padding - button_x in
+    let y = y - top - g.border - g.vertical_padding - button_y in
+    if y <> 0 then None
+    else if x >= 0 && x < 6 then Some H.Yes
+    else if x >= 8 && x < 13 then Some H.No
+    else None)
+;;
+
+let render_quit ~appearance ~hints (selection : H.quit_choice) dimensions background =
+  let x, y, width, height, g = quit_geometry ~hints dimensions in
+  let text role value = View.text ~attrs:(Role.attrs appearance role) value in
+  let button choice label =
+    let selected = H.equal_quit_choice selection choice in
+    text (if selected then Focus else Foreground) ((if selected then ">" else " ") ^ label)
+  in
+  let buttons =
+    let compact = if H.equal_quit_choice selection Yes then "> Yes" else "> No" in
+    Option.value_map (quit_button_origin g) ~default:(text Focus compact) ~f:(fun (x, _) ->
+      View.hcat [ button Yes "[Yes]"; text Surface "  "; button No "[No]" ]
+      |> View.pad ~l:x)
+  in
+  let body =
+    let centered role label =
+      let row = text role label in
+      View.pad ~l:(Int.max 0 ((g.content_width - View.width row) / 2)) row
+    in
+    View.vcat
+      ([ centered Heading "Quit Silver?"; buttons ]
+       @ if hints then [ centered Muted "Left/Right Tab · y/n · Enter/Esc" ] else [])
+  in
+  let modal =
+    Panel.render appearance ~title:View.none ~geometry:g
+      ~width ~height ~attrs:(Role.attrs appearance Border) body
+    |> colored appearance Surface
+  in
+  View.zcat [ View.pad ~l:x ~t:y modal; background ]
+;;
+
 let palette_controls host (p : H.palette) =
   let current = H.current host p.capture in
   let nonblank = not (String.is_empty (String.strip p.query)) in
@@ -4368,7 +4429,8 @@ let palette_controls host (p : H.palette) =
   | Some (Starter_result (_, select)) ->
     [ input "Done" Enter ]
     @ (if current && Option.is_some select then [ input "Select target" (Character 's') ] else [])
-  | Some (Chip_directory | Module_directory) -> submit "Next" (nonblank && not (Filename.is_absolute p.query))
+  | Some (Chip_directory | Module_directory _) ->
+    submit "Next" (nonblank && not (Filename.is_absolute p.query))
   | Some (Chip_mapping _) -> submit "Next" (String.equal p.query "ui_in:uo_out:comb8")
   | Some Design_executable -> submit "Import" nonblank
   | Some (Editor_file _) -> submit "Open" nonblank
@@ -4478,11 +4540,19 @@ let palette_page host dimensions =
       | Some H.Chip_directory -> "FROM IP LIBRARY — enter project-relative library directory"
       | Some (H.Chip_mapping _) -> "FROM IP LIBRARY — enter explicit pin mapping"
       | Some (H.Starter_name (Empty_ip | Sample_ip)) -> "NEW IP LIBRARY — enter library name"
-      | Some H.Module_directory -> "NEW MODULE — enter project-relative library directory"
+      | Some (H.Starter_name Bluespec_ip) -> "NEW BLUESPEC IP LIBRARY — enter library name"
+      | Some (H.Module_directory Dune) -> "NEW MODULE — enter project-relative library directory"
+      | Some (H.Module_directory Bazel) -> "NEW BLUESPEC MODULE — enter library directory"
       | Some (H.Starter_name (Module_in _)) -> "NEW MODULE — enter module name"
+      | Some (H.Starter_name (Bluespec_module_in _)) ->
+        "NEW BLUESPEC MODULE — enter module name"
       | Some (H.Starter_wait _) -> "Waiting for authoring service · Esc dismisses"
       | Some (H.Starter_preview (_, Chip _)) ->
         "CHIP TARGET PREVIEW · r toggles registration · Enter applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_preview (_, Bluespec_ip)) ->
+        "NEW BLUESPEC IP LIBRARY PREVIEW · Enter applies · Esc cancels · ↑/↓ scroll"
+      | Some (H.Starter_preview (_, Bluespec_module_in _)) ->
+        "NEW BLUESPEC MODULE PREVIEW · Enter applies · Esc cancels · ↑/↓ scroll"
       | Some (H.Starter_preview (p, _)) ->
         (if String.equal p.operation.recipe Hardcaml_workbench_protocol.Authoring.add_to_project_recipe
          then "ASIC STARTER PREVIEW · a applies"
@@ -4525,7 +4595,7 @@ let palette_page host dimensions =
     in
     let query =
       match p.argument with
-       | Some (H.Simulation_selection _ | H.Catalog_configuration _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory | H.Chip_mapping _ | H.Chip_directory) ->
+       | Some (H.Simulation_selection _ | H.Catalog_configuration _ | H.Acceptance _ | H.Design_executable | H.Flow_field _ | H.Starter_name _ | H.Module_directory _ | H.Chip_mapping _ | H.Chip_directory) ->
         let input =
           "> "
           ^ p.query
@@ -4564,13 +4634,26 @@ let palette_page host dimensions =
       | Some (H.Starter_name starter) ->
         (match starter with
          | Module_in dir -> [ "Library: " ^ Artifact_view.safe dir ]
+         | Bluespec_module_in dir ->
+           [ "Library: " ^ Artifact_view.safe dir
+           ; "Use a lowercase name without .bs (e.g. pipeline creates Pipeline.bs)."
+           ]
+         | Bluespec_ip ->
+           [ "Use a lowercase name (e.g. widget creates ip/widget/Widget.bs)."
+           ; "The new library does not change the starter's top-level design."
+           ]
          | Flow_entry draft -> [ "Owner chip: " ^ Flow_authoring.owner draft ]
          | Sample_ip -> [ "Template: sample behavior" ]
           | Empty_ip -> [ "Template: empty" ]
           | Chip (source, _) -> H.chip_assumptions source
          | Asic_starter -> [])
         @ [ "Enter previews new files in the open project. Esc cancels." ]
-      | Some H.Module_directory -> [ "Enter the directory containing the library's dune file." ]
+      | Some (H.Module_directory Dune) ->
+        [ "Enter the directory containing the library's dune file." ]
+      | Some (H.Module_directory Bazel) ->
+        [ "Enter the Bazel package directory relative to the project (e.g. ip/widget)."
+        ; "Use . for the root package."
+        ]
       | Some H.Chip_directory -> [ "Enter the directory containing the library's dune file." ]
       | Some (H.Chip_mapping dir) ->
         [ "Library: " ^ Artifact_view.safe dir
@@ -4584,6 +4667,13 @@ let palette_page host dimensions =
           | Some (H.Starter_preview (preview, Chip (source, _))) -> H.starter_preview_lines ~source preview
           | Some (H.Starter_preview (preview, Flow_entry draft)) ->
             H.starter_preview_lines preview @ Flow_authoring.summary draft
+          | Some (H.Starter_preview (preview, Bluespec_ip)) ->
+            H.starter_preview_lines ~build_tool:Bazel preview
+            @ [ "Library source label: //ip/" ^ preview.operation.name ^ ":sources"
+              ; "Add the label to the consuming target's sources and import the package."
+              ]
+          | Some (H.Starter_preview (preview, Bluespec_module_in _)) ->
+            H.starter_preview_lines ~build_tool:Bazel preview
           | Some (H.Starter_preview (preview, _)) -> H.starter_preview_lines preview
           | Some (H.Starter_result (rows, _)) -> rows
           | _ -> assert false
@@ -4952,6 +5042,28 @@ let plain_text view =
   Buffer.contents buffer
 ;;
 
+let%test_unit "quit overlay uses the same button geometry for keyboard and pointer" =
+  List.iter [ true; false ] ~f:(fun hints ->
+  List.iter [ 80, 24; 17, 5; 13, 2 ] ~f:(fun (width, height) ->
+    let dimensions = { Dimensions.width; height } in
+    let background = View.rectangle ~width ~height () in
+    List.iter [ H.Yes, ">[Yes]"; H.No, ">[No]" ] ~f:(fun (selection, selected) ->
+      let image = render_quit ~appearance:Appearance.default ~hints selection dimensions background in
+      let text = plain_text image in
+      if width = 80 then assert (Bool.equal hints (String.is_substring text ~substring:"Left/Right Tab"));
+      assert (String.is_substring text ~substring:selected);
+      List.iter [ "[Yes]", H.Yes; "[No]", H.No ] ~f:(fun (label, choice) ->
+        let x, y =
+          List.find_map (List.mapi (String.split_lines text) ~f:(fun y line -> y, line))
+            ~f:(fun (y, line) ->
+              Option.map (String.substr_index line ~pattern:label) ~f:(fun x ->
+                cell_width (String.prefix line x), y))
+          |> Option.value_exn
+        in
+        assert (Option.equal H.equal_quit_choice (quit_hit ~hints dimensions ~x ~y) (Some choice)))));
+  assert (Option.is_none (quit_hit ~hints { width = 80; height = 24 } ~x:0 ~y:0)))
+;;
+
 let ansi_cell view ~x ~y =
   let buffer = Buffer.create 64 in
   let cell = View.crop ~l:x ~t:y view in
@@ -5009,6 +5121,7 @@ let refinement_fixture_with initialize =
         (fun run -> List.find snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "connected"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = Some snapshot
     }
@@ -5450,6 +5563,43 @@ let%test_unit "wrapped job rows resolve raw IDs; headings and logs are inert" =
         phys_equal
           clicked
           (select_body_row clicked data tile ~width ~height:(row + 1) ~row)))
+;;
+
+let%test_unit "Bazel Project Tests shows process results for exact test jobs" =
+  let host, data, find = project_job_fixture ~compact:false in
+  let tile = find "project-tests" in
+  let job namespace name =
+    { (List.hd_exn Baseline_fixture.jobs) with
+      kind = { namespace; name }
+    ; id = Job_id.of_string (namespace ^ "-" ^ name)
+    }
+  in
+  let test = job "bazel" "test" in
+  let data =
+    { data with
+      build_tool = Bazel
+    ; jobs = [ job "bazel" "build"; test; job "simulation" "run"; job "other" "test" ]
+    ; log_lines = (fun id -> [ "Output from " ^ Job_id.to_string id ])
+    }
+  in
+  let rows = execution_annotations host data tile in
+  assert (
+    List.filter_map rows ~f:(fun row -> row.Simulation_view.target)
+    |> function
+    | [ Simulation_view.Job id ] -> Job_id.equal id test.id
+    | _ -> false);
+  let host =
+    H.set_local host tile.id { (H.local host tile.id) with cursor = Some "bazel-test" }
+  in
+  let text = tile_view host data tile ~width:120 ~height:16 |> plain_text in
+  List.iter
+    [ "Bazel test jobs: process results only"
+    ; "bazel test"
+    ; "Kind: bazel.test"
+    ; "Output from bazel-test"
+    ]
+    ~f:(fun substring -> assert (String.is_substring text ~substring));
+  assert (not (String.is_substring text ~substring:"Dune"))
 ;;
 
 let%test_unit "stock Overview stage cards render typed freshness markers" =
@@ -7817,6 +7967,7 @@ let%test_unit "execution rows use readable labels while selected detail retains 
     [ "simulation", "discover", "sim discover"
     ; "simulation", "run", "sim run"
     ; "dune", "test", "dune test"
+    ; "bazel", "test", "bazel test"
     ; "project-driver", "generate-rtl", "RTL generate"
     ; "provider", "run", "provider.run"
     ]
@@ -9504,6 +9655,7 @@ let%test_unit "density changes rendered padding while explicit overrides retain 
     ; summary = (fun _ -> assert false)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -9607,6 +9759,7 @@ let%test_unit "actual preset host resolves quiet chrome, headerless pins and sel
           List.find Asic_snapshot_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = Some Asic_snapshot_fixture.snapshot
     }
@@ -9781,6 +9934,7 @@ let%test_unit "host semantic terminal rows preserve failure and raw evidence whe
     ; summary = (fun _ -> Some summary)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -9892,6 +10046,7 @@ let%test_unit "utility navigation filters match input and inspection scroll is b
     ; summary = (fun _ -> None)
     ; status = "connected"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10027,6 +10182,7 @@ let%test_unit "checklist follows exact run and pin with selected-stage detail an
         (fun run -> List.find snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = Some snapshot
     }
@@ -10230,6 +10386,7 @@ let%test_unit "simulation tile renders project scope and independent selection a
     ; asic = None
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     }
   in
@@ -10521,6 +10678,7 @@ let%test_unit "fit renders all thirteen tiles across skins and distinguishes loa
     ; summary = (fun _ -> None)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10571,6 +10729,7 @@ let%test_unit "actual renderer clips cell geometry and distinguishes run and pro
     ; summary = (fun _ -> None)
     ; status = "fixture"
     ; environment = "test"
+    ; build_tool = Dune
     ; asic_lines = [ "Explicit synthetic rendering fixture" ]
     ; asic = None
     }
@@ -10688,6 +10847,7 @@ let%test_unit "artifact overlay cannot render retained page after tile binding c
     ; summary = (fun _ -> None)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10779,6 +10939,7 @@ let%test_unit "inspection overlay and input share full viewport and visibly reve
     ; summary = (fun _ -> assert false)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10870,6 +11031,7 @@ let%test_unit "unterminated inspection paste keeps query and rejection visible w
     ; summary = (fun _ -> assert false)
     ; status = "fixture"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10903,6 +11065,7 @@ let%test_unit "filter input remains visible after polling and with chrome hidden
     ; summary = (fun _ -> None)
     ; status = "connected"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = None
     }
@@ -10949,6 +11112,7 @@ let%test_unit "warm synthesis run switch renders 73 while pinned reference retai
           List.find Asic_snapshot_fixture.snapshot.summaries ~f:(fun s -> Run_ref.equal s.run run))
     ; status = "SYNTHETIC FIXTURE"
     ; environment = "fixture"
+    ; build_tool = Dune
     ; asic_lines = []
     ; asic = Some Asic_snapshot_fixture.snapshot
     }

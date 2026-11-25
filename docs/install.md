@@ -9,6 +9,10 @@ Neither installation provisions the toolchain of a project you open.
 - **Dune projects:** Dune and the dependencies of the project must be available
   in the environment running the Silver service, even for browsing. For local
   use, start Silver from your project's normal shell or opam environment.
+- **Classic Bluespec starter:** install Bazel, `bsc`, Verilator, the native C++
+  build tools and Rust on the service host. See the
+  [front-end workflow](bluespec_classic.md). Choose `--without-asic` for a
+  front-end-only Silver installation.
 - **Simulation:** The project must supply a compatible simulation provider, and
   any simulators or libraries it requires. Projects that compile an OCaml
   provider may need the `hardcaml_workbench_provider` SDK.
@@ -50,8 +54,13 @@ To install a specific version manually:
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
+
+   `ag` is also the executable name of The Silver Searcher. If the shell
+   resolves that program instead of Silver, launch Silver by its absolute
+   path (`$HOME/.local/bin/ag` for the default prefix) or intentionally
+   adjust your `PATH` ordering.
 
 ## Build from source
 
@@ -95,7 +104,7 @@ To install a specific version manually:
 
    ```sh
    export PATH="$HOME/.local/bin:$PATH"
-   command -v silver
+   command -v ag
    ```
 
 ### Download the source tarball

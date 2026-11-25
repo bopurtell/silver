@@ -9,7 +9,8 @@
 (test
  (name test_rpc)
  (modules test_rpc)
- (action (run %{test} -build-jobs 1))
+ (action
+  (run %{test} -build-jobs 1 -simulation-fixture %{dep:../../backend/test/simulation_provider_fixture.py}))
  (libraries
   async
   cohttp-async

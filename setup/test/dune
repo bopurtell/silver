@@ -27,3 +27,14 @@
  (deps test_simulation_cli.py)
  (action
   (run python3 %{dep:test_simulation_cli.py} %{exe:../simulation_main.exe})))
+
+(rule
+ (alias runtest)
+ (deps
+  test_bluespec_scaffold.py
+  (:example
+   ../../examples/bluespec_classic/Counter.bs
+   ../../examples/bluespec_classic/simulation_provider.py))
+ (action
+  (run python3 %{dep:test_bluespec_scaffold.py} %{exe:../../terminal/main.exe}
+   %{exe:../simulation_main.exe} %{example})))

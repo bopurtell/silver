@@ -4,6 +4,7 @@ open Hardcaml_workbench_protocol
 module Http = Hardcaml_workbench_native_http
 module Baseline_fixture = Terminal_presentation.Baseline_fixture
 module Presentation = Terminal_presentation.Presentation
+module Build_tool = Presentation.Build_tool
 module State = Terminal_presentation.State
 module Host = Terminal_presentation.Workspace_host
 module Flow_authoring = Terminal_presentation.Flow_authoring
@@ -182,6 +183,7 @@ type session =
   ; mutable reconnect_delay_ms : int
   ; mutable last_dimensions : Bonsai_term.Dimensions.t option
   ; mutable painted_palette : Host.t option
+  ; mutable painted_quit : Host.quit_choice option
   ; mutable browser : Browser.t option
   ; sharing : Project_sharing.t
   ; mutable share_wizard : (unit ref * int * Share_wizard.t) option
@@ -420,7 +422,8 @@ let create_session
       ; navigation_focus_touched = []
       ; reconnect_delay_ms = 250
       ; last_dimensions = None
-      ; painted_palette = None
+       ; painted_palette = None
+       ; painted_quit = None
       ; browser = None
       ; sharing =
           Project_sharing.create
@@ -510,6 +513,10 @@ let adoption_complete =
 
 let current_project session =
   State.current_project ~opened:session.opened session.snapshot
+;;
+
+let project_build_tool session =
+  Option.map session.opened ~f:(fun opened -> Build_tool.of_environment opened.environment)
 ;;
 
 let sharing_binding session : Project_sharing.binding option =
@@ -987,6 +994,8 @@ let load_presentation_preferences session =
              ; main_hints = true
              ; browser_hints = false
              ; palette_hints = true
+             ; quit_confirm = true
+             ; quit_default_yes = true
               ; timing_preload = true
               ; timing_preload_details = Terminal_presentation.Timing_preload.default_details
              ; quick_launch_view = true
@@ -2960,8 +2969,7 @@ let preparation_request
           let jobs =
             jobs
             @ List.filter (project_jobs session) ~f:(fun j ->
-              String.equal j.kind.namespace "dune"
-              && List.mem [ "test"; "build" ] j.kind.name ~equal:String.equal)
+              Build_tool.is_job "test" j || Build_tool.is_job "build" j)
           in
           Deferred.List.iter jobs ~how:`Sequential ~f:(fun j ->
             read_job_log_id session (Some j.id))))
@@ -4444,7 +4452,17 @@ let environment_lines session =
   | None ->
     [ "Project: none (use --project-root ROOT)"
     ; "Environment request: " ^ session.environment_label
-    ; "Generic Dune workspace: no project opened"
+    ]
+  | Some opened when not (V1.Environment_summary.uses_dune opened.environment) ->
+    [ sprintf
+        "Project: %s  root=%s"
+        opened.project.name
+        (Project_root.to_absolute_path opened.project.root)
+    ; sprintf
+        "Environment request: %s  resolved=%s"
+        session.environment_label
+        opened.environment.provenance
+    ; "Build tool: Bazel"
     ]
   | Some opened ->
     let environment = opened.environment in
@@ -4479,27 +4497,28 @@ let project_lines session ~width =
   match session.opened, current_project session with
   | None, _ ->
     [ "Project: none"
-     ; "Restart client: --project-root ROOT or --discover-project"
-    ; "Generic Dune workspace: unavailable"
+    ; "Restart client: --project-root ROOT or --discover-project"
     ]
   | Some opened, Some project ->
-    let contexts =
-      match opened.workspace.contexts with
-      | [] -> "none reported"
-      | contexts -> String.concat contexts ~sep:", "
-    in
     let root_label = "Root: " in
     [ "Project: " ^ project.name
     ; root_label
       ^ Presentation.middle_truncate
           ~width:(width - String.length root_label)
           (Project_root.to_absolute_path opened.project.root)
-    ; sprintf
-        "Environment: %s (Dune %s)"
-        session.environment_label
-        opened.environment.dune_version
-    ; "Contexts: " ^ contexts
     ]
+    @ (if V1.Environment_summary.uses_dune opened.environment
+       then
+         [ sprintf
+             "Environment: %s (Dune %s)"
+             session.environment_label
+             opened.environment.dune_version
+         ; "Contexts: "
+           ^ (match opened.workspace.contexts with
+              | [] -> "none reported"
+              | contexts -> String.concat contexts ~sep:", ")
+         ]
+       else [ "Environment: " ^ session.environment_label; "Build tool: Bazel" ])
   | Some _, None -> [ "Project state unavailable; reconnect to resync" ]
 ;;
 
@@ -4800,7 +4819,9 @@ let connection_detail_lines session ~width =
        @ root (Project_root.to_absolute_path opened.project.root)
        @ field "Requested environment:" session.environment_label
        @ field "Resolved environment:" opened.environment.provenance
-       @ field "Dune version:" opened.environment.dune_version
+       @ (if V1.Environment_summary.uses_dune opened.environment
+          then field "Dune version:" opened.environment.dune_version
+          else field "Build tool:" "Bazel")
        @ field "Manifest integration:" (component project.integration.manifest)
        @ field "Driver integration:" (component project.integration.driver))
   @ guidance
@@ -4814,8 +4835,8 @@ let connection_detail_lines session ~width =
           specific loopback endpoint without automatic startup.")
   @ guidance
       "Root / environment:"
-      "Restart the client with --project-root ROOT (directory containing dune-project) \
-       or --discover-project (nearest ancestor from the client's current directory). \
+      "Restart the client with --project-root ROOT or --discover-project (nearest \
+       project from the client's current directory). \
        For a remote daemon, an absolute root on the daemon host is safest; discovery \
        searches the client host, not the daemon host. \
        --environment inherited uses the daemon's environment, not this client's shell; \
@@ -4887,20 +4908,22 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
       in
       let workspace_rows =
         match session.opened with
-        | None -> [ "  (no project opened)" ]
-        | Some opened ->
-          if List.is_empty opened.workspace.items
-          then [ "  (no local items reported)" ]
-          else
-            List.map opened.workspace.items ~f:(fun item ->
-              sprintf
-                "  %-12s %s%s"
-                item.kind
-                (if List.is_empty item.names
-                 then "(unnamed)"
-                 else String.concat item.names ~sep:",")
-                (Option.value_map item.source_path ~default:"" ~f:(fun path ->
-                   "  " ^ path)))
+        | None -> []
+        | Some opened when V1.Environment_summary.uses_dune opened.environment ->
+          [ ""; "DUNE ITEMS" ]
+          @ (if List.is_empty opened.workspace.items
+             then [ "  (no local items reported)" ]
+             else
+               List.map opened.workspace.items ~f:(fun item ->
+                 sprintf
+                   "  %-12s %s%s"
+                   item.kind
+                   (if List.is_empty item.names
+                    then "(unnamed)"
+                    else String.concat item.names ~sep:",")
+                   (Option.value_map item.source_path ~default:"" ~f:(fun path ->
+                      "  " ^ path))))
+        | Some _ -> []
       in
       let job_rows =
         if List.is_empty jobs
@@ -4968,7 +4991,11 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
             match session.hierarchy_view with
             | Some view -> hierarchy_view_lines session view ~height:top_height
             | None ->
-              [ "PROJECT / GENERIC DUNE WORKSPACE" ]
+              [ (match project_build_tool session with
+                 | Some Dune -> "PROJECT / GENERIC DUNE WORKSPACE"
+                 | Some Bazel -> "PROJECT / BAZEL"
+                 | None -> "PROJECT")
+              ]
               @ project_lines session ~width:left_width
               @ [ ""; "WORKBENCH INTEGRATION" ]
               @ integration_lines session
@@ -4976,7 +5003,6 @@ let render_legacy session ({ Bonsai_term.Dimensions.width; height } as dimension
               @ hierarchy_status_lines session
               @ [ "" ]
               @ artifact_lines session
-              @ [ ""; "DUNE ITEMS" ]
               @ workspace_rows)
         in
         pane ~width:left_width ~height:top_height lines
@@ -5138,6 +5164,7 @@ let host_data session : Host_view.data =
             Run_ref.equal summary.Asic.Summary.run run)))
   ; status = session.status
   ; environment = session.environment_label
+  ; build_tool = Option.value (project_build_tool session) ~default:Dune
   ; asic_lines
   ; asic = session.asic
   }
@@ -5446,6 +5473,7 @@ let render
   ignore (retire_stale_browser session : bool);
   session.host <- Host.dismiss_stale_theme_picker session.host;
   session.painted_palette <- None;
+  session.painted_quit <- None;
   session.painted_browser <- None;
   let remember_palette (host : Host.t) =
     session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
@@ -5536,11 +5564,16 @@ let render
       session.painted_palette <- Option.some_if (Option.is_some host.palette) host;
       Host_view.render_palette host dimensions window
   in
-  match share_wizard session with
-  | None -> background
-  | Some (_, _, wizard) ->
-    Share_wizard.render wizard ~sharing:(Project_sharing.is_sharing session.sharing)
-      appearance dimensions background
+  let background =
+    match share_wizard session with
+    | None -> background
+    | Some (_, _, wizard) ->
+      Share_wizard.render wizard ~sharing:(Project_sharing.is_sharing session.sharing)
+        appearance dimensions background
+  in
+  session.painted_quit <- session.host.quit_selection;
+  Option.value_map session.painted_quit ~default:background ~f:(fun selection ->
+    Host_view.render_quit ~appearance ~hints:session.host.main_hints selection dimensions background)
 ;;
 
 (* Baseline capture.
@@ -5596,7 +5629,8 @@ let session_of_baseline_fixture (fixture : Baseline_fixture.t) =
     ; navigation_focus_touched = []
     ; reconnect_delay_ms = 250
     ; last_dimensions = None
-    ; painted_palette = None
+     ; painted_palette = None
+     ; painted_quit = None
     ; browser = None
     ; sharing = Project_sharing.create Attached
     ; share_wizard = None
@@ -5838,6 +5872,13 @@ let share_command =
     Share_with_cobalt
 ;;
 
+let authoring_build_tool session = Option.value (project_build_tool session) ~default:Dune
+
+let offers_project_authoring (opened : V1.Open_project.Payload.t) =
+  V1.Environment_summary.uses_dune opened.environment
+  || V1.Dune_workspace.Inspection.supports_bluespec_authoring opened.workspace
+;;
+
 let host_catalog_base session =
   (if session.local_project_files && Option.is_some session.opened
    then Host.project_entry_commands
@@ -5847,13 +5888,22 @@ let host_catalog_base session =
    | None -> []
    | Some _ when not (List.mem session.hello.capabilities Authoring.capability ~equal:String.equal) ->
      []
+   | Some opened when not (offers_project_authoring opened) -> []
    | Some _ ->
-     [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
-     ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
-     ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
-     ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
-     ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
-     ]
+     (match authoring_build_tool session with
+      | Dune ->
+        [ Host.command "project.new-ip" "New IP Library…" "new ip" Choose_ip_template
+        ; Host.command "project.new-module" "New Module…" "new module" Choose_module_directory
+        ; Host.command "project.new-chip" "New Chip Target…" "new chip" Choose_chip_source
+        ; Host.command "project.new-flow" "New Flow…" "new methodology" (New_flow None)
+        ; Host.command "project.duplicate-profile" "Duplicate Profile…" "copy settings" (Duplicate_profile None)
+        ]
+      | Bazel ->
+        [ Host.command "project.new-ip" "New IP Library…" "new ip bluespec bazel"
+            (Name_starter Bluespec_ip)
+        ; Host.command "project.new-module" "New Module…" "new module bluespec bazel"
+            Choose_module_directory
+        ])
      @ library_commands session ~f:(fun label dir ->
        Host.command ("project.library." ^ label ^ ":" ^ dir)
          (Artifact_view.safe ("Library: " ^ label ^ " · " ^ dir))
@@ -5867,6 +5917,7 @@ let host_catalog_base session =
   @
   (if session.local_project_files
       && Option.is_some session.opened
+      && (match authoring_build_tool session with Dune -> true | Bazel -> false)
       && not (adopted_here session)
       && not (Option.exists session.asic ~f:(fun asic -> asic.configured))
    then
@@ -5878,6 +5929,7 @@ let host_catalog_base session =
      ]
    else [])
   @ Host.catalog
+    ?build_tool:(project_build_tool session)
     session.host
     ~project:(current_project session)
     ~jobs:(project_jobs session)
@@ -7068,6 +7120,18 @@ let import_workload session ~current result digest =
     Option.value_map operation ~default:(return ()) ~f:(workload_request session tile)
 ;;
 
+let request_quit session ~exit =
+  let host, should_exit = Host.begin_quit session.host in
+  session.host <- host;
+  if should_exit then exit () else Bonsai_term.Effect.Ignore
+;;
+
+let quit_input session input ~exit =
+  let host, should_exit = Host.quit_input session.host input in
+  session.host <- host;
+  if should_exit then exit () else Bonsai_term.Effect.Ignore
+;;
+
 let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit =
   let open Bonsai_term in
   let captured_client = session.client in
@@ -7864,20 +7928,26 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
       (match project_action with
        | Share_with_cobalt -> begin_share_wizard session
        | _ ->
-         let ip =
-           List.find (host_catalog session) ~f:(fun c -> String.equal c.Host.id "project.new-ip")
+         let build_tool = authoring_build_tool session in
+         let commands = host_catalog session in
+         let find id = List.find commands ~f:(fun c -> String.equal c.Host.id id) in
+         let ip = find "project.new-ip" in
+         let new_module =
+           match build_tool with Dune -> None | Bazel -> find "project.new-module"
          in
          let libraries, asic =
            match ip with
            | None -> [], None
-           | Some _ -> library_commands session ~f:(fun label dir -> label, dir), session.asic
+           | Some _ ->
+             ( library_commands session ~f:(fun label dir -> label, dir)
+             , match build_tool with Dune -> session.asic | Bazel -> None )
          in
          session.browser_epoch <- session.context_epoch;
          session.browser <-
            Some
              (Browser.create
                 captured
-                (Browser.catalog ?ip ~share:share_command ~libraries asic));
+                (Browser.catalog ~build_tool ?ip ?new_module ~share:share_command ~libraries asic));
          Effect.Ignore)
     | Browse_chip_profiles chip ->
       (match session.browser, session.opened with
@@ -8015,7 +8085,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                ];
              Effect.Ignore
           | Library_actions dir ->
-             form None ~commands:(Host.library_authoring_commands dir);
+             form None ~commands:(Host.library_authoring_commands ~build_tool:(authoring_build_tool session) dir);
              Effect.Ignore
            | Choose_chip_source ->
              form None ~commands:
@@ -8033,7 +8103,7 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
            | Enter_chip_directory -> form (Some Chip_directory); Effect.Ignore
            | Map_chip dir -> form (Some (Chip_mapping dir)); Effect.Ignore
            | Choose_module_directory ->
-             form (Some Module_directory);
+             form (Some (Module_directory (authoring_build_tool session)));
              Effect.Ignore
            | Name_starter starter ->
              form (Some (Starter_name starter));
@@ -8047,7 +8117,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
             wait (fun token ->
               let target : Authoring.Target.t =
                 { destination = root; project = Some opened.project.id
-                ; object_id = (match starter with Module_in dir -> Some dir | _ -> None) }
+                 ; object_id =
+                     (match starter with
+                      | Module_in dir | Bluespec_module_in dir -> Some dir
+                      | _ -> None)
+                 }
               in
               let%bind () = match old_id with
                 | Some preview_id -> call (Cancel { preview_id }) >>| ignore
@@ -8119,7 +8193,11 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
                        ; "Build the chip executable for launch. Discover ASIC flows refreshes the picker." ]
                      | Registered path -> [ "Registered: " ^ path ]
                      | Skipped { path; reason } ->
-                       [ (if for_module then "Manual Dune edit: " else "Skipped registration: ") ^ path
+                        [ (if for_module then
+                             match authoring_build_tool session with
+                             | Dune -> "Manual Dune edit: "
+                             | Bazel -> "Manual Bazel edit: "
+                           else "Skipped registration: ") ^ path
                        ; reason ]
                        @ Option.value_map preview.registration ~default:[] ~f:(fun edit ->
                          String.split_lines edit.snippet))
@@ -9350,7 +9428,23 @@ let rec execute_host ?(validate = fun () -> Ok ()) session captured action ~exit
     | Unavailable reason ->
       session.host <- { session.host with notice = reason };
       Effect.Ignore
-    | Exit -> exit ())
+     | Set_quit_confirm quit_confirm ->
+       session.host <-
+         { session.host with
+           quit_confirm
+         ; notice = if quit_confirm then "q asks for quit confirmation" else "q quits immediately"
+         };
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+     | Set_quit_default_yes quit_default_yes ->
+       session.host <-
+         { session.host with
+           quit_default_yes
+         ; notice =
+             "Quit confirmation initially selects " ^ if quit_default_yes then "Yes" else "No"
+         };
+       Effect.of_deferred_thunk (fun () -> save_presentation_preferences session)
+     | Exit -> request_quit session ~exit
+     | Force_exit -> exit ())
 ;;
 
 let scroll_host session delta =
@@ -9436,9 +9530,7 @@ let browse_host session delta =
         , Host_view.run_cursor ~data session.host tile ))
       else
         ( project_jobs session
-          |> List.filter ~f:(fun job ->
-            (not (String.equal tile.kind "project-tests"))
-            || (String.equal job.kind.namespace "dune" && String.equal job.kind.name "test"))
+          |> Host_view.execution_jobs ~kind:tile.kind
           |> List.map ~f:(fun job -> Job_id.to_string job.id)
         , local.cursor )
     in
@@ -10435,7 +10527,18 @@ let handle_pointer ?editor_companion session ~exit ~kind ~mods ~x ~y =
     |> Option.value ~default:Effect.Ignore
   in
   match session.last_dimensions with
-  | _ when Option.is_some (share_wizard session) -> Effect.Ignore
+   | Some dimensions
+     when Option.is_some session.host.quit_selection || Option.is_some session.painted_quit ->
+     (match (kind : Event.mouse_kind), mods, session.host.quit_selection with
+      | Left, [], Some choice
+        when not session.host.paste
+             && Option.equal Host.equal_quit_choice (Some choice) session.painted_quit ->
+        (match Host_view.quit_hit ~hints:session.host.main_hints dimensions ~x ~y with
+         | Some Yes -> quit_input session (Host.Character 'y') ~exit
+         | Some No -> quit_input session (Host.Character 'n') ~exit
+         | None -> Effect.Ignore)
+      | _ -> Effect.Ignore)
+   | _ when Option.is_some (share_wizard session) -> Effect.Ignore
   | None -> Effect.Ignore
   | Some _ when retire_stale_browser session -> Effect.Ignore
   | Some dimensions
@@ -10604,7 +10707,8 @@ let tui
   in
   let host_modal session =
     let host = session.host in
-    Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
+    Option.is_some host.quit_selection
+    || Option.is_some host.palette || Option.is_some host.menu || Option.is_some session.browser
     || Option.is_some (share_wizard session)
     || host.editing_filter || host.paste || Option.is_some host.inspection_paste
   in
@@ -10917,6 +11021,16 @@ let tui
   let handle_keyboard session (event : Event.t) =
     if Host.is_interrupt event
     then exit ()
+    else if Option.is_some session.host.quit_selection
+    then
+      let input =
+        match event with
+        | Key_press { key = Arrow `Left; mods = [] } -> Some Host.Previous
+        | Key_press { key = Arrow `Right; mods = [] } -> Some Host.Next
+        | _ -> Host.decode_event event
+      in
+      Option.value_map input ~default:Effect.Ignore ~f:(fun input ->
+        quit_input session input ~exit)
     else if Option.is_some (share_wizard session)
     then share_wizard_key session event
     else if Option.is_none session.host.registry
@@ -10971,7 +11085,10 @@ let tui
       | Some effect -> effect
       | None ->
         (match event with
-         | Key_press { key; mods = [] } when key_is 'q' key -> exit ()
+          | Key_press { key; mods = [] } when key_is 'q' key -> request_quit session ~exit
+          | Key_press { key; mods = [] } when key_is 'Q' key -> exit ()
+          | Key_press { key; mods = [ Shift ] } when key_is 'q' key || key_is 'Q' key ->
+            exit ()
          | Key_press { key; mods = [ Ctrl ] } when key_is 'c' key || key_is 'C' key ->
            exit ()
          | Key_press { key; mods = [] } when key_is 'b' key ->
@@ -11106,6 +11223,13 @@ let tui
         && Option.exists (placement session dimensions (companion session)) ~f:(fun pane ->
           pane.focused && pane.key = entry.key)
       in
+      entry.clipboard_notice <- (fun notice ->
+        Effect.lazy_ (lazy (
+          if not (still_focused ())
+          then Effect.Ignore
+          else (
+            session.host <- { session.host with notice };
+            invalidate update_revision))));
       (* Cobalt owns recognizing this chord in the focused editor, so typing
          and paste are interpreted by its mode, not by a second Silver parser. *)
       entry.toggle_terminal <- (fun number ->
@@ -11322,11 +11446,17 @@ let tui
       in
       let terminal_pointer ~x ~y =
         let geometry = Shared_terminal.geometry terminal ~dimensions in
-        if Shared_terminal.contains geometry ~x ~y
-           || Option.is_some session.painted_palette
+        if Option.is_some session.painted_palette
            || not (workspace_layer session)
            || not (Option.equal Dimensions.equal session.last_dimensions (Some dimensions))
         then Effect.Ignore
+        else if Shared_terminal.contains geometry ~x ~y
+        then
+          (* A click explicitly refocuses the shell. A dead shell starts a
+             fresh process; a live shell is left untouched. *)
+          if Shared_terminal.restartable terminal
+          then terminal_command `Restart
+          else Effect.Ignore
         else (
           let host = displayed_host session in
           match Host_view.pointer_geometry ?editor_companion:origin host dimensions ~x ~y with
@@ -12233,14 +12363,43 @@ let run
             | Some message -> Or_error.error_string message))))
 ;;
 
+type endpoint_error =
+  | State_locked of { project_root : string; state_dir : string }
+  | Startup_error of Error.t
+
+let state_lock_lines ~project_root ~state_dir =
+  [ "Another Silver session is using this state directory."
+  ; "Project: " ^ project_root
+  ; "State directory: " ^ state_dir
+  ; "Close the other Silver window with q, then reopen this project."
+  ]
+;;
+
+let endpoint_failure = function
+  | Startup_error error -> error
+  | State_locked { project_root; state_dir } ->
+    Error.of_string (String.concat ~sep:"\n" (state_lock_lines ~project_root ~state_dir))
+;;
+
 let start_endpoint ~standalone ~endpoint ~project_root ~state_dir =
   match standalone, endpoint, project_root with
   | true, None, Some project_root ->
-    Monitor.try_with_or_error (fun () ->
-      let%map url = Server_host.start_standalone ~project_root ~state_dir in
-      Some url)
+    let%map result =
+      Monitor.try_with_or_error (fun () ->
+        let project_root = Filename_unix.realpath project_root in
+        let%map result = Server_host.try_start_standalone ~project_root ~state_dir in
+        match result with
+        | Ok url -> Ok (Some url)
+        | Error { state_dir } -> Error (State_locked { project_root; state_dir }))
+    in
+    (match result with
+     | Ok result -> result
+     | Error error -> Error (Startup_error error))
   | _ when Option.is_some state_dir ->
-    return (Or_error.error_string "--standalone-state-dir requires standalone local mode")
+    return
+      (Error
+         (Startup_error
+            (Error.of_string "--standalone-state-dir requires standalone local mode")))
   | _ -> return (Ok endpoint)
 ;;
 
@@ -12265,15 +12424,15 @@ let local_workspace
   let endpoints = String.Table.create () in
   let bind_new root =
     match parse_environment environment with
-    | Error error -> return (Error error)
+    | Error error -> return (Error (Startup_error error))
     | Ok (environment_selection, environment_label) ->
       let project_root = Some root in
       let first = Hashtbl.is_empty endpoints in
-      let%bind.Deferred.Or_error endpoint =
+      let%bind.Deferred.Result endpoint =
         match Hashtbl.find endpoints root with
         | Some endpoint -> return (Ok endpoint)
         | None ->
-          let%map.Deferred.Or_error endpoint =
+          let%map.Deferred.Result endpoint =
             start_endpoint ~standalone:true ~endpoint:None ~project_root
               ~state_dir:(if first then state_dir else None)
           in
@@ -12292,7 +12451,7 @@ let local_workspace
           ()
       in
       (match created with
-       | Error msg -> return (Or_error.error_string msg)
+       | Error msg -> return (Error (Startup_error (Error.of_string msg)))
        | Ok session ->
          let%map () =
            initialize_open_workspace
@@ -12305,17 +12464,28 @@ let local_workspace
          Ok session)
   in
   let bind root =
-    Monitor.try_with_or_error (fun () ->
-      let root = Filename_unix.realpath root in
-      match Hashtbl.find sessions root with
-      | Some session -> return (Ok session)
-      | None -> bind_new root)
-    >>| Or_error.join
+    let%map result =
+      Monitor.try_with_or_error (fun () ->
+        let root = Filename_unix.realpath root in
+        match Hashtbl.find sessions root with
+        | Some session -> return (Ok session)
+        | None -> bind_new root)
+    in
+    match result with
+    | Ok result -> result
+    | Error error -> Error (Startup_error error)
   in
   let%bind.Deferred.Or_error initial =
     match initial with
     | `Unbound start -> return (Ok (`Entry (Startup_entry.entry ~start Menu, None)))
-    | `Open root -> bind root >>| Or_error.map ~f:(fun s -> `Bound s)
+    | `Open root ->
+      let%map result = bind root in
+      (match result with
+       | Ok session -> Ok (`Bound session)
+       | Error (Startup_error error) -> Error error
+       | Error (State_locked { project_root; state_dir }) ->
+         let screen = Startup_entry.State_in_use (state_lock_lines ~project_root ~state_dir) in
+         Ok (`Entry (Startup_entry.entry ~start:project_root screen, None)))
   in
   let shutting_down = ref false in
   let cleanup () =
@@ -12336,7 +12506,7 @@ let local_workspace
             | None -> Bonsai_term.Effect.Ignore
             | Some original ->
               let start = Filename.dirname original in
-              let screen = match mode with `New -> Startup_entry.Name "" | `Open -> Existing "" in
+              let screen = match mode with `New -> Startup_entry.Preset | `Open -> Existing "" in
               set_page (`Entry (Startup_entry.entry ~original ~start screen, Some s))
         in
         let ~view, ~handler =
@@ -12356,7 +12526,9 @@ let local_workspace
             let open Bonsai_term in
             Effect.bind
               (Effect.of_deferred_thunk (fun () ->
-                 let%bind.Deferred.Or_error session = bind root in
+                 let%bind.Deferred.Or_error session =
+                   Deferred.map (bind root) ~f:(Result.map_error ~f:endpoint_failure)
+                 in
                  let%map.Deferred () =
                    match previous with
                    | Some old when not (phys_equal old session) ->
@@ -12406,11 +12578,14 @@ let local_workspace
 
 let command =
   let program = Filename.basename (Sys.get_argv ()).(0) in
-  let local_by_default = String.equal program "silver" in
+  let local_by_default = String.equal program "ag" in
   Command.async_or_error
     ~summary:
       (if local_by_default
-        then "Open the nearest Dune project, choose a project interactively, or attach to a Silver daemon"
+         then
+           "Open the nearest Silver Bazel or Dune project, choose a project interactively, \
+            or attach to a Silver daemon.\n\
+            Create a Bluespec Classic project with ag init --bluespec [DIR]."
        else "Connect to Silver")
     (let%map_open.Command endpoint =
         flag
@@ -12430,9 +12605,10 @@ let command =
           "--project-root"
           (optional string)
           ~doc:
-            "ROOT open a directory containing dune-project; explicit path is resolved \
+            "ROOT open a Silver Bazel (.silver/project.json) or Dune (dune-project) \
+             project; explicit path is resolved \
              on the daemon host (remote: use an absolute path); standalone mode \
-             defaults to the nearest enclosing Dune project"
+             defaults to the nearest enclosing project"
      and workspace_config =
        flag
          "--workspace-config"
@@ -12462,8 +12638,8 @@ let command =
          "--discover-project"
          no_arg
          ~doc:
-           " open the nearest ancestor of the current directory (symlinks resolved \
-            first) containing a regular dune-project; reports the root; not with \
+           " open the nearest Silver Bazel or Dune project from the current \
+            directory (symlinks resolved first); reports the root; not with \
             --project-root"
      and environment =
        flag
@@ -12697,14 +12873,18 @@ let command =
                  ~project_root
                  ~state_dir:standalone_state_dir
              with
-             | Error error ->
+             | Error failure ->
+               let error = endpoint_failure failure in
+               let kind : V1.Error.Kind.t =
+                 match failure with State_locked _ -> Conflict | Startup_error _ -> Internal_failure
+               in
                if api
                then
                  printf
                    "%s\n%!"
                    (Sexp.to_string_mach
                       (Workspace.Response.sexp_of_t
-                         (Error (V1.Error.create Internal_failure (error_message error)))));
+                         (Error (V1.Error.create kind (error_message error)))));
                return (Error error)
               | Ok endpoint ->
                 run
@@ -12732,4 +12912,33 @@ let command =
                  ())))
 ;;
 
-let () = Command_unix.run command
+let init_command =
+  Command.group
+    ~summary:"Create a Silver project"
+    [ ( "init"
+      , Command.basic
+          ~summary:"Create an editable Bluespec Classic project"
+          (let%map_open.Command bluespec =
+             flag "--bluespec" no_arg ~doc:" create a Bluespec Classic project"
+           and destination = anon (maybe_with_default "." ("DIR" %: string)) in
+           fun () ->
+             if not bluespec
+             then (
+               Core.eprintf "Usage: ag init --bluespec [DIR]\n%!";
+               Stdlib.exit 2);
+             match Hardcaml_workbench_setup.Bluespec_scaffold.create ~destination with
+             | Ok root ->
+               Core.printf "Initialized Bluespec Classic project in %s\n%!" root
+             | Error message ->
+               Core.eprintf "ag init: %s\n%!" message;
+               Stdlib.exit 1) )
+    ]
+;;
+
+let () =
+  match Array.to_list (Sys.get_argv ()) with
+  | program :: "init" :: _
+    when not (String.equal (Filename.basename program) "hardcaml-workbench") ->
+    Command_unix.run init_command
+  | _ -> Command_unix.run command
+;;

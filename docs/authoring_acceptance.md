@@ -19,7 +19,7 @@ If `/tmp` has a small user quota, put the evidence directory on disk and set
 ### Prerequisites
 
 - Linux with a PTY, Python 3.11+, Git, Dune, and [an ASIC-enabled Silver installation](../README.md#install-and-open-silver).
-- `silver`, `hardcaml-asic-starter`, `hardcaml-asic-targets`, and `hardcaml-asic-flow`
+- `ag`, `hardcaml-asic-starter`, `hardcaml-asic-targets`, and `hardcaml-asic-flow`
   on `PATH`; the active Dune context must be able to build a project that uses
   `hardcaml_asic`.
 - A [provisioned tool root](https://github.com/LeEmperor/hardcaml_asic/blob/HEAD/docs/guides/bootstrap.md),

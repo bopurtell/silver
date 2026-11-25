@@ -2,8 +2,10 @@ open! Core
 open Async
 open Bonsai_term
 module Discovery = Hardcaml_workbench_setup.Project_discovery
+module Bluespec_scaffold = Hardcaml_workbench_setup.Bluespec_scaffold
 module Authoring = Hardcaml_workbench_protocol.Authoring
 module Service = Hardcaml_workbench_backend.Authoring_service
+module Destination_path = Hardcaml_workbench_backend.Authoring_destination
 module Host = Terminal_presentation.Workspace_host
 module Style = Terminal_presentation.Host_view
 module Panel = Terminal_presentation.Panel
@@ -29,12 +31,20 @@ let resolve ~interactive ~explicit ~discover =
 type screen =
   | Closed
   | Menu
+  | Preset
   | Share_unbound of screen * Share_wizard.t
   | Name of string
   | Destination of string * string
+  | Bluespec_destination of string
+  | Bluespec_review of
+      { input : string
+      ; destination : string
+      ; snapshot : Destination_path.snapshot
+      }
   | Existing of string
   | Review of Authoring.Preview.t
-  | Failure of string list
+  | Failure of string list * screen option
+  | State_in_use of string list
   | Busy of string
 
 (* The label and its binding travel together through wrapping and clipping. *)
@@ -45,14 +55,23 @@ let share = "[s] " ^ Share_wizard.title, Host.Character 's'
 let controls_text controls = String.concat ~sep:"   " (List.map controls ~f:fst)
 let plain rows = List.map rows ~f:(fun s -> s, None)
 
+let bluespec_default = "bluespec-counter"
+
 let contents ~bound = function
   | Closed | Share_unbound _ -> assert false
   | Menu ->
     ( "Local project"
     , [ "[c] New Project… (Create project here)", Some (Host.Character 'c')
       ; "[o] Open existing project", Some (Host.Character 'o')
+      ; "CLI alternative: `ag init --bluespec`", None
       ]
     , (if bound then [ dismiss ] else [ share; dismiss ]) )
+  | Preset ->
+    ( "New Project… · Choose a preset"
+    , [ "[h] Hardcaml · Dune · OCaml", Some (Host.Character 'h')
+      ; "[b] Bluespec Classic · Bazel · Rust", Some (Host.Character 'b')
+      ]
+    , [ "Enter: Hardcaml", Host.Enter; dismiss ] )
   | Name s -> "Project name", plain [ s ^ "▏" ], [ "Enter continue", Host.Enter; dismiss ]
   | Destination (name, s) ->
     ( "Destination"
@@ -63,6 +82,26 @@ let contents ~bound = function
         ; s ^ "▏"
         ]
     , [ "Enter preview", Host.Enter; dismiss ] )
+  | Bluespec_destination s ->
+    ( "Bluespec Classic destination"
+    , plain
+        [ "Choose a new or empty directory. Silver uses the directory's name."
+        ; (if bound then "Blank creates a sibling named " ^ bluespec_default ^ "."
+           else "Blank uses the current directory.")
+        ; s ^ "▏"
+        ]
+    , [ "Enter preview", Host.Enter; "Esc back", Escape ] )
+  | Bluespec_review { destination; _ } ->
+    ( "Create preview"
+    , plain
+        [ "Preset: Bluespec Classic · Bazel · Rust"
+        ; "Project: " ^ Filename.basename destination
+        ; "Destination: " ^ destination
+        ; "Creates an editable counter, Rust checker, and Testing configuration."
+        ; "Build: //:rtl   Test: //:simulation"
+        ; "The wizard does not run any build tools."
+        ]
+    , [ "Enter: Apply and open", Host.Enter; "↑", Previous; "↓", Next; "Esc back", Escape ] )
   | Existing s ->
     "Existing project directory", plain [ s ^ "▏" ], [ "Enter open", Host.Enter; dismiss ]
   | Review p ->
@@ -75,10 +114,14 @@ let contents ~bound = function
       ; "↓", Next
       ; "Esc cancel", Escape
       ] )
-  | Failure rows ->
+  | Failure (rows, _) ->
     ( "Project error"
     , plain rows
     , [ "Enter retry", Host.Enter; "↑", Previous; "↓", Next; dismiss ] )
+  | State_in_use rows ->
+    ( "Project already open"
+    , plain rows
+    , [ "[q] Close this window", Host.Character 'q'; "↑", Previous; "↓", Next ] )
   | Busy label -> "Local project", plain [ label; "Please wait" ], []
 ;;
 
@@ -138,14 +181,15 @@ let rec render ~start ~original screen scroll ({ Dimensions.width; height } as d
       ~width
       ~height
       (View.vcat
-         (match original with
-          | None ->
+         (match screen, original with
+          | State_in_use _, _ -> [ text Heading "Silver" ]
+          | _, None ->
             [ text Heading "Silver  /  Unbound workspace"
             ; text Muted ("Directory: " ^ start)
-            ; text Foreground "No Dune project is open."
+            ; text Foreground "No project is open."
             ; text Focus (controls_text [ reopen; share; quit ])
             ]
-          | Some root ->
+          | _, Some root ->
             [ text Heading "Silver  /  Project switch"
             ; text Muted ("Current project: " ^ root)
             ; text Foreground ("Relative paths start at: " ^ start)
@@ -171,7 +215,7 @@ let rec render ~start ~original screen scroll ({ Dimensions.width; height } as d
     let clip = x + geometry.content_width in
     let offset =
       match screen with
-      | Name _ | Destination _ | Existing _ -> last
+      | Name _ | Destination _ | Bluespec_destination _ | Existing _ -> last
       | _ -> Int.min scroll last
     in
     let body =
@@ -213,6 +257,7 @@ type entry =
   ; original : string option
   ; initial : screen
   ; service : Service.t Lazy.t
+  ; destination_root : Destination_path.root Lazy.t
   ; screen : screen ref
   ; scroll : int ref
   ; pasted : bool ref
@@ -220,7 +265,35 @@ type entry =
 
 let entry ?original ~start initial =
   { start; original; initial; service = lazy (Service.create ~permitted_roots:[ start ])
+  ; destination_root = lazy (Destination_path.root start)
   ; screen = ref initial; scroll = ref 0; pasted = ref false }
+;;
+
+let path_components path =
+  String.split path ~on:'/' |> List.filter ~f:(Fn.non String.is_empty)
+;;
+
+let inside_project ~original destination =
+  Option.exists original ~f:(fun root ->
+    List.is_prefix
+      (path_components destination)
+      ~prefix:(path_components root)
+      ~equal:String.equal)
+;;
+
+(** Recheck the local authoring boundary before preview and apply. *)
+let visit_destination entry destination f =
+  try
+    let root, parts =
+      Destination_path.select [ Lazy.force entry.destination_root ] destination
+    in
+    if inside_project ~original:entry.original destination
+    then Error "Choose a destination outside the current project."
+    else Destination_path.visit root parts (fun _ snapshot -> f snapshot)
+  with
+  | Destination_path.Invalid message -> Error message
+  | Destination_path.Changed message ->
+    Error (message ^ ". Choose a new or empty directory.")
 ;;
 
 let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ graph) =
@@ -256,21 +329,22 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
           then Filename.concat start s
           else s
         in
-        let fail msg = show (Failure (String.split_lines msg)) in
+        let fail ?retry msg = show (Failure (String.split_lines msg, retry)) in
         let failure (f : Authoring.Failure.t) =
           show
             (Failure
-               ((Sexp.to_string (Authoring.Failure.sexp_of_kind f.kind) ^ ": " ^ f.message)
-                :: List.map f.created_files ~f:(fun p -> "Already created: " ^ p)))
+               ( (Sexp.to_string (Authoring.Failure.sexp_of_kind f.kind) ^ ": " ^ f.message)
+                 :: List.map f.created_files ~f:(fun p -> "Already created: " ^ p)
+               , None ))
         in
-        let work label f finish =
+        let work ?retry label f finish =
           Effect.Many
             [ show (Busy label)
             ; Effect.bind
                 (Effect.of_deferred_thunk (fun () ->
                    Monitor.try_with_or_error (fun () -> In_thread.run f)))
                 ~f:(function
-                  | Error e -> fail (Error.to_string_hum e)
+                  | Error e -> fail ?retry (Error.to_string_hum e)
                   | Ok r -> finish r)
             ]
         in
@@ -289,6 +363,7 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
           match !screen with
           | Name s -> show (Name (f s))
           | Destination (n, s) -> show (Destination (n, f s))
+          | Bluespec_destination s -> show (Bluespec_destination (f s))
           | Existing s -> show (Existing (f s))
           | _ -> Effect.Ignore
         in
@@ -343,10 +418,16 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
              | Cancelled -> cancel ()
              | Failed f -> failure f
              | _ -> fail "Unexpected cancel response")
+          | Some Escape, Bluespec_review { input; _ } -> show (Bluespec_destination input)
+          | Some Escape, Bluespec_destination _ -> show Preset
+          | Some (Escape | Character 'q'), State_in_use _ -> exit ()
           | Some Escape, _ -> cancel ()
           | Some (Character 'q'), Closed -> exit ()
-          | Some (Character 'p'), Closed | Some Enter, Failure _ -> show initial
-          | Some (Character 'c'), Menu -> show (Name "")
+          | Some (Character 'p'), Closed -> show initial
+          | Some Enter, Failure (_, retry) -> show (Option.value retry ~default:initial)
+          | Some (Character 'c'), Menu -> show Preset
+          | Some (Enter | Character 'h'), Preset -> show (Name "")
+          | Some (Character 'b'), Preset -> show (Bluespec_destination "")
           | Some (Character 'o'), Menu -> show (Existing "")
           | Some Enter, Name s when not (String.is_empty (String.strip s)) ->
             show (Destination (String.strip s, ""))
@@ -358,11 +439,7 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
             in
             (* Match path components like the authoring service, including repeated
                slashes. The service rejects dot components and symlink traversal. *)
-            let parts p =
-              String.split ~on:'/' p |> List.filter ~f:(Fn.non String.is_empty)
-            in
-            if Option.exists original ~f:(fun root ->
-                 List.is_prefix (parts destination) ~prefix:(parts root) ~equal:String.equal)
+            if inside_project ~original destination
             then fail "Choose a destination outside the current project."
             else (
               let target : Authoring.Target.t =
@@ -376,6 +453,27 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
                   | Previewed p -> show (Review p)
                   | Failed f -> failure f
                   | _ -> fail "Unexpected preview response"))
+          | Some Enter, Bluespec_destination input ->
+            let destination =
+              path (if bound && String.is_empty (String.strip input) then bluespec_default else input)
+            in
+            let retry = Bluespec_destination input in
+            work ~retry "Checking destination…"
+              (fun () -> visit_destination entry destination (fun snapshot -> Ok snapshot))
+              (function
+                | Error message -> fail ~retry message
+                | Ok snapshot -> show (Bluespec_review { input; destination; snapshot }))
+          | Some Enter, Bluespec_review { input; destination; snapshot } ->
+            let retry = Bluespec_destination input in
+            work ~retry "Creating Bluespec Classic project…"
+              (fun () ->
+                visit_destination entry destination (fun current ->
+                  if not (Destination_path.equal_snapshot snapshot current)
+                  then Error "Destination changed since preview. Review it again before creating."
+                  else Bluespec_scaffold.create ~destination))
+              (function
+                | Error message -> fail ~retry message
+                | Ok root -> open_root root)
           | Some Enter, Review p ->
             work
               "Creating project…"
@@ -384,12 +482,12 @@ let component ~no_mouse ~entry ~on_open ~on_cancel ~exit ~dimensions (local_ gra
                 | Applied _ -> open_root p.operation.target.destination
                 | Failed f -> failure f
                 | _ -> fail "Unexpected apply response")
-          | Some Next, (Review _ | Failure _) ->
+          | Some Next, (Review _ | Bluespec_review _ | Failure _ | State_in_use _) ->
             let _, rows, footer = contents ~bound !screen in
             let _, _, _, _, _, last, _ = layout dimensions rows footer in
             scroll := Int.min last (!scroll + 1);
             refresh ()
-          | Some Previous, (Review _ | Failure _) ->
+          | Some Previous, (Review _ | Bluespec_review _ | Failure _ | State_in_use _) ->
             scroll := Int.max 0 (!scroll - 1);
             refresh ()
           | Some Backspace, _ -> edit Terminal_presentation.Text_edit.drop_character

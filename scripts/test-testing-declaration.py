@@ -102,11 +102,15 @@ class Tty(Terminal):
         return Caret(self, source_line, column)
 
     def quit_silver(self):
+        # Exercise the ordinary dashboard quit route after Back, rather than
+        # bypassing it: the editor/return destination must yield input to Silver.
         os.write(self.master, b"q")
+        self.capture("quit-confirmation", ["Quit Silver?", ">[Yes]", "[No]"])
+        os.write(self.master, b"\r")
         deadline = time.monotonic() + 12
         while self.process.poll() is None:
             self.drain(.15, allow_exit=True)
-            assert time.monotonic() < deadline, "Silver's quit key did not work after Back"
+            assert time.monotonic() < deadline, "Silver's confirmed quit did not work after Back"
         assert self.process.returncode == 0, self.process.returncode
 
 
@@ -310,7 +314,7 @@ def run_live(args):
     # state tree so no running Silver session/history can supply a cached catalog.
     env = dict(os.environ, XDG_STATE_HOME=str(args.evidence / "state"))
     argv = [str(args.client), "--diagnostics-file", str(args.evidence / "silver.log")]
-    if args.client.name != "silver":
+    if args.client.name != "ag":
         argv.append("--standalone")  # a source-built main.exe is not the installed entry point
     tty = Tty(SimpleNamespace(evidence=args.evidence, env=env),
               argv=argv,
@@ -389,7 +393,7 @@ def run_live(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="probe the actual configured example; no edits or launches")
-    parser.add_argument("--client", type=Path, help="Silver executable (default for --live: ~/.local/bin/silver)")
+    parser.add_argument("--client", type=Path, help="Silver executable (default for --live: ~/.local/bin/ag)")
     parser.add_argument("--provider", type=Path,
                         help="prebuilt controlled FIFO test_provider.exe (no simulator needed)")
     parser.add_argument("--example", type=Path, default=HERE.parents[1] / "hardcaml_asic_example",
@@ -399,10 +403,14 @@ def main():
     if args.live:
         if args.provider:
             parser.error("--live uses the project's configured provider, not --provider")
-        args.client = args.client or Path.home() / ".local/bin/silver"
+        args.client = args.client or Path.home() / ".local/bin/ag"
     elif not (args.provider and args.client):
         parser.error("fixture mode requires --provider and --client")
-    for name in ("client", "provider", "example"):
+    # Keep argv[0] as supplied for ag, including Dune's install-tree symlink.
+    # In live mode this basename determines whether to exercise bare discovery.
+    args.client.resolve(strict=True)
+    args.client = args.client.absolute()
+    for name in ("provider", "example"):
         if value := getattr(args, name):
             setattr(args, name, value.resolve(strict=True))
     os.umask(0o077)

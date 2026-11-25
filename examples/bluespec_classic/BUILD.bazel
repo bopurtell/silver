@@ -1,0 +1,63 @@
+load(":simulation.bzl", "bench_test", "bluespec_rtl")
+
+TOP = "mkCounter"
+TOP_SOURCE = "Counter.bs"
+
+# Add each imported IP library's Bazel label here, not its directory or files.
+IP_SOURCES = [
+    # "//ip/sample_ip:sources",
+]
+
+bluespec_rtl(
+    name = "rtl",
+    srcs = glob(["*.bs", "*.bsv"], allow_empty = True) + IP_SOURCES,
+    top = TOP,
+    top_source = TOP_SOURCE,
+)
+
+filegroup(
+    name = "generated_modules",
+    srcs = [":rtl"],
+    output_group = "generated_modules",
+)
+
+genrule(
+    name = "bench",
+    srcs = [
+        ":generated_modules",
+        ":rtl",
+        "bench.cpp",
+        "checker.rs",
+    ],
+    outs = ["counter_bench"],
+    cmd = """
+        work=$$(mktemp -d)
+        trap 'rm -rf "$$work"' EXIT
+        bsc_dir=$${BLUESPECDIR:-}
+        if [[ -z "$$bsc_dir" ]]; then
+            bsc_help=$$(LC_ALL=C bsc -help)
+            bsc_dir=$$(sed -n 's/^Bluespec directory: //p' <<< "$$bsc_help")
+        fi
+        if [[ -z "$$bsc_dir" || ! -d "$$bsc_dir/Verilog" ]]; then
+            echo 'Cannot locate the BSC Verilog library. Set BLUESPECDIR to the BSC lib directory.' >&2
+            exit 1
+        fi
+        rustc --edition=2021 --crate-type=staticlib -C opt-level=2 -C panic=abort \\
+            -o "$$work/libchecker.a" $(location checker.rs)
+        verilator --cc --exe --build -j 2 --trace --top-module %s \\
+            --Mdir "$$work/obj" -o counter_bench \\
+            -y "$(location :generated_modules)" -y "$$bsc_dir/Verilog" \\
+            -I"$$bsc_dir/Verilog" \\
+            -LDFLAGS "$$work/libchecker.a -ldl -lpthread -lm" \\
+            "$$PWD/$(location :rtl)" "$$PWD/$(location bench.cpp)"
+        cp "$$work/obj/counter_bench" "$@"
+    """ % TOP,
+    executable = True,
+    tags = ["no-remote"],
+)
+
+bench_test(
+    name = "simulation",
+    bench = ":bench",
+    size = "small",
+)

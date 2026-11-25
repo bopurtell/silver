@@ -3,8 +3,9 @@ open! Core
 (** Project-root resolution shared by the terminal opener and the setup commands.
 
     A project root is a directory directly containing a {e regular file} named
-    [dune-project] (a symlink to a regular file counts, matching the daemon's opener). A
-    directory containing only [dune], or a VCS root, is not a project root.
+    [dune-project] or [.silver/project.json]. A symlink to a regular file counts as a
+    marker for discovery, which does not validate the manifest. A directory containing
+    only [dune], or a VCS root, is not a project root.
 
     Upward discovery first canonicalizes the starting directory with [realpath], then
     inspects that directory and each physical ancestor in turn up to [/], selecting the
@@ -19,10 +20,13 @@ open! Core
 (** The marker file name, [dune-project]. *)
 val marker : string
 
+val silver_marker : string
+
 module Discovered : sig
   type t =
     { start : string (** Canonical starting directory. *)
     ; root : string (** Nearest canonical ancestor (or [start]) with the marker. *)
+    ; marker : string (** Regular file that marked the selected root. *)
     ; enclosing : string option
     (** The next enclosing project root above [root], if any; never selected. *)
     }
@@ -53,8 +57,8 @@ val discover
 val describe : Discovered.t -> explicit_flag:string -> string
 
 (** Validate an explicitly named root without any ancestor search: [realpath], must be a
-    directory, and must directly contain a regular [dune-project]. Returns the canonical
-    root. Error strings match the initializer's established messages. *)
+    directory, and must directly contain a regular [dune-project] or
+    [.silver/project.json]. Returns the canonical root. *)
 val explicit_root : string -> (string, string) Result.t
 
 (** Entry-point helper. An explicit root wins and is returned unchanged, so the caller

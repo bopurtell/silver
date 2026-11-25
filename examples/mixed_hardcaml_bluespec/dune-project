@@ -1,0 +1,2 @@
+(lang dune 3.0)
+(name mixed_hardcaml_bluespec)

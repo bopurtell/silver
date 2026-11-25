@@ -12,7 +12,7 @@ let flags =
     flag
       "--root"
       (optional string)
-      ~doc:"DIR Project root (default: nearest Dune project)"
+      ~doc:"DIR Project root (default: nearest Silver Bazel or Dune project)"
   and endpoint =
     flag
       "--endpoint"
@@ -168,7 +168,7 @@ let new_chip =
 
 let new_ip =
   Command.async
-    ~summary:"Create a reusable Hardcaml library and test"
+    ~summary:"Create a reusable Hardcaml or Classic Bluespec IP library"
     (let open Command.Let_syntax in
      let%map_open flags
      and template =
@@ -189,14 +189,14 @@ let new_ip =
 
 let new_module =
   Command.async
-    ~summary:"Add a source module to an existing Dune library"
+    ~summary:"Add a source module to an existing Hardcaml or Classic Bluespec library"
     (let open Command.Let_syntax in
      let%map_open flags
      and library =
        flag
          "--library"
          (required string)
-         ~doc:"DIR Library directory relative to the project root"
+         ~doc:"DIR Dune library or Bazel package directory relative to the project root"
      and name = anon ("MODULE_NAME" %: string) in
      fun () -> run flags ~recipe:A.module_recipe ~name ~library:(Some library))
 ;;

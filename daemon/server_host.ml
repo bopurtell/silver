@@ -45,7 +45,9 @@ let session_temporary_paths () =
     Filename.concat session "logs", Some scratch
 ;;
 
-let start
+type state_lock_conflict = { state_dir : string }
+
+let start_with_state_lock
   ?(authoring_roots = [])
   ~port
   ~discovery_dir
@@ -76,12 +78,11 @@ let start
     Hardcaml_workbench_native_http.Runtime.paths ~directory:state_dir ()
   in
   let%bind () = Hardcaml_workbench_native_http.Runtime.ensure_directory state_paths in
-  let%bind state_lock =
-    Hardcaml_workbench_native_http.Runtime.acquire_lifetime_lock state_paths
-  in
-  let state_lock =
-    Or_error.tag state_lock ~tag:("cannot open Silver state at " ^ state_dir)
-    |> Or_error.ok_exn
+  let%bind.Deferred.Result state_lock =
+    let%map lock =
+      Hardcaml_workbench_native_http.Runtime.try_acquire_lifetime_lock state_paths
+    in
+    Result.of_option lock ~error:{ state_dir }
   in
   let%bind log_dir, subprocess_temp_dir = In_thread.run session_temporary_paths in
   let%bind service =
@@ -144,7 +145,37 @@ let start
     | Some fd ->
       Unix.funlock fd;
       Unix.close fd);
-  return endpoint
+  return (Ok endpoint)
+;;
+
+let state_lock_failure { state_dir } =
+  Error.tag
+    (Hardcaml_workbench_native_http.Runtime.lifetime_lock_held_error ())
+    ~tag:("cannot open Silver state at " ^ state_dir)
+;;
+
+let start
+  ?authoring_roots
+  ~port
+  ~discovery_dir
+  ~state_dir
+  ~inspection_detail_cache_entries
+  ~inspection_detail_cache_bytes
+  ()
+  =
+  let%map result =
+    start_with_state_lock
+      ?authoring_roots
+      ~port
+      ~discovery_dir
+      ~state_dir
+      ~inspection_detail_cache_entries
+      ~inspection_detail_cache_bytes
+      ()
+  in
+  result
+  |> Result.map_error ~f:state_lock_failure
+  |> Or_error.ok_exn
 ;;
 
 let handle_signals signals =
@@ -154,7 +185,7 @@ let handle_signals signals =
       signal)
 ;;
 
-let start_standalone ~project_root ~state_dir =
+let try_start_standalone ~project_root ~state_dir =
   let state_dir =
     Option.value_or_thunk state_dir ~default:(fun () ->
       let state_home =
@@ -168,7 +199,7 @@ let start_standalone ~project_root ~state_dir =
         (Md5.digest_string (Filename_unix.realpath project_root) |> Md5.to_hex))
   in
   handle_signals [ Signal.hup; Signal.int; Signal.term ];
-  start
+  start_with_state_lock
     ~authoring_roots:[ Filename_unix.realpath project_root ]
     ~port:0
     ~discovery_dir:None
@@ -176,4 +207,9 @@ let start_standalone ~project_root ~state_dir =
     ~inspection_detail_cache_entries:default_cache_entries
     ~inspection_detail_cache_bytes:default_cache_bytes
     ()
+;;
+
+let start_standalone ~project_root ~state_dir =
+  let%map result = try_start_standalone ~project_root ~state_dir in
+  result |> Result.map_error ~f:state_lock_failure |> Or_error.ok_exn
 ;;

@@ -242,7 +242,7 @@ def pty_check(session):
         for key in (str(timing_number).encode(), b'\t', b'j', b'k', b'1'):
             os.write(master, key)
             drain(.15)
-        os.write(master, b'q')
+        os.write(master, b'Q')
         process.wait(timeout=5)
         require(process.returncode == 0, 'PTY client failed')
     finally:
@@ -451,7 +451,7 @@ def reopen_real(args):
         follow_tile = next(t for t in field(final, 'tiles') if field(t, 'id') == follow)
         require(field(pinned_tile, 'binding') == ['Pin_run', runs[0]] and field(follow_tile, 'binding') == 'Follow',
                 'Saved pin/follow bindings incorrect')
-        os.write(master, b'q')
+        os.write(master, b'Q')
         process.wait(timeout=5)
         require(process.returncode == 0, 'Interactive client exit failed')
         session.stop()

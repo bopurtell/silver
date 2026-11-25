@@ -64,13 +64,22 @@ let with_startup_lock paths ~f =
     Unix.close fd)
 ;;
 
-let acquire_lifetime_lock paths =
+let try_acquire_lifetime_lock paths =
   let%bind fd = open_lock paths.lifetime_lock in
   if Unix.try_flock fd Unix.Lock_mode.Exclusive
-  then return (Ok fd)
+  then return (Some fd)
   else (
     let%map () = Unix.close fd in
-    Or_error.error_string "default daemon lifetime lock is already held")
+    None)
+;;
+
+let lifetime_lock_held_error () =
+  Error.of_string "default daemon lifetime lock is already held"
+;;
+
+let acquire_lifetime_lock paths =
+  let%map lock = try_acquire_lifetime_lock paths in
+  Result.of_option lock ~error:(lifetime_lock_held_error ())
 ;;
 
 let lifetime_lock_is_held paths =

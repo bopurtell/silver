@@ -154,11 +154,11 @@ def first_run(project: Path, evidence: Path, tools: Path, env: dict, record, *, 
         path.mkdir(mode=0o700, exist_ok=True)
         require(not any(path.iterdir()), f"Silver requires fresh {key}: {path}")
         runtime_env[key] = str(path)
-    silver = shutil.which("silver", path=runtime_env.get("PATH", ""))
+    silver = shutil.which("ag", path=runtime_env.get("PATH", ""))
     dune = shutil.which("dune", path=runtime_env.get("PATH", ""))
     renderer = shutil.which("hardcaml-asic-starter", path=runtime_env.get("PATH", ""))
-    require(silver and dune and renderer, "Installed silver, dune and hardcaml-asic-starter must be on PATH")
-    # Preserve argv[0]: the installed `silver` launcher has its own startup behavior.
+    require(silver and dune and renderer, "Installed ag, dune and hardcaml-asic-starter must be on PATH")
+    # Preserve argv[0]: the installed `ag` launcher has its own startup behavior.
     session = SimpleNamespace(env=runtime_env, evidence=evidence)
     with closing(Terminal(session, argv=[os.path.abspath(silver)], cwd=project, width=200, height=48)) as term:
         term.capture("empty-workspace", ["Unbound workspace", "Create project here"])

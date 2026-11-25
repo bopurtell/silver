@@ -8,6 +8,7 @@ module Cobalt_location = Cobalt_hosted.Open_location
 module Appearance = Terminal_presentation.Appearance
 module Config = Silver_editor.Editor_config
 module Theme = Silver_editor.Editor_theme
+module Clipboard = Silver_editor.Editor_clipboard
 
 type project =
   { id : Project_id.t
@@ -72,6 +73,7 @@ type mount =
   ; commands : Cobalt_hosted.Host_command.t list Bonsai.Expert.Var.t
   ; mutable select_command : string -> unit Effect.t
   ; mutable toggle_terminal : int option -> unit Effect.t
+  ; mutable clipboard_notice : string -> unit Effect.t
   ; mutable command_generation : int
   }
 
@@ -114,6 +116,7 @@ let mount mounts (owner : t) project =
          ; commands = Bonsai.Expert.Var.create []
          ; select_command = (fun _ -> Effect.Ignore)
          ; toggle_terminal = (fun _ -> Effect.Ignore)
+         ; clipboard_notice = (fun _ -> Effect.Ignore)
          ; command_generation = 0
          }
        in
@@ -144,6 +147,8 @@ let place ?appearance mounts placement =
 ;;
 
 let component mounts (local_ graph) =
+  let clipboard = Clipboard.create () in
+  let write_to_tty = Expert.Write_to_tty.write_string_to_tty graph in
   let registry = Bonsai.Expert.Var.value mounts.registry in
   let entries = Bonsai.map registry ~f:snd in
   let selected = Bonsai.Expert.Var.value mounts.selected in
@@ -187,7 +192,18 @@ let component mounts (local_ graph) =
               |> Bonsai.cutoff ~equal:Cobalt_hosted.Theme.equal
             in
             let pane =
+              let set_clipboard =
+                let%arr write = write_to_tty in
+                fun text ->
+                  Clipboard.copy
+                    clipboard
+                    ~mode:entry.config.clipboard
+                    ~write
+                    ~notice:(fun message -> entry.clipboard_notice message)
+                    text
+              in
               Cobalt_hosted.component ~layout:entry.config.layout ~appearance
+                ~set_clipboard
                 ~host_commands:(Bonsai.Expert.Var.value entry.commands)
                 ~on_host_command:(Bonsai.return (fun id -> entry.select_command id))
                 ~on_toggle_terminal:(Bonsai.return (fun number -> entry.toggle_terminal number))

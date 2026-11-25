@@ -41,7 +41,10 @@ val contains : geometry -> x:int -> y:int -> bool
 
 (** [project_root] is the absolute local working directory, not a run endpoint.
     [None] selects the project's most recent number (initially 1); toggling the
-    selected number hides it. Invalid numbers leave the overlay unchanged.
+    selected number hides it. Selecting a hidden or different number starts a
+    fresh shell if that number exited or failed. A visible exit screen is
+    retained until the next explicit reopen or restart, never auto-respawned.
+    Invalid numbers leave the overlay unchanged.
     [dimensions] is the full viewport. The caller owns workspace/tile focus. *)
 val toggle
   :  t
@@ -59,6 +62,10 @@ val resize : t -> dimensions:Bonsai_term.Dimensions.t -> unit
 
 (** Start the selected number again only after exit or failure. *)
 val restart : t -> unit
+
+(** A selected shell is restartable only after exit or startup failure.
+    A launch in progress is not restartable. *)
+val restartable : t -> bool
 
 (** Forward keyboard and paste events to the selected live shell; the caller
     handles overlay and frontend shortcuts before calling this, except while

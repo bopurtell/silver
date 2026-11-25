@@ -227,10 +227,13 @@ let toggle t ~project_root ~number ~dimensions =
       cancel_paste t;
       t.dimensions <- dimensions;
       let shell =
-        match shell with
-        | Some shell ->
-          resize_selected t shell;
-          shell
+         match shell with
+         | Some shell ->
+           (* Reopening an exited number is a new user intent, not a request to
+              focus the retained exit screen. Starting remains live so repeated
+              selections cannot enqueue competing Starts during launch. *)
+           if live shell then resize_selected t shell else start t shell;
+           shell
         | None ->
           (* Cobalt's keyspace is global to one pool; these private IDs namespace
              the user-visible number by project without allocating a range. *)
@@ -263,6 +266,8 @@ let restart t =
       start t shell;
       changed t))
 ;;
+
+let restartable t = Option.exists t.selected ~f:(fun shell -> not (live shell))
 
 let key (key : Event.Key.t) mods : Model.key =
   let has modifier = List.mem mods modifier ~equal:Event.Modifier.equal in
@@ -361,9 +366,9 @@ let render t ~dimensions =
       | Running, None -> "Running"
       | Running, Some notice -> "Warning: " ^ notice
       | Exited status, notice ->
-        let status = sprintf "%s (F12 restart)" (String.capitalize status) in
+         let status = sprintf "%s (reopen or F12 restart)" (String.capitalize status) in
         Option.value_map notice ~default:status ~f:(fun notice -> status ^ " · " ^ notice)
-      | Failed error, _ -> "Failed (F12 restart): " ^ error
+       | Failed error, _ -> "Failed (reopen or F12 restart): " ^ error
     in
     Shared_terminal_view.render
       ~number:shell.number

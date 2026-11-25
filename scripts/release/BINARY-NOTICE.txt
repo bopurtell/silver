@@ -7,6 +7,8 @@ Run ./install.sh --without-asic to install without a provider check. Omit
 This archive does not include the OCaml simulation-provider SDK, a project
 toolchain, an ASIC provider or EDA tools. Use the Silver source archive to
 install the SDK. See RELEASE.json for archive provenance.
+The editable Bluespec Classic starter is included in ag; its initialization
+command (ag init --bluespec [DIR]) requires python3 on PATH.
 
 Distribution review: not established by this packaging step. The binary
 statically links Cobalt code including its GPLv3 GAS grammar. Available

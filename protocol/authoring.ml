@@ -129,6 +129,12 @@ let module_recipe = "hardcaml-module-v1"
 let new_flow_recipe = "hardcaml-asic-new-flow-v1"
 let duplicate_profile_recipe = "hardcaml-asic-duplicate-profile-v1"
 
+(* These logical recipes dispatch to the language of the bound open project.
+   Their historical wire names are retained for existing clients. *)
+let is_source_recipe recipe =
+  List.mem [ ip_empty_recipe; ip_sample_recipe; module_recipe ] recipe ~equal:String.equal
+;;
+
 let targets_project_root recipe =
   List.mem
     [ chip_recipe
