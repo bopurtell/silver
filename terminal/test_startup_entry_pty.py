@@ -337,7 +337,12 @@ def exercise(client, base, real_renderer=None):
         term.capture("open", ["Existing project directory"])
         send(term, ".\r")
         # A long sandbox root can wrap the prose mid-word.
-        term.capture("open-error", ["Project error", "dune-project"])
+        wrap = r"(?: *│\n *│ *)?"
+        term.capture("open-error", [
+            "Project error",
+            re.compile(wrap.join(map(re.escape, "dune-project"))),
+            re.compile(wrap.join(map(re.escape, ".silver/project.json"))),
+        ])
         dismiss(term, "Project error")
         send(term, "p")
         menu(term)

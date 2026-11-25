@@ -117,7 +117,7 @@ profile or deliberately pinned setup. A nonempty invalid override fails rather
 than falling back to automatic discovery. Historical `real-tests-v2.json` is an
 optional retained setup artifact, not required for ordinary testing.
 
-Prepare the example's [ordinary main installation](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md)
+Prepare the example's [ordinary main installation](https://github.com/bopurtell/hardcaml_asic_example/blob/oxcaml/docs/workbench_main.md)
 first. Then use the explicit config helper, choosing a **new output filename**:
 
 ```bash

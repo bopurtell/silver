@@ -16,10 +16,10 @@ Neither installation provisions the toolchain of a project you open.
 - **Simulation:** The project must supply a compatible simulation provider, and
   any simulators or libraries it requires. Projects that compile an OCaml
   provider may need the `silver_provider` SDK.
-- **ASIC:** Install [hardcaml_asic](https://github.com/LeEmperor/hardcaml_asic#install-the-provider)
+- **ASIC:** Install [hardcaml_asic](https://github.com/bopurtell/hardcaml_asic/tree/oxcaml)
   on the service host. Silver calls it as a separate process; a design that
   imports `Hardcaml_asic` also needs its compiled libraries in the project's
-  build environment. Follow the [provider's bootstrap guide](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/bootstrap.md)
+  build environment. Follow the [provider's bootstrap guide](https://github.com/bopurtell/hardcaml_asic/blob/oxcaml/docs/guides/bootstrap.md)
   to provision the flow's PDK and EDA tools. A daemon on another host uses
   that host's dependencies, not the client's.
 

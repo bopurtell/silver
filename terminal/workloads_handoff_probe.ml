@@ -6,8 +6,7 @@ module T = Terminal_presentation.Testing_workspace
 module V = Terminal_presentation.Simulation_view
 module S = Simulation
 
-let main () =
-  let root = Core_unix.mkdtemp "/tmp/opencode/memory-workload-handoff-capture-" in
+let exercise root =
   let backend = Backend.create ~state_dir:(Filename.concat root "state") in
   let project = Backend.project backend root in
   let dir = Filename.concat project.dir "entry" in
@@ -393,6 +392,16 @@ let main () =
      namespace negatives passed\n\
      %!";
   Deferred.unit
+;;
+
+let main () =
+  let root =
+    Core_unix.mkdtemp
+      (Filename.concat Filename.temp_dir_name "memory-workload-handoff-capture-")
+  in
+  Monitor.protect
+    ~finally:(fun () -> Silver_backend.Service.cleanup_path root)
+    (fun () -> exercise root)
 ;;
 
 let () =

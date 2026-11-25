@@ -107,11 +107,11 @@ silver-author new-module helper --library ip/accum --apply
 
 ## Configure the ASIC example simulation suites
 
-1. Install the [hardcaml_asic provider](https://github.com/LeEmperor/hardcaml_asic#install-the-provider)
+1. Install the [hardcaml_asic provider](https://github.com/bopurtell/hardcaml_asic/tree/oxcaml)
    and the [Silver OCaml provider SDK](install.md#install-the-ocaml-provider-sdk)
    in the example's own compatible switch.
-2. In a checkout of [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example),
-   run `./bootstrap.sh` in that environment. It provisions the flow tools and
+2. In a checkout of [hardcaml_asic_example](https://github.com/bopurtell/hardcaml_asic_example),
+   run `./bootstrap.sh --with-silver` in that environment. It provisions the flow tools and
    configures the example's ASIC and simulation providers.
 3. Run `ag`. Open **Testing** and select the **Controlled FIFO** or
    **Memory workloads** suite when discovery completes. See the

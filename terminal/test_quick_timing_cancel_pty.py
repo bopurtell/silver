@@ -88,10 +88,21 @@ def exercise(client, daemon, base, scenario, query):
             # row must be viewed-flow, not the explicit workflow command or bulk.
             prefix = "Cancel — controlled_fifo-flow · "
             wanted = prefix + field(w, "key")
+            workflow_id = field(w, "id")
+            # Before registration, the same viewed command identifies the
+            # workflow by phase and its compressed opaque ID, not its key.
+            preallocation_title = (
+                f"Cancel — {phase} · work…{workflow_id[-4:]} · controlled_fifo-flow")
             for attempt in range(8):
                 row = selected_row(term, query, f"stop-{scenario}-{attempt}")
                 painted = row.split(" · stop viewed ASIC flow", 1)[0].rstrip()
-                if len(painted) > len(prefix) and wanted.startswith(painted):
+                if scenario == "physical-allocated":
+                    # The registered-run label includes the launch key, which
+                    # may be clipped by the palette.
+                    matched = len(painted) > len(prefix) and wanted.startswith(painted)
+                else:
+                    matched = painted == preallocation_title
+                if matched:
                     break
                 dismiss(term)
             else:

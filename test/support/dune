@@ -10,6 +10,7 @@
   terminal.py
   ../../scripts/test-native-execution.py
    ../../scripts/test-retained-asic-dashboard.py
+   ../../scripts/isolated_example.py
    ../../scripts/test-native-simulation.py
    ../../scripts/fixtures/simulation_fixture_wire.py
    ../../scripts/fixtures/testing_layout.py)

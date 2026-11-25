@@ -352,10 +352,8 @@ let test_bazel_project ~simulation_fixture ~directory =
               (log.eof && String.equal text (sprintf "bazel %s %s\n" name label))
               "Bazel did not receive the declared arguments or stream its log")
       in
-      let common_config = Filename.concat root ".silver" in
-      Core_unix.mkdir common_config;
       Out_channel.write_all
-        (Filename.concat common_config "silver-simulation.sexp")
+        (Filename.concat config "silver-simulation.sexp")
         ~data:
           (sprintf
              "((schema_version 1)(provider_executable /usr/bin/python3)(provider_args (%s))\

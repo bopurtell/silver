@@ -617,7 +617,7 @@ let%test_unit "middle truncation preserves location and final directory when it 
   let root = "/home/wayne/devel/jane/silver/test/fixtures/example_project" in
   [%test_result: string]
     (middle_truncate ~width:45 root)
-    ~expect:"/home/wayne/devel/jane/har.../example_project";
+    ~expect:"/home/wayne/devel/jane/sil.../example_project";
   [%test_result: int] (String.length (middle_truncate ~width:20 root)) ~expect:20;
   [%test_result: string] (middle_truncate ~width:20 root) ~expect:"/.../example_project"
 ;;

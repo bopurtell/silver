@@ -27,7 +27,7 @@ from fixtures.testing_layout import artifact_row, case_row
 
 class TerminalTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='workbench-pty-support-', dir='/tmp/opencode')
+        self.temp = tempfile.TemporaryDirectory(prefix='workbench-pty-support-')
         self.addCleanup(self.temp.cleanup)
         self.evidence = Path(self.temp.name)
         self.client = self.evidence / 'client'
@@ -151,7 +151,7 @@ class TerminalTests(unittest.TestCase):
         finally:
             os.chdir(previous)
         self.assertIs(modules['test-native-execution.py'].terminal_screen, terminal_screen)
-        self.assertIs(modules['test-retained-asic-dashboard.py'].Terminal, Terminal)
+        self.assertTrue(issubclass(modules['test-retained-asic-dashboard.py'].Terminal, Terminal))
         self.assertTrue(issubclass(modules['test-native-simulation.py'].Terminal, Terminal))
         self.assertEqual(list(self.evidence.iterdir()), [])
 

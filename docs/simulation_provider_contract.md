@@ -19,7 +19,7 @@ verification environment. In UVM terms, sequences/items cover the traffic portio
 FS2v1 exposes suites/cases and execution events, **not** an arbitrary workload graph
 or N-workload selection API. PT.8's project-owned cases execute one fixed memory
 workload each through this same runner and publish a separately verified result
-contract. See [workload terminology](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
+contract. See [workload terminology](https://github.com/bopurtell/hardcaml_asic/blob/oxcaml/docs/guides/variant-comparison.md#terminology-stimulus-workload-test-and-suite).
 This clarification changes no frozen wire schema or execution behavior.
 
 ## Configuration and process invocation

@@ -27,7 +27,7 @@ and stop if a block reports an error.
   for the [Bluespec starter](docs/bluespec_classic.md). Simulation needs the project's configured
   simulation provider and any tools it invokes.
 - **ASIC flows:** The service host also needs a compatible
-  [hardcaml_asic provider](https://github.com/LeEmperor/hardcaml_asic#install-the-provider).
+  [hardcaml_asic provider](https://github.com/bopurtell/hardcaml_asic/tree/oxcaml).
   The design may need the provider's OCaml libraries to build. Install the
   selected flow's PDK and EDA tools separately using the provider's provisioning
   instructions. They are not bundled with Silver.
@@ -127,7 +127,7 @@ Bluespec design with Rust verification](docs/bluespec_classic.md), run
 
 ## Try the ASIC example
 
-The [hardcaml_asic_example](https://github.com/LeEmperor/hardcaml_asic_example)
+The [hardcaml_asic_example](https://github.com/bopurtell/hardcaml_asic_example)
 repository contains a FIFO design with a `standard` flow and a `balanced` profile.
 This walkthrough runs synthesis on that design; it does not require any saved runs.
 
@@ -135,18 +135,18 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
    `hardcaml_asic` if you don't already have a compatible provider:
 
    ```sh
-   git clone https://github.com/LeEmperor/hardcaml_asic.git &&
+   git clone --branch oxcaml https://github.com/bopurtell/hardcaml_asic.git &&
      (cd hardcaml_asic && ./install.sh)
    ```
 
 2. Clone and enter the example:
 
    ```sh
-   git clone https://github.com/LeEmperor/hardcaml_asic_example.git && cd hardcaml_asic_example
+   git clone --branch oxcaml https://github.com/bopurtell/hardcaml_asic_example.git && cd hardcaml_asic_example
    ```
 
 3. Provision the tools and configure the project for synthesis. The
-   [provider's bootstrap guide](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/guides/bootstrap.md)
+   [provider's bootstrap guide](https://github.com/bopurtell/hardcaml_asic/blob/oxcaml/docs/guides/bootstrap.md)
    covers host requirements for the flow, including Docker and Nix.
 
    ```sh

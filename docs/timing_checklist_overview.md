@@ -58,7 +58,7 @@ Analysis requires `timing_analysis1`; executable Timing additionally requires
 `timing_stage1` and a declared fresh endpoint. New recipe schema 4 has seven stages
 and Timing-scoped analysis schema 2; historical six-stage recipes and signoff-scoped
 schema-1 analyses remain readable. See the sibling
-[executable provider contract](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/development/executable-timing.md).
+[executable provider contract](https://github.com/bopurtell/hardcaml_asic/blob/oxcaml/docs/guides/timing-intent.md).
 
 The provider captures an immutable source **at successful Timing completion**, before
 Signoff starts, and can recover proven STA evidence after a failed segment. Historical

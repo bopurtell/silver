@@ -22,7 +22,7 @@ If `/tmp` has a small user quota, put the evidence directory on disk and set
 - `ag`, `hardcaml-asic-starter`, `hardcaml-asic-targets`, and `hardcaml-asic-flow`
   on `PATH`; the active Dune context must be able to build a project that uses
   `hardcaml_asic`.
-- A [provisioned tool root](https://github.com/LeEmperor/hardcaml_asic/blob/HEAD/docs/guides/bootstrap.md),
+- A [provisioned tool root](https://github.com/bopurtell/hardcaml_asic/blob/HEAD/docs/guides/bootstrap.md),
   including the IHP PDK, TT support tools, and a reachable Docker engine with
   the locked LibreLane image. To check this installation separately:
 

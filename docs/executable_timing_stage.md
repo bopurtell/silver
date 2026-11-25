@@ -102,7 +102,7 @@ Discovery requires `timing_stage1` plus a declared fresh `timing` endpoint. The
 `timing_analysis1` capability alone does not authorize execution. HTTP consumers
 negotiate `X-Workbench-Asic-Timing-Analysis: 2` for new targets; old readers retain
 compatible historical observations. See the sibling
-[provider contract](https://github.com/LeEmperor/hardcaml_asic/blob/main/docs/development/executable-timing.md).
+[provider contract](https://github.com/bopurtell/hardcaml_asic/blob/oxcaml/docs/guides/timing-intent.md).
 
 ## Refreshed example deployment
 

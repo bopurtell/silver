@@ -5,11 +5,8 @@ tag=${1:?expected a release tag}
 output=${2:?expected an output directory}
 jobs=${SILVER_BUILD_JOBS:-4}
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends \
-  autoconf build-essential bzip2 ca-certificates curl git gzip libgmp-dev libsqlite3-dev \
-  opam pkg-config python3 rsync unzip xz-utils zlib1g-dev
+source scripts/release/host-deps.sh
+install_ubuntu_build_deps
 
 git config --global --add safe.directory "$PWD"
 git rev-parse --verify "refs/tags/${tag}^{commit}"

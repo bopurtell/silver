@@ -329,24 +329,29 @@ let suite_artifact_regression () =
   let state = T.select_attempt T.empty attempt.id |> receive in
   assert (Option.is_none (T.view state).case_id);
   assert (Option.is_some (T.artifact state));
-  let host =
-    H.set_testing (H.receive H.empty registry) tile.id (ref (), "project", state)
-  in
-  let saved =
-    Option.value_exn (H.navigation_preferences ~project_key:"suite-artifact" host)
-  in
-  let decoded = N.decode ~project_key:"suite-artifact" (N.encode saved) in
-  let restored =
-    H.restore_navigation_selections
-      decoded
-      (H.receive H.empty registry)
-      ~scope:"new-project"
-  in
-  let _, _, state = Option.value_exn (H.testing restored tile.id) in
-  assert (
-    Option.is_none (T.view state).case_id && Option.is_some (T.artifact_identity state));
-  assert (
-    Simulation.Artifact.equal artifact (Option.value_exn (T.artifact (receive state))))
+  (* A default VCD cursor is reconstructed after hydration; only explicit
+     selection persists the exact artifact identity. Exercise both paths for
+     suite-level evidence, which has no case ID. *)
+  List.iter [ false; true ] ~f:(fun explicit ->
+    let state = if explicit then T.select_artifact state artifact.id else state in
+    let host =
+      H.set_testing (H.receive H.empty registry) tile.id (ref (), "project", state)
+    in
+    let saved =
+      Option.value_exn (H.navigation_preferences ~project_key:"suite-artifact" host)
+    in
+    let decoded = N.decode ~project_key:"suite-artifact" (N.encode saved) in
+    let restored =
+      H.restore_navigation_selections
+        decoded
+        (H.receive H.empty registry)
+        ~scope:"new-project"
+    in
+    let _, _, state = Option.value_exn (H.testing restored tile.id) in
+    assert (Option.is_none (T.view state).case_id);
+    assert (Bool.equal explicit (Option.is_some (T.artifact_identity state)));
+    assert (
+      Simulation.Artifact.equal artifact (Option.value_exn (T.artifact (receive state)))))
 ;;
 
 let coordinator_regressions () =

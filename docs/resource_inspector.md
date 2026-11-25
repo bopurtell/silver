@@ -212,7 +212,7 @@ descriptors, eight indexes and a bounded detail cache; these are not unlimited a
 
 ## Restart the app
 
-Use the [checkout-backed example launcher](https://github.com/LeEmperor/hardcaml_asic_example/blob/main/docs/workbench_main.md)
+Use the [checkout-backed example launcher](https://github.com/bopurtell/hardcaml_asic_example/blob/oxcaml/docs/workbench_main.md)
 for the current example environment. Restart the client and daemon when no work
 is active if you need to pick up rebuilt binaries. Only one daemon may own a
 state directory.

@@ -38,6 +38,15 @@ The fixture uses an explicitly selected compatible switch, and the native
 application script exercises an isolated install. See
 [terminal baselines](../test/baselines/terminal/README.md) before updating captures.
 
+## Manual cold build on GitHub Actions
+
+Once `.github/workflows/ci.yml` is on the default branch, open **Actions**,
+select **Silver native CI**, choose **Run workflow**, and select the branch
+to test. The runner builds the pinned OxCaml switch and native
+dependencies from scratch before building Silver and running `@test-local` and
+`@test-api`. Compare the toolchain setup time with the build and test times when
+deciding what to cache. Ordinary pushes and pull requests do not start this job.
+
 ## Inline expect-test prerequisite
 
 When adding an inline expect-test library below the Dune project root, preserve
