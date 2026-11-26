@@ -8,7 +8,8 @@ waveforms, synthesis results, timing paths, and other run evidence without
 leaving the terminal.
 
 [Install](#install-and-open-silver) · [Try the ASIC example](#try-the-asic-example) ·
-[Documentation](docs/README.md)
+[Local documentation](docs/README.md) ·
+[Online documentation](https://bopurtell.github.io/clockmaker-docs/silver/)
 
 ![Silver’s Waveforms workspace showing FIFO signals, a VCD trace, and the passing simulation log.](docs/images/silver-waveforms.png)
 
