@@ -2,6 +2,7 @@ name: Silver native CI
 
 on:
   pull_request:
+  workflow_call:
   push:
     branches:
       - oxcaml
@@ -23,11 +24,19 @@ concurrency:
 
 jobs:
   native:
+    name: Native build and tests (Ubuntu ${{ matrix.ubuntu }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ubuntu: '24.04'
+            image: ubuntu:24.04@sha256:9a04f13b3f80ef056361e30868593b1cfd2279fe19e4081cb93a90bf56819d6a
+          - ubuntu: '26.04'
+            image: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      # Match the release workflow's target and pinned image.
-      UBUNTU_IMAGE: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+      UBUNTU_IMAGE: ${{ matrix.image }}
       PLATFORM: linux/amd64
       # Large switch archives can take longer than the default 10 minutes
       # for an individual segment on a slow cache connection.

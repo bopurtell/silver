@@ -45,7 +45,8 @@ a PR cancels its superseded run. You can also start a run from **Actions →
 Silver native CI → Run workflow** and select a branch.
 The runner reuses the pinned OxCaml switch and native dependencies
 when there is an exact cache hit; otherwise it provisions them from scratch.
-Each run builds the Silver packages from the selected revision and runs both
+Each run builds the Silver packages in separate Ubuntu 24.04 and 26.04
+x86-64 containers with image-specific caches. Each runs both
 `@test-local` and `@test-api`. Silver's `_build` directory is not cached.
 
 Pull requests can restore an eligible cache. Only runs on the `oxcaml` branch
@@ -59,6 +60,13 @@ Compare **total job time**, including cache transfer, as well as the individual
 build and test times. On the same revision, a [cold run](https://github.com/bopurtell/silver/actions/runs/45691162363)
 took 53m 44s and a [warm run](https://github.com/bopurtell/silver/actions/runs/45707984213)
 took 22m 26s.
+
+Pushing a `vMAJOR.MINOR.PATCH` tag runs the same native test matrix and
+packages the Ubuntu 26.04 x86-64 binary and source archives. After the
+matrix and the release installation checks pass, Actions attaches both
+archives and `SHA256SUMS` to a draft GitHub Release for the tag. A rerun
+can refresh the draft's assets. Review redistribution materials and the
+release notes before publishing the draft manually.
 
 ## Inline expect-test prerequisite
 

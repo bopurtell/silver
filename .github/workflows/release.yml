@@ -8,9 +8,12 @@ permissions:
   contents: read
 
 jobs:
+  native:
+    uses: ./.github/workflows/ci.yml
+
   package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 180
     env:
       UBUNTU_IMAGE: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
     steps:
@@ -27,6 +30,8 @@ jobs:
             exit 1
           fi
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")"
+      - name: Make room for the managed compiler build
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
       - name: Verify managed and explicit-switch source installations; package both archives
         shell: bash
         run: |
@@ -41,7 +46,7 @@ jobs:
           docker run --rm --interactive --network none --platform linux/amd64 \
             --volume "$RUNNER_TEMP/silver-dist:/assets:ro" \
             "$UBUNTU_IMAGE" bash -s -- "$GITHUB_REF_NAME" < scripts/release/smoke-binary.sh
-      - name: Upload staging artifacts (does not publish a GitHub Release)
+      - name: Stage verified release files
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: silver-${{ github.ref_name }}-release-assets
@@ -50,3 +55,35 @@ jobs:
             ${{ runner.temp }}/silver-dist/SHA256SUMS
           if-no-files-found: error
           compression-level: 0
+
+  draft:
+    needs: [native, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency: silver-release-draft-${{ github.ref_name }}
+    steps:
+      - name: Download verified release files
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: silver-${{ github.ref_name }}-release-assets
+          path: dist
+      - name: Attach assets to the draft release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sha256sum --strict --check SHA256SUMS
+          tag=$GITHUB_REF_NAME
+          assets=("silver-$tag-linux-x86_64-ubuntu-26.04.tar.gz" "silver-$tag-source.tar.gz" SHA256SUMS)
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft); then
+            if [[ $draft != true ]]; then
+              echo "::error::Release $tag is already public; refusing to replace its assets."
+              exit 1
+            fi
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" --draft --verify-tag --title "Silver $tag" \
+              --generate-notes "${assets[@]}"
+          fi

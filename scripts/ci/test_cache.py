@@ -276,8 +276,8 @@ class WorkflowTests(unittest.TestCase):
         triggers = re.search(r"(?m)^on:\n((?: +[^\n]*\n)+)",
                              WORKFLOW.read_text()).group(1)
         self.assertEqual(re.findall(r"(?m)^  (\w+):", triggers),
-                         ["pull_request", "push", "workflow_dispatch"])
-        self.assertRegex(triggers, r"(?m)^  pull_request:\s*\n  push:")
+                         ["pull_request", "workflow_call", "push", "workflow_dispatch"])
+        self.assertRegex(triggers, r"(?m)^  pull_request:\n  workflow_call:\n  push:")
         self.assertRegex(triggers,
                          r"(?m)^  push:\n    branches:\n      - oxcaml\n"
                          r"  workflow_dispatch:")
