@@ -20,6 +20,9 @@ if [[ $phase == setup || $phase == all ]]; then
   # Fetch only the selected commit into a writable repository, leaving the
   # runner's checkout untouched and excluding any ignored/generated files.
   git config --global --add safe.directory "$PWD"
+  # Ubuntu 24.04's git-upload-pack checks the Git directory itself when
+  # serving the local fetch below, separately from the mounted worktree.
+  git config --global --add safe.directory "$PWD/.git"
   revision=$(git rev-parse HEAD)
   # Match the runner's numerical IDs so the cache action can archive and
   # restore the bind-mounted state without sudo or recursive ownership changes.
