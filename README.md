@@ -11,9 +11,9 @@ leaving the terminal.
 [Local documentation](docs/README.md) ·
 [Online documentation](https://bopurtell.github.io/clockmaker-docs/silver/)
 
-![Silver Overview showing completed ASIC stages, synthesis cell counts, and post-routing timing results for the Controlled FIFO.](docs/images/silver-asic-overview.png)
+![Silver Overview showing completed synthesis, floorplan and timing runs, a cancelled timing run, and validated post-routing timing results for the Controlled FIFO.](docs/images/silver-asic-overview.png)
 
-*Inspecting a completed synthesis-through-timing run for the Controlled FIFO in `hardcaml_asic_example`.*
+*Inspecting a completed timing run alongside shorter and cancelled runs for the Controlled FIFO in `hardcaml_asic_example`.*
 
 ## Install and open Silver
 
