@@ -11,9 +11,9 @@ leaving the terminal.
 [Local documentation](docs/README.md) ·
 [Online documentation](https://bopurtell.github.io/clockmaker-docs/silver/)
 
-![Silver’s Waveforms workspace showing FIFO signals, a VCD trace, and the passing simulation log.](docs/images/silver-waveforms.png)
+![Silver Overview showing the Controlled FIFO synthesis plan ready but not submitted.](docs/images/silver-asic-overview.png)
 
-*Inspecting a passing Controlled FIFO simulation from `hardcaml_asic_example`.*
+*Planning an ASIC synthesis run for the Controlled FIFO in `hardcaml_asic_example`.*
 
 ## Install and open Silver
 
@@ -171,8 +171,6 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
    to stage and launch it. To review the plan before starting, press **r**
    instead and follow the [stage checklist guide](docs/checklist_launch_workflow.md).
 
-![Silver Overview showing the Controlled FIFO synthesis plan ready but not submitted.](docs/images/silver-asic-overview.png)
-
 ## Documentation
 
 - [Project workflows](docs/project_workflows.md): opening, creating, editing,
@@ -186,6 +184,10 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
 - [Workspace layouts](docs/workspace_configuration.md) and
   [terminal controls](docs/terminal_controls.md).
 - [Silver's own test suites](test/README.md).
+
+![Silver’s Waveforms workspace showing FIFO signals, a VCD trace, and the passing simulation log.](docs/images/silver-waveforms.png)
+
+*Inspecting a passing Controlled FIFO simulation from `hardcaml_asic_example`.*
 
 Legacy `hardcaml-workbench` command aliases and configuration files remain readable.
 The OCaml packages are now `silver`, `silver_provider` and `silver_web`;
