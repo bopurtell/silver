@@ -8,6 +8,7 @@ waveforms, synthesis results, timing paths, and other run evidence without
 leaving the terminal.
 
 [Install](#install-and-open-silver) · [Try the ASIC example](#try-the-asic-example) ·
+[Workspaces](#workspaces) ·
 [Local documentation](docs/README.md) ·
 [Online documentation](https://bopurtell.github.io/clockmaker-docs/silver/)
 
@@ -171,6 +172,44 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
    to stage and launch it. To review the plan before starting, press **r**
    instead and follow the [stage checklist guide](docs/checklist_launch_workflow.md).
 
+## Workspaces
+
+### Testing
+
+Discover simulation suites, select test cases and inputs, and inspect results,
+artifacts, and logs from individual attempts.
+
+![Silver Testing showing passing Controlled FIFO cases, simulation history, artifacts and logs.](docs/images/silver-testing.png)
+
+[Testing workspace guide](docs/testing_workspace.md)
+
+### Waveforms
+
+Inspect VCD traces directly in Silver, browse signals, and navigate simulation time.
+
+![Silver Waveforms showing signals from a directed FIFO simulation.](docs/images/silver-waveforms.png)
+
+[Embedded waveform viewer](docs/testing_workspace.md#embedded-waveform-viewer)
+
+### Timing
+
+Browse reported timing paths by slack, inspect the selected path's STA report,
+and trace the evidence back to its ASIC execution.
+
+![Silver Timing showing 1020 timing paths and a selected post-routing STA report.](docs/images/silver-timing.png)
+
+[Timing workspace guide](docs/timing_workspace_usability.md)
+
+### Resources
+
+Inspect resource requirements, selected implementations, and synthesis evidence.
+The SRAM-budget example shows two banks mapped to physical SRAM macros and a
+third falling back to flops.
+
+![Silver Resources showing exact SRAM mappings, a budget-exhausted fallback, and synthesis retention evidence.](docs/images/silver-resources.png)
+
+[Resource inspector guide](docs/resource_inspector.md)
+
 ## Documentation
 
 - [Project workflows](docs/project_workflows.md): opening, creating, editing,
@@ -184,10 +223,6 @@ This walkthrough runs synthesis on that design; it does not require any saved ru
 - [Workspace layouts](docs/workspace_configuration.md) and
   [terminal controls](docs/terminal_controls.md).
 - [Silver's own test suites](test/README.md).
-
-![Silver’s Waveforms workspace showing FIFO signals, a VCD trace, and the passing simulation log.](docs/images/silver-waveforms.png)
-
-*Inspecting a passing Controlled FIFO simulation from `hardcaml_asic_example`.*
 
 Legacy `hardcaml-workbench` command aliases and configuration files remain readable.
 The OCaml packages are now `silver`, `silver_provider` and `silver_web`;
